@@ -2799,15 +2799,19 @@ imports are rejected with **E0612**. An unqualified import of an undefined
 member is **E0611**, and importing an item from a module that is not in scope is
 **E0610** (D-MOD2).
 
-Declarations are public by default (S18, D-VIS-MODULE1). `priv name: module`
-keeps a module's contents to its enclosing module, and `priv(package) module
-name` keeps them inside the package; a `priv` struct field is usable only by its
-type's module. Reaching into a private module or field across files reports
-**E0605**, importing a member of a private module **E0609**. These markers are
-errors whose fix deletes them: `priv` on another declaration (**E0413**), an
-unknown `priv(...)` qualifier (**E0414**), section labels (**E0415**) and
-`priv(package)` on a field (**E0417**). Inline-module bodies are type-checked
-in their defining scope, so siblings call each other freely.
+Declarations are public by default (S18, D-VIS-MODULE1, D-VIS-ITEM1). `priv`
+is the only hiding form: a `priv` declaration at the top level of a package is
+usable by every file of that package, and inside a module by that module and
+its children (`priv(package)` there widens it to the package). `priv name:
+module` keeps a module's contents to its enclosing module, and `priv(package)
+module name` keeps them inside the package; a `priv` struct field is usable
+only by its type's module. Reaching a private declaration, module or field from
+outside reports **E0605**, importing a member of a private module **E0609**.
+These markers are errors whose fix deletes them: an unknown `priv(...)`
+qualifier or `priv(package)` on a top-level declaration other than a module
+(**E0414**), section labels (**E0415**) and `priv(package)` on a field
+(**E0417**). Inline-module bodies are type-checked in their defining scope, so
+siblings call each other freely.
 
 A member import names any top-level declaration: a function, type, enum,
 trait, tag, protocol, or constant. A constant is declared like any other item,

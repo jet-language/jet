@@ -97,6 +97,7 @@ use {
         ast_func,
         ast_const,
         core_module_export,
+        diagnostic_with_label,
         ast_program,
         ast_struct,
         type_name,
@@ -123,6 +124,9 @@ SemaInlineModuleSurface: struct {
     functions: [String:Bool]
     // Member constant names, read as `module.NAME`.
     constants: [String:Bool]
+    // The members written `priv`, each with its name's span;
+    // only this module and its children reach them.
+    private_members: [String:Span]
     // `pub use` inside the module: re-exported local name -> its owner.
     reexports: [String:SemaInlineTarget]
 }
@@ -817,6 +821,7 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
         forwarded: Call{name: sema_inline_member_name(target.module_alias, target.member), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(rewrite, args)}
         return Val(Expr.Call{call: forwarded, id: AST_NODE_GENERATED})
     }
+    if sema_inline_private_member(rewrite, surface, method, method_span) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
     if surface.functions.get(method) == None {
         rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.path}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
         return None
@@ -845,6 +850,7 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
         if target.qualified -> return Val(Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: AST_NODE_GENERATED}, member: target.member, span: span, id: node})
         return Val(Expr.Ident{name: sema_inline_member_name(target.module_alias, target.member), span: span, id: node})
     }
+    if sema_inline_private_member(rewrite, surface, member, span) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
     if surface.functions.get(member) == None && surface.constants.get(member) == None && surface.constants.get(SEMA_MODULE_META) != None {
         return Val(Expr.Field{base: Expr.Ident{name: sema_inline_member_name(surface.path, SEMA_MODULE_META), span: span, id: AST_NODE_GENERATED}, member: member, span: span, id: node})
     }
@@ -855,6 +861,34 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
         return Val(Expr.Field{base: base.copy(), member: member, span: span, id: node})
     }
     Val(Expr.Ident{name: sema_inline_member_name(surface.path, member), span: span, id: node})
+}
+
+// A `priv` member of an inline module is usable only inside that
+// module and its children (E0605, naming the member's `priv` declaration).
+sema_inline_private_member: fn(rewrite: SemaInlineRewrite, surface: SemaInlineModuleSurface, member: String, span: Span) -> Diagnostic? Never! {
+    declared: surface.private_members.get(member) ?? return None
+    if rewrite.sibling_module == surface.path || rewrite.sibling_module.starts_with("{surface.path}.") -> return None
+    diagnostic: sema_error("E0605", span, "`{member}` is private to module `{surface.path}`", "a `priv` declaration is usable only inside the module that declares it and that module's children", "use `{member}` from inside `{surface.path}`, or remove `priv` from it")
+    Val(diagnostic_with_label(diagnostic, declared, "`{member}` is declared `priv` here"))
+}
+
+// The functions and constants `body` declares onto `surface`. A member
+// written `priv` is private to the module unless the whole module is plain
+// `priv` (`hides_members`), whose narrowing already made every member so.
+sema_inline_surface_members: fn(surface: &SemaInlineModuleSurface, body: [Item], hides_members: Bool) Never! {
+    loop inner in body {
+        if inner == {
+            .Func(function) -> {
+                surface.functions[function.name] = true
+                if !hides_members && !function.is_pub && !function.is_package_pub -> surface.private_members[function.name] = function.name_span
+            }
+            .Const(constant) -> {
+                surface.constants[constant.name] = true
+                if !hides_members && !constant.is_pub && !constant.is_package_pub -> surface.private_members[constant.name] = constant.name_span
+            }
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
 }
 
 // `a.b.c` as a call receiver: each identifier segment with its span, false
@@ -1780,14 +1814,8 @@ sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [Impo
             path: "{parent}.{child.name}"
             private_to := String?{None}
             if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
-            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
-            loop inner in child_body {
-                if inner == {
-                    .Func(function) -> surface.functions[function.name] = true
-                    .Const(constant) -> surface.constants[constant.name] = true
-                    .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-                }
-            }
+            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}}
+            sema_inline_surface_members(surface, child_body, !child.is_pub && !child.is_package_pub)
             aliases: sema_inline_module_aliases(child, path, file_imports, inherited)
             binding := sema_inline_rewrite_empty()
             binding.sibling_module = path.copy()
@@ -1835,8 +1863,9 @@ sema_inline_lift_constant: fn(rewrite: &SemaInlineRewrite, constant: ConstDef, p
 
 // Lifts the member functions of every module nested in `body` (module
 // `parent`) under their member identities, each body rewritten with the
-// bindings sema_inline_collect_nested made for its module.
-sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], diagnostics: &[Diagnostic]) Never! {
+// bindings sema_inline_collect_nested made for its module; `owners` maps each
+// lifted function to its module's path.
+sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], owners: &[String:String], diagnostics: &[Diagnostic]) Never! {
     loop item in body {
         if item == .CodeModule(child) {
             child_body: child.body ?? next
@@ -1853,6 +1882,7 @@ sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineMod
                     .Func(function) -> {
                         member := sema_inline_rewrite_func(rewrite, function)
                         member.name = sema_inline_member_name(path, function.name)
+                        owners[member.name] = path.copy()
                         lifted.push(Item.Func{value: member})
                     }
                     .Const(constant) -> lifted.push(sema_inline_lift_constant(rewrite, constant, path))
@@ -1860,7 +1890,7 @@ sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineMod
                 }
             }
             loop diagnostic in rewrite.diagnostics -> diagnostics.push(diagnostic)
-            sema_inline_lift_nested(child_body, path, nested, bindings, lifted, diagnostics)
+            sema_inline_lift_nested(child_body, path, nested, bindings, lifted, owners, diagnostics)
         }
     }
 }
@@ -1953,14 +1983,8 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
-                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
-                loop inner in body {
-                    if inner == {
-                        .Func(function) -> surface.functions[function.name] = true
-                        .Const(constant) -> surface.constants[constant.name] = true
-                        .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-                    }
-                }
+                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}}
+                sema_inline_surface_members(surface, body, !definition.is_pub && !definition.is_package_pub)
                 surfaces.push(surface)
             }
         }
@@ -1973,6 +1997,9 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         }
     }
     lowered_items := [Item]{}
+    // Each lifted member function's module path: the file pass rewrites its
+    // body as that module's, so its `priv` reads stay inside.
+    owners := [String:String]{}
     loop item_index in 0..<hoisted_items.len() {
         item: hoisted_items[item_index]
         if item == .CodeModule(definition) {
@@ -1998,6 +2025,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                         .Func(function) -> {
                             member := sema_inline_rewrite_func(siblings, function)
                             member.name = sema_inline_member_name(definition.name, function.name)
+                            owners[member.name] = definition.name.copy()
                             lifted.push(Item.Func{value: member})
                         }
                         .Const(constant) -> lifted.push(sema_inline_lift_constant(siblings, constant, definition.name))
@@ -2005,7 +2033,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                     }
                 }
                 loop diagnostic in siblings.diagnostics -> diagnostics.push(diagnostic)
-                sema_inline_lift_nested(body, definition.name, nested, nested_bindings, lifted, diagnostics)
+                sema_inline_lift_nested(body, definition.name, nested, nested_bindings, lifted, owners, diagnostics)
                 module_item := definition
                 module_item.body = Val(sema_inline_strip_members(body))
                 lowered_items.push(Item.CodeModule{value: module_item})
@@ -2025,7 +2053,13 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     loop surface in nested -> surfaces.push(surface)
     calls.modules = surfaces.move()
     rewritten := [Item]{}
-    loop item in lowered_items -> rewritten.push(sema_inline_rewrite_item(calls, item))
+    loop item in lowered_items {
+        calls.sibling_module = ""
+        if item == .Func(function) {
+            if owners.get(function.name) == .Val(owner) -> calls.sibling_module = owner.copy()
+        }
+        rewritten.push(sema_inline_rewrite_item(calls, item))
+    }
     program.items = rewritten.move()
     program.imports = imports
     loop diagnostic in calls.diagnostics -> diagnostics.push(diagnostic)

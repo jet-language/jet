@@ -427,10 +427,12 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
                 written: Span{start: open.start, end: marker_span.end}
                 if !package -> parser_add_error_code_edit(state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
             }
-            if item_visibility && parser_current_kind(state) != TOKEN_KW_MODULE {
-                deletion: parser_deletion_edit(state, marker_span)
-                parser_add_error_code_edit(state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", deletion)
-                next
+            // `priv` hides any declaration. At a file's top
+            // level it already keeps the declaration inside the package, so
+            // `priv(package)` there names nothing more (a module keeps it).
+            if item_visibility && package && state.module_depth == 0 && parser_current_kind(state) != TOKEN_KW_MODULE {
+                parser_add_error_code_edit(state, "E0414", marker_span, "a top-level declaration takes plain `priv`, not `priv(package)`", "at a file's top level `priv` already keeps a declaration inside its package; only a module takes `priv(package)` there", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})
+                package = false
             }
             if !item_visibility && package {
                 parser_add_error_code_edit(state, "E0417", marker_span, "a field takes plain `priv`, not `priv(package)`", "a `priv` field is usable only by its type's module; package privacy belongs to modules", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})

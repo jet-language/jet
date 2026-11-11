@@ -3981,15 +3981,14 @@ RetiredForeignPrivate: struct {
     }
 }
 
-PrivNotAllowed: struct {
+RetiredPrivNotAllowed: struct {
     impl Diagnostic {
         code: "E0413"
-        edit: .SourceEdit
+        status: .Retired
         no_fix: None
-        fix_safety: .NeedsReview
-        what: fn(self) -> String { "`priv` on a non-module declaration; `priv` marks only modules and fields" }
-        why: fn(self) -> String { "Privacy is a property of a module or a field, never of a single declaration" }
-        fix: fn(self) -> String { "Delete `priv`; move the declaration into a `priv module` if it must stay internal." }
+        what: fn(self) -> String { "*Retired* (was: `priv` on a non-module declaration; `priv` now hides any declaration)" }
+        why: fn(self) -> String { "The registered parse rule applies here" }
+        fix: fn(self) -> String { "Follow the guidance for E0413" }
     }
 }
 
@@ -4000,9 +3999,9 @@ UnknownPrivQualifier: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
-        what: fn(self) -> String { "Unknown `priv(…)` qualifier; only `priv(package)` exists" }
-        why: fn(self) -> String { "`priv(package) module` is the only qualified module privacy" }
-        fix: fn(self) -> String { "Delete the qualifier, or write `priv(package)`." }
+        what: fn(self) -> String { "Unknown `priv(…)` qualifier, or `priv(package)` on a top-level declaration other than a module" }
+        why: fn(self) -> String { "`priv(package)` is the only qualifier, and at a file's top level plain `priv` already keeps a declaration inside its package" }
+        fix: fn(self) -> String { "Delete the qualifier: write `priv`, or `priv(package)` on a module." }
     }
 }
 

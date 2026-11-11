@@ -2203,24 +2203,30 @@ namespace like any other, so `use` and `pub use` are legal inside
 inside that body.
 
 **S18 — Visibility** *(D-VIS-MODULE1, owner directive 2026-10-07, card #4723;
-supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: everything is public by default,
-and declarations never carry a visibility marker. The only visibility keyword is
-`priv`, and it marks only two things:
+D-VIS-ITEM1=A, card #6050; supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*:
+everything is public by default. The only visibility keyword is `priv`, and it
+is the only hiding form:
 
+- a declaration: `priv name: fn …`, `priv Name: struct …` and every other
+  declaration (function, type, enum, trait, tag, protocol, constant, alias).
+  At the top level of a package it keeps the declaration inside the package;
+  inside a module it keeps it to that module and the module's children, and
+  `priv(package)` there widens it to the whole package.
 - a module: `priv name: module { … }` or the file-module form `priv name: module`.
   Its contents are usable only by the enclosing module and that module's other
   children. `priv(package) module` makes them usable by every module of the same
   package and invisible to other packages (other `priv(…)` qualifiers: E0414).
+  A `priv` declaration inside a `priv(package) module` stays module-only.
 - a struct field: `priv value: T` is readable and writable only by code in the
   type's own module (and its children). Invariant carriers such as secrets,
   native handles and validated values use it.
 
 Removed forms are compile errors whose fix deletes the marker: `pub` and
-`pub(…)` on a declaration, method or field (E0411), `private` (E0412), `priv`
-on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
-`priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
-`priv module` or a `priv` field from outside is E0605/E0609. There is no
-package-level privacy yet (it will come through the manifest).
+`pub(…)` on a declaration, method or field (E0411), `private` (E0412),
+`pub:`/`priv:` section labels (E0415), `priv(package)` on a top-level
+declaration other than a module (E0414: write `priv`) or on a field (E0417),
+and `#PubFile` (E0418). Reaching a `priv` declaration, a `priv module` or a
+`priv` field from outside is E0605/E0609.
 
 Re-export (`pub use`) is not decided: it stays the only `pub` form until the
 re-export ballot is ratified (the owner leans toward imports being public by
