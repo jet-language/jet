@@ -211,14 +211,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1426,
+  "total": 1424,
   "counts": {
     "Compiler": 748,
     "Core": 176,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
-    "Tools": 9,
+    "Tools": 7,
     "tests": 435
   },
   "regions": [
@@ -7098,20 +7098,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Tools",
-      "file": "Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet",
-      "line": 4,
-      "column": 5,
-      "reason": "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word"
-    },
-    {
-      "package": "Tools",
-      "file": "Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet",
-      "line": 111,
-      "column": 5,
-      "reason": "host replay uses a stack cell as a stand-in for the board register"
-    },
-    {
-      "package": "Tools",
       "file": "Tools/agent/cache/Lanes.jet",
       "line": 311,
       "column": 21,
@@ -10217,9 +10203,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
-| Tools | 9 |
+| Tools | 7 |
 | tests | 435 |
-| **total** | **1426** |
+| **total** | **1424** |
 
 ### Regions
 
@@ -11207,8 +11193,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 299:5 | "the test owns the planted lock file it ages" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
-| Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
-| Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 311:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/agent/orchestrator/LaneCommit.jet | 182:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |

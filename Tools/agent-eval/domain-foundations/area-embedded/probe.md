@@ -1,5 +1,13 @@
 # Embedded foundations probe
 
+> **Replaced.** The executable source specification of the embedded area is now the first-party battery `Jetpack/Provider/Batteries/embedded/embedded.jet` and its host replay `Examples/LowLevel/Embedded/Battery/run.jet`. The golden is `Examples/LowLevel/Embedded/Battery.out`.
+>
+> - The replay reaches every battery function and verifies a real Ed25519 image signature before the slot policy accepts the image.
+> - It prints every hardware or provider gate the battery names as open (G2–G7 and E3302).
+> - `tests/guards/embedded_battery.jet` holds the replay to both.
+>
+> The probe package under `pkg/` was removed. This report is the dated record of what the probe found.
+
 ## What I built
 I built one host-replayable Jet package for a `sensor_v1` Cortex-M board description and a `thumbv7em-none-eabihf` target. The program models C-layout GPIO, timer, UART, and DMA registers, a bounded interrupt queue and UART ring, a pinned DMA buffer, a control tick, and trial/confirmed/rejected image slots. Separate fixtures probe fixed-address MMIO, cryptographic signing, local-module execution, and the absent interrupt, DMA, WCET, flash, and OTA surfaces.
 

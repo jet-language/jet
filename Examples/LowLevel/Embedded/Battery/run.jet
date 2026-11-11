@@ -1,5 +1,8 @@
 // Host replay of the embedded battery. The executable consumes the ordinary
 // `embedded` package; it does not copy a helper or claim to be board hardware.
+// It is the executable specification of the embedded area: it reaches every
+// battery function and prints every hardware or provider gate the battery
+// names as open (tests/guards/embedded_battery.jet holds it to both).
 //
 // Host proof:
 //   jet run Examples/LowLevel/Embedded/Battery/run.jet
@@ -9,7 +12,10 @@
 //   jet build --target=board.sensor_v1 Examples/LowLevel/Embedded/Battery/run.jet --release
 //   jet debug Examples/LowLevel/Embedded/Battery/run.jet
 //   jet flash Examples/LowLevel/Embedded/Battery/run.jet
-use embedded
+use {
+    crypto: core.crypto
+    embedded
+}
 
 run: fn() {
     board: embedded.board()
@@ -70,14 +76,21 @@ run: fn() {
     resubmitted: embedded.dma_submit(dma, registers)
     _recompleted: embedded.dma_complete(dma, registers)
 
-    // The policy receives the verifier's authenticated result. It does not
-    // fabricate an image or claim flash persistence on the host.
+    // The policy receives the verifier's result. Here the verifier is real
+    // Ed25519 over the image bytes: the signed image is accepted and a
+    // tampered copy is refused. The host does not fabricate a flash image or
+    // claim flash persistence.
+    image: [U8]{69, 77, 66, 68, 49, 0, 0, 1}
+    tampered: [U8]{69, 77, 66, 68, 49, 0, 0, 2}
+    release_key: crypto.SigningKey.new_random() ?? panic("no signing key: {err}")
+    signature: crypto.sign(release_key, image) ?? panic("the image did not sign: {err}")
+    authenticated_release: crypto.verify(release_key.public_key(), image, signature) ?? false
+    authenticated_tamper: crypto.verify(release_key.public_key(), tampered, signature) ?? false
     slots := embedded.slot_policy(1)
-    authenticated_release: true
     accepted: embedded.stage_image(slots, checksum, authenticated_release)
     confirmed: embedded.confirm_trial(slots)
     activated: embedded.activate_confirmed(slots)
-    rejected: embedded.stage_image(slots, checksum, false)
+    rejected: embedded.stage_image(slots, checksum, authenticated_tamper)
     rolled_back: embedded.rollback_trial(slots)
     mapping_status: embedded.dma_mapping_status()
     timing_status: embedded.control_timing_status()

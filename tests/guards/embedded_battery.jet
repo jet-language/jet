@@ -1,0 +1,165 @@
+// The first-party embedded battery is the executable specification of the
+// embedded area. Its host replay, Examples/LowLevel/Embedded/Battery, reaches
+// every battery function and prints every hardware or provider gate the
+// battery names as open. It never presents the host replay as hardware proof.
+// The domain-foundations probe it replaced keeps only its dated report, and
+// that report points at the battery and the replay.
+use {
+    embedded_battery_files: core.files
+}
+
+EMBEDDED_BATTERY_SOURCE: "Jetpack/Provider/Batteries/embedded/embedded.jet"
+EMBEDDED_BATTERY_EXAMPLE: "Examples/LowLevel/Embedded/Battery/run.jet"
+EMBEDDED_BATTERY_GOLDEN: "Examples/LowLevel/Embedded/Battery.out"
+EMBEDDED_BATTERY_README: "Examples/LowLevel/README.md"
+EMBEDDED_BATTERY_PROBE: "Tools/agent-eval/domain-foundations/area-embedded"
+
+// How the lines start that the replay prints so no reader takes it for
+// hardware proof: DMA mapping and the deadline comparison are host
+// accounting, and no hardware release receipt is captured.
+EMBEDDED_BATTERY_HOST_ONLY: [String]{
+    "receipt captured false",
+    "status target DMA mapping/provider boundary open",
+    "status deadline comparison is accounting, not WCET proof",
+}
+
+// One top-level function of a battery source: its name and its body text.
+EmbeddedBatteryFunction: struct {
+    name: String
+    body: String
+}
+
+// Every column-zero `name: fn(...) { ... }` in `source`, in source order.
+embedded_battery_functions: fn(source: String) -> [EmbeddedBatteryFunction] {
+    found := [EmbeddedBatteryFunction]{}
+    name := ""
+    body := ""
+    loop line in source.lines() {
+        if name == "" {
+            if line.starts_with(" ") || line.starts_with("/") || line.starts_with("#") -> next
+            if line.split_once(": fn(") == .Val(parts) {
+                name = parts.before
+                body = ""
+            }
+            next
+        }
+        if line == "}}" {
+            found.push(EmbeddedBatteryFunction{name: name, body: body})
+            name = ""
+            next
+        }
+        body = "{body}{line}\n"
+    }
+    found
+}
+
+// Whether `text` calls `name`: `name(` that does not end a longer identifier.
+embedded_battery_calls: fn(text: String, name: String) -> Bool {
+    rest := text
+    loop {
+        parts: rest.split_once("{name}(") ?? return false
+        bytes: parts.before.bytes()
+        if bytes.len() == 0 -> return true
+        last: bytes[bytes.len() - 1]
+        identifier: (last >= U8{97} && last <= U8{122}) || (last >= U8{65} && last <= U8{90}) || (last >= U8{48} && last <= U8{57}) || last == U8{95}
+        if !identifier -> return true
+        rest = parts.after
+    }
+}
+
+// The battery functions `example` never reaches, directly as
+// `embedded.<name>(` or through the body of a function it reaches.
+embedded_battery_unreached: fn(functions: [EmbeddedBatteryFunction], example: String) -> [String] {
+    reached := [String]{}
+    loop function in functions {
+        if example.contains("embedded.{function.name}(") -> reached.push(function.name)
+    }
+    index := 0
+    loop index < reached.len() {
+        caller: reached[index]
+        index += 1
+        loop function in functions {
+            if function.name != caller -> next
+            loop callee in functions {
+                if !reached.contains(callee.name) && embedded_battery_calls(function.body, callee.name) -> reached.push(callee.name)
+            }
+        }
+    }
+    missing := [String]{}
+    loop function in functions {
+        if !reached.contains(function.name) -> missing.push(function.name)
+    }
+    missing
+}
+
+// The gate texts listed in the body of the battery's `open_core_gates`.
+embedded_battery_gates: fn(functions: [EmbeddedBatteryFunction]) -> [String] {
+    gates := [String]{}
+    loop function in functions {
+        if function.name != "open_core_gates" -> next
+        loop line in function.body.lines() {
+            if line.trim().split_once("\"") == .Val(opened) {
+                if opened.after.split_once("\"") == .Val(closed) -> gates.push(closed.before)
+            }
+        }
+    }
+    gates
+}
+
+#Test("the embedded host replay reaches every function of the embedded battery") {
+    guards_enter_root()
+    source: embedded_battery_files.read(EMBEDDED_BATTERY_SOURCE) ?? panic("read {EMBEDDED_BATTERY_SOURCE}: {err}")
+    example: embedded_battery_files.read(EMBEDDED_BATTERY_EXAMPLE) ?? panic("read {EMBEDDED_BATTERY_EXAMPLE}: {err}")
+    functions: embedded_battery_functions(source)
+    assert(functions.len() > 30, "the battery scan found too few functions: {functions.len()}")
+    missing: embedded_battery_unreached(functions, example)
+    assert(missing.len() == 0, "{EMBEDDED_BATTERY_EXAMPLE} never reaches these battery functions: {missing.join(", ")}")
+}
+
+#Test("the embedded host replay prints every open hardware gate and claims no hardware proof") {
+    guards_enter_root()
+    source: embedded_battery_files.read(EMBEDDED_BATTERY_SOURCE) ?? panic("read {EMBEDDED_BATTERY_SOURCE}: {err}")
+    golden: embedded_battery_files.read(EMBEDDED_BATTERY_GOLDEN) ?? panic("read {EMBEDDED_BATTERY_GOLDEN}: {err}")
+    gates: embedded_battery_gates(embedded_battery_functions(source))
+    assert(gates.len() > 0, "{EMBEDDED_BATTERY_SOURCE} names no open gate")
+    printed := [String]{}
+    loop line in golden.lines() {
+        if line.split_once("gate ") == .Val(parts) && parts.before == "" -> printed.push(parts.after)
+    }
+    assert_eq(printed, gates)
+    loop line in EMBEDDED_BATTERY_HOST_ONLY {
+        assert(golden.contains("\n{line}"), "{EMBEDDED_BATTERY_GOLDEN} lost the host-only line `{line}`")
+    }
+}
+
+#Test("the embedded battery replaces the domain-foundations probe and the docs link to it") {
+    guards_enter_root()
+    assert(!embedded_battery_files.exists("{EMBEDDED_BATTERY_PROBE}/pkg"), "the replaced probe package is back under {EMBEDDED_BATTERY_PROBE}/pkg")
+    report: embedded_battery_files.read("{EMBEDDED_BATTERY_PROBE}/probe.md") ?? panic("read the probe report: {err}")
+    assert(report.contains(EMBEDDED_BATTERY_SOURCE) && report.contains("Examples/LowLevel/Embedded/Battery"), "the probe report does not point at the battery and its replay")
+    readme: embedded_battery_files.read(EMBEDDED_BATTERY_README) ?? panic("read {EMBEDDED_BATTERY_README}: {err}")
+    assert(readme.contains("(Embedded/Battery/)"), "{EMBEDDED_BATTERY_README} does not link the embedded battery replay")
+}
+
+#Test("the embedded battery scan finds an unreached helper and reads the gate list") {
+    source: [String]{
+        `// a comment: fn(not one)`,
+        `used: fn() -> Int {`,
+        `    helper(1) + not_orphan(2)`,
+        `}`,
+        `helper: fn(value: Int) -> Int {`,
+        `    value`,
+        `}`,
+        `orphan: fn() {`,
+        `}`,
+        `open_core_gates: fn() -> [String] {`,
+        `    [`,
+        `        "G1: a gate",`,
+        `    ]`,
+        `}`,
+    }.join("\n")
+    functions: embedded_battery_functions(source)
+    assert_eq(functions.len(), 4)
+    assert_eq(embedded_battery_unreached(functions, "embedded.used()\nembedded.open_core_gates()"), [String]{"orphan"})
+    assert_eq(embedded_battery_gates(functions), [String]{"G1: a gate"})
+}
