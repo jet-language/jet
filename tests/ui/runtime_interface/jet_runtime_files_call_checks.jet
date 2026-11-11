@@ -1,0 +1,42 @@
+// A program reaches the runtime's public directory entries functions through
+// the jet.runtime interface: each call is checked against the member's Jet
+// signature and effect row, its tuple results with Option items included
+// (FS.Read to read, FS.Write to create and copy); a member without a row is
+// pure.
+use files: jet.runtime.files
+
+entry_count: fn(root: String) -[FS.Read]> Int {
+    key: files.entries_context(root, "", false)
+    opened: files.entries_read_dir(key, 0)
+    if opened.status_reason != None -> return -opened.status
+    count := 0
+    loop {
+        entry: files.entries_next(key, 0)
+        if entry.at_end || entry.status_code != None -> break
+        kind: files.entries_file_type(key, entry.child)
+        if kind.directory || kind.file -> count += 1
+        if files.entries_before(key, entry.child, 0) -> count += files.entries_shown(key, entry.child).len()
+        files.entries_release(key, entry.child)
+    }
+    files.entries_close(key)
+    count
+}
+
+copy_root: fn(source: String, destination: String) -[FS]> Bool {
+    key: files.entries_context(source, destination, true)
+    created: files.entries_mkdir(key, 0)
+    copied: files.entries_copy(key, 0)
+    files.entries_close(key)
+    created.status_reason == None && copied.status_code == None
+}
+
+pure_reads: fn() -> Bool {
+    files.fault_should_fail("read") || files.os_family() == "windows"
+}
+
+run: fn() -[IO, FS]> {
+    print(entry_count("."))
+    print(copy_root("a", "b"))
+    print(pure_reads())
+    print(files.process_id_raw())
+}

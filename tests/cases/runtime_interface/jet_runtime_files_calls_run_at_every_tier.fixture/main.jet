@@ -1,0 +1,80 @@
+// A user package lists and copies a directory tree through the
+// jet.runtime.files entries calls, and reads the pure fault and OS family
+// members and the process id.
+use files: jet.runtime.files
+
+// The paths under the directory `index`, depth first in name order; false
+// after a failed step.
+listing: fn(key: Int, index: Int, output: &[String]) -[FS.Read]> Bool {
+    opened: files.entries_read_dir(key, index)
+    if opened.status_reason != None -> return false
+    children := [Int]{}
+    loop {
+        entry: files.entries_next(key, index)
+        if entry.status_reason != None -> return false
+        if entry.at_end -> break
+        children.push(entry.child)
+    }
+    children.sort_by((left: Int, right: Int) -> {
+        if files.entries_before(key, left, right) -> return Ordering.Less
+        if files.entries_before(key, right, left) -> return Ordering.Greater
+        Ordering.Equal
+    })
+    loop child in children {
+        kind: files.entries_file_type(key, child)
+        if kind.status_reason != None -> return false
+        label := "other"
+        if kind.file -> label = "file"
+        if kind.directory -> label = "dir"
+        output.push("{label} {files.entries_shown(key, child)}")
+        if kind.directory && !listing(key, child, output) -> return false
+        files.entries_release(key, child)
+    }
+    true
+}
+
+// Copies the directory `index` to its destination; false after a failed step.
+copy_tree: fn(key: Int, index: Int) -[FS]> Bool {
+    created: files.entries_mkdir(key, index)
+    if created.status_reason != None -> return false
+    opened: files.entries_read_dir(key, index)
+    if opened.status_reason != None -> return false
+    loop {
+        entry: files.entries_next(key, index)
+        if entry.status_reason != None -> return false
+        if entry.at_end -> break
+        kind: files.entries_file_type(key, entry.child)
+        if kind.status_reason != None -> return false
+        if kind.directory && !copy_tree(key, entry.child) -> return false
+        if kind.file {
+            copied: files.entries_copy(key, entry.child)
+            if copied.status_reason != None -> return false
+        }
+        files.entries_release(key, entry.child)
+    }
+    true
+}
+
+show: fn(root: String) -[IO, FS.Read]> {
+    key: files.entries_context(root, "", false)
+    paths := [String]{}
+    print(listing(key, 0, paths))
+    loop path in paths -> print(path)
+    files.entries_close(key)
+}
+
+run: fn() -[IO, FS]> {
+    print(files.os_family())
+    print(files.fault_should_fail("write"))
+    print(files.process_id_raw() > 0)
+    show("tree")
+    copying: files.entries_context("tree", "out/tree", true)
+    print(copy_tree(copying, 0))
+    files.entries_close(copying)
+    show("out/tree")
+    missing: files.entries_context("missing", "", false)
+    failed: files.entries_read_dir(missing, 0)
+    print(failed.status_code ?? -1)
+    print(failed.status_reason != None)
+    files.entries_close(missing)
+}

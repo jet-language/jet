@@ -1,0 +1,27 @@
+# A user package lists a directory tree, copies it and lists the copy through
+# jet.runtime.files, and reads a missing directory's OS code. Each call lowers
+# through the route its interface signature projects (text and flag
+# arguments, tuple results with Option items) to the runtime export the row
+# names, so the program prints the same lines at O0, O1 and O2 and from the
+# binary `jet build` makes.
+fixture: jet_runtime_files_calls_run_at_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_calls_run_at_every_tier.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_calls_run_at_every_tier.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_calls_run_at_every_tier.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_calls_run_at_every_tier.out

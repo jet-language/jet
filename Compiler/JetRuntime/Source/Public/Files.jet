@@ -1,0 +1,52 @@
+// `jet.runtime.files` (#6615): the runtime's public directory entries
+// functions, in Jet types with their declared effect rows. Each member is a
+// runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (RouteAFiles.jet). An entries context is a
+// key, and each path in it a slot. A key that is not live, or a slot that is
+// out of range or released, panics. A tuple result's items cross in the
+// checked tuple's label-sorted order, which is the export's slot order. A
+// failed step answers its error kind as `status`, with its OS code and its
+// reason, and `status_reason` is None when the step worked. A member with no
+// row is pure.
+files: module {
+    // Opens an entries context over `source`, which copies into
+    // `destination` when `copying`; its key. Slot 0 is `source`.
+    #Import(c) entries_context: fn(source: String, destination: String, copying: Bool) -[FS.Read]> Int = "jet_entries8_open"
+
+    // Closes the entries context `key`. An unknown key is a no-op.
+    #Import(c) entries_close: fn(key: Int) -[FS.Read]> = "jet_entries8_close"
+
+    // Releases the slot `index`.
+    #Import(c) entries_release: fn(key: Int, index: Int) -[FS.Read]> = "jet_entries8_release"
+
+    // Opens the directory `index` for reading.
+    #Import(c) entries_read_dir: fn(key: Int, index: Int) -[FS.Read]> (status: Int, status_code: Int?, status_reason: String?) = "jet_entries8_read_dir"
+
+    // The next entry of the directory `index`: whether the stream ended, and
+    // the entry's new slot.
+    #Import(c) entries_next: fn(key: Int, index: Int) -[FS.Read]> (at_end: Bool, child: Int, status: Int, status_code: Int?, status_reason: String?) = "jet_entries8_next"
+
+    // Whether the entry `index` is a directory, and whether it is a file.
+    #Import(c) entries_file_type: fn(key: Int, index: Int) -[FS.Read]> (directory: Bool, file: Bool, status: Int, status_code: Int?, status_reason: String?) = "jet_entries8_file_type"
+
+    // Creates the copy destination of `index` with every missing parent.
+    #Import(c) entries_mkdir: fn(key: Int, index: Int) -[FS.Write]> (status: Int, status_code: Int?, status_reason: String?) = "jet_entries8_mkdir"
+
+    // Copies the file `index` to its copy destination.
+    #Import(c) entries_copy: fn(key: Int, index: Int) -[FS.Write]> (status: Int, status_code: Int?, status_reason: String?) = "jet_entries8_copy"
+
+    // Whether the entry `left`'s name sorts before the entry `right`'s.
+    #Import(c) entries_before: fn(key: Int, left: Int, right: Int) -[FS.Read]> Bool = "jet_entries8_before"
+
+    // The path of the entry `index`.
+    #Import(c) entries_shown: fn(key: Int, index: Int) -[FS.Read]> String = "jet_entries8_shown"
+
+    // Whether the fault schedule fails the file operation `operation`.
+    #Import(c) fault_should_fail: fn(operation: String) -> Bool = "jet_fault_should_fail"
+
+    // The host's OS family.
+    #Import(c) os_family: fn() -> String = "jet_std_os_family"
+
+    // This process's id.
+    #Import(c) process_id_raw: fn() -[FS]> Int = "jet_std_os_pid"
+}
