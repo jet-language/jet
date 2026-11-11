@@ -27,7 +27,7 @@ net_equal: fn(a: I64, b: I64, size: I64) -> Bool {
 #Export(c) jet_rt_handle_drop_jet_socket_addr: fn(value: I64) { if (value != I64{0}) -> jet_rt_free(value, I64{56}, I64{8}) }
 #Export(c) jet_rt_handle_eq_jet_socket_addr: fn(a: I64, b: I64) -> Bool { net_equal(a, b, I64{56}) }
 
-// The C boundary borrows native List<U8> data; Lower owns its capacity/drop.
+// The C boundary borrows native [U8] data; Lower owns its capacity/drop.
 #Export(c) jet_net_raw_ip_from_bytes: fn(bytes: I64, length: I64) -> I64 {
     if (length != I64{4} && length != I64{16}) -> host_record_index_refused()
     value: jet_rt_alloc(I64{24}, I64{8})

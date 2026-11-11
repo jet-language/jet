@@ -301,7 +301,7 @@ net_tcp_read_deadline: fn(stream: I64, limit: I64, milliseconds: I64, output: I6
 #Export(c) jet_net_tcp_read_bytes_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, length, false, error) }
 #Export(c) jet_net_tcp_read_text_deadline: fn(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, I64{0}, true, error) }
 // `read_into` (#5976): one read of at most `limit` bytes appended to the
-// caller's List<U8> at `header` [len@0][capacity@8][data@16]; the count is
+// caller's [U8] at `header` [len@0][capacity@8][data@16]; the count is
 // the output, 0 at end of stream, and a limit below 1 is invalid input. A
 // List without room for the read and its scratch grows
 // (rt_host_u8_list_room), so a caller that clears and reuses its List reads

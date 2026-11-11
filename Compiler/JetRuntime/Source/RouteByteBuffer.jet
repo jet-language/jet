@@ -1,5 +1,5 @@
 // The `Bytes` value routes over the ByteHandlesABI buffer: one native
-// List<U8> sequence plus a read cursor, with EOF at position == len. Writers
+// [U8] sequence plus a read cursor, with EOF at position == len. Writers
 // append fixed-width encodings; the string-like methods read the bytes as
 // lossy UTF-8 (one U+FFFD per invalid subpart) and reuse the Text kernels.
 // Int operands arrive as borrowed exact Int carriers; fixed-width writer
@@ -131,7 +131,7 @@ byte_buffer_option_byte: fn(buffer: I64, at: I64, some: I64) -> I64 {
     I64{1}
 }
 
-// A fresh List<U8> of `length` bytes at `data`: its buffer stored at
+// A fresh [U8] of `length` bytes at `data`: its buffer stored at
 // `output` (0 when empty), the length returned.
 byte_buffer_list: fn(data: I64, length: I64, output: I64) -> I64 {
     if (length == I64{0}) {
@@ -148,7 +148,7 @@ byte_buffer_list: fn(data: I64, length: I64, output: I64) -> I64 {
     length
 }
 
-// Consumes the `count` bytes after the cursor as a List<U8> written to
+// Consumes the `count` bytes after the cursor as a [U8] written to
 // (data_out, len_out); absent when fewer remain.
 byte_buffer_take: fn(buffer: I64, count: I64, data_out: I64, len_out: I64) -> I64 {
     position: byte_buffer_position(buffer)
@@ -218,7 +218,7 @@ byte_buffer_find: fn(buffer: I64, needle: I64, some: I64, last: Bool) -> I64 {
     I64{1}
 }
 
-// A List<Text> of `count` words built by the caller: storage at `output`.
+// A [Text] of `count` words built by the caller: storage at `output`.
 byte_buffer_text_words: fn(count: I64, output: I64) -> I64 {
     if (count > I64{1152921504606846975}) {
         rt_text_capacity_stop()

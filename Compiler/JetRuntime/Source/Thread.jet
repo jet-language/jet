@@ -16,7 +16,7 @@
 // @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
 // @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
 // @176 Sentry fence depth; @184 Sentry frames List*; @192 reserved;
-// @200 Comptime request-scope flag; @208 Thread dynamic TLS List<I64>*
+// @200 Comptime request-scope flag; @208 Thread dynamic TLS [I64]*
 // (also owns T1 capture/scope services); @216/@224 Sync absolute futex
 // timespec; @232/@240 Sync/HostIO clock_gettime timespec scratch;
 // @248 Scheduler shared scratch word (worker-count out).
@@ -37,7 +37,7 @@
 
 // Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
 // List header@16, scope native List header@40 (0 thread, 1 attempt),
-// live-TCB native List<I64> header@64 containing [tid,tcb,...] word pairs
+// live-TCB native [I64] header@64 containing [tid,tcb,...] word pairs
 // (a fiber's pair is [tcb,tcb], Fiber.jet), the atomic count@88 of threads
 // thread_spawn started that have not registered yet, the fork gate@96, and
 // the reap list head@104 (thread_reap).
@@ -110,7 +110,7 @@ thread_new_tcb: fn(tid: I64) -> I64 {
     tcb
 }
 
-// Registry mutex is held. These are native List<I64> words, two per thread;
+// Registry mutex is held. These are native [I64] words, two per thread;
 // the TCB's @88 holds its row's first word index, so unregistering is O(1).
 thread_register_tcb: fn(tid: I64, tcb: I64) {
     live: wrapping(thread_tls_registry + I64{64})

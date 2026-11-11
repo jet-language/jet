@@ -120,7 +120,8 @@ sha256_hex_digit: fn(value: Int) -> U8 Never! {
 // Lowercase hex of `bytes`: the digits are gathered as bytes and made a
 // String once.
 sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
-    digits := List<U8>.try_with_capacity(bytes.len() * 2) ?? panic("hex digit allocation failed")
+    digits := [U8]{}
+    digits.try_reserve(bytes.len() * 2) ?? panic("hex digit allocation failed")
     loop byte in bytes {
         value: Int.from_u8(byte)
         digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))

@@ -3,7 +3,7 @@
 // (core.http.client.jet_http_build_get). Results are native [[U8]]: an outer buffer of 24-byte [len,cap,data]
 // headers, inner data at RT_HOST_U8_STRIDE, exact capacity, null when empty.
 
-// Bytes24 is a native List<U8> header [len0, cap8, data16] being grown.
+// Bytes24 is a native [U8] header [len0, cap8, data16] being grown.
 bh_bytes_reserve: fn(bytes: I64, extra: I64) {
     length: rt_text_word(bytes)
     capacity: rt_text_word(wrapping(bytes + I64{8}))
@@ -38,7 +38,7 @@ bh_bytes_drop: fn(bytes: I64) {
     thread_zero(bytes, I64{24})
 }
 
-// The owned native List<U8>: capacity exactly length, null data when empty.
+// The owned native [U8]: capacity exactly length, null data when empty.
 bh_bytes_seal: fn(bytes: I64) {
     length: rt_text_word(bytes)
     capacity: rt_text_word(wrapping(bytes + I64{8}))

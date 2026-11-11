@@ -197,7 +197,7 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
     // Comma counting is shape-only: quoted commas still count, unbalanced closers saturate.
     assert_eq(debug_snapshot_test_value("Label", "{{text: \"a,b\"}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 2})
     assert_eq(debug_snapshot_test_value("[Int]", "[)), 1, 2]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 3})
-    assert_eq(debug_snapshot_test_value("Map<String, Int>", "{{\"a\": 1}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 1})
+    assert_eq(debug_snapshot_test_value("SyncMap<String, Int>", "{{\"a\": 1}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Record, length: 1})
     assert_eq(debug_snapshot_test_value("Table", "HashMap {{a: 1, b: 2}}"), DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: 1})
     // A Map opener without its closer keeps the whole raw text, opener included.
     assert_eq(debug_snapshot_test_value("Map", "[a, b"), DebugValue.Aggregate{kind: DebugAggregateKind.Map, length: 1})

@@ -2,7 +2,7 @@
 // inline [len, cap, data]; descriptors are [stride, clone, drop, show, equal,
 // compare, kind, child0, child1]. Callbacks operate on borrowed payload slots.
 // Only initialized payload bytes are read (Bool is one byte; Unit is empty).
-// The native List<U8> carrier is packed, matching checked StorageLayout(U8)
+// The native [U8] carrier is packed, matching checked StorageLayout(U8)
 // and the generated C ABI's u8 elements. Every host byte-list seam shares it.
 RT_HOST_U8_STRIDE: I64{1}
 host_u8_get: fn(data: I64, index: I64) -> I64 {
@@ -39,7 +39,7 @@ host_u8_put: fn(data: I64, index: I64, byte: I64) {
     true
 }
 
-// Room in the exclusively lent List<U8> at `header` for `room` more bytes:
+// Room in the exclusively lent [U8] at `header` for `room` more bytes:
 // one without it grows to at least twice its capacity, its bytes copied
 // over, so a caller that clears and reuses one List stops allocating
 // (`read_into`, #5976).

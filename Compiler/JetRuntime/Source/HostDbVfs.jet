@@ -84,7 +84,7 @@ db_vfs_open_dev_null: fn(mode: I64) -> I64 {
 }
 
 // seekAndRead: pread64(2) of `count` bytes at `offset` into the borrowed
-// List<U8> at `header` from element `at`, continuing after a short read and
+// [U8] at `header` from element `at`, continuing after a short read and
 // retrying EINTR until end of file. The bytes read, or the negated code.
 #Export(c) jet_db_vfs_read: fn(fd: I64, offset: I64, header: I64, at: I64, count: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
@@ -333,7 +333,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     jet_int_owned_from_i64(span)
 }
 
-// unixRandomness: fill the borrowed List<U8> at `header` from getrandom(2),
+// unixRandomness: fill the borrowed [U8] at `header` from getrandom(2),
 // retrying EINTR. The bytes filled, or the negated code.
 #Export(c) jet_db_vfs_random: fn(header: I64) -> I64 {
     if !db_vfs_packed() -> return jet_int_owned_from_i64(DB_VFS_EINVAL)

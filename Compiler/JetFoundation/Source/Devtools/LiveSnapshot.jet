@@ -322,7 +322,8 @@ jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetL
         if before.owner != Val(live_sys.getuid()) -> return Err(jet_live_error("live runtime snapshot belongs to another user"))
     }
     if before.size > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
-    bytes := List<U8>.try_with_capacity(if before.size < 65536 -> before.size else -> 65536) ?? panic("live snapshot allocation failed")
+    bytes := [U8]{}
+    bytes.try_reserve(if before.size < 65536 -> before.size else -> 65536) ?? panic("live snapshot allocation failed")
     loop {
         room: 1048577 - bytes.len()
         chunk: reader.read(if room < 65536 -> room else -> 65536) ?? return Err(jet_live_error("cannot read live runtime snapshot: {err}"))

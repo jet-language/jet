@@ -253,7 +253,7 @@ sema_web_bucket_name: fn(bucket: WebBucket) -> String Never! {
 }
 
 sema_web_abi_type: fn(ty: Type, context: String, span: Span) -> Diagnostic Never! {
-    sema_error("E-WEB-ABI-TYPE", span, "`{sema_web_type_show(ty)}` cannot cross the JS/WASM boundary {context}", "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)", "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe")
+    sema_error("E-WEB-ABI-TYPE", span, "`{sema_web_type_show(ty)}` cannot cross the JS/WASM boundary {context}", "web exports and imports only admit ABI-safe types (scalars, `String`, lists and maps of ABI-safe values, and `#Codable` structs/enums)", "use a scalar, `String`, a list or map of ABI-safe values, or a `#Codable` struct/enum whose fields are ABI-safe")
 }
 
 // Scalars, `String`, lists, options and shared cells of ABI-safe
@@ -339,7 +339,7 @@ sema_web_type_show: fn(ty: Type) -> String Never! {
         .Char -> "Char"
         .Named(name) -> name
         .List(inner) -> "[{sema_web_type_show(inner)}]"
-        .Map(_, _, value) -> "Map<String, {sema_web_type_show(value)}>"
+        .Map(_, _, value) -> "[String: {sema_web_type_show(value)}]"
         .Fn(params, ret, effect_bound, _, _, _) -> sema_web_fn_debug(params, ret, effect_bound)
         .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_web_type_debug(ty)
     }

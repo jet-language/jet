@@ -240,7 +240,7 @@ jet_cli_import_run: fn(raw: [String], json: Bool) -[FS, Env, Time, IO]> JetDrive
     if language == "c" || language == "cpp" {
         foreign: jet_cli_import_foreign_language(language) ?? panic("C/C++ importer language is mapped")
         capability: pkg_foreign_boundary_capability(foreign)
-        return jet_cli_import_usage_error("source conversion for '{language}' is unavailable", "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Extern overlay", json)
+        return jet_cli_import_usage_error("source conversion for '{language}' is unavailable", "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Import overlay", json)
     }
     installed: [String]{"py", "pascal", "ada", "java", "csharp", "ts", "js", "go"}
     if !installed.contains(language) -> return jet_cli_import_usage_error("source importer '{language}' is not installed", "use jet import py|java|csharp|ts|js|go <dir> for narrow conversion; Ada/Pascal are binder-only/manual; C/C++ use their binder plus checked overlays", json)

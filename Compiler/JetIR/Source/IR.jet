@@ -505,7 +505,8 @@ ir_row_key: fn(m: IRModule, row: Int) -> String Never! {
 // alike; ir_merge stops the build when two merged functions do.
 ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
     hash: stable_id("ir.symbol", key)
-    symbol := List<U8>.try_with_capacity(prefix.len() + 16) ?? panic("symbol allocation failed")
+    symbol := [U8]{}
+    symbol.try_reserve(prefix.len() + 16) ?? panic("symbol allocation failed")
     loop byte in prefix.bytes() -> symbol.push(byte)
     // Most significant nibble first: each rotate brings the next one down.
     rest := hash

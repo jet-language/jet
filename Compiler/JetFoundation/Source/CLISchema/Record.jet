@@ -95,23 +95,27 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema MetadataError! {
     version_text: cursor.optional_string()
     count: cursor.u32()
     if count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many inputs"})
-    inputs := List<CLIInputSchema>.try_with_capacity(count) ?? panic("CLI metadata input allocation failed")
+    inputs := [CLIInputSchema]{}
+    inputs.try_reserve(count) ?? panic("CLI metadata input allocation failed")
     loop _ in 0..<count -> inputs.push(cli_schema_decode_input(cursor))
     command_count: cursor.u32()
     if command_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many commands"})
-    commands := List<CLISubcommandSchema>.try_with_capacity(command_count) ?? panic("CLI metadata command allocation failed")
+    commands := [CLISubcommandSchema]{}
+    commands.try_reserve(command_count) ?? panic("CLI metadata command allocation failed")
     loop _ in 0..<command_count {
         name: cursor.string()
         command_description: cursor.optional_string()
         input_count: cursor.u32()
         if input_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many command inputs"})
-        command_inputs := List<CLIInputSchema>.try_with_capacity(input_count) ?? panic("CLI metadata command input allocation failed")
+        command_inputs := [CLIInputSchema]{}
+        command_inputs.try_reserve(input_count) ?? panic("CLI metadata command input allocation failed")
         loop _ in 0..<input_count -> command_inputs.push(cli_schema_decode_input(cursor))
         commands.push(CLISubcommandSchema{name: name, description: command_description, inputs: command_inputs.move()})
     }
     job_count: cursor.u32()
     if job_count > CLI_SCHEMA_MAX_JOBS -> return Err(MetadataError.Malformed{why: "too many jobs"})
-    jobs := List<JobFact>.try_with_capacity(job_count) ?? panic("CLI metadata job allocation failed")
+    jobs := [JobFact]{}
+    jobs.try_reserve(job_count) ?? panic("CLI metadata job allocation failed")
     loop _ in 0..<job_count -> jobs.push(cli_schema_decode_job(cursor))
     if cursor.at != cursor.bytes.len() -> return Err(MetadataError.Malformed{why: "trailing payload bytes"})
     Ok(CLICommandSchema{entry_type: entry_type, description: description, inputs: inputs.move(), commands: commands.move(), jobs: jobs.move(), standard: standard, version: version_text})
@@ -163,7 +167,8 @@ cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema Metadata
 cli_schema_decode_strings: fn(cursor: &CLIRecordCursor, maximum: Int, refusal: String) -> [String] MetadataError! {
     count: cursor.u32()
     if count > maximum -> return Err(MetadataError.Malformed{why: refusal})
-    values := List<String>.try_with_capacity(count) ?? panic("CLI metadata string allocation failed")
+    values := [String]{}
+    values.try_reserve(count) ?? panic("CLI metadata string allocation failed")
     loop _ in 0..<count -> values.push(cursor.string())
     Ok(values)
 }
@@ -184,7 +189,8 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
     if parallel == 0 -> return Err(MetadataError.Malformed{why: "job parallel bound must be positive"})
     argument_count: cursor.u32()
     if argument_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job arguments"})
-    arguments := List<JobArgumentSchema>.try_with_capacity(argument_count) ?? panic("CLI metadata job argument allocation failed")
+    arguments := [JobArgumentSchema]{}
+    arguments.try_reserve(argument_count) ?? panic("CLI metadata job argument allocation failed")
     loop _ in 0..<argument_count {
         argument_name: cursor.string()
         label: cursor.string()
@@ -362,7 +368,8 @@ encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
     }
     cli_schema_put_u32(payload, schema.jobs.len())
     loop job in schema.jobs -> cli_schema_encode_job(payload, job)
-    record := List<U8>.try_with_capacity(46 + payload.len()) ?? panic("CLI metadata record allocation failed")
+    record := [U8]{}
+    record.try_reserve(46 + payload.len()) ?? panic("CLI metadata record allocation failed")
     record.extend(CLI_SCHEMA_MAGIC)
     record.push(U8{Int.from_u16(RECORD_VERSION).bit_and(255)})
     record.push(U8{Int.from_u16(RECORD_VERSION) >> 8})

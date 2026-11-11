@@ -722,7 +722,7 @@ sema_taskgroup_check_branches: fn(args: [CallArg], span: Span, method: String, a
             result_ty = Val(Type.Tuple{fields: result_fields})
         }
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
-            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a List<Task<T>> or, for all, a named tuple of Tasks", "pass a list of Task values"))
+            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs task branches, not `{type_name(values.ty)}`", "the combinator consumes a [Task<T>] or, for all, a named tuple of Tasks", "pass a list of Task values"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }

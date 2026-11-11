@@ -3,8 +3,8 @@ use {
     s2_syntax_parse: core.text.parse
 }
 
-// Live docs, examples, UI fixtures, Core and agent memory never reintroduce
-// retired syntax spellings. The lexer-backed `Dyn` surface check lives in
+// In-repo sources, docs, examples, UI fixtures, Core and agent memory never
+// reintroduce retired syntax spellings. The lexer-backed `Dyn` surface check lives in
 // tests/guards/dyn_surface; lexical and registry oracles stay compiler unit tests.
 // Plain helpers make the author check cover assertion bodies (#4790).
 s2_syntax_paths: fn(root: String) -> [String] {
@@ -35,21 +35,53 @@ s2_syntax_skip: fn(path: String) -> Bool {
     name: parts[parts.len() - 1]
     path.contains("/target/") || name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired") || path.ends_with(".published.snapshot") || path.ends_with("Docs/spec/syntax-decisions.md")
 }
+s2_syntax_ident_byte: fn(ch: Int) -> Bool {
+    ch == 95 || (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122)
+}
+// A needle counts only as its own token: never as the tail of a longer name
+// (`BTreeMap<`, `SyncMap<`), never as the head of one (`#context-menu`,
+// `LayoutHandles`), never as a marker's dotted key (`#test.`), and never as a
+// case-folded `display_query` lookup key.
 s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
-    if needle != "List<" && needle != "List[" && needle != "Map<" -> return line.contains(needle)
     offset := 0
     raw: line.bytes()
+    width: needle.bytes().len()
+    last: Int.from_u8(needle.bytes()[width - 1])
+    marker: needle.starts_with("#") || needle.starts_with("@")
     loop {
         index: s2_syntax_parse.find_from(line, needle, offset)
         if index < 0 -> return false
-        preceded := false
-        if index > 0 {
-            ch: Int.from_u8(raw[index - 1])
-            preceded = ch == 95 || (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122)
+        offset = index + width
+        if index > 0 && s2_syntax_ident_byte(Int.from_u8(raw[index - 1])) -> next
+        if index >= 16 && policy_slice_bytes(line, index - 16, index) == "display_query: \"" -> next
+        if offset < raw.len() {
+            after: Int.from_u8(raw[offset])
+            if s2_syntax_ident_byte(last) && (s2_syntax_ident_byte(after) || after == 45) -> next
+            if marker && after == 46 -> next
         }
-        if !preceded -> return true
-        offset = index + needle.bytes().len()
+        return true
     }
+}
+
+// Files that record retired spellings as data: the diagnostics registry rows
+// and their generated copies, the guards' own needle lists, and the foreign
+// producers whose stable digest keys spell the source language's words.
+s2_syntax_data_file: fn(path: String) -> Bool {
+    path == "Compiler/Prelude/Diagnostics.jet" ||
+    path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet" ||
+    (path.starts_with("tests/cases/selfhost_terminators/") && path.ends_with("/main.jet")) ||
+    path == "tests/guards/syntax_reconciliation.jet" ||
+    path == "tests/guards/arrow_surface/arrow_surface.jet" ||
+    path.starts_with("Jetpack/Integrations/Source/Foreign/") ||
+    path == "Compiler/JetDriver/Source/Driver/RustForeign.jet" ||
+    path == "Compiler/JetDriver/Source/Driver/RustForeignSource.jet" ||
+    path == "Compiler/JetDriver/Tests/RustForeign.jet"
+}
+
+// The broad roots scan source and text files; the curated roots scan all.
+s2_syntax_scanned_text: fn(path: String) -> Bool {
+    extensions: [String]{".jet", ".md", ".case", ".stderr", ".warn", ".out", ".txt", ".template", ".expected", ".stdout"}
+    extensions.any(extension -> path.ends_with(extension))
 }
 s2_syntax_trim_start: fn(text: String) -> String {
     bytes: text.bytes()
@@ -109,17 +141,25 @@ s2_syntax_ui_excerpt: fn(path: String, line: String) -> Bool {
     head != "" && head.bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
 }
 
+// The curated surface (agent memory, the spec, Core, examples and UI
+// fixtures) is scanned whole; the rest of the tree is scanned in its source
+// and text files, history and dated evidence excepted.
+s2_syntax_curated: fn(path: String) -> Bool {
+    path == "AGENTS.md" || path == "CLAUDE.md" || path.starts_with("Docs/spec/") || path.starts_with("Core/") || path.starts_with("Examples/") || path.starts_with("tests/ui/")
+}
+
 s2_syntax_live_surface_has_no_retired_spellings: fn() {
-    roots: [String]{"AGENTS.md", "CLAUDE.md", "Docs/spec", "Docs/spec/reference/syntax-surface.jet", "Core", "Examples", "tests/ui"}
-    forbidden: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val "}
+    roots: [String]{"AGENTS.md", "CLAUDE.md", "Docs", "Core", "Examples", "Compiler", "Jetpack", "Tools", "tests"}
+    forbidden: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val ", "LayoutHandle", "#Extern"}
     failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
-            if path.ends_with(".rs") || s2_syntax_skip(path) -> next
+            if path.ends_with(".rs") || s2_syntax_skip(path) || s2_syntax_data_file(path) -> next
+            if !s2_syntax_curated(path) && (!s2_syntax_scanned_text(path) || s6_ratchet_history(path)) -> next
             source: s2_syntax_files_api.read(path) ?? next
             subjects: s2_syntax_ui_subject_lines(path)
             loop (index, line) in source.lines() {
-                if subjects.contains(index + 1) || s2_syntax_ui_excerpt(path, line) -> next
+                if subjects.contains(index + 1) || s2_syntax_ui_excerpt(path, line) || line.contains("_RETIRED") -> next
                 loop needle in forbidden {
                     if needle == "pure fn" && !path.starts_with("Docs") -> next
                     if s2_syntax_forbidden(line, needle) -> failures.push("{path}:{index + 1} contains retired {needle}")

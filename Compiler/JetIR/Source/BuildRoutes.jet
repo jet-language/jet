@@ -797,7 +797,7 @@ ir_mapped_lines: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     ir_lazy_iter_from_list(m, p, b, list, element, meta, row, span)
 }
 
-// `List<T>.try_new()` and `List<T>.try_with_capacity(capacity)`: a new empty
+// `List.try_new()` and `List.try_with_capacity(capacity)`: a new empty
 // List with room for `capacity` elements (none for `try_new`), or the
 // try_reserve `Err(AllocError)`.
 ir_list_try_empty: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, with_capacity: Bool, args: [Int], span: Span) -> Int Never! {
@@ -1255,7 +1255,7 @@ ir_queue_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     out
 }
 
-// A Tally builtin over its ordered Map<T, Int> carrier: `add(x)` counts `x`
+// A Tally builtin over its ordered [T: Int] carrier: `add(x)` counts `x`
 // once more, `remove(x)` once less (its entry goes at zero, an absent `x`
 // stays absent), `count(x)` is its count (0 when absent), `has(x)` whether it
 // is counted, and `len()` / `is_empty()` read the distinct elements.
@@ -4471,7 +4471,7 @@ ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
                 lowered.push(slot)
             }
             .List(element) -> {
-                // A nested List (List<List<U8>>) crosses like any List: its
+                // A nested List ([[U8]]) crosses like any List: its
                 // buffer holds the inline 24-byte element headers.
                 item_row: ir_list_item(m, p, b, slot) ?? return ir_fail_slot(b, span, "runtime route {name} List argument of {shown}")
                 if element == .Handle(handle_name) {

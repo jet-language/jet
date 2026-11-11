@@ -46,7 +46,7 @@ ir_environment_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnv
         return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{raw}, row)
     }
     if route.op == .Columns {
-        inner: if ir_untag(result) == .List(element) -> element else -> { return ir_fail_slot(b, span, "environment columns require List<List<U8>>") }
+        inner: if ir_untag(result) == .List(element) -> element else -> { return ir_fail_slot(b, span, "environment columns require [[U8]]") }
         inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
         if !ir_environment_bytes(m, p, inner_row) || ir_list_stride(m, inner_row) != 24 -> return ir_fail_slot(b, span, "environment columns require canonical compact nested Lists")
         header: ir_fresh_temp(m, b, row)
@@ -58,7 +58,7 @@ ir_environment_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnv
     inner: if ir_untag(result) == .Option(payload) -> payload else -> { return ir_fail_slot(b, span, "environment getter requires Option") }
     inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     if route.op == .Bytes {
-        if !ir_environment_bytes(m, p, inner_row) -> return ir_fail_slot(b, span, "environment value requires Option<List<U8>>")
+        if !ir_environment_bytes(m, p, inner_row) -> return ir_fail_slot(b, span, "environment value requires Option<[U8]>")
     } else {
         if m.types[inner_row].kind != .String -> return ir_fail_slot(b, span, "strict environment getter requires Option<String>")
     }
@@ -89,7 +89,7 @@ ir_environment_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnv
 }
 
 // get_os owns an align-1 raw buffer (data at 0, length at 8 of `out`); a
-// List<U8> owns align-8 storage. The compact bytes are copied into a buffer
+// [U8] owns align-8 storage. The compact bytes are copied into a buffer
 // of their own, then the raw allocation is released once.
 ir_environment_byte_payload: fn(m: &IRModule, b: &IRBuilder, boxed: Int, out: Int) Never! {
     data: ir_load_word(m, b, out, 0)

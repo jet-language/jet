@@ -1,10 +1,10 @@
 // Native byte/text crossings for core.builtin.bytes/string_from_bytes(_lossy),
 // core.encoding.__utf8_validate/__string_byte/__bytes_into_text. Over the
-// current C carriers: a List<U8> argument is its borrowed (slot data, length)
-// pair at RT_HOST_U8_STRIDE; a List<U8> result is a fresh slot buffer written
+// current C carriers: a [U8] argument is its borrowed (slot data, length)
+// pair at RT_HOST_U8_STRIDE; a [U8] result is a fresh slot buffer written
 // to the out word, with the length returned (CAbiRoutes list_out).
 
-// Append count native List<U8> elements starting at start. Reserve once,
+// Append count native [U8] elements starting at start. Reserve once,
 // then initialize every byte before publishing the new length.
 text_bytes_push: fn(target: I64, data: I64, start: I64, count: I64) {
     if (count <= I64{0}) -> return
@@ -23,7 +23,7 @@ text_bytes_push: fn(target: I64, data: I64, start: I64, count: I64) {
     rt_text_store(wrapping(target + I64{8}), used + count)
 }
 
-// The end of the valid UTF-8 run of a native List<U8> from `start`: the
+// The end of the valid UTF-8 run of a native [U8] from `start`: the
 // index of the first invalid sequence, or length when the rest is valid.
 text_bytes_valid_end: fn(data: I64, start: I64, length: I64) -> I64 {
     at := start
@@ -59,7 +59,7 @@ text_bytes_valid_end: fn(data: I64, start: I64, length: I64) -> I64 {
 }
 
 // Rust Utf8Error Display of the first invalid sequence, or 0 when the native
-// List<U8> is valid UTF-8. error_len None (a truncated final sequence) is the
+// [U8] is valid UTF-8. error_len None (a truncated final sequence) is the
 // "incomplete" form; otherwise the invalid subpart length is reported.
 text_bytes_utf8_error: fn(data: I64, length: I64) -> I64 {
     at: text_bytes_valid_end(data, I64{0}, length)
@@ -80,7 +80,7 @@ text_bytes_utf8_error: fn(data: I64, length: I64) -> I64 {
     message
 }
 
-// Exact copy of length native List<U8> elements into a fresh owned text:
+// Exact copy of length native [U8] elements into a fresh owned text:
 // packed elements are the text's bytes, copied whole (rt_text_copy).
 text_bytes_owned: fn(data: I64, length: I64) -> I64 {
     if (RT_HOST_U8_STRIDE == I64{1}) -> return rt_text_copy(data, length)
@@ -133,7 +133,7 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
 // is copied, never adopted.
 #Export(c) jet_raw_bytes_into_text: fn(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
 
-// jet_string_bytes: the UTF-8 bytes as a fresh List<U8>, one block move into
+// jet_string_bytes: the UTF-8 bytes as a fresh [U8], one block move into
 // the packed buffer (not a store per byte).
 #Export(c) jet_string_bytes: fn(value: I64, output: I64) -> I64 {
     length: rt_text_len(value)

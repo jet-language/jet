@@ -1,26 +1,32 @@
-// Generic collection constructors retain owner arguments across failure rails.
+// Contextual collection constructors take the owner's element type from the
+// declared return slot and keep it across failure rails. `??` checks its
+// subject without a slot, so each contextual call is its own call root.
 CollectionStaticRow: struct { value: Int }
 
+collection_static_try_bytes: fn() -> [U8] { List.try_with_capacity(1) }
+
 collection_static_bytes: fn() -> [U8] Never! {
-    values := List<U8>.try_with_capacity(1) ?? panic("allocation failed")
+    values := collection_static_try_bytes() ?? panic("allocation failed")
     values.push(U8{7})
     values
 }
 
+collection_static_try_strings: fn() -> [String] { List.try_new() }
+
 collection_static_strings: fn() -> [String] Never! {
-    values := List<String>.try_new() ?? panic("allocation failed")
+    values := collection_static_try_strings() ?? panic("allocation failed")
     values.push("text")
     values
 }
 
+collection_static_try_rows: fn() -> [CollectionStaticRow] { List.try_with_capacity(1) }
+
 collection_static_rows: fn() -> [CollectionStaticRow] Never! {
-    values := List<CollectionStaticRow>.try_with_capacity(1) ?? panic("allocation failed")
+    values := collection_static_try_rows() ?? panic("allocation failed")
     values.push(CollectionStaticRow{value: 9})
     values
 }
 
-// The owner's element type comes from the declared return slot; `??` checks
-// its subject without a slot, so the contextual call is its own call root.
 collection_static_try_contextual: fn() -> [String] {
     List.try_with_capacity(2)
 }
@@ -34,8 +40,8 @@ collection_static_contextual: fn() -> [String] Never! {
     strings: collection_static_strings()
     rows: collection_static_rows()
     contextual: collection_static_contextual()
-    if bytes.len() != 1 || bytes[0] != (U8{7}) -> panic("List<U8> owner type was lost")
-    if strings.len() != 1 || strings[0] != "text" -> panic("List<String> owner type was lost")
-    if rows.len() != 1 || rows[0].value != 9 -> panic("nominal List owner type was lost")
+    if bytes.len() != 1 || bytes[0] != (U8{7}) -> panic("[U8] owner type was lost")
+    if strings.len() != 1 || strings[0] != "text" -> panic("[String] owner type was lost")
+    if rows.len() != 1 || rows[0].value != 9 -> panic("nominal list owner type was lost")
     if contextual.len() != 0 -> panic("contextual List construction was not empty")
 }

@@ -3,7 +3,7 @@
 // seam, active only when JET_ENC_HOSTILE_IO is set):11 (host path metadata).
 // Codec policy is Jet.
 
-// text.into_bytes() as a fresh List<U8>; the moved-in String is dropped once
+// text.into_bytes() as a fresh [U8]; the moved-in String is dropped once
 // its bytes are copied.
 #Export(c) jet_raw_text_into_bytes: fn(value: I64, output: I64) -> I64 {
     result: jet_string_bytes(value, output)
@@ -321,7 +321,7 @@ encoding_flush: fn(writer: I64) -> I64 {
     encoding_cause_errno(-failure)
 }
 
-// (a borrowed List<U8>), and.
+// (a borrowed [U8]), and.
 #Export(c) jet_raw_encoding_write_bytes: fn(writer: I64, data: I64, length: I64, error: I64) -> I64 {
     temporary: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
     packed: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
@@ -418,7 +418,7 @@ encoding_file_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 
     I64{1}
 }
 
-// One read on the reader's own stream into the empty List<U8> at `header` (len,
+// One read on the reader's own stream into the empty [U8] at `header` (len,
 // capacity, data), at most `max` bytes, without growing it. The List's length
 // becomes the count; an error leaves it empty.
 #Export(c) jet_raw_encoding_read_into: fn(reader: I64, header: I64, max: I64, value: I64, error: I64) -> I64 {
