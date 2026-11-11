@@ -4891,11 +4891,17 @@ transaction/event lengths, history limit, cursor, generation, and capture state;
 `event_json` reports the last transaction identity and diff without serializing
 the generic state payload.
 
-Store callbacks take no state parameter: they capture the store's rooted
-reactive handles (D-DX-STORE1). `signal` and `state_signal` return the typed
-`Signal<T>`, not a textual generation token. Writes made during a transaction
-remain staged, are visible to that callback's subsequent reads, and notify
-reactive observers only once at the outermost commit.
+`transaction`, `update`, `batch`, `optimistic` and `patch` (and the `transact`
+receiver) take `apply: fn(&T)`: the callback receives the current value as a
+written parameter and changes it in place, as in
+`store.transact("add item", (cart: &Cart) -> cart.items.push(item))`. The
+store then holds the changed value and records one transaction from the value
+before it. A store is built on one `core.reactive` signal (D-DX-STORE1):
+`signal` and `state_signal` return that typed `Signal<T>`, not a textual
+generation token, and its observers see one update per transaction, after the
+callback returns. `optimistic` and `patch` keep the value from before the
+callback, and until `patch_commit`, `patch_rollback` returns the store with
+that value restored.
 
 
 ### `core.web.storage` — browser storage adapters

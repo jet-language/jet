@@ -34,7 +34,7 @@ WebStore: struct<T> {
     signal: fn(self) -> Signal<T> Never! { signal<T>(self) }
     state_signal: fn(self) -> Signal<T> Never! { state_signal<T>(self) }
     set: fn(&self, value: T) -> WebStoreTransaction<T> Never! { set<T>(self, value) }
-    transact: fn(&self, label: String, apply: fn() Never!) -> WebStoreTransaction<T> Never! { transaction<T>(self, label, [String]{}, apply) }
+    transact: fn(&self, label: String, apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! { transaction<T>(self, label, [String]{}, apply) }
     back: fn(&self) -> WebStore<T>? Never! { back<T>(self) }
     forward: fn(&self) -> WebStore<T>? Never! { forward<T>(self) }
     jump: fn(&self, index: Int) -> WebStore<T>? Never! { jump<T>(self, index) }
@@ -102,17 +102,21 @@ get: fn<T>(store: WebStore<T>) -> T Never! { value<T>(store) }
 signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { store.state }
 state_signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
 
-transaction: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStoreTransaction<T> Never! {
+// `apply` changes a working copy of the current value; the store then holds
+// the changed copy and records one transaction from the value before it.
+transaction: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
     before: value<T>(store.copy())
-    apply()
+    next := value<T>(store.copy())
+    apply(next)
+    store.state = reactive.set(store.state, next)
     record<T>(store, label, values, before)
 }
 
-update: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStoreTransaction<T> Never! {
+update: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
     transaction<T>(store, label, values, apply)
 }
 
-batch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStoreTransaction<T> Never! {
+batch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
     transaction<T>(store, label, values, apply)
 }
 
@@ -126,14 +130,15 @@ set: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
 
 set_state: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(store, value) }
 
-optimistic: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStorePatch<T> Never! {
+// The changed value is live at once; the patch keeps the value before it, and
+// until patch_commit, patch_rollback returns the store with that value restored.
+optimistic: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStorePatch<T> Never! {
     backup := value<T>(store.copy())
-    apply()
-    transaction: record<T>(store, label, values, backup)
+    transaction: transaction<T>(store, label, values, apply)
     WebStorePatch<T>{store: store.copy(), backup: backup, transaction: transaction, active: true}
 }
 
-patch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn() Never!) -> WebStorePatch<T> Never! {
+patch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStorePatch<T> Never! {
     optimistic<T>(store, label, values, apply)
 }
 

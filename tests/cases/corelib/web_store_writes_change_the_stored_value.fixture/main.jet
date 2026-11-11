@@ -1,0 +1,28 @@
+use web_store: core.web.store
+
+Cart: struct {
+    items: [String]
+    total: Int
+}
+
+run: fn() {
+    counter := web_store.new("counter", 1)
+    added: web_store.transaction(counter, "add", ["value"], (n: &Int) -> n += 41)
+    print("transaction: {added.before} -> {added.after}, store {counter.get()}")
+    _update: web_store.update(counter, "double", ["value"], (n: &Int) -> n *= 2)
+    print("update: {counter.get()}")
+    _batch: web_store.batch(counter, "less", ["value"], (n: &Int) -> n -= 4)
+    print("batch: {counter.get()}")
+    guess := web_store.optimistic(counter, "guess", ["value"], (n: &Int) -> n = 0)
+    print("optimistic: {counter.get()}, backup {guess.backup}")
+    kept := web_store.patch(counter, "keep", ["value"], (n: &Int) -> n += 7)
+    _kept: web_store.patch_commit(kept)
+    print("patch: {counter.get()}, history {web_store.history(counter).len()}")
+
+    cart := web_store.new("cart", Cart{items: [String]{}, total: 0})
+    bought: cart.transact("buy", (c: &Cart) -> {
+        c.items.push("tea")
+        c.total += 3
+    })
+    print("transact: {cart.get().items.join(",")} {cart.get().total}, before {bought.before.items.len()} items")
+}
