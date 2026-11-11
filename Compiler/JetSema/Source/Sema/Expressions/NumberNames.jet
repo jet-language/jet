@@ -85,8 +85,9 @@ sema_expr_number_name_refused: fn(name: String, required: Type, scopes: SemaScop
 // Reads the number name `name` (scope row `index`) at `span`, where `expected`
 // is asked for. Not handled when the name's own type serves the use or its
 // literal doesn't fit there either: the caller reads the name as usual and
-// reports the mismatch.
-sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+// reports the mismatch. `noted` when the caller already read the name at
+// `span` (an operator's left operand, read before its right one is known).
+sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
     // copy: the scope row keeps its literal for the name's other uses.
@@ -113,11 +114,89 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
         context.number_retypes_found.push(SemaNumberRetype{binding: binding, ty: fitted.ty.copy(), use_span: span})
         return unhandled
     }
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, index), kind: "local"})
-    if !sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return SemaNumberNameRead{handled: true, value: None}
+    if !noted {
+        context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, index), kind: "local"})
+        if !sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return SemaNumberNameRead{handled: true, value: None}
+    }
     value := sema_check_expression(literal, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
+}
+
+// Whether no operator rule combines numbers of types `left` and `right`:
+// both are numbers, neither widens into the other, and they are not an exact
+// number beside an Int (which meets it as the same value) or a Complex beside
+// a plain number (which lifts into it).
+sema_expr_number_types_refused: fn(left: Type, right: Type) -> Bool {
+    if type_identity_equal(left, right) -> return false
+    left_precise: sema_expr_precise_name(left)
+    right_precise: sema_expr_precise_name(right)
+    if !sema_expr_is_numeric(left) && left_precise == None -> return false
+    if !sema_expr_is_numeric(right) && right_precise == None -> return false
+    if left_precise == (Val("Complex")) || right_precise == (Val("Complex")) -> return false
+    if (left_precise != None && right == Type.Int) || (right_precise != None && left == Type.Int) -> return false
+    sema_expr_numeric_join(left, right) == None
+}
+
+// Whether `expr` is a bare number name.
+sema_expr_number_name_operand: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expr == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(scopes, name) ?? return false
+        return scopes.bindings[index].number_literal != None
+    }
+    false
+}
+
+// An operator operand that is a number name whose own type the other
+// operand's type `other` refuses reads at `other` (sema_expr_number_name_read):
+// `price * rate` with `price: Float` and `rate: 0.5` multiplies two Floats,
+// and `total + price` makes a `:=` name `total` a Float.
+sema_expr_number_operand_read: fn(operand: Expr, other: Type, noted: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+    unhandled: SemaNumberNameRead{handled: false, value: None}
+    if operand == .Ident(name, span, _) {
+        index: sema_scope_resolve_index(scopes, name) ?? return unhandled
+        if scopes.bindings[index].number_literal == None -> return unhandled
+        own: sema_scope_binding_type(environment, scopes, index) ?? return unhandled
+        if !sema_expr_number_types_refused(own, other) -> return unhandled
+        return sema_expr_number_name_read(name, span, index, Val(other), noted, environment, program, scopes, state, context, diagnostics)
+    }
+    unhandled
+}
+
+// Whether the scope row `index` is a `:=` number name no pass has decided a
+// type for yet, so a write may decide it (sema_expr_number_target_retype).
+sema_expr_number_target_open: fn(index: Int, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool Never! {
+    if !scopes.bindings[index].mutable || scopes.bindings[index].number_literal == None -> return false
+    sema_expr_number_retype(scopes.bindings[index].symbol.span, context.number_retypes_known) == None
+}
+
+// A value a written `:=` number name reads without a type asked for: a name
+// that is not itself a number name, a field, or an element. It has its own
+// type, which may decide the target's (`total = price`).
+sema_expr_number_target_value_typed: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expr == .Ident(_, _, _) -> return !sema_expr_number_name_operand(expr, scopes)
+    if expr == .Field(_, _, _, _) || expr == .Index(_, _, _, _, _) -> return true
+    if expr == .Paren(inner, _, _) -> return sema_expr_number_target_value_typed(inner, scopes)
+    false
+}
+
+// A write `total = price` or `total += price` to the open `:=` number name
+// at scope row `index` (sema_expr_number_target_open), whose value has the
+// type `offered` that the name's own type refuses, is a use of that type:
+// when the name's literal takes it, the next pass declares the name at it.
+sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+    if !sema_expr_number_target_open(index, scopes, context) -> return
+    own: scopes.bindings[index].symbol.ty ?? return
+    if !sema_expr_number_types_refused(own, offered) -> return
+    // copy: the scope row keeps its literal for the name's other uses.
+    literal: (scopes.bindings[index].number_literal ?? return).copy()
+    // A literal's check opens no statement tail.
+    tail_store := sema_statement_tail_store_init()
+    trial := [Diagnostic]{}
+    fitted: sema_probe_expression(literal, Val(offered), environment, program, scopes, state, tail_store, context, trial) ?? return
+    if sema_has_error_since(trial, 0) -> return
+    // copy: the probe's type is recorded for the next pass; the probe's result is dropped.
+    context.number_retypes_found.push(SemaNumberRetype{binding: scopes.bindings[index].symbol.span, ty: fitted.ty.copy(), use_span: name_span})
 }
 
 // The type an earlier pass decided for the `:=` number binding `binding`, or

@@ -4293,7 +4293,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     // A name bound to a number literal reads, where its own type is refused,
     // as that literal written here (Expressions/NumberNames.jet).
     if unresolved_index == .Val(number_index) && scopes.bindings[number_index].number_literal != None {
-        number_read: sema_expr_number_name_read(name, span, number_index, expected, environment, program, scopes, state, context, diagnostics)
+        number_read: sema_expr_number_name_read(name, span, number_index, expected, false, environment, program, scopes, state, context, diagnostics)
         if number_read.handled -> return number_read.value
     }
     // E0420: a `Type{ uninit }` binding read before
@@ -5145,7 +5145,20 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
             }
         }
     }
-    checked_rhs: sema_check_expression(right, rhs_expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    // A number name the other operand's type refuses reads at that type
+    // (Expressions/NumberNames.jet): `price * rate` with `price: Float` and
+    // `rate: 0.5` multiplies two Floats. The left operand is read again only
+    // when the right one is no number name, so one operator adapts one side.
+    right_number := sema_expr_number_operand_read(right, checked_lhs.ty, false, environment, program, scopes, state, context, diagnostics)
+    right_handled: right_number.handled
+    rhs_checked := right_number.value
+    if right_handled && rhs_checked == None -> return None
+    if !right_handled -> rhs_checked = sema_check_expression(right, rhs_expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked_rhs: rhs_checked ?? return None
+    if !sema_expr_number_name_operand(right, scopes) {
+        left_number := sema_expr_number_operand_read(left, checked_rhs.ty, true, environment, program, scopes, state, context, diagnostics)
+        if left_number.handled -> checked_lhs = left_number.value ?? return None
+    }
     // A fractional literal before a Dyn operand is a Float, not a Decimal.
     if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) && sema_dyn_float_literal_value(left) == .Val(number) {
         checked_lhs = sema_node(context, Type.Float, NodeKind.FloatLit{value: number}, checked_lhs.span)

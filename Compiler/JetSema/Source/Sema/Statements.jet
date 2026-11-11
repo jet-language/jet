@@ -5836,13 +5836,19 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, scopes, state, context, diagnostics) -> return None
     required: binding.symbol.ty ?? Type.Named{name: "Unit"}
     expected := Type?{None}
-    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, required, scopes)
+    // A `:=` number name whose type no use has decided yet takes the type of a
+    // typed value written to it (`total := 0` then `total = price` or
+    // `total += price`), so a plain write's value is checked on its own and
+    // decides it (sema_expr_number_target_retype).
+    number_target: sema_expr_number_target_open(index, scopes, context)
+    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, scopes) || (number_target && sema_expr_number_target_value_typed(expr, scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
     // The Rust `Stmt::Assign` feeds the place type into the RHS for compound
     // updates too, so `price *= 2.0` with `price: Float` reads the literal as
     // Float rather than exact Decimal.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
     checked_value: sema_check_expression(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if number_target -> sema_expr_number_target_retype(index, checked_value.ty, name_span, environment, program, scopes, state, context)
     if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, false) -> return None
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, context, diagnostics) -> return None
     checked := checked_value
