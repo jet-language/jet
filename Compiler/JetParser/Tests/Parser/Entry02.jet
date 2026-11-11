@@ -324,6 +324,13 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert(entry02_unit_result(entry02_func(p, "bounded").return_type, "IOError"))
     assert(entry02_func(p, "load").return_type == (Val(Type.Result{ok: Type.Named{name: "Config"}, err: Type.Named{name: "IOError"}})))
 }
+// The contract may also follow the effect arrow; both orders are one signature.
+#Test("unit_fallible_contract_may_follow_the_effect_arrow") {
+    p: entry02_program("before: fn() IOError! -[FS]> {{}}\nafter: fn() -[FS]> IOError! {{}}\n")
+    assert(entry02_unit_result(entry02_func(p, "before").return_type, "IOError"))
+    assert(entry02_unit_result(entry02_func(p, "after").return_type, "IOError"))
+    assert(entry02_format("after: fn() -[FS]> IOError! {{}}\n").contains("after: fn() IOError! -[FS]>"))
+}
 #Test("suffix_contract_reaches_nested_general_type_positions") {
     p: entry02_program("Holder: struct {{\nmap: [String: IOError!]\ntuple: (entry: Entry? StoreError!, failure: Err!)\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
     holder: entry02_struct(p, "Holder")

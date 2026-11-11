@@ -1466,31 +1466,27 @@ parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
 }
 
 // The result after the one arrow. Current forms are `-> T`,
-// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`. A `->` with no type after it is left for the
+// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`, which also follows an
+// effect row (`-[E]> C!`). A `->` with no type after it is left for the
 // body parser, so `f: fn() -> expr` still reads as a one-line body.
 parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult {
     prefix_effect: parser_func_effect_starts_here(state)
-    effect_start: parser_current(state).span.start
     effects: parser_parse_opt_func_effects(state)
-    arrow_return := false
     plain_arrow := false
     result := ParsedType?{None}
     if {
         effects.effects != None || effects.via != None -> {
-            arrow_return = true
             result = if parser_result_type_follows_arrow(state) -> Val(parser_parse_type(state, 0)) else -> parser_parse_unit_fallible_return(state)
         }
         parser_at_unified_arrow(state) -> {
             before: state.position
             parser_bump(state)
             if parser_result_type_follows_arrow(state) {
-                arrow_return = true
                 plain_arrow = true
                 result = Val(parser_parse_type(state, 0))
             } else {
                 result = parser_parse_unit_fallible_return(state)
                 if parser_has_type(result) {
-                    arrow_return = true
                     plain_arrow = true
                 } else {
                     state.position = before
@@ -1506,15 +1502,8 @@ parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult
     if result == .Val(parsed) {
         return_type = Val(parsed.ty)
         return_type_span = Val(parsed.span)
-        if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            if plain_arrow {
-                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
-            } else {
-                // The error contract precedes the effect arrow.
-                contract: parser_source_slice(state, parsed.span.start, parsed.span.end)
-                arrow: parser_source_slice(state, effect_start, parsed.span.start).trim()
-                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible error contract comes before the effect arrow", "a function that can fail but returns no value has no result after its effect arrow; its error contract is written first", "write `{contract} {arrow}`, as in `save: fn(path: String) IOError! -[FS]>`")
-            }
+        if plain_arrow && parser_is_unit_fallible(parsed.ty) {
+            parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
     ParsedCallableResult{return_type: return_type.move(), return_type_span: return_type_span.move(), effects: effects.effects, via: effects.via, prefix_effect: prefix_effect.move(), plain_arrow: plain_arrow}
