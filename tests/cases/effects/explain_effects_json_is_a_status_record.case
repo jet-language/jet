@@ -1,0 +1,22 @@
+# `jet explain effects --json` follows the ratified machine-output contract
+# (D-REPORT-MACHINE1, D-REPORT-LAW1): the command result is one
+# `jet.status/v1` record with action `explain.effects`, holding the ladder as
+# status data, and any diagnostic inside it is a `jet.report/v3` object.
+# D-JET-EXPLAIN-EFFECTS1's "`jet.report/v1` envelope" names that contract.
+# The golden pins the whole record for a type method with a function row and
+# an `#FX` block, and the testkit's machine-output validator accepts it.
+fixture: explain_effects_json_is_a_status_record/input
+env: NO_COLOR=1
+step: jet check explain.jet
+exit: 0
+step golden: jet explain effects --json explain.jet:5
+exit: 0
+stdout: = "{\"schema\":\"jet.status/v1\",\"action\":\"explain.effects\",\"ok\":true,\"reports\":[],\"site\":\"explain.jet:5\",\"rungs\":[{\"rung\":\"block\",\"written\":true,\"text\":\"#FX(IO)\",\"site\":\"explain.jet:4\"},{\"rung\":\"function\",\"written\":true,\"text\":\"-[IO]>\",\"site\":\"explain.jet:3\"},{\"rung\":\"type\",\"written\":true,\"text\":\"#FX(!Net)\",\"site\":\"explain.jet:1\"},{\"rung\":\"module\",\"written\":false,\"text\":\"(none written)\",\"site\":\"\"},{\"rung\":\"package\",\"written\":false,\"text\":\"(none written)\",\"site\":\"\"},{\"rung\":\"run\",\"written\":false,\"text\":\"everything else allowed; --deny wins\",\"site\":\"\"}],\"reaches\":[{\"effect\":\"IO\",\"chain\":[\"explain::Talk::speak\"],\"site\":\"explain.jet:5\"}]}\n" # the exact record
+step valid: jet explain effects --json explain.jet:5
+exit: 0
+stdout: machine-output = [status] # one record the machine-output validator accepts as a status record
+step caps: jet explain effects --json --caps explain.jet
+exit: 0
+stdout: machine-output = [status] # the cap list is a status record too
+stdout: ~ "\"action\":\"explain.effects\"" # under the same action
+stdout: ~ "\"kind\":\"type\"" # carrying the type cap

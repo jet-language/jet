@@ -1267,7 +1267,11 @@ its ladder on stdout, under the errors on stderr. `--json` prints one
 `written`, `text`, `site`) and `reaches` (`effect`, `chain`, `site`), or
 `scope` and `caps` (`file`, `line`, `cap`, `kind`, `name`). Every name it
 prints, a `chain` step among them, is the source's, never a
-compiler-generated one.
+compiler-generated one. This is the "`jet.report/v1` envelope" that
+D-JET-EXPLAIN-EFFECTS1 names: the machine-output contract of
+D-REPORT-MACHINE1 and D-REPORT-LAW1, under which a command result is one
+`jet.status/v1` record and every report inside it is a `jet.report/v3`
+object.
 
 `jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
 and its expected output `Examples/<area>/<name>.out` beside it.
