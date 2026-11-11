@@ -185,6 +185,13 @@ maximally optimized machine code for the same workload. Jet must match or beat
 it in both cycles and bytes (Jet/ceiling at most `1.00`). Beating the peers is
 the floor, not the goal.
 
+Measure live. Jet's goal is raw compile and run speed, not incremental or
+cached compilation: the compile-speed target is 30 million lines per second
+from cold. A measured run compiles from cold, and its compile time counts. No
+script cache, build-action reuse or other compile cache serves it, and every
+compile cache is off by default. Computers are fast and software is bloated,
+which is why the final comparison is always hand-optimized machine code.
+
 Every required cell needs a ceiling reference: an asm-parity cell
 (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
 best known technique for the workload (SIMD, algorithmic, or syscall-level),
