@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99300,
+    "rev": 99306,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60088,6 +60088,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Owner 2026-11-11: an executable stepped plan to 30M lines/s, now c5-c9. Arithmetic: 30M lines/s on about 1M lines is 33 ms wall. At 32 threads that's about 1.07 CPU-s in total, about 1 µs of CPU per line. Today (seed-t22) it's 749 CPU-s for 925K lines, about 810 µs per line at parallelism 5.4, so the target needs about 800x less CPU per line and about 6x more parallelism. Steps, each with a numeric gate measured by the c1 cell: 0 stop the bleeding (55K lines/s), 1 parallelism to 24/32 (400K), 2 data-oriented core (5M), 3 fused per-function pipeline and direct image writer (20M), 4 codegen to the hand-written ceiling (30M). G11Speed owns all of it and runs continuously. No step's patch is accepted without its before and after numbers from the cell."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed or size climb: moved from G13 to G11. Owner order 2026-11-09: all speed and size work is G11. It stays a horizon card under the 2026-11-08 rule: it blocks no card, milestone, release or gate, and its targets are not pass/fail criteria elsewhere."
@@ -60249,6 +60254,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T12:12:46.727Z"
+        },
+        {
+          "n": 5,
+          "text": "Plan step 0, stop the bleeding: every train records its compiler build's CPU-s and per-phase seconds against the previous seed and fails past +10% (the train speed gate). The 2026-11-11 regression (sema.bodies 5.0 -> 52.1 s, comptime.precheck 0.3 -> 19.2 s between a0.0.43 and seed-t22) is bisected to its commits and fixed at the root, and the #6527 slide from a0_021 (53.6K lines/s, 54 CPU-s) is undone. Gate: at least 55K lines/s and at most 60 µs of CPU per line. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:18:42.013Z"
+        },
+        {
+          "n": 6,
+          "text": "Plan step 1, use the machine: average parallelism goes from about 5 to at least 24 of 32 threads. Modules stream through the pipeline as soon as their dependencies are checked (no phase-wide barriers), comptime runs in parallel, work queues are wait-free, and the allocator keeps per-thread arenas so threads take no global lock. 32 threads beat 16. Gate: at least 400K lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:18:43.301Z"
+        },
+        {
+          "n": 7,
+          "text": "Plan step 2, data-oriented core: every compiler name, symbol, type and function is an interned u32 id (no String keys in maps). AST, types and IR are flat struct-of-arrays columns, compiler data lives in per-phase arenas freed in bulk, and compiler data carries no reference counts. Peak RSS falls under 1 GB (#5910). Gate: at most 5 µs of CPU per line and at least 5M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:18:44.544Z"
+        },
+        {
+          "n": 8,
+          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. The lexer is SIMD at 1 GB/s or more against an asm-parity reference. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:18:45.839Z"
+        },
+        {
+          "n": 9,
+          "text": "Plan step 4, the compiler compiled well: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) closes the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/perf/asm-parity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:18:47.404Z"
         }
       ],
       "refs": [],
@@ -60258,12 +60308,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-11T12:12:46.727Z",
+      "updated": "2026-11-11T12:18:48.967Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 4
+      "criteriaLastN": 9
     },
     {
       "id": "c0fo37ov",
@@ -197695,6 +197745,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T12:18:48.968Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T12:18:47.404Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#9 Plan step 4, the compiler compiled well: Jet's own release c"
+    },
+    {
+      "at": "2026-11-11T12:18:45.839Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#8 Plan step 3, fused per-function pipeline: each function goes"
+    },
+    {
+      "at": "2026-11-11T12:18:44.544Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#7 Plan step 2, data-oriented core: every compiler name, symbol"
+    },
+    {
+      "at": "2026-11-11T12:18:43.301Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#6 Plan step 1, use the machine: average parallelism goes from "
+    },
+    {
+      "at": "2026-11-11T12:18:42.013Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c031o59x",
+      "note": "#5 Plan step 0, stop the bleeding: every train records its comp"
+    },
     {
       "at": "2026-11-11T12:14:34.644Z",
       "by": "Main",
