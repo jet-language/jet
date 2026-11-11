@@ -287,6 +287,33 @@ home_dir: fn() -[Env]> String? Never! {
     get("USERPROFILE")
 }
 
+/// The XDG base directory for user caches: $XDG_CACHE_HOME when it is set and
+/// not empty, else `.cache` under the home directory, joined by
+/// `files.join_all`. The home directory is $HOME when it is set, else the
+/// account's home in /etc/passwd (on Windows %USERPROFILE%), as node's
+/// `os.homedir()` and Python's `expanduser` find it. None when there is none.
+cache_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_CACHE_HOME", ".cache") }
+
+/// The XDG base directory for user data: $XDG_DATA_HOME, else `.local/share`
+/// under the home directory, read as `cache_dir` reads its own.
+data_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_DATA_HOME", ".local/share") }
+
+/// The XDG base directory for user configuration: $XDG_CONFIG_HOME, else
+/// `.config` under the home directory, read as `cache_dir` reads its own.
+config_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_CONFIG_HOME", ".config") }
+
+base_dir: fn(variable: String, under: String) -[Env, FS.Read]> String? Never! {
+    chosen: get(variable) ?? ""
+    if chosen != "" -> return Val(chosen)
+    home: get("HOME") ?? account_home() ?? return None
+    Val(files.join_all([String]{home, under}))
+}
+
+account_home: fn() -[Env, FS.Read]> String? Never! {
+    if family() == "windows" -> return get("USERPROFILE")
+    Val((user_by_id(getuid()) ?? return None).home)
+}
+
 name: fn() -[Env]> String Never! { core.sys.name() }
 
 family: fn() -[Env]> String Never! { core.sys.__family_os() }
@@ -1711,4 +1738,14 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
         }
         .Text(_) -> assert(false)
     }
+}
+
+#Test("XDG base directories take a non-empty variable, else join under the home directory") {
+    set("JET_SYS_BASE_DIR_PROBE", "/probe/cache")
+    assert_eq(base_dir("JET_SYS_BASE_DIR_PROBE", ".cache"), Val("/probe/cache"))
+    set("JET_SYS_BASE_DIR_PROBE", "")
+    home: get("HOME") ?? account_home() ?? panic("no home directory")
+    assert_eq(base_dir("JET_SYS_BASE_DIR_PROBE", ".local/share"), Val(files.join_all([String]{home, ".local/share"})))
+    assert(unset("JET_SYS_BASE_DIR_PROBE") ?? false)
+    assert_eq(base_dir("JET_SYS_BASE_DIR_PROBE", ".config"), Val(files.join_all([String]{home, ".config"})))
 }

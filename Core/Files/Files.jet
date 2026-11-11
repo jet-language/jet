@@ -1315,6 +1315,52 @@ join_impl: fn(a: String, b: String) -> String Never! {
 
 join: fn(a: String, b: String) -> String Never! { join_impl(a, b) }
 
+/// `path` as node's `path.normalize` writes it: `/` separates (`\` is an
+/// ordinary character), empty and `.` segments go, `..` takes away the segment
+/// before it (a relative path keeps a leading `..`; `/..` is `/`), and a
+/// trailing slash stays. "" is ".". `collapse` is Python's `normpath`, which
+/// drops the trailing slash and also reads `\` and drive letters.
+normalize: fn(path: String) -> String Never! {
+    if path == "" -> return "."
+    absolute: path.starts_with("/")
+    trailing: path.ends_with("/")
+    parts := [String]{}
+    loop part in path.split("/") {
+        if {
+            part == "" || part == "." -> {}
+            part != ".." -> parts.push(part.copy())
+            parts.len() > 0 && parts[parts.len() - 1] != ".." -> { _ := parts.pop() }
+            !absolute -> parts.push("..")
+            else -> {}
+        }
+    }
+    body: parts.join("/")
+    if body == "" {
+        return if {
+            absolute -> "/"
+            trailing -> "./"
+            else -> "."
+        }
+    }
+    "{if absolute -> "/" else -> ""}{body}{if trailing -> "/" else -> ""}"
+}
+
+/// `parts` joined as node's `path.join` joins them: the non-empty parts joined
+/// with `/`, then `normalize`d, so an absolute part stays under the parts
+/// before it (`join_all(["/a", "/b"])` is "/a/b", where `join("/a", "/b")` is
+/// "/b"). No non-empty part gives ".".
+join_all: fn(parts: [String]) -> String Never! {
+    normalize(parts.filter(part -> part != "").join("/"))
+}
+
+/// `path` made absolute against the current directory and `normalize`d, as
+/// node's `path.resolve(path)` gives it: no trailing slash, except "/". No
+/// file is read; `canonicalize` resolves links.
+resolve: fn(path: String) -[FS, Env]> String IOError! {
+    whole: normalize(if path.starts_with("/") -> path.copy() else -> "{sys.current_dir()}/{path}")
+    Ok(if whole != "/" && whole.ends_with("/") -> whole.removesuffix("/") else -> whole)
+}
+
 
 absolute: fn(path: String | Path) -[FS, Env]> String IOError! {
     text: path_text(path)
@@ -3230,4 +3276,22 @@ metadata_fault_seen: fn(probe: String, error: IOError) {
 #Test(faults: [FS.Read]) files_is_symlink_takes_the_read_fault: fn() {
     fixture: metadata_fault_fixture("is_symlink_fault") ?? return
     if !is_symlink(fixture.link) -> print("files fault observed: is_symlink")
+}
+
+#Test("normalize, join_all and resolve write paths as node's path module does") {
+    assert_eq(normalize("/a//b/./c/../d/"), "/a/b/d/")
+    assert_eq(normalize("a/../../b"), "../b")
+    assert_eq(normalize("/../x"), "/x")
+    assert_eq(normalize("a/.."), ".")
+    assert_eq(normalize("a/../"), "./")
+    assert_eq(normalize("//"), "/")
+    assert_eq(normalize(""), ".")
+    assert_eq(normalize("a\\b/c"), "a\\b/c")
+    assert_eq(join_all([String]{"/home/u", ".cache"}), "/home/u/.cache")
+    assert_eq(join_all([String]{"/a", "/b/", "../c"}), "/a/c")
+    assert_eq(join_all([String]{"", ".cache"}), ".cache")
+    assert_eq(join_all([String]{"", ""}), ".")
+    assert_eq(resolve("/x/y/../z/") ?? panic("absolute"), "/x/z")
+    assert_eq(resolve("/") ?? panic("root"), "/")
+    assert_eq(resolve("a/./b") ?? panic("relative"), "{sys.current_dir() ?? panic("cwd")}/a/b")
 }

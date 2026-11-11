@@ -1160,58 +1160,12 @@ prepare: fn(o: Options, repo: String) -> Inputs Failure! {
     Ok(Inputs{capsule_text: capsule_text, control_text: control_text, tasks: tasks, adapters: adapters, capsule: capsule, control: control, fixtures: fixtures, harness: harness})
 }
 
-// $name, as `env.NAME || fallback` reads it: empty is unset.
-env_or: fn(name: String, fallback: String) -> String {
-    value: sys.get(name) ?? return fallback
-    if value == "" -> fallback else -> value
-}
-
-// `path` as node's path.normalize writes it.
-node_normal: fn(path: String) -> String {
-    if path == "" -> return "."
-    absolute: path.starts_with("/")
-    trailing: path.ends_with("/")
-    parts := [String]{}
-    loop part in path.split("/") {
-        if part == "" || part == "." -> next
-        if part == ".." {
-            if parts.len() > 0 && parts[parts.len() - 1] != ".." {
-                _: parts.pop()
-                next
-            }
-            if !absolute -> parts.push("..")
-            next
-        }
-        parts.push(part.copy())
-    }
-    body: parts.join("/")
-    if body == "" {
-        if absolute -> return "/"
-        return if trailing -> "./" else -> "."
-    }
-    "{if absolute -> "/" else -> ""}{body}{if trailing -> "/" else -> ""}"
-}
-
-// path.join(head, tail): the non-empty parts joined and normalized.
-node_join: fn(head: String, tail: String) -> String {
-    if head == "" -> return node_normal(tail)
-    if tail == "" -> return node_normal(head)
-    node_normal("{head}/{tail}")
-}
-
-// path.resolve(path): absolute from the current directory, normalized, with no trailing slash.
-node_resolve: fn(path: String) -> String {
-    whole: node_normal(if path.starts_with("/") -> path.copy() else -> "{files.cwd() ?? "."}/{path}")
-    if whole != "/" && whole.ends_with("/") -> whole.removesuffix("/") else -> whole
-}
-
 // path.resolve($name || join(shared, under)), shared being $JET_TEST_SCRATCH,
 // $JET_TEST_SCRATCH_DIR or the scratch root Tools/agent/roots.mjs names.
-scratch_root: fn(name: String, under: String) -> String {
-    home: env_or("HOME", sys.home_dir() ?? "")
-    dev: env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", node_join(env_or("XDG_CACHE_HOME", node_join(home, ".cache")), "jet-dev")))
-    shared: node_resolve(env_or("JET_TEST_SCRATCH", env_or("JET_TEST_SCRATCH_DIR", dev)))
-    node_resolve(env_or(name, node_join(shared, under)))
+scratch_root: fn(name: String, under: String) -> String IOError! {
+    dev: process.env_nonempty("JET_SCRATCH_ROOT") ?? process.env_nonempty("JET_STATE_ROOT") ?? files.join_all([String]{sys.cache_dir() ?? "", "jet-dev"})
+    shared: files.resolve(process.env_nonempty("JET_TEST_SCRATCH") ?? process.env_nonempty("JET_TEST_SCRATCH_DIR") ?? dev)
+    files.resolve(process.env_nonempty(name) ?? files.join_all([String]{shared, under}))
 }
 
 evaluate: fn(o: Options, repo: String) -> Int Failure! {
@@ -1226,8 +1180,8 @@ evaluate: fn(o: Options, repo: String) -> Int Failure! {
     }
     rows := [Dyn]{}
     reasons := [String]{}
-    cases_root: scratch_root("JET_AGENT_EVAL_SCRATCH_DIR", "agent-eval")
-    adapter_root: scratch_root("JET_AGENT_EVAL_ADAPTER_SCRATCH_DIR", "agent-eval-adapters")
+    cases_root: scratch_root("JET_AGENT_EVAL_SCRATCH_DIR", "agent-eval") ?? return Err(usage_error("{err}"))
+    adapter_root: scratch_root("JET_AGENT_EVAL_ADAPTER_SCRATCH_DIR", "agent-eval-adapters") ?? return Err(usage_error("{err}"))
     files.create_dir_all(cases_root) ?? return Err(usage_error("{err}"))
     files.create_dir_all(adapter_root) ?? return Err(usage_error("{err}"))
     prefix: jet_prefix(o.jet_bin, repo)

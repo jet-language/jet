@@ -10,71 +10,40 @@
 // as `node roots.mjs NAME...` does, and exits 64 at any other name.
 // Tools/agent/orchestrator/Roots.jet is the twin of roots.sh.
 use {
+    files: core.files
     process: core.process
     sys: core.sys
 }
 
-// `$name`, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> fallback.copy() else -> value
+// `$name` when it is set and not empty, else `under` joined under `dir`.
+env_or: fn(name: String, dir: String, under: String) -[Env]> String Never! {
+    process.env_nonempty(name) ?? files.join_all([String]{dir, under})
 }
 
-// `path` as node's path.normalize writes it.
-normal: fn(path: String) -> String Never! {
-    if path == "" -> return "."
-    absolute: path.starts_with("/")
-    trailing: path.ends_with("/")
-    parts := [String]{}
-    loop part in path.split("/") {
-        if part == "" || part == "." -> next
-        if part == ".." {
-            if parts.len() > 0 && parts[parts.len() - 1] != ".." {
-                _ := parts.pop()
-                next
-            }
-            if !absolute -> parts.push("..")
-            next
-        }
-        parts.push(part.copy())
-    }
-    body: parts.join("/")
-    if body == "" {
-        if absolute -> return "/"
-        return if trailing -> "./" else -> "."
-    }
-    "{if absolute -> "/" else -> ""}{body}{if trailing -> "/" else -> ""}"
+state: fn() -[Env, FS.Read]> String Never! {
+    env_or("JET_STATE_ROOT", sys.cache_dir() ?? "", "jet-dev")
 }
 
-// path.join(head, tail): the non-empty parts joined and normalized.
-join: fn(head: String, tail: String) -> String Never! {
-    if head == "" -> return normal(tail)
-    if tail == "" -> return normal(head)
-    normal("{head}/{tail}")
+scratch: fn() -[Env, FS.Read]> String Never! { process.env_nonempty("JET_SCRATCH_ROOT") ?? state() }
+
+seeds: fn() -[Env, FS.Read]> String Never! {
+    env_or("JET_SEEDS", sys.data_dir() ?? "", "jet-seeds")
 }
 
-home: fn() -[Env]> String Never! { env_or("HOME", sys.home_dir() ?? "") }
-
-state: fn() -[Env]> String Never! { env_or("JET_STATE_ROOT", join(env_or("XDG_CACHE_HOME", join(home(), ".cache")), "jet-dev")) }
-
-scratch: fn() -[Env]> String Never! { env_or("JET_SCRATCH_ROOT", state()) }
-
-seeds: fn() -[Env]> String Never! { env_or("JET_SEEDS", join(env_or("XDG_DATA_HOME", join(home(), ".local/share")), "jet-seeds")) }
-
-seed: fn() -[Env]> String Never! { env_or("JET_SEED", join(seeds(), "current")) }
+seed: fn() -[Env, FS.Read]> String Never! { env_or("JET_SEED", seeds(), "current") }
 
 // The root `name` names: None when it is not a root.
-root: fn(name: String) -[Env]> String? Never! {
+root: fn(name: String) -[Env, FS.Read]> String? Never! {
     if name == {
         "JET_STATE_ROOT" -> Val(state())
         "JET_SCRATCH_ROOT" -> Val(scratch())
-        "JET_RUN_ROOT" -> Val(env_or("JET_RUN_ROOT", join(scratch(), "run")))
-        "JET_BASE_ROOT" -> Val(env_or("JET_BASE_ROOT", join(scratch(), "discovery/base")))
-        "JET_TARGET_ROOT" -> Val(env_or("JET_TARGET_ROOT", join(scratch(), "targets")))
+        "JET_RUN_ROOT" -> Val(env_or("JET_RUN_ROOT", scratch(), "run"))
+        "JET_BASE_ROOT" -> Val(env_or("JET_BASE_ROOT", scratch(), "discovery/base"))
+        "JET_TARGET_ROOT" -> Val(env_or("JET_TARGET_ROOT", scratch(), "targets"))
         "JET_SEEDS" -> Val(seeds())
         "JET_SEED" -> Val(seed())
         // The jet under test, which `jet test` passes its children.
-        "JET_BIN" -> Val(env_or("JET_BIN", join(seed(), "jet")))
+        "JET_BIN" -> Val(env_or("JET_BIN", seed(), "jet"))
         else -> None
     }
 }

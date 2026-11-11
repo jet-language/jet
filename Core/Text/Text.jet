@@ -246,6 +246,32 @@ trim_end: fn(text: String) -> String Never! {
     slice_bytes(text.bytes(), 0, end)
 }
 
+/// The text Latin-1 (ISO 8859-1) `bytes` spell: each byte is the scalar with
+/// its number, so every byte sequence decodes and none is lost, as node's
+/// `toString('latin1')` and Python's `decode("latin-1")` read bytes.
+decode_latin1: fn(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    loop byte in bytes {
+        if byte < (U8{128}) -> out.push(byte) else -> out.extend([U8]{U8{192 + Int{byte} /% 64}, U8{128 + Int{byte} %% 64}})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+/// The integer `text` starts with, as `parseInt(text, 10)` and C's `strtol`
+/// read one: the whitespace `trim_start` skips, an optional `+` or `-`, then
+/// the longest run of ASCII digits; whatever follows is ignored. None when no
+/// digit comes first. Int is exact at any size, so no long run rounds.
+leading_int: fn(text: String) -> Int? Never! {
+    raw: trim_start(text).bytes()
+    negative: raw.len() > 0 && raw[0] == (U8{45})
+    start: if negative || (raw.len() > 0 && raw[0] == (U8{43})) -> 1 else -> 0
+    end := start
+    loop end < raw.len() && raw[end] >= (U8{48}) && raw[end] <= (U8{57}) -> end += 1
+    if end == start -> return None
+    digits: slice_bytes(raw, start, end)
+    Val(Int.parse(if negative -> "-{digits}" else -> digits) ?? return None)
+}
+
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
 pad_start: fn(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
 
@@ -1391,4 +1417,28 @@ collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: 
     // Core Han: the CJK Unified Ideographs and CJK Compatibility Ideographs blocks.
     core_han: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
     (base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail)
+}
+
+#Test("decode_latin1 keeps every byte as the scalar of its number") {
+    assert_eq(decode_latin1("!<arch>\n".bytes()), "!<arch>\n")
+    nbsp: String.from_bytes([U8]{U8{194}, U8{160}}) ?? ""
+    assert_eq(decode_latin1([U8]{U8{65}, U8{233}, U8{160}, U8{255}}), "Aé{nbsp}ÿ")
+    assert_eq(decode_latin1([U8]{U8{195}, U8{169}}), "Ã©")
+    assert_eq(decode_latin1([U8]{}), "")
+}
+
+#Test("leading_int reads parseInt's sign and digits after leading whitespace") {
+    assert_eq(leading_int("1234      "), Val(1234))
+    assert_eq(leading_int(" \t-42abc"), Val(-42))
+    assert_eq(leading_int("+7"), Val(7))
+    assert_eq(leading_int("007"), Val(7))
+    nbsp: String.from_bytes([U8]{U8{194}, U8{160}}) ?? ""
+    assert_eq(leading_int("{nbsp}12"), Val(12))
+    assert_eq(leading_int("-99999999999999999999 "), Val(-99999999999999999999))
+    assert(leading_int("") == None)
+    assert(leading_int("  ") == None)
+    assert(leading_int("-") == None)
+    assert(leading_int("+-1") == None)
+    assert(leading_int("x12") == None)
+    assert(leading_int(".5") == None)
 }

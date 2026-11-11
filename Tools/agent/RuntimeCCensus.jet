@@ -27,6 +27,7 @@
 // The Jet twin of runtime-c-census.mjs (gauntlet tool entry runtime-c-census).
 use {
     binary: core.encoding.binary
+    collections: core.collections
     files: core.files
     process: core.process
     text: core.text
@@ -42,114 +43,40 @@ Symbols: struct {
     references: [String]
 }
 
-// A reference and what made it.
-Want: struct {
-    name: String
-    from: String
-}
-
-// The names defined so far and every reference wanted, in the order they
-// were first wanted.
+// The names defined so far and every reference wanted, with what made it, in
+// the order they were first wanted.
 Census: struct {
     defined: Set<String>
     wanted: Set<String>
-    wants: [Want]
+    wants: [(from: String, name: String)]
 }
 
 // Wants `name` for `from` unless it is defined or already wanted.
 want: fn(census: &Census, name: String, from: String) {
     if census.defined.has(name) || census.wanted.has(name) -> return
     census.wanted.add(name.copy())
-    census.wants.push(Want{name: name.copy(), from: from.copy()})
-}
-
-// The little-endian fields `format` reads from the `size` bytes at `at`.
-fields: fn(bytes: [U8], at: Int, format: String, size: Int) -> [Int] {
-    binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}")
-}
-
-// bytes[from..<to] as node's subarray takes it: both ends held inside the
-// bytes, and nothing when `to` is not past `from`.
-part: fn(bytes: [U8], from: Int, to: Int) -> [U8] Never! {
-    start: if {
-        from < 0 -> 0
-        from > bytes.len() -> bytes.len()
-        else -> from
-    }
-    end: if {
-        to < start -> start
-        to > bytes.len() -> bytes.len()
-        else -> to
-    }
-    bytes.slice(start, end)
-}
-
-// The bytes as node's toString('latin1') reads them: each byte is the
-// character of that code point.
-latin1: fn(bytes: [U8]) -> String Never! {
-    out := [U8]{}
-    loop byte in bytes {
-        if byte < (U8{128}) {
-            out.push(byte)
-            next
-        }
-        out.push(U8{192 + Int{byte} /% 64})
-        out.push(U8{128 + Int{byte} %% 64})
-    }
-    String.from_bytes(out) ?? ""
-}
-
-// Whether a latin1 byte is whitespace to JavaScript's trim and parseInt.
-js_space: fn(byte: U8) -> Bool Never! {
-    [9, 10, 11, 12, 13, 32, 160].contains(Int{byte})
-}
-
-// The bytes without the JavaScript whitespace at their end (trimEnd).
-trimmed_end: fn(bytes: [U8]) -> [U8] Never! {
-    end := bytes.len()
-    loop end > 0 && js_space(bytes[end - 1]) -> end -= 1
-    bytes.slice(0, end)
-}
-
-// Number.parseInt of the latin1 bytes, base 10: the signed digits after the
-// leading whitespace, None (NaN) when there are none.
-parse_int: fn(bytes: [U8]) -> Int? Never! {
-    codes: bytes.map(byte -> Int{byte})
-    at := 0
-    loop at < codes.len() && js_space(bytes[at]) -> at += 1
-    sign := 1
-    if at < codes.len() && (codes[at] == 43 || codes[at] == 45) {
-        if codes[at] == 45 -> sign = -1
-        at += 1
-    }
-    digits := 0
-    value := 0
-    loop at < codes.len() && codes[at] >= 48 && codes[at] <= 57 {
-        value = value * 10 + codes[at] - 48
-        digits += 1
-        at += 1
-    }
-    if digits == 0 -> None else -> Val(sign * value)
+    census.wants.push((name: name.copy(), from: from.copy()))
 }
 
 elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
     // The magic and EI_CLASS ELFCLASS64.
     if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
+    // The little-endian fields `format` reads from the `size` bytes at `at`.
+    fields: (at: Int, format: String, size: Int) -> binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}")
     // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
-    header: fields(bytes, 0x28, "<QIHHHHH", 22)
-    // sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize
-    section: (index: Int) -> fields(bytes, header[0] + index * header[5], "<IIQQQQIIQQ", 64)
+    header: fields(0x28, "<QIHHHHH", 22)
     symbols := Symbols{name: name.copy(), defines: [], references: []}
     loop index in 0..<header[6] {
-        table: section(index)
-        // SHT_SYMTAB
+        // sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize
+        table: fields(header[0] + index * header[5], "<IIQQQQIIQQ", 64)
+        // sh_type 2, a symbol table
         if table[1] != 2 -> next
-        strings: section(table[6])[4]
+        strings: fields(header[0] + table[6] * header[5], "<IIQQQQIIQQ", 64)[4]
         // Every entry after the first that starts inside the table.
         at := table[4] + table[9]
         loop at < table[4] + table[5] {
             // st_name, st_info, st_other, st_shndx; the binding is st_info's high nibble
-            symbol: fields(bytes, at, "<IBBH", 8)
+            symbol: fields(at, "<IBBH", 8)
             at += table[9]
             bind: symbol[1] >> 4
             // STB_LOCAL
@@ -157,11 +84,11 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
             start: strings + symbol[0]
             end := start
             loop bytes[end] != 0 -> end += 1
-            text: latin1(bytes.slice(start, end))
+            symbol_name: text.decode_latin1(bytes.slice(start, end))
             // SHN_UNDEF, STB_WEAK
             if {
-                symbol[3] != 0 -> symbols.defines.push(text)
-                bind != 2 -> symbols.references.push(text)
+                symbol[3] != 0 -> symbols.defines.push(symbol_name)
+                bind != 2 -> symbols.references.push(symbol_name)
             }
         }
     }
@@ -169,22 +96,21 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
 }
 
 // The ELF members of a System V / GNU ar archive, long names resolved. The
-// symbol tables (`/`, `/SYM64/`) and the long-name table (`//`) are passed
-// over, and so is every other member that is not ELF. Names and sizes are
-// read as the original reads them: latin1, the size as parseInt does, and
-// a size that is not a number ends the archive.
+// long-name table (`//`) is read, and every member that is not ELF, the
+// symbol tables (`/`, `/SYM64/`) among them, is passed over. Names and sizes
+// are read as the original reads them: latin1, the size as parseInt does,
+// and a size that is not a number ends the archive.
 archive_members: fn(bytes: [U8], label: String) -> [Symbols] {
-    if latin1(part(bytes, 0, 8)) != "!<arch>\n" -> process.fail(1, "{label}: not an ar archive")
+    if !bytes.starts_with("!<arch>\n".bytes()) -> process.fail(1, "{label}: not an ar archive")
     members := [Symbols]{}
     long_names := [U8]{}
     at := 8
     loop at + 60 <= bytes.len() {
-        raw: latin1(trimmed_end(part(bytes, at, at + 16)))
-        size: parse_int(part(bytes, at + 48, at + 58)) ?? break
-        body: part(bytes, at + 60, at + 60 + size)
-        // JavaScript's remainder takes the sign of the size.
-        at += 60 + size + (if size < 0 -> 0 - (0 - size) %% 2 else -> size %% 2)
-        if raw == "/" || raw == "/SYM64/" -> next
+        raw: text.decode_latin1(bytes.slice(at, at + 16)).trim_end()
+        size: text.leading_int(text.decode_latin1(bytes.slice(at + 48, at + 58))) ?? break
+        body: collections.slice_clamped(bytes, at + 60, at + 60 + size)
+        // `%%`, like JavaScript's remainder, takes the sign of the size.
+        at += 60 + size + size %% 2
         if raw == "//" {
             long_names = body.copy()
             next
@@ -192,19 +118,14 @@ archive_members: fn(bytes: [U8], label: String) -> [Symbols] {
         name := raw
         // A long name is `/N`, N its offset in the long-name table, and runs
         // to the newline after it (without one, to the table's last byte).
-        digits: raw.removeprefix("/")
-        if raw.starts_with("/") && digits != "" && text.scalars(digits).all(c -> "0123456789".contains(c)) {
-            start: digits.to_int() ?? 0
-            newline := -1
-            loop index in start..<long_names.len() {
-                if long_names[index] == (U8{10}) {
-                    newline = index
-                    break
-                }
-            }
-            name = latin1(part(long_names, start, if newline < 0 -> long_names.len() - 1 else -> newline))
+        if (Regex{"^/[0-9]+$"}).is_match(raw) {
+            start: raw.removeprefix("/").to_int() ?? 0
+            newline: collections.slice_clamped(long_names, start, long_names.len()).index_of(U8{10})
+            name = text.decode_latin1(collections.slice_clamped(long_names, start, if newline == .Val(offset) -> start + offset else -> -1))
         }
-        if body.len() >= 4 && binary.unpack_u32be(body, 0) == Val(ELF_MAGIC) -> members.push(elf_symbols(body, "{label}({name.removesuffix("/")})"))
+        if binary.unpack_u32be(body, 0) == Val(ELF_MAGIC) {
+            members.push(elf_symbols(body, "{label}({name.removesuffix("/")})"))
+        }
     }
     members
 }
@@ -254,10 +175,10 @@ run: fn() {
         item: census.wants[at]
         at += 1
         if census.defined.has(item.name) -> next
-        member: index.get(item.name) ?? next
-        pulled.push("  {members[member].name} <- {item.from} ({item.name})")
-        loop name in members[member].defines -> census.defined.add(name)
-        loop name in members[member].references -> want(census, name, members[member].name)
+        member: members[index.get(item.name) ?? next]
+        pulled.push("  {member.name} <- {item.from} ({item.name})")
+        loop name in member.defines -> census.defined.add(name.copy())
+        loop name in member.references -> want(census, name, member.name)
     }
     unresolved := census.wants.filter(item -> !census.defined.has(item.name)).map(item -> item.name)
     unresolved.sort()

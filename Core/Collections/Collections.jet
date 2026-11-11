@@ -721,6 +721,25 @@ insort_right: fn(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
+/// `items[start:end]` with its bounds held inside the list, as a Python slice
+/// and JavaScript's `slice` and `subarray` take them: a negative bound counts
+/// from the end, a bound past either end stops there, and an end that is not
+/// past the start gives an empty list.
+slice_clamped: fn<T>(items: [T], start: Int, end: Int) -> [T] Never! {
+    from: clamped_bound(start, items.len())
+    to: clamped_bound(end, items.len())
+    if to <= from -> return [T]{}
+    items.slice(from, to)
+}
+
+clamped_bound: fn(at: Int, len: Int) -> Int Never! {
+    if {
+        at < 0 -> if len + at < 0 -> 0 else -> len + at
+        at > len -> len
+        else -> at
+    }
+}
+
 map_entries: fn(m: OrderedMap) -> Int Never! {
     n := m.keys.len()
     if m.values.len() < n -> n = m.values.len()
@@ -853,3 +872,14 @@ chain_get: fn(c: Chain, key: String) -> String? Never! {
 }
 
 chain_contains: fn(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }
+
+#Test("slice_clamped holds its bounds inside the list, as a Python slice does") {
+    items: [Int]{1, 2, 3, 4, 5}
+    assert_eq(slice_clamped(items, 1, 3), [Int]{2, 3})
+    assert_eq(slice_clamped(items, -2, 99), [Int]{4, 5})
+    assert_eq(slice_clamped(items, -99, 2), [Int]{1, 2})
+    assert_eq(slice_clamped(items, 0, -1), [Int]{1, 2, 3, 4})
+    assert_eq(slice_clamped(items, 4, 2), [Int]{})
+    assert_eq(slice_clamped(items, 7, 9), [Int]{})
+    assert_eq(slice_clamped("ab".bytes(), 0, 60), "ab".bytes())
+}

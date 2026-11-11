@@ -390,6 +390,13 @@ env_get_or: fn(name: String, fallback: String) -[Env]> String Never! {
     core.sys.get(name) ?? return fallback
 }
 
+/// The environment variable `name` when it is set and not empty, as shell
+/// `${name:-…}` and JavaScript `env[name] || …` read it; None otherwise.
+env_nonempty: fn(name: String) -[Env]> String? Never! {
+    value: core.sys.get(name) ?? return None
+    if value == "" -> None else -> Val(value)
+}
+
 env_keys: fn() -[Env]> [String] EnvError! { core.sys.vars() }
 
 env_set: fn(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
@@ -591,6 +598,15 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert_eq(exit_status(killed), 137)
     stopped: Sh{argv: [String]{"sleep", "10"}}.spec().timeout(1s).run() ?? panic("sleep did not start")
     assert_eq(exit_status(stopped), 124)
+}
+
+#Test("env_nonempty reads a variable only when it is set and not empty") {
+    core.sys.set("JET_ENV_NONEMPTY_PROBE", "")
+    assert(env_nonempty("JET_ENV_NONEMPTY_PROBE") == None)
+    core.sys.set("JET_ENV_NONEMPTY_PROBE", "value")
+    assert_eq(env_nonempty("JET_ENV_NONEMPTY_PROBE"), Val("value"))
+    assert(core.sys.unset("JET_ENV_NONEMPTY_PROBE") ?? false)
+    assert(env_nonempty("JET_ENV_NONEMPTY_PROBE") == None)
 }
 
 // Temporary native-carrier layout. This is not a second public builder API:
