@@ -4821,6 +4821,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     reach := jet_driver_reach(use_driven)
     pending_index := 0
     meta_decided := false
+    spells_program := false
     // The current parse wave's results, last-first: every unit queued when
     // the wave starts is parsed at once, on the admitted compiler threads.
     parsed := [JetDriverParsedUnit]{}
@@ -4927,6 +4928,12 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
         demand: parsed_unit.demand.move()
         words := parsed_unit.words.move()
+        if !is_core && !spells_program {
+            spells_program = if words == {
+                .Val(found) -> found.words.contains("program")
+                .None -> true
+            }
+        }
         parse_result := parsed_unit.parsed.move()
         // Runtime member imports consult shared rows only on the load thread.
         if importer_core -> jet_driver_core_runtime_member_imports(parse_result.program, request.core_sources) else -> jet_driver_member_imports(parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
@@ -5438,6 +5445,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         failed_stage: failed_stage,
         complete: complete,
         run_member_paths: run_member_paths,
+        spells_program: spells_program,
     }
 }
 

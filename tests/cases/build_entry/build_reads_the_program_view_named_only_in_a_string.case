@@ -1,0 +1,7 @@
+# The staging check of `build: fn` snapshots the whole-program view
+# (`b.program`) only when a source outside Core spells `program`. Words
+# inside strings count, so a view read only from an interpolation hole still
+# gets the real snapshot, not the empty one (#6527 c5).
+fixture: fixtures/build_reads_the_program_view_named_only_in_a_string
+step: jet build main.jet
+exit: 0

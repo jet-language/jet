@@ -710,6 +710,17 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     } else { return .Missing(fact: "the semantic index is not a struct") }
     .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
+
+// The whole-program view of a build no body can read (no source outside
+// Core spells `program`): ProgramInfo's fields, every one empty, so the
+// build skips the snapshot.
+jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
+    fields := [TComptimeField]{}
+    loop name in ([String]{"types", "functions", "packages", "definitions", "references", "call_edges", "structural_nodes"}) {
+        fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
+    }
+    TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}
+}
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.
 // A package query carrier must preserve the pinned-root authority, checked-read
