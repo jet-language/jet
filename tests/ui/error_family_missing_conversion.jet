@@ -1,0 +1,21 @@
+#Error
+FileErr: enum {
+    NotFound
+}
+
+#Error
+AppErr: enum {
+    File(FileErr)
+}
+
+read_config: fn(path: String) -> String FileErr! {
+    if path == "" -> return Err(FileErr.NotFound)
+    Ok("42")
+}
+
+load: fn(path: String) -> String AppErr! {
+    raw: read_config(path)
+    Ok(raw)
+}
+
+run: fn() { print(load("config.txt") ?? "none") }

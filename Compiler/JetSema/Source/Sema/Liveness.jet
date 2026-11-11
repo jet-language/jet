@@ -179,6 +179,10 @@ sema_liveness_is_root: fn(function: Func, is_entry: Bool) -> Bool Never! {
         }
     }
     if function.is_job || function.web_marker == .Val(.WasmExport) -> return true
+    // A declared `impl Source -> Target` is used by the fallible calls whose
+    // failure it converts, which leave no call site or name reference; like
+    // any impl it is not dead code.
+    if sema_is_error_conversion_function(function) -> return true
     is_entry && function.name == "run"
 }
 

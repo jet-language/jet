@@ -21,7 +21,11 @@ AppErr: enum {
 }
 
 // Each conversion preserves the original source error as a payload in the
-// application family. The body receives that error as `self`.
+// application family. The body receives that error as `self`. Without
+// `impl FileErr -> AppErr`, the `read_config(path)` call in `load` is
+// rejected because `FileErr` has no route into `AppErr`
+// (tests/ui/error_family_missing_conversion.jet records the rejection and
+// this repair).
 impl FileErr -> AppErr { AppErr.File(self) }
 
 impl ParseErr -> AppErr { AppErr.Parse(self) }
@@ -39,6 +43,8 @@ parse_int: fn(text: String) -> Int ParseErr! {
 
 // Plain fallible calls propagate automatically. At each call, the declared
 // conversion changes only the error carrier; the success payload stays intact.
+// `load` reads `path`, changes nothing, and returns either the port or the
+// first converted failure; `parse_int` never runs when `read_config` fails.
 load: fn(path: String) -> Int AppErr! {
     raw: read_config(path)  // FileErr -> AppErr.File
     port: parse_int(raw)  // ParseErr -> AppErr.Parse
