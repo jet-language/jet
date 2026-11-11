@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99572,
+    "rev": 99573,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79500,12 +79500,12 @@
         },
         {
           "n": 15,
-          "text": "(was #5044) Bottom-up performance: golden machine-code catalog and codegen-gap gate on the JetIR backend",
+          "text": "Work backwards from hand-optimized machine code (owner direction 2026-11-11). A kernel catalog covers each common code shape: counted and iterator loops, list sum and map, text scan and compare, struct copy and move, enum match, option and error return, hash lookup, bounds-checked index, call and return, allocation and drop. Each kernel has a small Jet program and a hand-written, maximally optimized x86-64 reference that does the same work with the same safety checks. For each kernel, a checker compares the hot code that `jet build` emits with the reference: instruction count, spills, loads and stores, checks, and calls. Every extra instruction is named with its root (bounds check not hoisted, value spilled, copy not elided, loop not vectorized, call not inlined, or atomic reference count). Each root is fixed once, in the general lowering, never per kernel, and is proved on a second program that uses the feature differently. Each kernel then gets a machine-code golden that pins the emitted hot loop at O1 and O2, so a regression fails the gate. The gate fails any kernel whose emitted hot code is over its reference in instructions or cycles. Every new codegen feature adds its kernel and reference before it lands.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:10:45.585Z"
+          "at": "2026-11-11T19:17:32.506Z"
         },
         {
           "n": 17,
@@ -79822,7 +79822,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-11T12:45:14.299Z",
+      "updated": "2026-11-11T19:17:32.506Z",
       "updatedBy": "Main",
       "criteriaLastN": 53
     },
@@ -197959,6 +197959,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T19:17:32.506Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0i891tv",
+      "note": "#15: Owner direction 2026-11-11: derive codegen output from hand-optimized machine code for every code shape, so that emitted code approaches the ceiling everywhere, not only in the 19 end-to-end asm-parity cells.; was: (was #5044) Bottom-up performance: golden machine-code catalog and codegen-gap gate on the JetIR backend"
+    },
     {
       "at": "2026-11-11T19:15:32.124Z",
       "by": "Main",
