@@ -3288,7 +3288,7 @@ ir_print: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) 
 // cells back into their variables after the call. The result has the
 // callee's executable return type.
 ir_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [Type], receiver: Int, receiver_backs: [IRWriteBack], args: [BodyCallArg], span: Span) -> Int Never! {
-    if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(m, p, b, intrinsic, args, span)
+    if p.intrinsics.get(key) == .Val(intrinsic) -> return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
     if p.foreign.get(key) == .Val(foreign) -> return ir_foreign_call(m, p, b, foreign, args, span)
     row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "call of a function outside the checked program: {key}")
     ir_call_row(m, p, b, row, type_args, receiver, receiver_backs, args, span)
@@ -3299,7 +3299,7 @@ ir_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, type_args: [
 ir_call_decl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: DeclID, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     row: ir_decl_row(p, callee)
     if row >= 0 && p.intrinsics.len() > 0 {
-        if p.intrinsics.get(p.functions[row].key) == .Val(intrinsic) -> return ir_intrinsic_call(m, p, b, intrinsic, args, span)
+        if p.intrinsics.get(p.functions[row].key) == .Val(intrinsic) -> return ir_intrinsic_call(m, p, b, intrinsic, type_args, args, span)
     }
     foreign: ir_decl_foreign(p, callee)
     if foreign >= 0 -> return ir_foreign_call(m, p, b, p.foreign_rows[foreign], args, span)

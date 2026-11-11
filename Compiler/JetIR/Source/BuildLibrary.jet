@@ -50,6 +50,15 @@ IRRuntimeIntrinsic: enum {
     StaticText
     // A call of the fault report the linker writes (ir_fault_report_call).
     FaultReport
+    // Core's core.mem operations at their instance's one type argument
+    // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
+    // an exact List reserve, a volatile load or store, a streaming store.
+    TypeSize
+    ListCapacity
+    ListReserveExact
+    VolatileRead
+    VolatileWrite
+    StreamStore
 }
 
 IRIntrinsicShape: enum {
@@ -640,13 +649,15 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
     ir_i64_type(ir_executable_return(function))
 }
 
-// A call of runtime intrinsic `intrinsic`, built as its operation.
-// rt_static_text of a literal is the literal's immortal String (the
-// ConstText of its data row) as an I64; a bit cast stores its operand in a
-// frame word and loads it back in the other class; an address intrinsic is
-// the FunctionAddress of its export; rt_fault_print is a call of the fault
-// report the linker writes.
-ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [BodyCallArg], span: Span) -> Int Never! {
+// A call of runtime intrinsic `intrinsic` at its instance `type_args`, built
+// as its operation. rt_static_text of a literal is the literal's immortal
+// String (the ConstText of its data row) as an I64; a bit cast stores its
+// operand in a frame word and loads it back in the other class; an address
+// intrinsic is the FunctionAddress of its export; rt_fault_print is a call of
+// the fault report the linker writes; a core.mem operation is its inline
+// lowering (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store,
+// BuildSentry.jet ir_core_volatile).
+ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
     if intrinsic == {
@@ -655,7 +666,20 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .FloatFromBits -> ir_bitcast(m, p, b, args, word_row, float_row, span)
         .FunctionAddress(key) -> ir_address_call(m, p, b, key, args, word_row, span)
         .FaultReport -> ir_fault_report_call(m, p, b, args, word_row, span)
+        .TypeSize -> ir_core_list_leaf(m, p, b, Type.Int, "__type_size", ir_intrinsic_nodes(args), type_args, span)
+        .ListCapacity -> ir_core_list_leaf(m, p, b, Type.Int, "__list_capacity", ir_intrinsic_nodes(args), type_args, span)
+        .ListReserveExact -> ir_core_list_leaf(m, p, b, Type.Bool, "__list_reserve_exact", ir_intrinsic_nodes(args), type_args, span)
+        .VolatileRead -> ir_core_volatile(m, p, b, "volatile_read", ir_intrinsic_nodes(args), type_args, span)
+        .VolatileWrite -> ir_core_volatile(m, p, b, "volatile_write", ir_intrinsic_nodes(args), type_args, span)
+        .StreamStore -> ir_core_stream_store(m, p, b, ir_intrinsic_nodes(args), type_args, span)
     }
+}
+
+// The argument expression nodes of an intrinsic call, in order.
+ir_intrinsic_nodes: fn(args: [BodyCallArg]) -> [Int] Never! {
+    nodes := [Int]{}
+    loop arg in args -> nodes.push(arg.value)
+    nodes
 }
 
 // A call of rt_fault_print: a C call of LINK_FAULT_REPORT, the native fault
