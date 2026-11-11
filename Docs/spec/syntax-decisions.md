@@ -3780,13 +3780,15 @@ physical layout is not guaranteed. Completion visibly groups
 `$layout` as a compiler fact; hover, rename, navigation, diagnostics,
 `jet inspect expand --facts layout`, and JSON project the same model.
 
-**D-METADERIVE1 — User derives**: `derive T.Wire { … }` (old
-`derive Wire for T` is E2714); the header names the provider and target, and
-the body contains typed Jet members. `@` holes are filled at expansion and the
-resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
-never inject unchecked AST or re-lex emitted text). `comptime loop` over
-`T.reflect().fields` contributes one checked member per field. Local-only orphan rule.
-Routed through the existing marker system (D-USERDERIVE1).
+**D-METADERIVE1 — User derives** *(superseded by D-MARKER-LAW1)*: a provider
+is a marker struct whose `impl Marker` block has an `expand` template; the old
+`derive T.Wire { … }` declaration is not Jet syntax (and `derive Wire for T`
+stays E2714). The template contains typed Jet members. `#{…}` holes are filled
+at expansion and the resulting items enter ordinary sema like hand-written code
+(**D-META-CODE1** — never inject unchecked AST or re-lex emitted text).
+`comptime loop` over `target.reflect().fields` contributes one checked member
+per field. A marker from another module is written through its import alias,
+so the orphan rule and E2711 are retired.
 
 **D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
 reaches marker bodies, top-level `impl` items, and `#Test` bodies, including
@@ -8100,7 +8102,7 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
   function does — `abilities: ...Ability`. This is the only new spelling
   the card adds, and it reuses the ratified rest-parameter form.
 - D-MARK-VOCAB1: `Policy::MarkerVocabulary` is the one vocabulary value. It
-  holds the registry rows plus the `derive T.Name { … }` providers a build can
+  holds the registry rows plus the package markers a build can
   see, and it answers both "may this name be written?" and "did you mean?". The
   separate `known_derive_names` set is deleted.
 - `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads

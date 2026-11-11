@@ -580,7 +580,6 @@ jfmt_item_span_start: fn(f: JetFmt, item: Item) -> Int Never! {
         .ErrorConv(definition) -> jfmt_rfind_or(f, definition.from_span.start, "impl", definition.from_span.start)
         .Migration(declaration) -> declaration.span.start
         .ProtocolDecl(declaration) -> declaration.span.start
-        .UserDerive(definition) -> definition.span.start
         .TemplateLoop(looped) -> looped.span.start
         .GenericModule(decl) -> decl.span.start
         .ModuleAlias(decl) -> decl.span.start
@@ -628,7 +627,6 @@ jfmt_item_span_end: fn(item: Item) -> Int Never! {
         .ErrorConv(definition) -> definition.body_span.end
         .Migration(declaration) -> declaration.span.end
         .ProtocolDecl(declaration) -> declaration.span.end
-        .UserDerive(definition) -> definition.span.end
         .TemplateLoop(looped) -> looped.span.end
         .GenericModule(decl) -> decl.span.end
         .ModuleAlias(decl) -> decl.span.end
@@ -1518,7 +1516,7 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
                 updated.body = jfmt_strip_redundant_optional_returns(decl.body)
                 out.push(Item.GenericModule{value: updated})
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> out.push(item.copy())
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> out.push(item.copy())
         }
     }
     out

@@ -142,7 +142,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
                 if code_module.body == .Val(body) -> row.body = Val(sema_alias_rewrite_items(body, keys))
                 value = Item.CodeModule{value: row}
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         rewritten.push(value)
     }
@@ -225,7 +225,7 @@ sema_alias_item_declares: fn(item: Item, name: String) -> SemaAliasDeclared Neve
         .Func(value) -> sema_alias_meaning_if(value.name == name, .Value)
         .Const(value) -> sema_alias_meaning_if(value.name == name, .Value)
         .CodeModule(value) -> sema_alias_meaning_if(value.name == name, .Module)
-        .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> SemaAliasMeaning.Unknown
+        .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> SemaAliasMeaning.Unknown
     }
     if meaning == .Value && item == .Const(value) -> return SemaAliasDeclared{meaning: meaning, binding: sema_alias_binding_path(value)}
     SemaAliasDeclared{meaning: meaning, binding: None}

@@ -1,0 +1,22 @@
+
+use labels
+
+LocalLabel: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            local_label: fn(self) -> String { "local:{target.reflect().name}" }
+        }
+    }
+}
+
+#[Labels.RemoteLabel, LocalLabel]
+LocalType: struct { value: Int }
+
+run: fn() {
+    local := LocalType{ value: 1 }
+    print(local.remote_label())
+    print(local.local_label())
+    print(labels.remote_type_label())
+}

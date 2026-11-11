@@ -651,12 +651,11 @@ sema_compiler_index_item_shape: fn(item: Item) -> String Never! {
         .ErrorConv(_) -> 16
         .Migration(_) -> 17
         .ProtocolDecl(_) -> 18
-        .UserDerive(_) -> 19
-        .TemplateLoop(_) -> 20
-        .GenericModule(_) -> 21
-        .ModuleAlias(_) -> 22
-        .MarkerDecl(_) -> 23
-        .FactDecl(_) -> 24
+        .TemplateLoop(_) -> 19
+        .GenericModule(_) -> 20
+        .ModuleAlias(_) -> 21
+        .MarkerDecl(_) -> 22
+        .FactDecl(_) -> 23
     }
     "Discriminant({index})"
 }
@@ -682,7 +681,6 @@ sema_compiler_index_item_span: fn(item: Item) -> Span Never! {
         .ErrorConv(value) -> value.from_span
         .Migration(value) -> value.span
         .ProtocolDecl(value) -> value.span
-        .UserDerive(value) -> value.span
         .TemplateLoop(value) -> value.span
         .GenericModule(value) -> value.span
         .ModuleAlias(value) -> value.span
@@ -1275,15 +1273,6 @@ sema_compiler_index_walk_item: fn(state: &SemaCompilerIndexWalkState, item: Item
         .Const(definition) -> sema_compiler_index_walk_expr_slot(state, "value", definition.value, module_path)
         .Test(definition) -> sema_compiler_index_walk_stmt_slot(state, "body", definition.body, module_path)
         .ErrorConv(definition) -> sema_compiler_index_walk_stmt_slot(state, "body", definition.body, module_path)
-        .UserDerive(definition) -> {
-            old_slot := state.slot
-            old_list := state.slot_is_list
-            state.slot = "body"
-            state.slot_is_list = true
-            sema_compiler_index_walk_derive_body(state, definition.body, module_path)
-            state.slot = old_slot
-            state.slot_is_list = old_list
-        }
         .TemplateLoop(definition) -> {
             sema_compiler_index_walk_expr_slot(state, "source", definition.source, module_path)
             old_slot := state.slot

@@ -314,7 +314,7 @@ jet_cli_doc_collect_protocol_names: fn(items: [Item], names: &[String]) Never! {
             .ProtocolDecl(protocol) -> if !names.contains(protocol.name) -> names.push(protocol.name)
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_doc_collect_protocol_names(body, names)
             .GenericModule(generic_module) -> jet_cli_doc_collect_protocol_names(generic_module.body, names)
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -400,7 +400,7 @@ jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String
             .Const(definition) -> jet_cli_doc_add_item(output, unit, "const", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
             // A marker's docs are its struct's, so its companion declaration
             // adds none.
-            .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) -> {}
+            .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) -> {}
         }
     }
 }

@@ -569,7 +569,7 @@ sema_comptime_reflection_layout_item_name: fn(item: Item) -> String? {
         .Enum(value) -> Val(value.name)
         .Distinct(value) -> Val(value.name)
         .TypeAlias(value) -> Val(value.name)
-        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -615,7 +615,7 @@ sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGrap
         }
         .Distinct(definition) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, [TypeParam]{}, definition.base, resolutions)
         .TypeAlias(definition) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, definition.type_params, definition.target, resolutions)
-        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -1250,7 +1250,7 @@ sema_comptime_reflection_append_inherent_methods: fn(items: [Item], owner: Strin
             .Impl(implementation) -> if implementation.type_name == owner && implementation.trait_name == None -> sema_comptime_reflection_append_methods(implementation.methods, module_path, identity, registry, values)
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> sema_comptime_reflection_append_inherent_methods(body, owner, module_path, identity, registry, values)
             .GenericModule(generic_module) -> sema_comptime_reflection_append_inherent_methods(generic_module.body, owner, module_path, identity, registry, values)
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1405,7 +1405,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
             }
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> sema_comptime_reflection_trait_contracts_from_items(body, owner, module_path, identity, registry, contracts)
             .GenericModule(generic_module) -> sema_comptime_reflection_trait_contracts_from_items(generic_module.body, owner, module_path, identity, registry, contracts)
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1714,6 +1714,6 @@ sema_comptime_reflection_type_info: fn(
         }
         .Enum(definition) -> return Val(sema_comptime_reflection_enum_type_info(definition, registered_module, identity, engine, registry))
         .Distinct(definition) -> return Val(sema_comptime_reflection_distinct_type_info(definition, registered_module, identity, engine, registry))
-        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
 }

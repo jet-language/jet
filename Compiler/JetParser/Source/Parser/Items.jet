@@ -10,8 +10,6 @@ use {
         ContractClause,
         ConstDef,
         CtValue,
-        DeriveBodyItem,
-        DeriveDef,
         EffectRowEntry,
         EnumDef,
         EnumGroup,
@@ -114,7 +112,6 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_COPY,
-        TOKEN_KW_DERIVE,
         TOKEN_KW_COMPTIME,
         TOKEN_KW_EFFECT,
         TOKEN_KW_ENUM,
@@ -345,10 +342,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(Item.Tag{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(state)), handled: true}
-        token.kind == TOKEN_KW_DERIVE -> {
-            value: parser_parse_user_derive(state) ?? return ParsedItemOrImport{item: None, handled: true}
-            return ParsedItemOrImport{item: Val(Item.UserDerive{value: value}), handled: true}
-        }
     }
     ParsedItemOrImport{item: None, handled: false}
 }
@@ -2903,47 +2896,3 @@ parser_parse_tag_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }
 
-// `derive T.Trait { … }`.
-parser_parse_user_derive: fn(state: &JetParserState) -> DeriveDef? {
-    start: parser_bump(state)
-    type_name: parser_expect_name(state, "after `derive`")
-    parser_expect(state, TOKEN_DOT, "`.` between a type and derive trait")
-    trait_token: parser_expect_name(state, "after `.` in a derive declaration")
-    // Rust `derive_body_items`: a derive body is the shared template body —
-    // items, statements and `comptime loop` templates (parser_marker_body).
-    body: parser_marker_body(state)
-    end: parser_lookahead(state, -1).span
-    type_param: parser_value(state, type_name)
-    trait_name: parser_value(state, trait_token)
-    if parser_derive_nested_impl_span(body) == .Val(span) {
-        message: "`derive {type_param}.{trait_name}` already names its implementation"
-        parser_add_fatal_code(state, "E0003", span, message, "a derive provider body is the member list; a nested `impl` repeats the target and trait", "remove the `impl` wrapper and keep its members directly in the derive body")
-        return None
-    }
-    Val(DeriveDef{trait_name: trait_name, trait_span: trait_token.span, type_param: type_param, body: body, span: parser_cover(start.span, end)})
-}
-
-// Rust `derive_nested_impl_span`: the first `impl` or error conversion a
-// derive body (or one of its template loops) wraps its members in.
-parser_derive_nested_impl_span: fn(body: [DeriveBodyItem]) -> Span? Never! {
-    loop body_item in body {
-        if body_item == {
-            .Item(item) -> if item == {
-                .Impl(implementation) -> return Val(implementation.span)
-                .ErrorConv(conversion) -> return Val(conversion.from_span)
-                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-            }
-            .Loop(_, _, _, nested, _) -> {
-                if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)
-            }
-            .If(_, _, then_body, else_body, _) -> {
-                if parser_derive_nested_impl_span(then_body) == .Val(span) -> return Val(span)
-                if else_body == .Val(branch) {
-                    if parser_derive_nested_impl_span(branch) == .Val(span) -> return Val(span)
-                }
-            }
-            .Stmt(_) -> {}
-        }
-    }
-    None
-}

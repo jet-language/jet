@@ -1,11 +1,17 @@
-// 128 — user-authored derive, plus `T.reflect()`
-// Demonstrates: derive bodies are checked Jet items with typed holes.
+// 128 — a user-authored provider written as a marker template, plus `target.reflect()`
+// Demonstrates: marker template bodies are checked Jet items with typed holes.
 // `Debug` itself is retired as an explicit-derive spelling
-// (built-in Debug auto-derives, E0922 if written) — a user-authored derive
-// provider can't reuse that name either, so this demo names its own
+// (built-in Debug auto-derives, E0922 if written) — a package marker
+// can't reuse that name either, so this demo names its own
 // `DebugText`.
-derive T.DebugText {
-    debug_string: fn(self) -> String { T.reflect().name }
+DebugText: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            debug_string: fn(self) -> String { target.reflect().name }
+        }
+    }
 }
 
 #DebugText

@@ -12699,16 +12699,15 @@ RegistryNameLookalike: struct {
     }
 }
 
-OrphanDerive: struct {
+RetiredOrphanDerive: struct {
     trait_name: String
     type: String
 
     impl Diagnostic {
         code: "E2711"
-        stage: [.Compile]
+        status: .Retired
         detail: true
-        no_fix: .Ambiguous
-        fix_next: "Define the derive provider or target type in the entry module."
+        no_fix: None
         what: fn(self) -> String { "Derive orphan rule: neither `` `derive T.{self.trait_name}` `` nor `` `{self.type}` `` is local." }
         why: fn(self) -> String { "A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module. Two imported sides leave the entry package owning neither contract." }
         fix: fn(self) -> String { "Define `derive T.{self.trait_name}` or `{self.type}` in the entry module." }

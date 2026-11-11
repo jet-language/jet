@@ -1,6 +1,12 @@
 
-derive T.CopyCallback {
-    duplicate: fn(self) -> fn(Int) -> Int { self.callback.copy() }
+CopyCallback: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            duplicate: fn(self) -> fn(Int) -> Int { self.callback.copy() }
+        }
+    }
 }
 
 #CopyCallback

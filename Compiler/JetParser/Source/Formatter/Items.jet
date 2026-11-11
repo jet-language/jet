@@ -10,7 +10,6 @@ use jet_foundation.[
     ConstDef,
     ContribValue,
     DeriveBodyItem,
-    DeriveDef,
     DistinctDef,
     EffectImpl,
     EffectRowEntry,
@@ -497,7 +496,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                     if jfmt_decode_named_shapes(body, name, args, seen) == .Val(shapes) -> return Val(shapes)
                 }
             }
-            .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -741,10 +740,8 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
         }
         // Protocol declarations have typed message fields.
         .ProtocolDecl(p) -> jfmt_fmt_protocol_decl(f, p)
-        // Derive bodies are typed item templates.
-        .UserDerive(d) -> jfmt_fmt_derive_decl(f, d)
         // Root declaration loops use the same typed body
-        // formatter as derive and marker templates.
+        // formatter as marker templates.
         .TemplateLoop(loop_item) -> jfmt_fmt_item_template_loop(f, loop_item)
         // Generic module templates are typed item
         // templates, not opaque source strings.
@@ -843,20 +840,6 @@ jfmt_fmt_user_policy_decl: fn(f: &JetFmt, declaration: UserPolicyDecl) {
     jfmt_write_verbatim(f, declaration.span.start, declaration.span.end, true)
 }
 
-jfmt_fmt_derive_decl: fn(f: &JetFmt, derive_def: DeriveDef) {
-    jfmt_write(f, "derive ")
-    jfmt_write(f, derive_def.type_param)
-    jfmt_write(f, ".")
-    jfmt_write(f, derive_def.trait_name)
-    jfmt_write(f, " {{")
-    jfmt_newline(f)
-    f.indent += 1
-    jfmt_fmt_derive_body_items(f, derive_def.body)
-    f.indent -= 1
-    jfmt_emit_leading(f, derive_def.span.end)
-    jfmt_end_template_block(f)
-}
-
 jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
     jfmt_write(f, "comptime loop ")
     jfmt_write(f, loop_item.var)
@@ -871,8 +854,8 @@ jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
     jfmt_end_template_block(f)
 }
 
-// Format typed derive, marker, and generated-source bodies through their AST.
-// These bodies share one representation, so one walk closes all three.
+// Format typed marker and generated-source bodies through their AST.
+// These bodies share one representation, so one walk closes both.
 jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
     loop index in 0..<body.len() {
         body_item: body[index]

@@ -173,7 +173,7 @@ jet_driver_program_has_inline_module: fn(program: Program, name: String) -> Bool
             .ModuleAlias(alias) -> {
                 if alias.name == name -> return true
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -2502,7 +2502,7 @@ jet_driver_apply_auto_derive_policy: fn(program: &Program, unit: JetDriverSource
                 updated.auto_derive_default = false
                 program.items[index] = Item.Enum{value: updated}
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -2526,7 +2526,7 @@ jet_driver_namespace_item_names: fn(items: [Item], from: Int) -> [NamedSpan] Nev
             .Tag(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .Const(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
             .ProtocolDecl(value) -> names.push(NamedSpan{name: value.name, span: value.name_span})
-            .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     names
@@ -2607,8 +2607,8 @@ jet_driver_default_regions: fn(items: [Item], template: Bool, module_index: Int,
             .CodeModule(definition) -> jet_driver_default_regions(definition.body ?? [Item]{}, template, module_index, regions)
             .GenericModule(definition) -> jet_driver_default_regions(definition.body, template, module_index, regions)
             .TemplateLoop(definition) -> jet_driver_template_default_regions(definition.body, module_index, regions)
-            .UserDerive(definition) -> jet_driver_template_default_regions(definition.body, module_index, regions)
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .MarkerDecl(definition) -> if definition.body == .Val(body) -> jet_driver_template_default_regions(body, module_index, regions)
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -3965,7 +3965,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
             .Test(_) -> {
                 if !entry -> next
             }
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         kept.push(item)
     }
@@ -4047,7 +4047,7 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
                     next
                 }
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
         kept.push(item.copy())
     }

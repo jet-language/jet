@@ -1,0 +1,31 @@
+// One provider shape after the cutover: a package marker adds members from its
+// `expand` template, and the built-in `Equatable` and `Comparable` providers are
+// Prelude markers expanded the same way.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            tname: target.name
+            count: target.fields.len()
+            describe: fn(self) -> String { "{tname} has {count} fields" }
+        }
+    }
+}
+
+#[Describe, Equatable, Comparable]
+Version: struct {
+    major: Int
+    minor: Int
+}
+
+run: fn() {
+    a := Version{major: 1, minor: 2}
+    b := Version{major: 1, minor: 3}
+    c := Version{major: 1, minor: 2}
+    print(a.describe())
+    print(a == b)
+    print(a == c)
+    print(a < b)
+    print(b < a)
+}

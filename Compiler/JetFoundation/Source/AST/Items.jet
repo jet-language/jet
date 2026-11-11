@@ -20,7 +20,6 @@ Item: enum {
     ErrorConv(value: ErrorConvDef)
     Migration(value: MigrationDecl)
     ProtocolDecl(value: ProtocolDecl)
-    UserDerive(value: DeriveDef)
     TemplateLoop(value: ItemTemplateLoop)
     GenericModule(value: GenericModuleDef)
     ModuleAlias(value: ModuleAliasDef)
@@ -727,14 +726,6 @@ ItemTemplateLoop: struct {
     span: Span
 }
 
-DeriveDef: struct {
-    trait_name: String
-    trait_span: Span
-    type_param: String
-    body: [DeriveBodyItem]
-    span: Span
-}
-
 TraitMethodSig: struct {
     name: String
     name_span: Span
@@ -1036,7 +1027,7 @@ app_entry_run_fn: fn(items: [Item]) -> Func? Never! {
                     if app_entry_run_fn(body) == .Val(function) -> return Val(function)
                 }
             }
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None

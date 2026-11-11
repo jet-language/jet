@@ -126,25 +126,27 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     })
 }
 
-#Test("derive_generic_type_holes_stay_in_the_template_ast") {
+#Test("marker_template_type_holes_stay_in_the_template_ast") {
     // The Rust fixture's retired `~self.value` is spelled `.copy()`.
-    parsed: program("\nderive T.TypeName {{\n    info: T.reflect()\n    param: info.type_params[0].name\n    get_value: fn(self) -> @param {{ self.value.copy() }}\n    type_name: fn(self) -> String {{ T.reflect().name }}\n}}\n")
-    template: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
-    function: loop body_item in template.body {
+    parsed: program("\nTypeName: struct {{\n    impl Marker {{\n        expand: fn(self, target: Target) {{\n            param: target.type_params[0].name\n            get_value: fn(self) -> @param {{ self.value.copy() }}\n            type_name: fn(self) -> String {{ target.name }}\n        }}\n    }}\n}}\n")
+    declaration: loop item in parsed.items { if item == .MarkerDecl(d) -> break d } ?? panic("marker declaration")
+    body: declaration.body ?? panic("marker template")
+    function: loop body_item in body {
         if body_item == .Item(item) {
             if item == .Func(f) && f.name == "get_value" -> break f
         }
-    } ?? panic("generic derive function")
+    } ?? panic("generic template function")
     assert(function.return_type == (Val(Type.Named{name: "@param"})))
 }
 
-#Test("derive_body_rejects_nested_impl_but_generate_keeps_item_blocks") {
-    source: "\nderive T.Debug {{\n    impl Thing.Debug {{\n        debug: fn(self) -> String {{ \"nested\" }}\n    }}\n}}\n"
+#Test("retired_derive_provider_declaration_is_not_an_item_but_generate_keeps_item_blocks") {
+    source: "\nderive T.Debug {{\n    debug: fn(self) -> String {{ \"retired\" }}\n}}\n"
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     diagnostics: parser_test_errors(source)
-    assert(diagnostics.len() == 1)
-    assert(diagnostics[0].code == "E0003")
+    assert(diagnostics.len() > 0)
+    // No teaching diagnostic names the retired spelling.
+    assert(loop d in diagnostics { if d.what.contains("derive T.") -> break false } ?? true)
     _: program("\nbuild: fn(b: Build) {{\n    b.generate(\"made\") {{\n        impl Thing.Debug {{\n            debug: fn(self) -> String {{ \"generated\" }}\n        }}\n    }}\n}}\n")
 }
 
@@ -154,13 +156,13 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     assert(loop_item.body.len() == 2)
     assert(if loop_item.body[0] == { .Item(item) -> if item == {
         .Impl(_) -> true
-        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
         .Stmt(_) | .Loop(_, _, _, _, _) | .If(_, _, _, _, _) -> false
     })
     assert(if loop_item.body[1] == { .Item(item) -> if item == {
         .Test(_) -> true
-        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
         .Stmt(_) | .Loop(_, _, _, _, _) | .If(_, _, _, _, _) -> false
     })

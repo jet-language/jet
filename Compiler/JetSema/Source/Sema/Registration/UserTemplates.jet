@@ -1,9 +1,8 @@
-// Package-authored templates (user `derive T.Name` providers, declared marker
-// bodies and root `comptime loop` declarations) expand through the same typed
-// template engine as the Prelude providers (Registration/Derives.jet). Generated
-// items re-enter ordinary registration as written items; nothing is serialized
-// or re-lexed. Rust: (user derives, marker bodies) and
-// `expand_item_template_loops`.
+// Package-authored templates (declared marker bodies and root `comptime loop`
+// declarations) expand through the same typed template engine as the Prelude
+// providers (Registration/Derives.jet). Generated items re-enter ordinary
+// registration as written items; nothing is serialized or re-lexed. Rust:
+// (marker bodies) and `expand_item_template_loops`.
 use jet_foundation.[
     CallLabel,
     CodeModule,
@@ -15,7 +14,6 @@ use jet_foundation.[
     CtReport,
     CtValue,
     DeriveBodyItem,
-    DeriveDef,
     Diagnostic,
     EffectRowEntry,
     Func,
@@ -31,7 +29,6 @@ use jet_foundation.[
     RuleSite,
     Span,
     Stmt,
-    StructDef,
     TAppliedRule,
     TAppliedRuleArgumentMenu,
     TAppliedRuleCatalog,
@@ -41,19 +38,6 @@ use jet_foundation.[
     diagnostic_with_detail,
     expr_span,
 ]
-
-SemaUserDeriveProvider: struct {
-    module_index: Int
-    definition: DeriveDef
-}
-
-// One member a generated method may collide with: its name, how the
-// diagnostic names it, and where it is declared.
-SemaUserMemberSite: struct {
-    name: String
-    site: String
-    span: Span
-}
 
 // ---------------------------------------------------------------------------
 // Reflection carrier. Reflection builds handles on the typed `TComptimeValue`
@@ -230,7 +214,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
             module_row.program.items.push(item.copy())
             if item == {
                 .Impl(_) -> {}
-                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                     _ := sema_registration_add_root(module_row, item, source_file, source_origin, source_segments, problems)
                 }
             }
@@ -246,120 +230,6 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
     }
     loop problem in problems -> sema_registration_push_graph_diagnostic(graph, module_index, problem)
-}
-
-// ---------------------------------------------------------------------------
-// User derives. A struct requesting `#Name` expands the
-// `derive T.Name` provider preferring the entry module, then the target's
-// own module. The orphan law (E2711) requires the provider or the target to
-// be entry-local. Generated functions become ordinary members of the target;
-// other generated items join the target's module.
-
-sema_user_derive_member_sites: fn(items: [Item], owner: String) -> [SemaUserMemberSite] {
-    sites := [SemaUserMemberSite]{}
-    loop item in items {
-        if item == {
-            .Struct(candidate) -> {
-                if candidate.name == owner {
-                    loop method in candidate.methods -> sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
-                }
-            }
-            .Impl(candidate) -> {
-                if candidate.type_name == owner {
-                    loop method in candidate.methods -> sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
-                }
-            }
-            .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-    sites
-}
-
-// The latest site recorded for `name` (Rust keeps one map entry per name;
-// a later declaration replaces an earlier one).
-sema_user_member_site: fn(sites: [SemaUserMemberSite], name: String) -> SemaUserMemberSite? Never! {
-    index := sites.len() - 1
-    loop index >= 0 {
-        if sites[index].name == name -> return Val(sites[index])
-        index -= 1
-    }
-    None
-}
-
-sema_user_derive_collision: fn(derive_name: String, owner: String, method: Func, site: SemaUserMemberSite) -> Diagnostic {
-    diagnostic: sema_error("E0105", method.name_span, "generated method `{method.name}` from `derive T.{derive_name}` collides with {site.site}", "`derive T.{derive_name}` and {site.site} both define a member named `{method.name}` on `{owner}`", "rename the generated member in `derive T.{derive_name}`, or rename the colliding member")
-    diagnostic_with_detail(diagnostic, "generated member `{method.name}` from `derive T.{derive_name}` at span {method.name_span.start}..{method.name_span.end}\n{site.site} at span {site.span.start}..{site.span.end}")
-}
-
-sema_user_derive_provider: fn(providers: [SemaUserDeriveProvider], name: String, module_index: Int, entry_index: Int) -> SemaUserDeriveProvider? Never! {
-    chosen := SemaUserDeriveProvider?{None}
-    rank := 3
-    loop candidate in providers {
-        if candidate.definition.trait_name != name -> next
-        candidate_rank: if candidate.module_index == entry_index -> 0 else -> if candidate.module_index == module_index -> 1 else -> 2
-        if candidate_rank < rank {
-            chosen = Val(candidate)
-            rank = candidate_rank
-        }
-    }
-    chosen
-}
-
-sema_user_derive_expand_struct: fn(graph: SemaRegistrationGraph, module_index: Int, items: [Item], definition: StructDef, providers: [SemaUserDeriveProvider], entry_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
-    sites: sema_user_derive_member_sites(items, definition.name)
-    generated_sites := [SemaUserMemberSite]{}
-    type_info := CtValue?{None}
-    loop requested in definition.derives {
-        provider: sema_user_derive_provider(providers, requested.name, module_index, entry_index) ?? next
-        if module_index != entry_index && provider.module_index != entry_index {
-            // The violating marker belongs to an imported source file, so the
-            // diagnostic carries no entry-file caret.
-            diagnostics.push(sema_error_optional("E2711", None, "derive orphan rule: neither `derive T.{requested.name}` nor `{definition.name}` is local", "a generated implementation is owned locally only when the derive provider or target type lives in the entry module", "define `derive T.{requested.name}` or `{definition.name}` in the entry module"))
-            next
-        }
-        if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
-        info: type_info ?? next
-        expanded: sema_derive_expand_provider_body(provider.definition.body, provider.definition.type_param, info, diagnostics) ?? next
-        methods := [Func]{}
-        loop expanded_item in expanded {
-            if expanded_item == {
-                .Func(function) -> {
-                    existing: sema_user_member_site(sites, function.name)
-                    if existing == .Val(site) {
-                        diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
-                        next
-                    }
-                    prior: sema_user_member_site(generated_sites, function.name)
-                    if prior == .Val(site) {
-                        diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
-                        next
-                    }
-                    generated_sites.push(SemaUserMemberSite{name: function.name, site: "generated member `{function.name}` from `derive T.{requested.name}`", span: function.name_span})
-                    methods.push(function)
-                }
-                .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> generated.push(expanded_item)
-            }
-        }
-        // The provider name selects the derive; its body supplies ordinary
-        // members on the target, not a trait conformance.
-        if methods.len() > 0 {
-            generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
-        }
-    }
-}
-
-sema_user_derive_collect_module: fn(graph: SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
-    items: graph.modules[module_index].program.items
-    loop item in items {
-        if item == .Struct(definition) -> sema_user_derive_expand_struct(graph, module_index, items, definition, providers, entry_index, generated, diagnostics)
-    }
-}
-
-sema_user_derive_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int) {
-    generated := [Item]{}
-    diagnostics := [Diagnostic]{}
-    sema_user_derive_collect_module(graph, module_index, providers, entry_index, generated, diagnostics)
-    sema_user_template_register(graph, module_index, generated, diagnostics)
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +269,7 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, m
                 }
                 .Struct(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, reports)
                 .Enum(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, reports)
-                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -532,7 +402,7 @@ sema_user_rule_existing_span: fn(items: [Item], owner: String, member: String) -
                     }
                 }
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -574,7 +444,7 @@ sema_user_rule_accept: fn(items: [Item], rule: String, owner: String?, owner_spa
                     generated.push(Item.Impl{value: accepted})
                 }
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> generated.push(expanded_item.copy())
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> generated.push(expanded_item.copy())
         }
     }
 }
@@ -606,7 +476,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 loop method in implementation.methods -> sema_user_rule_collect_member(graph, module_index, implementation.type_name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
             }
             .CodeModule(code_module) -> sema_user_rule_collect_code_module(graph, module_index, code_module, generated, diagnostics)
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     // Function-site rules see a FunctionInfo and may emit any top-level item.
@@ -634,7 +504,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
             .Enum(definition) -> {
                 loop block in definition.trait_impls -> sema_user_rule_collect_impl(graph, module_index, definition.name, block.markers, generated, diagnostics)
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     // Registration has already replaced each error conversion with its
@@ -726,7 +596,7 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
                 .Func(function) -> {
                     if sema_user_template_function_info(function) == .Val(info) -> functions.push(info)
                 }
-                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -899,7 +769,7 @@ sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span
                 loop nested in body -> sema_user_text_blocks_in_item(nested, source, block_spans, blocks)
             }
         }
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -950,22 +820,14 @@ sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
         loop problem in problems -> sema_registration_push_graph_diagnostic(graph, module_index, problem)
     }
     if refused -> graph.complete = !sema_registration_blocking_error(graph.diagnostics)
-    providers := [SemaUserDeriveProvider]{}
     has_any_rule_body := false
-    loop (module_index, module_row) in graph.modules {
-        loop item in module_row.program.items {
-            if item == .UserDerive(definition) -> providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
-        }
+    loop module_row in graph.modules {
         loop declaration in sema_marker_module_declarations(module_row.program.items, "", false) {
             if declaration.body != None -> has_any_rule_body = true
         }
     }
-    if providers.len() == 0 && !has_any_rule_body -> return
-    entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
-    loop module_index in 0..<graph.modules.len() {
-        if providers.len() > 0 -> sema_user_derive_expand_module(graph, module_index, providers, entry_index)
-        if has_any_rule_body -> sema_user_rule_expand_module(graph, module_index)
-    }
+    if !has_any_rule_body -> return
+    loop module_index in 0..<graph.modules.len() -> sema_user_rule_expand_module(graph, module_index)
     // A rule's warning-severity `reject` reports without failing the graph.
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)
 }

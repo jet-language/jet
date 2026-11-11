@@ -4,7 +4,8 @@
 # `comptime if … else comptime if … else` expands only its chosen branch, and
 # a template loop writes one member per field. The marker's parameter is a
 # named field read as `self.label`. A direct member that would replace a
-# written one is refused like any generated member.
+# written one is refused like any generated member. The old provider
+# declaration `derive T.X { … }` is rejected as source that does not parse.
 fixture: d_meta_body1_contract.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -26,3 +27,8 @@ stderr: ~ "Generated member `describe` would change or shadow `describe` on `Poi
 stderr: ~ "jet-lang.dev/e/E0105" # the generated-collision code
 stderr: ~ "--> main.jet:9:13" # the template's direct member
 stderr: ~ "1 problem found" # one collision
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "--> main.jet:5:" # the old provider declaration is refused where it starts
+stderr: !~ "marker" # no teaching diagnostic points at the marker form
+stderr: !~ "provider" # nor names the retired declaration

@@ -1,0 +1,29 @@
+# The derive-provider cutover (#4276 c14). The one provider shape is a marker:
+# a package marker's template adds a member, and the built-in `Equatable` and
+# `Comparable` providers run from Prelude markers, with the same stdout, stderr
+# and exit at every optimization tier. The retired `derive T.X { … }`
+# declaration has no alias: it fails to parse, `jet run` executes nothing, and
+# no diagnostic teaches the replacement.
+fixture: v42_cutover_regression.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = v42_cutover_regression.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = v42_cutover_regression.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = v42_cutover_regression.stdout.expected
+stderr: empty
+step retired: jet run retired/main.jet
+exit: 1
+stdout: empty
+stderr: ~ "--> main.jet:5:" # refused where the retired declaration starts
+stderr: !~ "marker" # no teaching diagnostic points at the marker form
+stderr: !~ "provider" # nor names the retired declaration

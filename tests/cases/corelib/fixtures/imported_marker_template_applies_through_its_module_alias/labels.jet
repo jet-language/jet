@@ -1,0 +1,18 @@
+
+RemoteLabel: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            remote_label: fn(self) -> String { "remote:{target.reflect().name}" }
+        }
+    }
+}
+
+#RemoteLabel
+RemoteType: struct { value: Int }
+
+remote_type_label: fn() -> String {
+    value := RemoteType{ value: 2 }
+    return value.remote_label()
+}

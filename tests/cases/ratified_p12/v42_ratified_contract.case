@@ -5,7 +5,9 @@
 # package marker that sets a checking setting (`inherits`, `resolution`,
 # `scopes`, `owns_menu`, `companion`) is refused; `sites` and `repeatable`
 # stay its own, and the embedded Prelude's rows (`Policy` sets all three
-# refused settings) alone change checking.
+# refused settings) alone change checking. The old provider declaration
+# `derive T.X { … }` is not Jet syntax: it fails to parse like any unknown
+# source, with no teaching diagnostic.
 fixture: v42_ratified_contract.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -39,3 +41,8 @@ stderr: ~ "jet-lang.dev/e/E0936" # the marker-setting code
 stderr: !~ "main.jet:6:" # sites stays a package marker's own
 stderr: !~ "main.jet:7:" # and so does repeatable
 stderr: ~ "3 problems found" # one per refused setting
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "--> main.jet:5:" # the retired declaration is refused where it starts
+stderr: !~ "marker" # no teaching diagnostic points at the marker form
+stderr: !~ "provider" # nor names the retired declaration

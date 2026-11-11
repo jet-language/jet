@@ -135,7 +135,7 @@ sema_comptime_use_own_callees: fn(items: [Item]) -> [String:Bool] Never! {
             .Struct(definition) -> sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
             .Enum(definition) -> sema_comptime_use_method_callees(definition.name, definition.methods, definition.trait_impls, callees)
             .Impl(definition) -> sema_comptime_use_method_callees(definition.type_name, definition.methods, [TraitImplBlock]{}, callees)
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     callees
@@ -222,7 +222,7 @@ sema_comptime_use_items: fn(items: [Item], scan: &SemaComptimeUseScan) {
                     scan.comptime_locals = outer_comptime
                 }
             }
-            .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -701,7 +701,7 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
             .Func(function) -> {
                 if function.is_job || function.every != None || function.web_marker != None || function.kernel != None || function.markers.len() > 0 -> return false
             }
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     true

@@ -54,7 +54,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FieldTypes](Derives/FieldTypes.jet) — A reflected record names its type `type`: a derive reads `field.type`, and so does `T.reflect()`.
 - [MarkerDerives](Derives/MarkerDerives.jet)
 - [SerdeDerive](Derives/SerdeDerive.jet)
-- [UserDerive](Derives/UserDerive.jet) — user-authored derive, plus `T.reflect()` Demonstrates: derive bodies are checked Jet items with typed holes.
+- [UserDerive](Derives/UserDerive.jet) — a user-authored provider written as a marker template, plus `target.reflect()` Demonstrates: marker template bodies are checked Jet items with typed holes.
 
 ## Generics
 

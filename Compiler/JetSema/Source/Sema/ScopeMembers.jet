@@ -34,7 +34,6 @@ SemaScopeMembersMarkerRegistry: struct {
     known_marker_names: [String]
     function_allowed_markers: [String]
     block_allowed_markers: [String]
-    derive_provider_names: [String]
 }
 
 SemaScopeMembersDeclaredTypeArgument: struct {
@@ -152,31 +151,11 @@ sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRe
     true
 }
 
-sema_scope_members_registry_add_items: fn(registry: &SemaScopeMembersMarkerRegistry, items: [Item]) -> Bool Never! {
-    loop item in items {
-        if item == {
-            .UserDerive(derive_definition) -> {
-                sema_scope_members_append_name(registry.derive_provider_names, derive_definition.trait_name)
-                sema_scope_members_append_name(registry.known_marker_names, derive_definition.trait_name)
-            }
-            .CodeModule(code_module) -> {
-                if code_module.body != None {
-                    body: code_module.body ?? return false
-                    if !sema_scope_members_registry_add_items(registry, body) -> return false
-                }
-            }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
-    }
-    true
-}
-
 sema_scope_members_registry_add_program: fn(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
     loop declaration in sema_marker_module_declarations(program.items, "", false) {
         if !sema_scope_members_registry_add_declaration(registry, declaration) -> return false
     }
-    // Derive providers keep their existing lexical registration path.
-    sema_scope_members_registry_add_items(registry, program.items)
+    true
 }
 
 sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
@@ -194,8 +173,8 @@ sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersM
 }
 
 // `catalog` must be built from the complete embedded Prelude/Markers.jet
-// source. The graph must be complete because source-declared marker and derive
-// names are package-wide. Occurrence facts never authorize marker sites.
+// source. The graph must be complete because the visible marker declarations
+// are read across it. Occurrence facts never authorize marker sites.
 sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
     if !graph.complete -> return None
     registry := SemaScopeMembersMarkerRegistry{
@@ -205,24 +184,16 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
         known_marker_names: [String]{},
         function_allowed_markers: [String]{},
         block_allowed_markers: [String]{},
-        derive_provider_names: [String]{},
     }
     if !sema_scope_members_registry_add_applied_catalog(registry, catalog) -> return None
     current_module_found := false
     loop module_row_index in 0..<graph.modules.len() {
-        // The current module's rows come from `program`; read either in place.
+        // The current module's rows come from `program`; other modules'
+        // marker declarations enter only through the import-qualified rows
+        // below.
         if graph.modules[module_row_index].module_identity == module_identity {
             current_module_found = true
             if !sema_scope_members_registry_add_program(registry, program) -> return None
-        } else {
-            // Derive providers retain their existing package scope; marker
-            // declarations enter only through the import-qualified rows below.
-            loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
-                if graph.modules[module_row_index].program.items[item_index] == .UserDerive(provider) {
-                    sema_scope_members_append_name(registry.derive_provider_names, provider.trait_name)
-                    sema_scope_members_append_name(registry.known_marker_names, provider.trait_name)
-                }
-            }
         }
     }
     if !current_module_found -> return None
@@ -279,7 +250,7 @@ sema_scope_members_check: fn(items: [Item]) -> [Diagnostic] {
                     loop method in implementation.methods -> sema_scope_members_walk(method.body, false, diagnostics)
                 }
             }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     diagnostics

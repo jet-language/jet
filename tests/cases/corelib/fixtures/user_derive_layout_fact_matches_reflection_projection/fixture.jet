@@ -1,20 +1,26 @@
 
-derive T.LayoutFacts {
-    info: T.reflect().layout
-    reflected: T.reflect().layout
-    selected: info[.count]
-    kind: info.kind
-    target: info.target
-    guarantee: info.guarantee
-    layout_source: info.source
-    reflected_kind: reflected.kind
-    field_name: selected.name
-    size: info.size
-    reflected_size: reflected.size
-    selected_offset: selected.offset
-    reflected_offset: reflected.fields[0].offset
-    name: T.reflect().name
-    layout_facts: fn(self) -> String { "{kind}:{target}:{guarantee}:{layout_source}:{reflected_kind}:{field_name}:{size}:{reflected_size}:{selected_offset}:{reflected_offset}" }
+LayoutFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect().layout
+            reflected: target.reflect().layout
+            selected: info[.count]
+            kind: info.kind
+            target: info.target
+            guarantee: info.guarantee
+            layout_source: info.source
+            reflected_kind: reflected.kind
+            field_name: selected.name
+            size: info.size
+            reflected_size: reflected.size
+            selected_offset: selected.offset
+            reflected_offset: reflected.fields[0].offset
+            name: target.reflect().name
+            layout_facts: fn(self) -> String { "{kind}:{target}:{guarantee}:{layout_source}:{reflected_kind}:{field_name}:{size}:{reflected_size}:{selected_offset}:{reflected_offset}" }
+        }
+    }
 }
 
 #LayoutFacts

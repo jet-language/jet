@@ -1,12 +1,14 @@
-// The built-in derive providers: ordinary Prelude derives whose typed bodies
+// The built-in derive providers: Prelude markers whose typed `expand` bodies
 // JetSema expands for each selected capability (Registration/Derives.jet). The
 // text is Compiler/Prelude/Derives.jet, copied by `jet build Compiler`
 // (Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this
 // copy.
 SEMA_PRELUDE_DERIVE_SOURCE_PATH: "jet:canonical-prelude/Prelude/Derives.jet"
-SEMA_PRELUDE_DERIVE_SOURCE: comptime { ```// Built-in derive providers are ordinary Prelude derives.
-// Their typed bodies use the same template expansion as package source,
-// including reflected enum variant payloads.
+SEMA_PRELUDE_DERIVE_SOURCE: comptime { ```// Built-in derive providers are ordinary Prelude markers: each `expand`
+// template writes the capability's members directly, read with the same
+// template expansion as package source, including reflected enum variant
+// payloads. `#{name}` is the derived type; a generic type keeps its
+// parameters.
 //
 // Enum equality/order match `self` once per variant, then dispatch `rhs`
 // inside that arm. A cartesian product of separate `if self ==` tables
@@ -16,111 +18,123 @@ SEMA_PRELUDE_DERIVE_SOURCE: comptime { ```// Built-in derive providers are ordin
 // the variant count: equality lets any other `rhs` variant fall through to
 // `return false`, and ordering reads the `rhs` variant ordinal once and orders
 // different variants by ordinal before comparing payloads.
-derive T.Equatable {
-    equal: fn(self, rhs: T) -> Bool {
-        comptime if T.kind == "enum" {
-            comptime loop left in T.reflect().fields {
-                if self == {
-                    .#{left} -> {
-                        if rhs == {
+Equatable: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            equal: fn(self, rhs: #{name}) -> Bool {
+                comptime if target.kind == "enum" {
+                    comptime loop left in target.reflect().fields {
+                        if self == {
                             .#{left} -> {
-                                comptime loop field in left.reflect().fields {
-                                    comptime if field.type == T.reflect().name {
-                                        if self.#{field}.equal(rhs.#{field}) == false -> return false
-                                    } else {
-                                        if self.#{field} != rhs.#{field} -> return false
+                                if rhs == {
+                                    .#{left} -> {
+                                        comptime loop field in left.reflect().fields {
+                                            comptime if field.type == target.reflect().name {
+                                                if self.#{field}.equal(rhs.#{field}) == false -> return false
+                                            } else {
+                                                if self.#{field} != rhs.#{field} -> return false
+                                            }
+                                        }
+                                        return true
                                     }
+                                    else -> {}
                                 }
-                                return true
+                                return false
                             }
                             else -> {}
                         }
-                        return false
                     }
-                    else -> {}
-                }
-            }
-            return false
-        } else {
-            comptime if T.kind == "struct" {
-                comptime loop field in T.reflect().fields {
-                    if self.#{field} != rhs.#{field} -> return false
-                }
-                return true
-            } else {
-                comptime if T.base == "Float" || T.base == "Float32" {
-                    return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
+                    return false
                 } else {
-                    return self.raw() == rhs.raw()
+                    comptime if target.kind == "struct" {
+                        comptime loop field in target.reflect().fields {
+                            if self.#{field} != rhs.#{field} -> return false
+                        }
+                        return true
+                    } else {
+                        comptime if target.base == "Float" || target.base == "Float32" {
+                            return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
+                        } else {
+                            return self.raw() == rhs.raw()
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-derive T.Comparable {
-    compare: fn(self, rhs: T) -> Ordering {
-        comptime if T.kind == "enum" {
-            jet_rhs_variant_index := 0
-            comptime loop right in T.reflect().fields {
-                if rhs == {
-                    .#{right} -> { jet_rhs_variant_index = right.index }
-                    else -> {}
-                }
-            }
-            comptime loop left in T.reflect().fields {
-                if self == {
-                    .#{left} -> {
-                        if jet_rhs_variant_index > left.index -> return .Less
-                        if jet_rhs_variant_index < left.index -> return .Greater
+Comparable: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            compare: fn(self, rhs: #{name}) -> Ordering {
+                comptime if target.kind == "enum" {
+                    jet_rhs_variant_index := 0
+                    comptime loop right in target.reflect().fields {
                         if rhs == {
+                            .#{right} -> { jet_rhs_variant_index = right.index }
+                            else -> {}
+                        }
+                    }
+                    comptime loop left in target.reflect().fields {
+                        if self == {
                             .#{left} -> {
-                                comptime loop field in left.reflect().fields {
-                                    // A Float payload orders by IEEE totalOrder, as `.compare` does;
-                                    // its plain `<` stays the IEEE comparison.
-                                    comptime if field.type == T.reflect().name || field.type == "Float" || field.type == "F32" {
-                                        if self.#{field}.compare(rhs.#{field}) == {
-                                            .Less -> return .Less
-                                            .Greater -> return .Greater
-                                            .Equal -> {}
+                                if jet_rhs_variant_index > left.index -> return .Less
+                                if jet_rhs_variant_index < left.index -> return .Greater
+                                if rhs == {
+                                    .#{left} -> {
+                                        comptime loop field in left.reflect().fields {
+                                            // A Float payload orders by IEEE totalOrder, as `.compare` does;
+                                            // its plain `<` stays the IEEE comparison.
+                                            comptime if field.type == target.reflect().name || field.type == "Float" || field.type == "F32" {
+                                                if self.#{field}.compare(rhs.#{field}) == {
+                                                    .Less -> return .Less
+                                                    .Greater -> return .Greater
+                                                    .Equal -> {}
+                                                }
+                                            } else {
+                                                if self.#{field} < rhs.#{field} -> return .Less
+                                                if self.#{field} > rhs.#{field} -> return .Greater
+                                            }
                                         }
-                                    } else {
-                                        if self.#{field} < rhs.#{field} -> return .Less
-                                        if self.#{field} > rhs.#{field} -> return .Greater
+                                        return .Equal
                                     }
+                                    else -> {}
                                 }
                                 return .Equal
                             }
                             else -> {}
                         }
-                        return .Equal
                     }
-                    else -> {}
-                }
-            }
-            return .Equal
-        } else {
-            comptime if T.kind == "struct" {
-                comptime loop field in T.reflect().fields {
-                    comptime if field.type == "Float" || field.type == "F32" {
-                        if self.#{field}.compare(rhs.#{field}) == {
-                            .Less -> return .Less
-                            .Greater -> return .Greater
-                            .Equal -> {}
-                        }
-                    } else {
-                        if self.#{field} < rhs.#{field} -> return .Less
-                        if self.#{field} > rhs.#{field} -> return .Greater
-                    }
-                }
-                return .Equal
-            } else {
-                comptime if T.base == "Float" || T.base == "F32" {
-                    return self.raw().compare(rhs.raw())
-                } else {
-                    if self.raw() < rhs.raw() -> return .Less
-                    if self.raw() > rhs.raw() -> return .Greater
                     return .Equal
+                } else {
+                    comptime if target.kind == "struct" {
+                        comptime loop field in target.reflect().fields {
+                            comptime if field.type == "Float" || field.type == "F32" {
+                                if self.#{field}.compare(rhs.#{field}) == {
+                                    .Less -> return .Less
+                                    .Greater -> return .Greater
+                                    .Equal -> {}
+                                }
+                            } else {
+                                if self.#{field} < rhs.#{field} -> return .Less
+                                if self.#{field} > rhs.#{field} -> return .Greater
+                            }
+                        }
+                        return .Equal
+                    } else {
+                        comptime if target.base == "Float" || target.base == "F32" {
+                            return self.raw().compare(rhs.raw())
+                        } else {
+                            if self.raw() < rhs.raw() -> return .Less
+                            if self.raw() > rhs.raw() -> return .Greater
+                            return .Equal
+                        }
+                    }
                 }
             }
         }

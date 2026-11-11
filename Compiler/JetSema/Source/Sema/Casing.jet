@@ -8,7 +8,6 @@ use jet_foundation.[
     BindPattern,
     Binding,
     CallArg,
-    DeriveBodyItem,
     Diagnostic,
     Expr,
     Func,
@@ -276,31 +275,9 @@ sema_casing_item: fn(item: Item, diagnostics: &[Diagnostic]) {
                 loop field in message.fields -> sema_casing_snake(field.name, message.span, "message field", diagnostics)
             }
         }
-        .UserDerive(definition) -> {
-            sema_casing_pascal(definition.trait_name, definition.trait_span, "trait", diagnostics)
-            sema_casing_derive_body(definition.body, diagnostics)
-        }
         // Foreign declarations are exempt zones. Other
         // declaration families carry no user-defined identifier category.
         .EffectDecl(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-    }
-}
-
-sema_casing_derive_body: fn(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) {
-    loop entry in body {
-        if entry == {
-            .Item(value) -> sema_casing_item(value, diagnostics)
-            .Stmt(value) -> sema_casing_stmts([Stmt]{value}, diagnostics)
-            .Loop(_, _, source, nested, _) -> {
-                sema_casing_expr(source, diagnostics)
-                sema_casing_derive_body(nested, diagnostics)
-            }
-            .If(cond, _, then_body, else_body, _) -> {
-                sema_casing_expr(cond, diagnostics)
-                sema_casing_derive_body(then_body, diagnostics)
-                if else_body == .Val(branch) -> sema_casing_derive_body(branch, diagnostics)
-            }
-        }
     }
 }
 

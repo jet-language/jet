@@ -1,9 +1,15 @@
-derive T.Debug {
-    states: T.reflect().states
-    derived_fact_read: fn() -> String { "ok" }
+StateFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            states: target.reflect().states
+            derived_fact_read: fn() -> String { "ok" }
+        }
+    }
 }
 
-#Debug
+#StateFacts
 Report: struct {
     state { Draft, Published }
     value: Int

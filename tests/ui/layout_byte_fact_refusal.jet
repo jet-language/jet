@@ -1,7 +1,13 @@
 // D-LAYOUT-FACTS1=B: optional byte facts can be read; default layout keeps them absent.
-derive T.LayoutBytes {
-    layout: T.reflect().layout
-    bytes: layout.fields[0].offset
+LayoutBytes: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            layout: target.reflect().layout
+            bytes: layout.fields[0].offset
+        }
+    }
 }
 
 #LayoutBytes

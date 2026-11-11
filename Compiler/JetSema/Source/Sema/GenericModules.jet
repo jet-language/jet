@@ -132,7 +132,7 @@ sema_genmod_declares_modules: fn(items: [Item]) -> Bool {
     loop item in items {
         if item == {
             .ModuleAlias(_) | .GenericModule(_) -> return true
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -666,7 +666,7 @@ sema_genmod_check_code_module: fn(graph: SemaRegistrationGraph, body: [Item], ty
         if item == {
             .GenericModule(nested) -> nested_defs.push(sema_genmod_substitute_template(nested, type_names, type_actuals))
             .ModuleAlias(alias) -> aliases.push(sema_genmod_substitute_alias(alias, type_names, type_actuals))
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     if nested_defs.len() == 0 && aliases.len() == 0 -> return
@@ -702,7 +702,7 @@ sema_genmod_report_cycles: fn(items: [Item], check: &SemaGenericModuleCheck) -> 
                     .None -> nodes.push(SemaGenericModuleNode{name: definition.name, edges: edges})
                 }
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     if nodes.len() == 0 -> return false
@@ -744,7 +744,7 @@ sema_genmod_collect_alias_edges: fn(items: [Item], edges: &[SemaGenericModuleEdg
         if item == {
             .ModuleAlias(alias) -> edges.push(SemaGenericModuleEdge{target: alias.target, span: alias.target_span})
             .GenericModule(definition) -> sema_genmod_collect_alias_edges(definition.body, edges)
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -898,7 +898,7 @@ sema_genmod_definition_items: fn(items: [Item]) -> [Item] {
     loop item in items {
         if item == {
             .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .ErrorConv(_) | .Test(_) | .Const(_) -> kept.push(item.copy())
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     kept
@@ -938,7 +938,7 @@ sema_genmod_resolve_test_names: fn(items: &[Item], inherited: [String:Expr], enu
                 updated.body = Val(body)
                 items[index] = Item.CodeModule{value: updated}
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -954,7 +954,7 @@ sema_genmod_has_expression_tests: fn(items: [Item]) -> Bool {
                     if sema_genmod_has_expression_tests(body) -> return true
                 }
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -1056,7 +1056,7 @@ sema_genmod_expand_items: fn(items: [Item], nesting: SemaGenericModuleNesting, i
                 .Struct(definition) -> names.push(definition.name)
                 .Enum(definition) -> names.push(definition.name)
                 .Trait(definition) -> names.push(definition.name)
-                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             declarations.push(declaration)
         }
@@ -1157,7 +1157,7 @@ sema_genmod_project_types: fn(rewrite: &SemaInlineRewrite, alias: String, canoni
 sema_genmod_project_item: fn(item: Item, projections: [String:String], projected_names: [String], projection: SemaInlineRewrite) -> Item? {
     if item == {
         .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Impl(_) | .ErrorConv(_) | .Test(_) -> {}
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
     updated := item
     loop name in projected_names {
@@ -1187,7 +1187,7 @@ sema_genmod_rewrite_item: fn(rewrite: &SemaInlineRewrite, item: Item) -> Item {
             Item.Test{value: updated}
         }
         // copy: sema_genmod_project_item admits only the kinds above.
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> item.copy()
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> item.copy()
     }
 }
 
@@ -1246,7 +1246,7 @@ sema_genmod_nominal_name: fn(item: Item) -> String {
         .Enum(definition) -> definition.name
         .Trait(definition) -> definition.name
         .Tag(definition) -> definition.name
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
 }
 
@@ -1285,7 +1285,7 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
         if item == {
             .CodeModule(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
             .ModuleAlias(nested) -> rewrite.types[nested.name] = Type.Named{name: sema_genmod_value_name(alias.name, nested.name)}
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     rewrite.values = source.source_values
@@ -1358,7 +1358,7 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
                 if nested.body == .Val(nested_body) -> mapped.body = Val(sema_genmod_specialize_nested(rewrite, nested_body, nested.name, enums, nested_path))
                 declarations.push(Item.CodeModule{value: mapped})
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> sema_genmod_push_declaration(rewrite, item, alias.name, declarations)
         }
     }
     body := [Item]{}
@@ -1481,7 +1481,7 @@ sema_genmod_push_declaration: fn(rewrite: &SemaInlineRewrite, item: Item, alias:
         }
         .Impl(definition) -> declarations.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
         .ErrorConv(definition) -> declarations.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -1523,7 +1523,7 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
             .Impl(definition) -> mapped.push(Item.Impl{value: sema_inline_rewrite_impl(rewrite, definition)})
             .ErrorConv(definition) -> mapped.push(Item.ErrorConv{value: sema_inline_rewrite_error_conv(rewrite, definition)})
             .Test(definition) -> mapped.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, module_name)})
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     values: sema_genmod_folded_consts(mapped, rewrite.values, enums)

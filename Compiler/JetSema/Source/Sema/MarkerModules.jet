@@ -115,7 +115,7 @@ sema_marker_module_items: fn(items: [Item], segments: [String], position: Int, e
             .CodeModule(code_module) -> {
                 if position + 1 < segments.len() && sema_casing_marker_qualifier(code_module.name) == segments[position] && code_module.body == .Val(body) -> sema_marker_module_items(body, segments, position + 1, exported && code_module.is_pub, rows)
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -150,7 +150,7 @@ sema_marker_module_declaration_by_span: fn(items: [Item], span: Span) -> MarkerD
                     if declaration != None -> return declaration
                 }
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -222,7 +222,7 @@ sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only
                     loop row in sema_marker_module_declarations(body, name, exported_only) -> declarations.push(row)
                 }
             }
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     declarations
@@ -330,7 +330,7 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 if code_module.body == .Val(body) -> row.body = Val(sema_marker_module_bind_items(body, bindings))
                 value = Item.CodeModule{value: row}
             }
-            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         bound.push(value)
     }
@@ -427,13 +427,13 @@ sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TApplied
 
 // The registry of the builtin applied rules alone, without source-declared markers.
 sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
-    catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
+    catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(catalog, applied) -> return None
     Val(catalog)
 }
 
-// The marker laws of every module. A marker no rule, marker declaration or
-// derive provider names (E0927) is returned per module row in `unknown_rules`,
+// The marker laws of every module. A marker no rule or marker declaration
+// names (E0927) is returned per module row in `unknown_rules`,
 // apart from the other reports: it does not stop registration, and the
 // module's declaration check reports it beside the body errors.
 sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {

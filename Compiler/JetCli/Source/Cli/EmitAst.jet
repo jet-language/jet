@@ -75,7 +75,7 @@ jet_cli_emit_ast_find_functions: fn(item: Item, name: String, found: &[JetCLIEmi
         .GenericModule(value) -> {
             loop inner in value.body -> jet_cli_emit_ast_find_functions(inner, name, found)
         }
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -242,7 +242,6 @@ jet_cli_emit_ast_item: fn(item: Item) -> JetCLIEmitNode Never! {
             children: loop message in value.messages -> jet_cli_emit_leaf("message", "message {message.name}")
             jet_cli_emit_node("protocol", "protocol {value.name}", children)
         }
-        .UserDerive(value) -> jet_cli_emit_leaf("derive", "derive {value.trait_name}<{value.type_param}>")
         .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "comptime loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
         .GenericModule(value) -> jet_cli_emit_ast_items("generic-module", "generic module {value.name}", value.body)
         .ModuleAlias(value) -> jet_cli_emit_leaf("module-alias", "{value.name}: module = {value.target}")

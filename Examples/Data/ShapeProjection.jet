@@ -16,11 +16,17 @@ use {
     db: core.db
 }
 
-derive T.LayoutFacts {
-    info: T.reflect().layout
-    selected: info[.port_slot]
-    layout_name: selected.name
-    layout_projection: fn(self) -> String Never! { "{layout_name}" }
+LayoutFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect().layout
+            selected: info[.port_slot]
+            layout_name: selected.name
+            layout_projection: fn(self) -> String Never! { "{layout_name}" }
+        }
+    }
 }
 
 #[LayoutFacts, CLI]

@@ -9,12 +9,18 @@ package: {
 
 use core.mem
 
-derive T.LayoutFacts {
-    info: T.reflect().layout
-    kind: info.kind
-    alignment: info.alignment
-    size: info.size
-    layout_facts: fn(self) -> String { "{kind}:{alignment}:{size}" }
+LayoutFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect().layout
+            kind: info.kind
+            alignment: info.alignment
+            size: info.size
+            layout_facts: fn(self) -> String { "{kind}:{alignment}:{size}" }
+        }
+    }
 }
 
 #[Layout(c, align(64)), LayoutFacts]

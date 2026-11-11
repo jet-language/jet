@@ -49,7 +49,6 @@ graph gesture. The coverage labels mean:
 - [Item::ErrorConv] status=readonly conversion facts, source edits.
 - [Item::Migration] status=readonly schema-evolution facts, source edits.
 - [Item::ProtocolDecl] status=readonly protocol facts, source edits.
-- [Item::UserDerive] status=readonly derive facts, source edits.
 - [Item::TemplateLoop] status=readonly item-template expansion facts, source
   edits.
 - [Item::GenericModule] status=readonly module-template facts, source edits.

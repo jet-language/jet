@@ -12,20 +12,26 @@ ATTRIBUTION: comptime { report.reflect().attribution }
 
 UNIT_SCALE: comptime { Meter.reflect().unit_scale_provenance }
 
-derive T.Summarize {
-    info: T.reflect()
-    type_name: info.name
-    first: info.fields[0].name
-    second: info.fields[1].name
-    third: info.fields[2].name
-    range_start: info.reflect().range.start
-    method_effects: info.methods[0].reflect().effects.values.len()
-    method_sendability: info.methods[0].reflect().sendability.known
-    method_movedness: info.methods[0].reflect().movedness.known
-    method_origin: info.methods[0].reflect().origin.tracked
-    method_view_mutable: info.methods[0].reflect().view_provenance.mutable
-    method_maturity: info.methods[0].reflect().maturity.level
-    compile_field_names: fn(self) -> String { "{type_name}: {first},{second},{third} range={range_start} effects={method_effects} send={method_sendability} moved={method_movedness} track={method_origin} view={method_view_mutable} maturity={#{method_maturity} == .Experimental}" }
+Summarize: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            type_name: info.name
+            first: info.fields[0].name
+            second: info.fields[1].name
+            third: info.fields[2].name
+            range_start: info.reflect().range.start
+            method_effects: info.methods[0].reflect().effects.values.len()
+            method_sendability: info.methods[0].reflect().sendability.known
+            method_movedness: info.methods[0].reflect().movedness.known
+            method_origin: info.methods[0].reflect().origin.tracked
+            method_view_mutable: info.methods[0].reflect().view_provenance.mutable
+            method_maturity: info.methods[0].reflect().maturity.level
+            compile_field_names: fn(self) -> String { "{type_name}: {first},{second},{third} range={range_start} effects={method_effects} send={method_sendability} moved={method_movedness} track={method_origin} view={method_view_mutable} maturity={#{method_maturity} == .Experimental}" }
+        }
+    }
 }
 
 // `reflect.of(x)` is legal exactly where `"{x}"` is, so a reflected type owns a

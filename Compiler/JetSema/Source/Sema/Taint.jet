@@ -616,7 +616,7 @@ sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistration
                 .Impl(definition) -> loop method in definition.methods -> sema_taint_add_callable(catalog, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].module_name, definition.type_name, method)
                 .ExternRust(block) -> loop function in block.functions -> sema_taint_add_extern_callable(catalog, graph.modules[module_row_index].module_identity, function)
                 .CModule(block) -> loop function in block.functions -> sema_taint_add_extern_callable(catalog, graph.modules[module_row_index].module_identity, function)
-                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -1852,7 +1852,7 @@ sema_taint_body_of: fn(graph: SemaRegistrationGraph, module_identity: String, ow
                     if method.name == name -> return Val(method)
                 }
             }
-            .Test(_) | .ErrorConv(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Test(_) | .ErrorConv(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -2711,7 +2711,7 @@ sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowS
             .Impl(definition) -> loop method in definition.methods -> sema_taint_check_function(graph, state, module_index, method, definition.type_name, found)
             .Test(test) -> sema_taint_check_body(graph, state, module_index, test.body, found)
             .ErrorConv(definition) -> sema_taint_check_body(graph, state, module_index, definition.body, found)
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

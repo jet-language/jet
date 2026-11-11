@@ -1,10 +1,10 @@
-Error [jet.DuplicateDefinition]: Generated method `debug_string` from `derive T.DebugText` collides with existing method `Point.debug_string`
-  --> tests/ui/derive_generated_collision.jet:2:5
+Error [jet.DuplicateDefinition]: Generated member `debug_string` would change or shadow `debug_string` on `Point`
+  --> tests/ui/derive_generated_collision.jet:6:13
     |
-  2 |     debug_string: fn(self) -> String { T.reflect().name }
-    |     ^^^^^^^^^^^^
- Why: `derive T.DebugText` and existing method `Point.debug_string` both define a member named `debug_string` on `Point`
- Fix: Rename the generated member in `derive T.DebugText`, or rename the colliding member
-generated member `debug_string` from `derive T.DebugText` at span 25..37
-existing method `Point.debug_string` at span 124..136
+  6 |             debug_string: fn(self) -> String { target.reflect().name }
+    |             ^^^^^^^^^^^^
+ Why: A rule may add a member but cannot change or shadow a written member
+ Fix: Rename the generated member or remove the existing member
+generated member `debug_string` from rule `DebugText` at span 117..129
+existing member `Point.debug_string` at span 237..249
 More: jet-lang.dev/e/E0105

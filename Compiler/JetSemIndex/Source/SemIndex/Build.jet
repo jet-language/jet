@@ -379,7 +379,7 @@ semindex_declaration_kind: fn(items: [Item], name: String) -> SemAnchor? {
             .Tag(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "tag", def_span: value.name_span, semantic_identity: None}) }
             .Distinct(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
             .TypeAlias(value) -> if value.name == name { found = Val(SemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
-            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if found != None -> return found
     }
@@ -454,7 +454,7 @@ semindex_state_marker_refs: fn(item: Item, db: &SemDB, ctx: SemWalk) {
         }
         .Impl(implementation) -> loop method in implementation.methods -> semindex_state_marker_refs_for_method(method, db, ctx)
         .Enum(definition) -> loop method in definition.methods -> semindex_state_marker_refs_for_method(method, db, ctx)
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -630,7 +630,6 @@ semindex_item_head: fn(item: Item) -> NamedSpan Never! {
         .ErrorConv(x) -> NamedSpan{name: "ErrorConv", span: x.from_span}
         .Migration(x) -> NamedSpan{name: "Migration", span: x.span}
         .ProtocolDecl(x) -> NamedSpan{name: "ProtocolDecl", span: x.span}
-        .UserDerive(x) -> NamedSpan{name: "UserDerive", span: x.span}
         .TemplateLoop(x) -> NamedSpan{name: "TemplateLoop", span: x.span}
         .GenericModule(x) -> NamedSpan{name: "GenericModule", span: x.span}
         .ModuleAlias(x) -> NamedSpan{name: "ModuleAlias", span: x.span}
@@ -770,19 +769,16 @@ semindex_type_def: fn(ctx: SemWalk, name: String, span: Span, derives: [String],
     semindex_def(ctx, "{prefix}:{ctx.scope_identity}::{name}", name, semindex_display(ctx, None, name), span, SemKind.Type{derives: derives})
 }
 
-semindex_derive_body: fn(body: [DeriveBodyItem], nested: Bool, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
+semindex_derive_body: fn(body: [DeriveBodyItem], db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
     loop body_item in body {
         if body_item == {
             .Item(item) -> semindex_item(item, db, ctx, modules)
             .Stmt(stmt) -> semindex_stmt(stmt, db, ctx, modules)
-            .Loop(_, _, source, inner, _) -> {
-                semindex_expr(source, db, ctx, modules)
-                if nested -> semindex_derive_body(inner, false, db, ctx, modules)
-            }
+            .Loop(_, _, source, _, _) -> semindex_expr(source, db, ctx, modules)
             .If(cond, _, then_body, else_body, _) -> {
                 semindex_expr(cond, db, ctx, modules)
-                semindex_derive_body(then_body, nested, db, ctx, modules)
-                if else_body == .Val(branch) -> semindex_derive_body(branch, nested, db, ctx, modules)
+                semindex_derive_body(then_body, db, ctx, modules)
+                if else_body == .Val(branch) -> semindex_derive_body(branch, db, ctx, modules)
             }
         }
     }
@@ -950,18 +946,12 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
                 db.defs.push(semindex_def(ctx, "protocol:{ctx.scope_identity}::{message.name}", message.name, semindex_display(ctx, Val(value.name), message.name), message.name_span, SemKind.EnumVariant{parent: value.name}))
             }
         }
-        .UserDerive(value) -> {
-            db.refs.push(semindex_scoped_ref(value.trait_name, value.trait_span, ctx))
-            saved: semindex_slot_enter(db, ctx, "body", "list")
-            semindex_derive_body(value.body, true, db, ctx, modules)
-            semindex_slot_leave(ctx, saved)
-        }
         .TemplateLoop(value) -> {
             source_saved: semindex_slot_enter(db, ctx, "source", "scalar")
             semindex_expr(value.source, db, ctx, modules)
             semindex_slot_leave(ctx, source_saved)
             saved: semindex_slot_enter(db, ctx, "body", "list")
-            semindex_derive_body(value.body, false, db, ctx, modules)
+            semindex_derive_body(value.body, db, ctx, modules)
             semindex_slot_leave(ctx, saved)
         }
         .GenericModule(value) -> db.defs.push(semindex_def(ctx, semindex_module_identity(ctx.scope_identity, value.name), value.name, semindex_display(ctx, None, value.name), value.name_span, SemKind.Module))
@@ -2148,7 +2138,7 @@ semindex_exported: fn(item: Item) -> String? Never! {
         .Enum(value) -> if value.is_pub { name = Val(value.name) }
         .Trait(value) -> if value.is_pub { name = Val(value.name) }
         .Tag(value) -> if value.is_pub { name = Val(value.name) }
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     name
 }
@@ -2293,7 +2283,7 @@ semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [Sem
             .Enum(enumeration) -> if enumeration.name == owner -> loop block in enumeration.trait_impls -> contracts.push(semindex_block_contract(block, owner, members))
             .CodeModule(code_module) -> if code_module.body == .Val(body) -> semindex_collect_trait_contracts(body, owner, members, contracts)
             .GenericModule(generic) -> semindex_collect_trait_contracts(generic.body, owner, members, contracts)
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -2306,7 +2296,7 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
             .Struct(value) -> declaration = Val(value.name_span)
             .Enum(value) -> declaration = Val(value.name_span)
             .Trait(value) -> declaration = Val(value.name_span)
-            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if declaration == .Val(found) {
             if found.start == span.start && found.end == span.end -> return Val(item)
@@ -2315,7 +2305,7 @@ semindex_find_declaration: fn(items: [Item], span: Span) -> Item? {
         if item == {
             .CodeModule(code_module) -> nested_items = code_module.body
             .GenericModule(generic) -> nested_items = Val(generic.body)
-            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if nested_items == .Val(body) {
             if semindex_find_declaration(body, span) == .Val(nested) -> return Val(nested)
@@ -2354,7 +2344,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
                         associated: loop entry in trait_def.assoc_types -> SemAssociatedType{name: entry.name, ty: None}
                         contracts.push(SemTraitContract{trait_name: trait_def.name, associated_types: associated, methods: semindex_member_signatures(db.members, trait_def.name, "trait_requirement", trait_def.name)})
                     }
-                    .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                    .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
                 break
             }

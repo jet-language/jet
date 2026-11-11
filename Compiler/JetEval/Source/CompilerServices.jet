@@ -488,11 +488,6 @@ jet_eval_compiler_services_syntax_node: fn(item: Item) -> TComptimeValue Never! 
             name = Val(value.name)
             span = value.name_span
         }
-        .UserDerive(value) -> {
-            kind = "derive"
-            name = Val(value.trait_name)
-            span = value.trait_span
-        }
         .TemplateLoop(value) -> {
             kind = "template_loop"
             span = value.span
@@ -681,7 +676,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                     functions.push(value.copy())
                     package_functions.push(value)
                 }
-                .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
                 value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")

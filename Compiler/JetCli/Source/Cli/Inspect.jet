@@ -1048,12 +1048,6 @@ jet_cli_compiler_item: fn(item: Item) -> JetCLIStatusValue Never! {
             start = value.name_span.start
             end = value.name_span.end
         }
-        .UserDerive(value) -> {
-            kind = "derive"
-            name = Val(value.trait_name)
-            start = value.trait_span.start
-            end = value.trait_span.end
-        }
         .TemplateLoop(value) -> {
             kind = "template_loop"
             start = value.span.start
@@ -1229,7 +1223,7 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
             .Enum(value) -> local.push(value.name)
             .TypeAlias(value) -> local.push(value.name)
             .Distinct(value) -> local.push(value.name)
-            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     params := [String:[TypeParam]]{}
@@ -1246,7 +1240,7 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
             .Impl(value) -> {
                 if value.trait_name == .Val(trait_name) -> jet_cli_inspect_register_impl(value.type_name, trait_name, value.methods, value.operator_rhs, value.delegation_field, local, params, impls)
             }
-            .Func(_) | .Distinct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in program.items {
@@ -1257,7 +1251,7 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
             .Enum(value) -> {
                 loop block in value.trait_impls -> jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, impls)
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     jet_cli_inspect_synthetic_operator(impls, "Vec3", "Mul", "Float", "Vec3")

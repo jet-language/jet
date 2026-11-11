@@ -780,9 +780,12 @@ container, generated, and hand-written implementations. A built-in derive adds
 typed Jet items beside the marked type and sends them through the same sema, IR builder,
 and codegen path as hand-written members. JSON therefore compares the same
 encoded bytes and decoded values for generated and hand-written codecs. A
-user-defined derive expands only when its provider or target is entry-local;
-otherwise E2711 points at the derive marker (D-SERDE2, D-SERDE16,
-D-META-CODE1, D-META-BODY1).
+package provider is a marker whose `expand` template holds the generated
+members; the built-in `Equatable` and `Comparable` providers are Prelude markers
+of the same shape. A marker from another module is written through its import
+alias (`#Labels.RemoteLabel`), so no separate orphan rule applies and E2711 is
+retired. The old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2,
+D-SERDE16, D-META-CODE1, D-META-BODY1, D-MARKER-LAW1).
 
 A struct's `validate { … }` block declares checks in the exact form
 `check(condition, at: field, "message")`. `field` names a sibling field. Every

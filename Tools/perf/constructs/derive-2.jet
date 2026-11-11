@@ -1,7 +1,13 @@
-derive T.FieldNames {
-    comptime loop field in T.reflect().fields {
-        method: "field_{field.reflect().name}"
-        #{method}: fn(self) -> String { field.reflect().name }
+FieldNames: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            comptime loop field in target.reflect().fields {
+                method: "field_{field.reflect().name}"
+                #{method}: fn(self) -> String { field.reflect().name }
+            }
+        }
     }
 }
 

@@ -54,7 +54,7 @@ sema_name_display_item: fn(facts: &NameFacts, module_index: Int, module_alias: S
                 loop nested in body -> sema_name_display_item(facts, module_index, module_alias, child.name, internal, display, nested)
             }
         }
-        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 sema_name_display_selected: fn(item: Item, type_prefix: String, value_prefix: String?) -> Bool Never! {
@@ -66,7 +66,7 @@ sema_name_display_selected: fn(item: Item, type_prefix: String, value_prefix: St
         .Impl(implementation) -> implementation.type_name.starts_with(type_prefix)
         .Const(definition) -> if value_prefix == .Val(prefix) -> definition.name.starts_with(prefix) else -> false
         .CodeModule(child) -> if value_prefix == .Val(prefix) -> child.name.starts_with(prefix) else -> false
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 sema_name_plain_display_paths: fn(facts: &NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
@@ -115,7 +115,7 @@ sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, p
             .Tag(definition) -> name = definition.name
             .Distinct(definition) -> name = definition.name
             .TypeAlias(definition) -> name = definition.name
-            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if !name.starts_with(type_prefix) || name.bytes().len() == prefix_end -> next
         first: Int.from_u8(name.bytes()[prefix_end])

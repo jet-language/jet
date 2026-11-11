@@ -1259,7 +1259,7 @@ sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnviro
             marker: Marker{name: "Test", negated: false, name_span: test.span, args: args, arg_labels: labels, span: test.span, ct: None}
             _ := sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -1476,7 +1476,7 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
                 loop nested in body -> sema_marker_rules_item_applications(nested, applications)
             }
         }
-        .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -1592,9 +1592,6 @@ sema_marker_rules_unknown_error: fn(registry: SemaScopeMembersMarkerRegistry, ma
     }
     loop name in registry.marker_rules {
         sema_marker_rules_append_name(names, name.name)
-    }
-    loop name in registry.derive_provider_names {
-        sema_marker_rules_append_name(names, name)
     }
     nearest := ""
     nearest_distance := 3

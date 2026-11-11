@@ -1,9 +1,15 @@
-derive T.Label {
-    info: T.reflect()
-    tname: info.name
-    // resolves to the same value as `tname`
-    lbl: #{tname}
-    label: fn(self) -> String { #{lbl} }
+Label: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            tname: info.name
+            // resolves to the same value as `tname`
+            lbl: #{tname}
+            label: fn(self) -> String { #{lbl} }
+        }
+    }
 }
 
 #Label

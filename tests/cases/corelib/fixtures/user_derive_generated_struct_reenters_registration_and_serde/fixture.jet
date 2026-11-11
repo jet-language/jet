@@ -1,10 +1,16 @@
 
 use json: core.encoding.json
 
-derive T.ConfigSchema {
-    #Codable
-    GeneratedConfig: struct {
-        ports: [Int]{[80, 443]}
+ConfigSchema: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            #Codable
+            GeneratedConfig: struct {
+                ports: [Int]{[80, 443]}
+            }
+        }
     }
 }
 

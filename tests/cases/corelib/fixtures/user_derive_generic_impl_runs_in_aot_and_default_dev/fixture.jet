@@ -1,9 +1,15 @@
 
-derive T.TypeName {
-    info: T.reflect()
-    param: info.type_params[0].name
-    get_value: fn(self) -> #{param} { self.value.copy() }
-    type_name: fn(self) -> String { T.reflect().name }
+TypeName: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            param: info.type_params[0].name
+            get_value: fn(self) -> #{param} { self.value.copy() }
+            type_name: fn(self) -> String { target.reflect().name }
+        }
+    }
 }
 
 #TypeName

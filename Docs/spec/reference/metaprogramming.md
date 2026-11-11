@@ -212,9 +212,11 @@ in the [Jetpack reference](jetpack-epoch5.md). Build-side inspection is
 read-only unless a ratified generation operation is used; a build entry cannot
 silently rewrite an existing declaration.
 
-The source registry reserves typed item-template generation. `derive T.Trait {
-... }` and `b.generate(name) { ... }` carry ordinary Jet item and statement
-grammar, and neither form accepts a source string or re-lexes generated text.
+The source registry reserves typed item-template generation. A marker's
+`expand` template and `b.generate(name) { ... }` carry ordinary Jet item and
+statement grammar, and neither form accepts a source string or re-lexes
+generated text. The old `derive T.Trait { ... }` provider declaration is not
+Jet syntax; a provider is a marker.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
 A `#{name}` paste in a `b.generate` body that names a local of the build entry splices
