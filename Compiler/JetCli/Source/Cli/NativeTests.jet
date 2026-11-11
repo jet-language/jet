@@ -357,8 +357,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
         batch_spec := clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path)
         if time_limit == .Val(limit) {
-            bound: limit.in(.Milliseconds) ?? return Err("the test time limit is out of range")
-            batch_spec = batch_spec.timeout(Duration.milliseconds(bound * (tests.len() + check_names.len())) ?? return Err("the test batch time limit is out of range"))
+            batch_spec = batch_spec.timeout(limit * (tests.len() + check_names.len()))
         }
         batch: batch_spec.run() ?? {
             native_test_files.remove(batch_path).drop("native test spawn already failed")

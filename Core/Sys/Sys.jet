@@ -1057,12 +1057,14 @@ limit_duration: fn(raw: Int?) -> Duration? {
 
 limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
     span: value ?? return Ok(None)
-    nanos: span.in(.Nanoseconds) ?? 0
-    if nanos < 0 {
+    if span.sign() < 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
             cause: Val("a CPU-time limit cannot be negative; pass None for unlimited")}))
     }
-    Ok(Val(nanos /% 1000000000 + (if nanos % 1000000000 == 0 -> 0 else -> 1)))
+    // Whole seconds, rounded up when a fraction of a second is left over.
+    whole: span.total_seconds()
+    if (Duration.seconds(whole) ?? span).difference(span).is_zero() -> return Ok(Val(whole))
+    Ok(Val(whole + 1))
 }
 
 // EPERM (raising a hard limit without privilege) and EINVAL (soft above
