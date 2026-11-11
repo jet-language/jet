@@ -110,10 +110,11 @@ run: fn() {
     if args.len() == 0 || args[0] == "" -> process.fail(1, "usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
     batch: args[0]
     subs: args.slice(1, args.len())
-    w: roots.worktree()
-    g: "{roots.state()}/scratch/Main"
-    o: roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))
-    i: "{roots.main()}/integ/{batch}"
+    r: roots.roots()
+    w: r["JET_DEV_WORKTREE"]
+    g: "{r["JET_STATE_ROOT"]}/scratch/Main"
+    o: process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())
+    i: "{r["JET_SCRATCH_ROOT"]}/lanes/Main/integ/{batch}"
     t: "{i}/tree"
     files.remove_all(i) ?? ()
     loop dir in [t, "{i}/tests", "{i}/bin"] -> files.create_dir_all(dir)
@@ -126,7 +127,7 @@ run: fn() {
     report := ["# Integration {batch} on origin/dev {base}", ""]
     files.write(report_path, "{report.join("\n")}\n")
     stacked := [String]{}
-    loop ps in roots.env_or("INTEG_PRE", "").words() {
+    loop ps in (process.env_nonempty("INTEG_PRE") ?? "").words() {
         // An item without a batch names the SUB for both.
         parts: ps.partition(":")
         pb: parts.head
@@ -161,7 +162,7 @@ run: fn() {
     crc := census.code
     print("census rc={crc}")
     // The repository ratchets and generator checks (Land.jet ratchets), with the seed on the composed tree, all at once.
-    seed: files.canonicalize(roots.seed())
+    seed: files.canonicalize(r["JET_SEED"])
     id: files.read("{seed}/IDENTITY").trim()
     ratchets: Sh{"{"{seed}/jet"} Tools/agent/Land.jet ratchets"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).run().output.lines()
     files.create_dir_all("{i}/ratchets")
@@ -227,7 +228,7 @@ run: fn() {
         loop golden in cited {
             stem: golden.removesuffix(".out").removesuffix(".err")
             ran: Sh{"bash {"{g}/capped.sh"} 24G nice -n 19 jet test Compiler --profile golden {stem}"}.spec().cwd(t)
-                .env("PATH", "{i}/bin:{roots.env_or("PATH", "")}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31")
+                .env("PATH", "{i}/bin:{process.env_nonempty("PATH") ?? ""}").env("JET", self_jet).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).env("CAP_CPUS", "16-31")
                 .timeout(1800s).stderr(.Stdout).run()
             files.write("{i}/goldens.{stem.replace("/", "_")}.out", ran.output)
             golden_rcs.push("{rc(ran)}\t{stem}")

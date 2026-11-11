@@ -148,31 +148,32 @@ snapshot: fn(worktree: String, tree: String, named: [String]) {
 
 run: fn() {
     named: process.args()
-    g: "{roots.state()}/scratch/Main"
-    run_root: roots.run_dir()
+    r: roots.roots()
+    g: "{r["JET_STATE_ROOT"]}/scratch/Main"
+    run_root: r["JET_RUN_ROOT"]
     files.create_dir_all(run_root)
     // Its own lock AND its own directories: precommit censuses never queue behind lanes' long checks, and
     // never share r14 with Tools/agent/land/census-snap.sh (vbatch's launch census).
     _held: files.lock("{run_root}/precommit-census.lock")
-    prepared: roots.env_or("CENSUS_TREE", "")
-    tree: if prepared == "" -> "{roots.scratch()}/discovery/r14p/snap" else -> prepared
-    compiler: files.canonicalize(roots.env_or("CENSUS_JET_DIR", roots.seed()))
-    id: roots.env_or("CENSUS_JET_IDENTITY", files.read_or("{compiler}/IDENTITY", "").trim())
-    at: roots.env_or("CENSUS_OUT", "{roots.scratch()}/discovery/r14p/census")
+    prepared: process.env_nonempty("CENSUS_TREE") ?? ""
+    tree: if prepared == "" -> "{r["JET_SCRATCH_ROOT"]}/discovery/r14p/snap" else -> prepared
+    compiler: files.canonicalize(process.env_nonempty("CENSUS_JET_DIR") ?? r["JET_SEED"])
+    id: process.env_nonempty("CENSUS_JET_IDENTITY") ?? files.read_or("{compiler}/IDENTITY", "").trim()
+    at: process.env_nonempty("CENSUS_OUT") ?? "{r["JET_SCRATCH_ROOT"]}/discovery/r14p/census"
     files.remove_all(at) ?? ()
     files.create_dir_all(at)
-    if prepared == "" -> snapshot(roots.worktree(), tree, named)
+    if prepared == "" -> snapshot(r["JET_DEV_WORKTREE"], tree, named)
     // From here on, a relative root or report names a path from the tree, as in the original.
     files.chdir(tree) ?? process.fail(2, "census: cd {tree}: {err}")
     seed: "{compiler}/jet"
-    check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCli"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_TOOLCHAIN_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
+    check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCli"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": process.env_nonempty("CENSUS_TOOLCHAIN_ROOT") ?? ".", "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
     print("check rc={check_rc}")
     // The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
     census_errors(g, "{at}/check-keep-going.tsv", 21)
     if check_rc != 0 -> process.exit(1)
-    if roots.env_or("CENSUS_BUILD", "1") == "0" -> process.exit(0)
+    if (process.env_nonempty("CENSUS_BUILD") ?? "1") == "0" -> process.exit(0)
     files.remove_all("Compiler/JetCli/.jet/build") ?? ()
-    build_rc: pass(jetenv(g, seed, Sh{"build --threads 12 Compiler"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_BUILD_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/build-keep-going.tsv"]).timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
+    build_rc: pass(jetenv(g, seed, Sh{"build --threads 12 Compiler"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": process.env_nonempty("CENSUS_BUILD_ROOT") ?? ".", "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/build-keep-going.tsv"]).timeout(time.duration_seconds(1800)), "{at}/build.out", "{at}/build.err")
     build_rows_count: rows("{at}/build-keep-going.tsv")
     print("build rc={build_rc} rows={build_rows_count}")
     build_rows("{at}/build-keep-going.tsv")
@@ -188,8 +189,8 @@ run: fn() {
     }
     // Guards pass: tests/guards on the seed, failing only on a guard row or closed-list problem not in
     // guards-known.txt. CENSUS_GUARDS_TIMEOUT is in seconds, 0 for no limit.
-    if roots.env_or("CENSUS_GUARDS", "1") == "1" {
-        limit: roots.env_or("CENSUS_GUARDS_TIMEOUT", "2400").to_int() ?? 2400
+    if (process.env_nonempty("CENSUS_GUARDS") ?? "1") == "1" {
+        limit: (process.env_nonempty("CENSUS_GUARDS_TIMEOUT") ?? "2400").to_int() ?? 2400
         guards: jetenv(g, seed, Sh{"test tests/guards"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": "."], stack: false)
         _ := pass(if limit > 0 -> guards.timeout(time.duration_seconds(limit)) else -> guards, "{at}/guards.out")
         gate: Sh{"node {"{g}/guards-gate.mjs"} {"{at}/guards.out"} {"{g}/guards-known.txt"}"}.spec().stderr(.Stdout).run()
@@ -202,7 +203,7 @@ run: fn() {
     runtime(g, self_jet, at, id)
     // Self-check pass: the compiler just built checks the compiler packages, then every Core body, with
     // keep-going, as chain s2 does.
-    if roots.env_or("CENSUS_SELFCHECK", "1") == "1" {
+    if (process.env_nonempty("CENSUS_SELFCHECK") ?? "1") == "1" {
         loop package in ["Compiler/JetCli", "Core"] {
             name: if package == "Core" -> "selfcheck-core" else -> "selfcheck"
             tsv: "{at}/{name}-keep-going.tsv"
@@ -214,5 +215,7 @@ run: fn() {
         }
     }
     // Hosted Jetpack pass, when a named file is under Jetpack/: the compiler census alone never compiles Jetpack.
-    if named.any(path -> path.starts_with("Jetpack/")) && roots.env_or("CENSUS_JETPACK", "1") == "1" -> jetpack(g, self_jet, at, id)
+    if named.any(path -> path.starts_with("Jetpack/")) && (process.env_nonempty("CENSUS_JETPACK") ?? "1") == "1" {
+        jetpack(g, self_jet, at, id)
+    }
 }

@@ -78,6 +78,17 @@ vars: fn() -[Env]> [String] EnvError! {
     entry_names(__env_snapshot())
 }
 
+/// The process environment as a map: every variable whose name and value are
+/// UTF-8 text (one that is not is left out, as `get` reads it as unset).
+environment: fn() -[Env]> [String: String] Never! {
+    found := [String: String]{}
+    loop entry in __env_snapshot() {
+        name: String.from_bytes(entry.name) ?? next
+        found[name] = String.from_bytes(entry.value) ?? next
+    }
+    found
+}
+
 // Immutable host bytes are not the logical process environment.
 __startup_env: fn() -> [(name: [U8], value: [U8])] Never! {
     env_columns(core.sys.__startup_env_columns())
@@ -428,6 +439,214 @@ expand: fn(value: String) -[Env]> String Never! {
         i = i + 1
     }
 }
+
+/// The process environment with the env file at `path` applied over it, as a
+/// shell has its variables after `set -a; . path`, read with no shell: the
+/// format is `env_text`'s, `$NAME` reads an earlier line's value, else the
+/// environment, and a line's value replaces the environment's. No file at
+/// `path` leaves the environment as it is, as `[ -f path ] && . path` does.
+env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
+    vars: environment()
+    text := ""
+    if files.read(path) == {
+        .Ok(found) -> text = found
+        .Err(.NotFound(_)) -> return Ok(vars)
+        .Err(error) -> return Err(error)
+    }
+    Ok(vars.merge(env_text(text, vars, path) ?? return Err(err)))
+}
+
+/// The variables `text` assigns as an env file, each with its value. A line
+/// is blank, a `#` comment, or `NAME=value` with an optional `export ` before
+/// it and an optional ` # comment` after it. The value is one shell word:
+/// `'…'` is literal, `"…"` takes `\"`, `\\`, `\$` and `\`` as escapes, a bare
+/// `\c` is `c`, and `$NAME`, `${NAME}`, `${NAME:-word}` and `${NAME-word}`
+/// (`word` when NAME is unset or empty, or unset) and `${NAME:?word}` and
+/// `${NAME?word}` (an error then) expand as the shell expands them, `word`
+/// included. `$NAME` reads an earlier line's value, else `vars`, else
+/// nothing. What else the shell would run or expand (`$(…)`, backticks, `~`,
+/// `$1`, `;`, `|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms, `+=`, an
+/// unquoted space) is an `IOError.InvalidInput` naming `source:line`.
+env_text: fn(text: String, vars: [String: String], source: String{"env text"}) -> [String: String] IOError! {
+    assigned := [String: String]{}
+    number := 0
+    loop raw in text.lines() {
+        number += 1
+        line := EnvLine{raw: raw.bytes(), at: 0}
+        reason: env_line(line, vars, assigned) ?? next
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Read, resource: Val("{source}:{number}"), os_code: None, cause: Val(reason),
+        }))
+    }
+    Ok(assigned)
+}
+
+// An env file line being read: its bytes and the index of the next one.
+EnvLine: struct {
+    raw: [U8]
+    at: Int
+}
+
+// Reads one line into `assigned`: None for a blank line, a comment or an
+// assignment, else what keeps the line from being read.
+env_line: fn(line: &EnvLine, vars: [String: String], assigned: &[String: String]) -> String? Never! {
+    env_blanks(line)
+    if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
+    if line.at + 6 < line.raw.len() && slice_ascii(line.raw, line.at, line.at + 6) == "export" && env_blank(line.raw[line.at + 6]) {
+        line.at += 6
+        env_blanks(line)
+    }
+    start: line.at
+    loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
+    if line.at == start || env_digit(line.raw[start]) || line.at >= line.raw.len() || line.raw[line.at] != (U8{61}) {
+        return Val("a line is `NAME=value`, `export NAME=value`, a `#` comment or blank")
+    }
+    name: slice_ascii(line.raw, start, line.at)
+    line.at += 1
+    value := [U8]{}
+    reason: env_word(line, vars, assigned, value, true, false)
+    if reason != None -> return reason
+    env_blanks(line)
+    if line.at < line.raw.len() && line.raw[line.at] != (U8{35}) -> return Val("a value is one word: quote it to hold a space")
+    assigned[name] = String.from_bytes(value) ?? return Val("the value is not UTF-8")
+    None
+}
+
+// Reads a word onto `out`: up to a blank, or with `braced` up to the `}` that
+// ends a `${NAME:-word}`, left unread. Expansions push their value only when
+// `live`, as the shell expands a default only when it takes it.
+env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+    first: line.at
+    loop line.at < line.raw.len() {
+        c: line.raw[line.at]
+        if braced && c == (U8{125}) -> return None
+        if !braced && env_blank(c) -> return None
+        if c == (U8{39}) {
+            close := line.at + 1
+            loop close < line.raw.len() && line.raw[close] != (U8{39}) -> close += 1
+            if close >= line.raw.len() -> return Val("a `'` quote is not closed")
+            loop index in line.at + 1..<close -> out.push(line.raw[index])
+            line.at = close + 1
+            next
+        }
+        if c == (U8{34}) {
+            line.at += 1
+            reason: env_double(line, vars, assigned, out, live)
+            if reason != None -> return reason
+            next
+        }
+        if c == (U8{36}) {
+            reason: env_dollar(line, vars, assigned, out, live)
+            if reason != None -> return reason
+            next
+        }
+        if c == (U8{92}) {
+            if line.at + 1 >= line.raw.len() -> return Val("a `\\` does not continue a line here")
+            out.push(line.raw[line.at + 1])
+            line.at += 2
+            next
+        }
+        if c == (U8{126}) && (line.at == first || line.raw[line.at - 1] == (U8{58})) -> return Val("`~` is not expanded here: write $HOME")
+        if ([U8]{59, 38, 124, 60, 62, 40, 41, 96}).contains(c) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 1)}` is shell syntax an env file does not run")
+        out.push(c)
+        line.at += 1
+    }
+    if braced -> return Val("a `${{` is not closed")
+    None
+}
+
+// Reads a `"…"` word part after its opening quote, through the closing one.
+env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
+    loop line.at < line.raw.len() {
+        c: line.raw[line.at]
+        if c == (U8{34}) {
+            line.at += 1
+            return None
+        }
+        if c == (U8{36}) {
+            reason: env_dollar(line, vars, assigned, out, live)
+            if reason != None -> return reason
+            next
+        }
+        if c == (U8{96}) -> return Val("a backtick command is not run here")
+        if c == (U8{92}) && line.at + 1 < line.raw.len() && ([U8]{34, 36, 92, 96}).contains(line.raw[line.at + 1]) -> line.at += 1
+        out.push(line.raw[line.at])
+        line.at += 1
+    }
+    Val("a `\"` quote is not closed")
+}
+
+// Reads the expansion at a `$`, pushing its value onto `out` when `live`; a
+// `$` that starts none is itself.
+env_dollar: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
+    after: if line.at + 1 < line.raw.len() -> line.raw[line.at + 1] else -> U8{32}
+    if after == (U8{123}) {
+        line.at += 2
+        return env_braced(line, vars, assigned, out, live)
+    }
+    if after == (U8{40}) -> return Val("a `$(` command is not run here")
+    if env_digit(after) || ([U8]{35, 63, 42, 64, 33, 36, 45, 39}).contains(after) -> return Val("`{slice_ascii(line.raw, line.at, line.at + 2)}` is a shell parameter an env file does not have")
+    if !is_env_ident(after) {
+        out.push(U8{36})
+        line.at += 1
+        return None
+    }
+    start: line.at + 1
+    line.at = start
+    loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
+    if live -> loop byte in (env_lookup(slice_ascii(line.raw, start, line.at), vars, assigned) ?? "").bytes() -> out.push(byte)
+    None
+}
+
+// Reads a `${…}` after its `${`, through its `}`.
+env_braced: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
+    forms: "only `${{NAME}}`, `${{NAME:-word}}`, `${{NAME-word}}`, `${{NAME:?word}}` and `${{NAME?word}}` expand here"
+    start: line.at
+    loop line.at < line.raw.len() && is_env_ident(line.raw[line.at]) -> line.at += 1
+    if line.at == start || env_digit(line.raw[start]) -> return Val(forms)
+    if line.at >= line.raw.len() -> return Val("a `${{` is not closed")
+    name: slice_ascii(line.raw, start, line.at)
+    value: env_lookup(name, vars, assigned)
+    if line.raw[line.at] == (U8{125}) {
+        line.at += 1
+        if live -> loop byte in (value ?? "").bytes() -> out.push(byte)
+        return None
+    }
+    colon: line.raw[line.at] == (U8{58})
+    if colon -> line.at += 1
+    op: if line.at < line.raw.len() -> line.raw[line.at] else -> U8{0}
+    if op != (U8{45}) && op != (U8{63}) -> return Val(forms)
+    line.at += 1
+    unset: value == None || (colon && value == Val(""))
+    word := [U8]{}
+    reason: env_word(line, vars, assigned, word, live && unset, true)
+    if reason != None -> return reason
+    line.at += 1
+    if !live -> return None
+    if !unset {
+        loop byte in (value ?? "").bytes() -> out.push(byte)
+        return None
+    }
+    if op == (U8{63}) && word.len() == 0 -> return Val("{name}: parameter null or not set")
+    if op == (U8{63}) -> return Val("{name}: {String.from_bytes(word) ?? ""}")
+    loop byte in word -> out.push(byte)
+    None
+}
+
+// `name`'s value: an earlier line's, else `vars`'s; None when it is unset.
+env_lookup: fn(name: String, vars: [String: String], assigned: [String: String]) -> String? Never! {
+    if assigned.get(name) == .Val(value) -> return Val(value.copy())
+    if vars.get(name) == .Val(value) -> return Val(value.copy())
+    None
+}
+
+env_blanks: fn(line: &EnvLine) Never! {
+    loop line.at < line.raw.len() && env_blank(line.raw[line.at]) -> line.at += 1
+}
+
+env_blank: fn(byte: U8) -> Bool { byte == (U8{32}) || byte == (U8{9}) || byte == (U8{13}) }
+
+env_digit: fn(byte: U8) -> Bool { byte >= (U8{48}) && byte <= (U8{57}) }
 
 pid: fn() -[Env]> Int Never! { getpid() }
 
@@ -1329,6 +1548,65 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert(expand("$$NAME") == "$NAME")
     assert(expand("100%") == "100%")
     assert(expand("é") == "é")
+}
+
+#Test("env_text reads NAME=value lines as the shell sources them") {
+    vars := [String: String]{}
+    vars["HOME"] = "/home/u"
+    vars["EMPTY"] = ""
+    vars["JET_SCRATCH_ROOT"] = "/from/env"
+    text: "# a comment\n\n  export A=\"${{JET_SCRATCH_ROOT:-/mnt/x}}\"  # kept from the environment\nB=\"${{UNSET_NAME:-$HOME/.cache/jet}}\"\nC='lit $HOME'\nD=${{EMPTY:-e}}:${{EMPTY-f}}:$A/b\\ c\nE=\"q\\\"\\$x\\\\\"\nF=${{UNSET_NAME:-${{B}}/n}}\nG=${{A:-${{UNSET_NAME:?unused}}}}\nexport H=\nI=a#b\nJ=$:$/\"$\"\r\n"
+    found: env_text(text, vars) ?? panic("the env text did not read: {err}")
+    assert_eq(found.get("A"), Val("/from/env"))
+    assert_eq(found.get("B"), Val("/home/u/.cache/jet"))
+    assert_eq(found.get("C"), Val("lit $HOME"))
+    assert_eq(found.get("D"), Val("e::/from/env/b c"))
+    assert_eq(found.get("E"), Val("q\"$x\\"))
+    assert_eq(found.get("F"), Val("/home/u/.cache/jet/n"))
+    assert_eq(found.get("G"), Val("/from/env"))
+    assert_eq(found.get("H"), Val(""))
+    assert_eq(found.get("I"), Val("a#b"))
+    assert_eq(found.get("J"), Val("$:$/$"))
+    assert(found.get("HOME") == None)
+    assert_eq(found.len(), 10)
+}
+
+#Test("env_text refuses what only a shell would run, naming the line") {
+    vars := [String: String]{}
+    refused: [String]{"A=$(id)", "A=`id`", "A=~/x", "A=x:~/y", "A=$1", "A=${{#B}}", "A=${{B:+c}}", "A=${{B:=c}}", "A+=b", "A=b c", "A=b; c", "A=b|c", ": ${{A:=b}}", "A=\"b", "A='b", "A=${{B", "A=b\\", "A=${{UNSET_NAME:?is required}}", "1A=b", "A b"}
+    loop line in refused {
+        if env_text("OK=1\n{line}\n", vars, "probe") == {
+            .Err(.InvalidInput(context)) -> assert_eq(context.resource, Val("probe:2"))
+            .Err(_) -> panic("`{line}` gave another error kind")
+            .Ok(_) -> panic("`{line}` was read")
+        }
+    }
+    if env_text("A=${{UNSET_NAME:?is required}}", vars) == .Err(.InvalidInput(context)) -> assert_eq(context.cause, Val("UNSET_NAME: is required"))
+}
+
+#Test("env_file applies a file over the environment and reads a missing one as the environment") {
+    dir: files.mkdtemp("jet-env-file") ?? panic("no temp dir")
+    files.write("{dir}/env", "export JET_ENV_FILE_A=\"$JET_ENV_FILE_HOME/a\"\nJET_ENV_FILE_B=$JET_ENV_FILE_A/b\nJET_ENV_FILE_KEPT=${{JET_ENV_FILE_KEPT:-file}}\nJET_ENV_FILE_HOME=/file\n") ?? panic("cannot write the env file")
+    set("JET_ENV_FILE_HOME", "/h")
+    set("JET_ENV_FILE_KEPT", "env")
+    found: env_file("{dir}/env") ?? panic("the env file did not read: {err}")
+    assert_eq(found.get("JET_ENV_FILE_A"), Val("/h/a"))
+    assert_eq(found.get("JET_ENV_FILE_B"), Val("/h/a/b"))
+    assert_eq(found.get("JET_ENV_FILE_KEPT"), Val("env"))
+    assert_eq(found.get("JET_ENV_FILE_HOME"), Val("/file"))
+    missing: env_file("{dir}/missing") ?? panic("a missing file is an error")
+    assert(missing.get("JET_ENV_FILE_A") == None)
+    assert_eq(missing.get("JET_ENV_FILE_HOME"), Val("/h"))
+    assert(unset("JET_ENV_FILE_HOME") ?? false)
+    assert(unset("JET_ENV_FILE_KEPT") ?? false)
+    files.remove_all(dir) ?? ()
+}
+
+#Test("environment holds the process's variables") {
+    set("JET_ENVIRONMENT_PROBE", "value")
+    assert_eq(environment().get("JET_ENVIRONMENT_PROBE"), Val("value"))
+    assert(unset("JET_ENVIRONMENT_PROBE") ?? false)
+    assert(environment().get("JET_ENVIRONMENT_PROBE") == None)
 }
 
 host_env: fn(name: String) -[Env]> String? Never! {

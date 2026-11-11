@@ -7,6 +7,14 @@
 # needs no setup. No committed file names one machine's copy
 # (the personal-information guard of Tools/agent/LaneCheck.jet).
 #
+# The env file holds assignments only, so the Jet twin reads it with no shell
+# (core.sys.env_file): each line is blank, a `#` comment, or NAME=value with
+# an optional `export ` before it and an optional ` # comment` after it. The
+# value is one word: '...' is literal; "..." expands and takes \" \\ \$ \` as
+# escapes; $NAME, ${NAME}, ${NAME:-word}, ${NAME-word}, ${NAME:?word} and
+# ${NAME?word} expand, the word included. Nothing else: no commands, `~`,
+# $1, `;`, `+=` or other ${...} forms.
+#
 #   JET_STATE_ROOT    per-user dev state and caches  ($XDG_CACHE_HOME/jet-dev)
 #   JET_SCRATCH_ROOT  large shared scratch           ($JET_STATE_ROOT)
 #   JET_RUN_ROOT      land queue, locks, slot ledger ($JET_SCRATCH_ROOT/run)

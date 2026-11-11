@@ -52,11 +52,12 @@ run: fn() {
     args: process.args()
     if args.len() == 0 -> process.fail(1, "usage: jet Tools/agent/orchestrator/IntegLand4.jet BATCH SUB...")
     batch: args[0]
-    queue: "{roots.state()}/scratch/Main"
-    integ: "{roots.main()}/integ/{batch}"
+    r: roots.roots()
+    queue: "{r["JET_STATE_ROOT"]}/scratch/Main"
+    integ: "{r["JET_SCRATCH_ROOT"]}/lanes/Main/integ/{batch}"
     if !files.read_or("{integ}/REPORT.md", "").has_line_prefix("Census rc=0 ") -> fail("integ-land: batch {batch} did not pass its census/ratchets")
     // Every git step and tree path below is the dev worktree's.
-    files.chdir(roots.worktree()) ?? process.exit(2)
+    files.chdir(r["JET_DEV_WORKTREE"]) ?? process.exit(2)
     if (Sh{"git status --porcelain=v1 -uno"}.text()) != "" -> fail("integ-land: dev worktree has changes")
     _ := Sh{"git fetch -q origin"}.ok()
     base: files.read("{integ}/BASE").trim()
@@ -91,7 +92,7 @@ run: fn() {
     // batch applied landed (b4b: landing a subset with the full regen put SchedLead-6 rows on dev without their source).
     applied: lists.filter(name -> name != "regen.files").len()
     // INTEG_LANDED_BEFORE=k: k SUBs of this batch already landed in an earlier, interrupted run.
-    done: landed.len() + (roots.env_or("INTEG_LANDED_BEFORE", "0").to_int() ?? 0)
+    done: landed.len() + ((process.env_nonempty("INTEG_LANDED_BEFORE") ?? "0").to_int() ?? 0)
     if files.read_or("{integ}/regen.patch", "") != "" {
         if done != applied -> fail("integ-land: not every SUB landed, so regen.patch was not applied; rerun the generators")
         sha: commit("{integ}/regen.patch", "{integ}/regen.files", "{integ}/regen.commitmsg", "integration: regenerate the generated tables for {batch}\n\nIntegrated: {batch} on {base}\n")

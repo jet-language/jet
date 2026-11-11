@@ -164,9 +164,10 @@ run: fn() {
     spec: json.parse(files.read(args[0]))
     tool: "/Tools/agent/orchestrator/TowerSpecApply.jet"
     checkout: if sys.executable().ends_with(tool) -> sys.executable().removesuffix(tool) else -> "."
-    repo: files.absolute(roots.env_or("TOWER_SPEC_REPO", checkout))
-    writer: files.absolute(roots.env_or("TOWER_SPEC_WRITER", "{roots.state()}/scratch/Main/tower-dev.mjs"))
-    patches: files.absolute(roots.env_or("TOWER_SPEC_PATCHES", roots.main()))
+    r: roots.roots()
+    repo: files.absolute(process.env_nonempty("TOWER_SPEC_REPO") ?? checkout)
+    writer: files.absolute(process.env_nonempty("TOWER_SPEC_WRITER") ?? "{r["JET_STATE_ROOT"]}/scratch/Main/tower-dev.mjs")
+    patches: files.absolute(process.env_nonempty("TOWER_SPEC_PATCHES") ?? "{r["JET_SCRATCH_ROOT"]}/lanes/Main")
     failed := 0
     loop s in (if spec == .Array(l) -> l.copy() else -> [Dyn]{}) {
         if apply(s, repo, writer, patches, go: args.contains("--go")) == .Err(e) {

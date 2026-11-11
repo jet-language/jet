@@ -245,7 +245,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
 // Regenerates every generated file an applied SUB touched, with the seed,
 // from the composed sources.
 regenerate: fn(tree: String, integ: String) {
-    seed: files.canonicalize(roots.seed())
+    seed: files.canonicalize(roots.roots()["JET_SEED"])
     // The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/agent/RuntimeGenerators.jet\tall\n")
@@ -276,8 +276,9 @@ run: fn() {
     if args.len() < 2 -> process.fail(1, "usage: jet Tools/agent/orchestrator/IntegApply6.jet TREE I SUB...")
     tree: args[0]
     integ: args[1]
-    g: "{roots.state()}/scratch/Main"
-    if !based(tree, roots.worktree()) -> stop("integ-apply: init failed", 2)
+    r: roots.roots()
+    g: "{r["JET_STATE_ROOT"]}/scratch/Main"
+    if !based(tree, r["JET_DEV_WORKTREE"]) -> stop("integ-apply: init failed", 2)
     files.write("{integ}/generators", "")
     order := [String]{}
     failures := [String]{}
@@ -287,7 +288,9 @@ run: fn() {
     }
     // INTEG_POST="patch ...": Main's fixups that must apply plainly (no three-way, no keep-ours) to the composed
     // tree after every SUB, such as deleting ledger proof rows a merge kept. They land inside regen.patch.
-    loop patch in roots.env_or("INTEG_POST", "").words() -> print("{if (Sh{"git -C {tree} apply -p1 {patch}"}.ok()) -> "POST" else -> "POST-FAIL"} {patch}")
+    loop patch in (process.env_nonempty("INTEG_POST") ?? "").words() {
+        print("{if (Sh{"git -C {tree} apply -p1 {patch}"}.ok()) -> "POST" else -> "POST-FAIL"} {patch}")
+    }
     regenerate(tree, integ)
     if (Sh{"git -C {tree} add -A"}.ok()) -> files.write("{integ}/regen.patch", Sh{"git -C {tree} diff --cached --binary HEAD"}.run().output)
     files.remove_all("{tree}/.git")

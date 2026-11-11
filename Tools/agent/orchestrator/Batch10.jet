@@ -99,8 +99,8 @@ error_lines: fn(integ: String) -> [String] {
 }
 
 run: fn() {
-    main: roots.main()
-    integrate: "{roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))}/integrate10.sh"
+    main: "{roots.roots()["JET_SCRATCH_ROOT"]}/lanes/Main"
+    integrate: "{process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())}/integrate10.sh"
     // One batch at a time: two runs of the same BATCH would write into one integ dir.
     _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
     args: process.args()

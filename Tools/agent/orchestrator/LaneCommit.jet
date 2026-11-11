@@ -269,15 +269,16 @@ run: fn() {
     args: process.args()
     if args.len() < 3 -> process.fail(1, "usage: jet Tools/agent/orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
     lane: args[0]
-    run_dir: roots.run_dir()
+    r: roots.roots()
+    run_dir: r["JET_RUN_ROOT"]
     l: Lander{
-        worktree: files.absolute(roots.env_or("LANE_COMMIT_WORKTREE", roots.worktree())),
-        queue: files.absolute(roots.env_or("LANE_COMMIT_QUEUE", "{run_dir}/commit-queue")),
-        precommit: files.absolute(roots.env_or("LANE_COMMIT_PRECOMMIT", "{roots.state()}/scratch/Main/precommit.sh")),
+        worktree: files.absolute(process.env_nonempty("LANE_COMMIT_WORKTREE") ?? r["JET_DEV_WORKTREE"]),
+        queue: files.absolute(process.env_nonempty("LANE_COMMIT_QUEUE") ?? "{run_dir}/commit-queue"),
+        precommit: files.absolute(process.env_nonempty("LANE_COMMIT_PRECOMMIT") ?? "{r["JET_STATE_ROOT"]}/scratch/Main/precommit.sh"),
         hold: files.absolute("{run_dir}/commit-hold"),
         freeze: files.absolute("{run_dir}/path-freeze"),
     }
-    lock: files.absolute(roots.env_or("LANE_COMMIT_LOCK", "{run_dir}/commit.lock"))
+    lock: files.absolute(process.env_nonempty("LANE_COMMIT_LOCK") ?? "{run_dir}/commit.lock")
     files.create_dir_all(l.queue)
     // Hold switch: while the hold file exists, only the lanes it lists (one per line) land.
     loop held(l, lane) -> time.sleep(20s)

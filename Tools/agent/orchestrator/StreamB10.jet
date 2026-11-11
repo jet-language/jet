@@ -16,7 +16,8 @@ use {
 run: fn() {
     args: process.args()
     if args.len() < 2 -> process.fail(1, "usage: jet Tools/agent/orchestrator/StreamB10.jet A_BATCH B_BATCH SUB...")
-    integ: "{roots.main()}/integ"
+    r: roots.roots()
+    integ: "{r["JET_SCRATCH_ROOT"]}/lanes/Main/integ"
     loop {
         census: files.read_or("{integ}/{args[0]}/census.out", "")
         if census.has_line_prefix("runtime rc=0") -> break
@@ -28,7 +29,7 @@ run: fn() {
     }
     seed: "{integ}/seed-{args[0]}"
     build: "{integ}/{args[0]}/tree/Compiler/JetCli/.jet/build"
-    current: files.canonicalize(roots.seed())
+    current: files.canonicalize(r["JET_SEED"])
     files.remove_all(seed) ?? ()
     files.create_dir_all(seed)
     files.copy("{build}/jet", "{seed}/jet")
@@ -40,7 +41,7 @@ run: fn() {
     loop sub in subs {
         if !files.is_dir(sub) -> print("streamB: not staged, skipped: {sub}")
     }
-    integrate: "{roots.env_or("JET_ORCHESTRATOR_DIR", files.dirname(sys.executable()))}/integrate10.sh"
+    integrate: "{process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())}/integrate10.sh"
     batch: Sh{"{integrate} {args[1]}"}.extend(subs.filter(sub -> files.is_dir(sub))).spec().env("CENSUS_JET_DIR", seed).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run()
     if batch.code != 0 -> process.exit(batch.code)
 }

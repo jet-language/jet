@@ -26,7 +26,8 @@ run: fn() {
     rows: files.read(args[0]).tsv_records().filter(cells -> cells.len() >= 3)
     files.create_dir_all(out)
     cpus: loop cpu in 0..<12 -> cpu
-    specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(roots.worktree()).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
+    worktree: roots.roots()["JET_DEV_WORKTREE"]
+    specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
     results: process.run_all(specs, 6)
     loop at in 0..<rows.len() {
         row: rows[at]
