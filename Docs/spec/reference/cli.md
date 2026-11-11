@@ -501,8 +501,9 @@ use its retained ownership, consumers, targets, and generated-source digest.
 Unobserved action-cache status remains `unknown`.
 `inspect build --times` instead reads the `.jet/build/times.json` record the
 last `jet build` of the package wrote and shows how long each step and target
-took and whether it was made or reused (`--json`: the `BuildTimes` record under
-`times`); with no record it fails with E2104.
+took and whether it was made or reused; compile caches are off by default, so
+`jet build` makes every one (`--json`: the `BuildTimes` record under `times`);
+with no record it fails with E2104.
 The default-pipeline path still checks the package semantically. Failed queries
 use the standard `diagnostics` JSON status envelope or human problem-count
 report, with advisory lints shown only under `--verbose`/`-v`; internal query
@@ -768,7 +769,8 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
-which a cold store lays out first) and the native backend's (`native.sources`,
+which a cold store lays out first; opened only while saved work is reused) and
+the native backend's (`native.sources`,
 `native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
 `native.foreign` (the wait for the program's C closure and the runtime's
 bytes, which its own thread realizes and reads while the object builds; for

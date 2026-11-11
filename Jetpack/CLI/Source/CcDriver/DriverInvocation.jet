@@ -134,17 +134,14 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
         return EXIT_USER_ERROR
     }
     grants: [BuildEffect]{BuildEffect.Exec}
-    artifact_store: BuildArtifactStoreHandle.open() ?? {
-        cli_cc_report_operational_error("C/C++ invocation could not open the artifact store", "{err}", "check JET_STORE_DIR and retry")
-        return EXIT_USER_ERROR
-    }
     // The action runs only in the native sandbox; fetch Jet's pinned
     // Bubblewrap first when the host has no usable one.
     if foundation_native_sandbox_prepare() == .Err(error) {
         cli_cc_report_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()})
         return EXIT_USER_ERROR
     }
-    if build_execute_build_plan(plan, project_root, artifact_store, grants) == {
+    // Compile caches are off: the action always runs and nothing is stored.
+    if build_execute_build_plan(plan, project_root, None, grants) == {
         .Ok(_) -> {
             if !options.compile_only {
                 if cli_cc_mark_link_outputs_executable(project_root, invocation.outputs) == {

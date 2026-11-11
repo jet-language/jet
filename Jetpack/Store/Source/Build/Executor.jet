@@ -8,7 +8,7 @@
 // in action order, as the Rust join does.
 
 use {
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
+    jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
@@ -102,8 +102,12 @@ build_action_failure_stderr: fn(report: DiagnosticBuildError) -> String? Never! 
 
 // Execute the canonical action graph through the platform-native child
 // boundary. Every selected action's declared abilities must be granted
-// before anything runs; probes need the Exec grant.
-build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildExecutionResult BuildExecutionError! {
+// before anything runs; probes need the Exec grant. With `artifact_store`,
+// an action with no ambient effect is restored from its stored record and a
+// run one is stored; without it every action runs and nothing is stored.
+// Callers give a store only while saved work is reused
+// (BUILD_REUSE_SAVED_WORK, off), so a default build opens none.
+build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect]) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildExecutionResult BuildExecutionError! {
     selected_actions: plan.selected_action_ids() ?? return Err(BuildExecutionError.InvalidGraph(err))
     loop action in plan.actions {
         if !selected_actions.contains(action.id) -> next
@@ -218,6 +222,8 @@ BuildActionRun: struct {
     sandbox: String
     rebuild_status: ActionCacheStatus
     command: NativeSandboxCommand
+    // The store the run is published to: set only for a reused action.
+    reuse: BuildArtifactStoreHandle?
 }
 
 BuildActionStart: enum {
@@ -240,12 +246,13 @@ build_folder_mount: fn(path: String) -> String Never! {
 }
 
 // Rust `execute_one_action` on the local path, for many actions at once:
-// each of `ids` (their prerequisites already done) is keyed and restored
-// from a cached record, else staged in a fresh private work tree; the staged
-// ones run together under the native sandbox, at most `jobs` at a time, and
-// each publishes only its declared outputs. One slot per action, in `ids`
-// order: one action's failure never stops the others.
-build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
+// each of `ids` (their prerequisites already done) is keyed and, with
+// `artifact_store`, restored from a cached record, else staged in a fresh
+// private work tree; the staged ones run together under the native sandbox,
+// at most `jobs` at a time, and each publishes only its declared outputs. One
+// slot per action, in `ids` order: one action's failure never stops the
+// others.
+build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
     results := [Result<ActionOutcome, BuildExecutionError>]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
@@ -270,7 +277,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
         .Ok(receipts) -> loop index in 0..<runs.len() {
             slot: slots[index]
             if receipts[index] == {
-                .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root, artifact_store) == {
+                .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root) == {
                     .Ok(outcome) -> results[slot] = Ok(outcome)
                     .Err(error) -> results[slot] = Err(error)
                 }
@@ -286,11 +293,12 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
 
 // Snapshot the action's inputs and the files of the folders it reads whole
 // (`stamps` their last digests; a found folder is the one its probe chose),
-// key it and restore a cached record, else stage it in a fresh private work
-// tree that receives exactly the input bytes the key hashed, runnable where
-// the input is, with each folder bound read-only at its path and each found
-// program it is passed named by the path it runs at there.
-build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+// key it and, with `artifact_store`, restore a cached record, else stage it
+// in a fresh private work tree that receives exactly the input bytes the key
+// hashed, runnable where the input is, with each folder bound read-only at
+// its path and each found program it is passed named by the path it runs at
+// there.
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
         if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
     }
@@ -321,16 +329,16 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
     // Only an action with no ambient effect is reused (build_effects_reusable),
-    // and only while saved work is reused (BUILD_REUSE_SAVED_WORK, off): its
-    // record is neither read here nor written by build_finish_action.
-    if BUILD_REUSE_SAVED_WORK && action.reusable() {
-        if build_read_action_record(artifact_store, key) == {
+    // and only from a given store.
+    reuse: if action.reusable() -> artifact_store else -> None
+    if reuse == .Val(store) {
+        if build_read_action_record(store, key) == {
             .Val(record) -> {
                 if record.failure_report == .Val(report) {
                     build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "terminal", Val(record.outcome))
                     return Err(BuildExecutionError.Reported{report})
                 }
-                if build_restore_action_outputs(artifact_store, project_root, action, record) == {
+                if build_restore_action_outputs(store, project_root, action, record) == {
                     .Ok(edited) -> {
                         if edited == .Val(path) -> return Err(BuildExecutionError.HandEdited{action: action.name, path})
                         build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "restore", Val(ActionOutcome.RestoredFromCache))
@@ -343,7 +351,9 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
             .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
         }
     }
-    rebuild_status: if !action.reusable() -> ActionCacheStatus.Miss(.AmbientEffect) else -> ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
+    rebuild_status := ActionCacheStatus.Miss(restore_failure ?? .NoLocalActionRecord)
+    if reuse == None -> rebuild_status = ActionCacheStatus.Miss(.ReuseOff)
+    if !action.reusable() -> rebuild_status = ActionCacheStatus.Miss(.AmbientEffect)
     build_record_cache_event(action.name, key, rebuild_status, "lookup", None)
 
     sandbox: files.join(files.join(project_root, ".jet/build-sandbox"), "{sys.pid()}-{action.id}-{key.removeprefix("act-sha256:")}")
@@ -404,7 +414,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
-    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command}})
+    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command, reuse}})
 }
 
 // `action` with each found folder bound from the folder its find_folder
@@ -449,8 +459,9 @@ build_abandon_action: fn(run: BuildActionRun, error: NativeSandboxError) -[FS]> 
 }
 
 // Read the receipt of a staged action's child: record a failure as the
-// action's cached terminal report, else publish its declared outputs.
-build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_root: String, artifact_store: BuildArtifactStoreHandle) -[FS, Env, Exec, Time, Rand]> ActionOutcome BuildExecutionError! {
+// action's cached terminal report, else publish its declared outputs (both
+// to the run's store, when it has one).
+build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_root: String) -[FS, Env, Exec, Time, Rand]> ActionOutcome BuildExecutionError! {
     action: run.action
     key: run.key
     sandbox: run.sandbox
@@ -459,9 +470,9 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
     if !ran.receipt.success {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
         report: build_action_failure_report(action.name, code, ran.receipt.errors.trim())
-        if BUILD_REUSE_SAVED_WORK && action.reusable() {
+        if run.reuse == .Val(store) {
             record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
-            build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
+            build_write_action_record(store, key, record) ?? return Err(build_io_action(action, err))
             build_record_cache_event(action.name, key, run.rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
         }
         return Err(BuildExecutionError.Reported{report})
@@ -475,9 +486,9 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         return Err(BuildExecutionError.HandEdited{action: action.name, path})
     }
     outcome: ActionOutcome.Succeeded{exit_code: code}
-    if BUILD_REUSE_SAVED_WORK && action.reusable() {
-        record: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
-        build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
+    if run.reuse == .Val(store) {
+        record: build_capture_declared_outputs(store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
+        build_write_action_record(store, key, record) ?? return Err(build_io_action(action, err))
         build_record_cache_event(action.name, key, ActionCacheStatus.Miss(.NoLocalActionRecord), "publish", Val(outcome))
     }
     files.remove_all(sandbox) ?? return Err(build_io_action(action, BuildIOError.from(err)))

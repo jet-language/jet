@@ -604,7 +604,8 @@ input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matche
 records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1), and every `find`
 its glob with the SHA-256 of its sorted matches, an empty match included. Each is an input of
 the build identity: editing a file, or adding a file to or removing one from a glob, makes
-`jet build` and `jet run` rebuild, not reuse a stored binary, and `jet dev` rerun.
+a build that would reuse a stored binary rebuild instead, and `jet dev` rerun;
+`jet build` stores no binary, as compile caches are off by default.
 A Core library file embeds files beside it in the toolchain's Core tree. They
 are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
 A path or glob spelled `toolchain:<path>` resolves against the toolchain tree the
@@ -5902,15 +5903,15 @@ refused (E3502) before anything runs. A step's key covers its declared input
 content, argv, authority, toolchain, probes, signing identity, and
 generated-source hashes.
 
-No step is reused: every `jet build` runs every step, whatever its effects, so
-a step's outputs are always the ones this build made. Reusing a step's stored
-record is off, and no flag, variable or setting turns it on. `FS`, `Exec` and
-`Env` are not ambient effects: the sandbox lets the step read only its declared
-inputs, write only its tree, run only its tool and what is mounted (each
-identified by content in the key), and see only its declared variables (their
-values in the key). `Net`, `Time`, `Rand`, `IO`, `DB`, `Log` and `GPU` are. A
-step must write an output. No step runs outside the sandbox: a read of an
-undeclared file fails the step on every build. Example:
+No step is reused: every `jet build` runs every step, whatever its effects, and
+opens no store, so a step's outputs are always the ones this build made. Reusing
+a step's stored record is off, and no flag, variable or setting turns it on.
+`FS`, `Exec` and `Env` are not ambient effects: the sandbox lets the step read
+only its declared inputs, write only its tree, run only its tool and what is
+mounted (each identified by content in the key), and see only its declared
+variables (their values in the key). `Net`, `Time`, `Rand`, `IO`, `DB`, `Log`
+and `GPU` are. A step must write an output. No step runs outside the sandbox: a
+read of an undeclared file fails the step on every build. Example:
 [`tests/cases/build_entry/run_steps_run_again_on_every_build.case`](../../tests/cases/build_entry/run_steps_run_again_on_every_build.case).
 
 When `jet build` runs the graph of a `build: fn`, it leaves two records under

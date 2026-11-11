@@ -92,10 +92,9 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 #Test("ability grants: a granted ability passes the grant gate, an ungranted one is refused before any action runs") {
     root: build_test_root("grants")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     marker: files.join(root, "ran")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Net}, "printf ran > '{marker}'; {BUILD_TEST_COPY_SCRIPT}")
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+    if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "write", capability: BuildEffect.Net})
         .Ok(_) -> panic("an ungranted Net ability must be refused")
     }
@@ -105,7 +104,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     // then stops the action at the sandbox boundary instead.
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}) == {
+    if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
             assert(error == BuildExecutionError.SandboxUnavailable{reason: "test sandbox override prevents child execution"})
@@ -121,16 +120,15 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 
 #Test("probe grants: probes run only with the Exec grant") {
     root: build_test_root("probe-grant")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
     probe: build.find_program("has-sh", "sh") ?? panic("probe")
     target: build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{}) == {
+    if build_execute_build_plan(plan, root, None, [BuildEffect]{}) == {
         .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "probe has-sh", capability: BuildEffect.Exec})
         .Ok(_) -> panic("a probe without the Exec grant must be refused")
     }
-    result: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("an Exec-granted find_program probe needs no child")
+    result: build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) ?? panic("an Exec-granted find_program probe needs no child")
     assert_eq(result.probes.len(), 1)
     assert(result.probes[0].success)
     files.remove_all(root).drop("test cleanup")
@@ -147,11 +145,10 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 #Test("no unsandboxed fallback: an unavailable backend refuses the action and nothing is published") {
     root: build_test_root("unavailable")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+    if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
             assert(error == BuildExecutionError.SandboxUnavailable{reason: "test sandbox override prevents child execution"})
@@ -172,36 +169,43 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     if !build_test_require_sandbox() -> return
     root: build_test_root("available")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
-    result: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
+    result: build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) ?? panic("sandboxed action should run")
     assert_eq(result.report.metrics.actions_total, 1)
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("declared output"), "input")
     files.remove_all(root).drop("test cleanup")
 }
 
-#Test("action reuse: an action with no ambient effect is restored until an input changes, one with an ambient effect always runs") {
+#Test("action reuse: compile caches are off without a store; with one an action with no ambient effect is restored until an input changes, one with an ambient effect always runs") {
     if !build_test_require_sandbox() -> return
     root: build_test_root("reuse")
     files.write(files.join(root, "input.txt"), "one") ?? panic("input")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     grants: [BuildEffect]{BuildEffect.Exec, BuildEffect.Time}
     pure: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     assert(pure.actions[0].reusable())
-    first: build_execute_build_plan(pure, root, store, grants) ?? panic("first run")
+    // The default: no store, so every run runs the action and writes no store.
+    build_execute_build_plan(pure, root, None, grants) ?? panic("first run without a store")
+    off: build_execute_build_plan(pure, root, None, grants) ?? panic("unchanged run without a store")
+    assert_eq(off.report.metrics.actions_total, 1)
+    assert_eq(off.report.metrics.cache_restored_actions, 0)
+    store_root: files.join(root, ".jet-store")
+    assert(!files.exists(store_root))
+    // Opting in: the executor is given a store.
+    store: BuildArtifactStoreHandle.at(store_root) ?? panic("store")
+    first: build_execute_build_plan(pure, root, Val(store), grants) ?? panic("first run")
     assert_eq(first.report.metrics.reusable_actions, 1)
     assert_eq(first.report.metrics.cache_restored_actions, 0)
-    again: build_execute_build_plan(pure, root, store, grants) ?? panic("unchanged run")
+    again: build_execute_build_plan(pure, root, Val(store), grants) ?? panic("unchanged run")
     assert_eq(again.report.metrics.cache_restored_actions, 1)
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("restored output"), "one")
     files.write(files.join(root, "input.txt"), "two") ?? panic("edit input")
-    changed: build_execute_build_plan(pure, root, store, grants) ?? panic("changed run")
+    changed: build_execute_build_plan(pure, root, Val(store), grants) ?? panic("changed run")
     assert_eq(changed.report.metrics.cache_restored_actions, 0)
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("rebuilt output"), "two")
     ambient: build_test_plan([BuildEffect]{BuildEffect.Exec, BuildEffect.Time}, BUILD_TEST_COPY_SCRIPT)
     assert(!ambient.actions[0].reusable())
-    build_execute_build_plan(ambient, root, store, grants) ?? panic("ambient run")
-    rerun: build_execute_build_plan(ambient, root, store, grants) ?? panic("ambient rerun")
+    build_execute_build_plan(ambient, root, Val(store), grants) ?? panic("ambient run")
+    rerun: build_execute_build_plan(ambient, root, Val(store), grants) ?? panic("ambient rerun")
     assert_eq(rerun.report.metrics.ambient_actions, 1)
     assert_eq(rerun.report.metrics.cache_restored_actions, 0)
     files.remove_all(root).drop("test cleanup")
@@ -251,7 +255,7 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     store: BuildArtifactStoreHandle.at(store_root) ?? panic("store")
     grants: [BuildEffect]{BuildEffect.Exec}
     plan: build_test_plan(grants, "read -r line < input.txt; printf %s \"$line-out\" > out.txt")
-    ran: build_execute_build_plan(plan, root, store, grants) ?? panic("run")
+    ran: build_execute_build_plan(plan, root, Val(store), grants) ?? panic("run")
     assert_eq(ran.report.metrics.cache_restored_actions, 0)
     assert(!files.exists(build_test_blob_path(store_root, "kept".bytes())))
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("output"), "kept-out")
@@ -285,11 +289,10 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     root: build_test_root("sandbox-root")
     outside: build_test_root("sandbox-root-outside")
     files.write(files.join(root, "input.txt"), "input") ?? panic("input")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("state dir")
     files.symlink(outside, files.join(root, ".jet/build-sandbox")) ?? panic("link sandbox root")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+    if build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> if error == {
             .IO(action, detail) -> {
                 assert_eq(action, "write")
@@ -712,11 +715,11 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     action: build.action("read", spec) ?? panic("action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
-    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("first run")
+    build_execute_build_plan(plan, root, Val(store), [BuildEffect]{BuildEffect.Exec}) ?? panic("first run")
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "one")
     assert(!files.exists(files.join(root, "data/w")))
     files.write(files.join(root, "data/a.txt"), "three") ?? panic("edit a")
-    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("second run")
+    build_execute_build_plan(plan, root, Val(store), [BuildEffect]{BuildEffect.Exec}) ?? panic("second run")
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out again"), "three")
     files.remove_all(root).drop("test cleanup")
 }
@@ -728,7 +731,6 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.write(files.join(lib, "marker.txt"), "found") ?? panic("marker")
     previous: sys.get("LIBRARY_PATH")
     sys.set("LIBRARY_PATH", "{files.join(root, "none")}:{lib}")
-    store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
     probe: build.probe("marks", ProbeSpec.find_folder("marker.txt")) ?? panic("probe")
     script: "read -r line < .jet/found/marks/marker.txt; printf %s \"$line\" > out.txt"
@@ -736,14 +738,14 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     action: build.action("read", spec) ?? panic("action")
     target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
-    build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) ?? panic("run")
+    build_execute_build_plan(plan, root, None, [BuildEffect]{BuildEffect.Exec}) ?? panic("run")
     assert_eq(files.read(files.join(root, "out.txt")) ?? panic("out"), "found")
     missing := HermeticBuildContext.new()
     absent: missing.probe("absent", ProbeSpec.find_folder("jet-test-no-such-file.a")) ?? panic("absent probe")
     needs: missing.action("needs", ActionSpec.new([String]{"sh"}).with_outputs([String]{"o.txt"}).with_found_folder(".jet/found/absent", absent).with_probe(absent).with_cap(BuildEffect.Exec)) ?? panic("needs")
     missing_target: missing.add_executable("o", TargetSpec.new().with_action(needs)) ?? panic("missing target")
     missing_plan: missing.plan_with_default(missing_target) ?? panic("missing plan")
-    if build_execute_build_plan(missing_plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+    if build_execute_build_plan(missing_plan, root, None, [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> if error == {
             .FolderNotFound(name, file, searched) -> {
                 assert_eq(name, "absent")
@@ -835,7 +837,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     build_write_action_record(store, key, ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+    if build_execute_build_plan(plan, root, Val(store), [BuildEffect]{BuildEffect.Exec}) == {
         .Err(error) -> {
             build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
             assert(error == BuildExecutionError.Reported{report})

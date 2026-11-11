@@ -106,6 +106,8 @@ CacheMissReason: enum {
     // The action has an ambient effect, so it always runs.
     AmbientEffect
     FrontEndIncomplete
+    // No store was given: compile caches are off, so every action runs.
+    ReuseOff
 }
 
 ActionCacheStatus: enum {
@@ -606,6 +608,7 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
         .Miss(.RemoteDenied) -> (status: "miss", reason: "remote_denied")
         .Miss(.AmbientEffect) -> (status: "miss", reason: "ambient_effect")
         .Miss(.FrontEndIncomplete) -> (status: "miss", reason: "front_end_incomplete")
+        .Miss(.ReuseOff) -> (status: "miss", reason: "reuse_off")
     }
     rendered_outcome: if outcome == {
         .Val(value) -> Dyn.Text(build_encode_outcome(value))

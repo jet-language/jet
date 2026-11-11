@@ -13,7 +13,7 @@ use {
     core.build.[BuildGraph, BuildGraphAction]
     jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
-    jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionOutcome, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProbeFact, BuildProvenance, ContentDigest,
@@ -183,8 +183,10 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
         cli_files.create_dir_all(folder) ?? return jet_cli_build_failed("couldn't create `{folder}` for the package files steps read: {err}", jet_cli_why("E2105"), "make `{folder}` writable", color)
         cli_files.copy2(from, to) ?? return jet_cli_build_failed("couldn't copy the package file `{from}` a step reads: {err}", jet_cli_why("E2105"), "correct the path given to `.file(path)` on `b.dependency(name)`", color)
     }
+    // Steps reuse saved work only while it is reused (BUILD_REUSE_SAVED_WORK,
+    // off): a default build opens no store, and every step runs.
     store := BuildArtifactStoreHandle?{None}
-    if needs.steps.len() > 0 {
+    if BUILD_REUSE_SAVED_WORK && needs.steps.len() > 0 {
         store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     }
     jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, selected, needs, root, member, options, threads, invocation, generated, last.kept, trace_sink, color)
@@ -195,7 +197,8 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
 // failed one never starts. Every failure is reported, in the order it
 // happened. Then the run records `receipt`, with each step's reuse, the
 // digest of each kept output (`last_kept` the last build's), and the time of
-// every node that ran (jet_cli_build_record).
+// every node that ran (jet_cli_build_record). Without `store` no step is
+// reused and nothing is stored.
 jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String: String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     jobs: threads ?? cli_sys.cpu_count()
     // Per node: 0 waiting, 1 done, 2 failed, 3 never started.
@@ -225,13 +228,12 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
         }
         if ready_steps.len() > 0 {
             executor: plan ?? panic("a build with steps lowered them to the executor")
-            artifacts: store ?? panic("a build with steps opened the build store")
             loop batch in build_execution_batches(executor, ready_steps) {
                 // Each batch is one `build.step` span, named by its steps.
                 names: loop id in batch -> graph.actions[id].name.copy()
                 if trace_sink == .Val(sink) -> sink.begin("build.step", names.join(" "), -1, -1)
                 watch: cli_time.start()
-                results: build_execute_actions(executor, batch, root, artifacts, grants, probes, jobs)
+                results: build_execute_actions(executor, batch, root, store, grants, probes, jobs)
                 if trace_sink == .Val(sink) -> sink.end("build.step", batch.len())
                 wall: watch.elapsed_millis()
                 loop index in 0..<batch.len() {
