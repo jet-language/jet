@@ -290,7 +290,7 @@ xchacha20poly1305_open: fn(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [
 }
 
 /// RFC 9106 Argon2id with bounded portable memory and one to eight lanes.
-argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
+#Unsafe("crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call") argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 || memory_kib < 8192 || memory_kib > 262144 || iterations < 1 || iterations > 10 || lanes < 1 || lanes > 8 || output_len < 16 || output_len > 64 {
         return Err(.Length)
     }
@@ -329,13 +329,13 @@ all_zero: fn(bytes: [U8]) -> Bool Never! {
     diff == U8{0}
 }
 
-secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the secret's raw bytes and wipes them") secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them") shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them") signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them") x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 open_v1_body: fn(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)

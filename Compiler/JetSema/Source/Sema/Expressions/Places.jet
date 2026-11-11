@@ -1077,14 +1077,15 @@ sema_expression_numeric_bound_type: fn(base: Expr, member: String) -> Type? {
 }
 
 // Reading a secret-bearing value's raw bytes is an exposure.
-// Outside Core source it needs an audited `#Unsafe` region, exactly like the
-// `core.crypto.expert` exposure functions.
+// Only the module that declares the secret type reads its bytes freely, as a
+// module reads its own type's fields. Every other module, a Core one included,
+// needs an audited `#Unsafe` region, exactly like the `core.crypto.expert`
+// exposure functions.
 sema_expression_secret_exposure_allowed: fn(ty: Type, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if member != "bytes" || context.unsafe_depth > 0 || !sema_call_reflection_secret_bearing(ty) -> return true
     if program.registration_graph == .Val(graph) {
     caller_index: sema_scope_caller_index(environment, graph) ?? return true
-    caller_name: graph.modules[caller_index].module_name
-    if caller_name == "core" || caller_name.starts_with("core.") -> return true
+    if sema_expression_secret_declared_by(graph, ty, caller_index) -> return true
     shown: type_name(ty)
     exposure: if {
         shown.ends_with("SigningKey") -> "signing_key_bytes"
@@ -1096,6 +1097,18 @@ sema_expression_secret_exposure_allowed: fn(ty: Type, member: String, span: Span
     return false
     }
     true
+}
+
+// Whether module row `caller` declares the secret type `ty` names: one of its
+// own nominals of that leaf is a secret-bearing declaration.
+sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> Bool Never! {
+    name: sema_type_graph_base_name(ty) ?? return false
+    leaf: sema_call_reflection_leaf_name(name)
+    loop row in 0..<graph.modules[caller].nominals.len() {
+        if graph.modules[caller].nominals[row].symbol.name != leaf -> next
+        if sema_call_reflection_secret_bearing(Type.Named{name: "{graph.modules[caller].nominals[row].symbol.module_name}::{leaf}"}) -> return true
+    }
+    false
 }
 
 // S71 the chain yields `T?`; an already-optional member flattens, so

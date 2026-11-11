@@ -1631,7 +1631,10 @@ the original zeroizing owner. The private JETC v2 engine uses those projections
 only inside reasoned `#Unsafe` blocks and wipes each operation-scoped copy on
 both success and refusal before propagating the outcome. The original
 `Secret`, `SharedSecret`, and `X25519SecretKey` retain their ordinary `Close`
-duty; no raw secret-field access is required outside the expert boundary.
+duty; no raw secret-field access is required outside the expert boundary. Only
+`core.crypto`, the module that declares these types, reads a secret's `.bytes`
+field directly; any other module, a Core one included, reads it only inside an
+`#Unsafe` region (E0510), and the expert projections are `#Unsafe` functions.
 
 Fixed-limb operations reserve their complete workspace before filling it,
 avoiding geometric regrowth that could leave stale secret bytes in freed

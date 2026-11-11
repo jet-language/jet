@@ -663,9 +663,10 @@ sema_check_private_module_type: fn(name: String, span: Span, environment: SemaSc
     }
 }
 
-// `ExpiringSecret<T>` wraps only the closed secret family (E0112). Core's own
-// declarations name the wrapper over their formal `T`. The bare wrapper name
-// resolves to no declaration, so its member is resolved on its own.
+// `ExpiringSecret<T>` wraps only the closed secret family (E0112). The module
+// that declares the wrapper names it over its own formal `T`, as any module
+// writes its own generic type. The bare wrapper name resolves to no
+// declaration, so its member is resolved on its own.
 sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     resolved := ty
     if program.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
@@ -674,12 +675,23 @@ sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names
         if args.len() == 1 {
             if sema_is_expiring_secret_member_type(args[0]) -> return
             if program.registration_graph == .Val(graph) {
-                if sema_is_expiring_secret_member_type(sema_type_resolve_declared_recursive(graph, args[0], sema_scope_caller_row(environment, graph), environment.generic_params)) -> return
+                caller: sema_scope_caller_row(environment, graph)
+                if sema_is_expiring_secret_member_type(sema_type_resolve_declared_recursive(graph, args[0], caller, environment.generic_params)) -> return
+                if args[0] == .Named(formal) && generic_names.contains(formal) && sema_expiring_secret_declared_by(graph, caller) -> return
             }
-            if sema_module_is_core_source(environment.module_identity) && args[0] == .Named(formal) && generic_names.contains(formal) -> return
         }
         diagnostics.push(sema_error("E0112", span, "`ExpiringSecret<T>` requires a secret type", "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper", "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`"))
     }
+}
+
+// Whether module row `caller` declares the ExpiringSecret wrapper itself.
+sema_expiring_secret_declared_by: fn(graph: SemaRegistrationGraph, caller: Int) -> Bool Never! {
+    if caller < 0 -> return false
+    loop row in 0..<graph.modules[caller].nominals.len() {
+        if graph.modules[caller].nominals[row].symbol.name != "ExpiringSecret" -> next
+        if sema_is_expiring_secret_name("{graph.modules[caller].nominals[row].symbol.module_name}::ExpiringSecret") -> return true
+    }
+    false
 }
 
 // D9: `_` is a pattern wildcard, never a type hole. The Rust reference reports

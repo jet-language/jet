@@ -210,10 +210,10 @@ KeyUnlock: struct {
     secret: View<U8>
 }
 // These retain a read borrow of the real owner's bytes, never a copied secret.
-__key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+#Unsafe("vault key import: the caller's unlock request borrows the private key's bytes for the unlock only") __key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
 }
-__key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+#Unsafe("vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only") __key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
 }
 
