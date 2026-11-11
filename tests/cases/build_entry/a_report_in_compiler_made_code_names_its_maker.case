@@ -1,0 +1,26 @@
+# #3526 c17: a report in code a `Compiler` value made names the call and the
+# function that made it, so the root's own build, a dependency's function the
+# root handed the value to, and the module it made are told apart. Each build
+# makes code with a type error:
+# - `added`: the root's `build` adds it with `meta.add`;
+# - `handed`: the root hands the value to the `tool` package's `install`,
+#   which adds it;
+# - `rewritten`: the root's `build` gives `count` a body with `meta.rewrite_body`.
+fixture: a_report_in_compiler_made_code_names_its_maker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build added/main.jet
+exit: 1
+stderr: ~ "Note: `meta.add` in `build` at " # the root's build made the module
+stderr: ~ "main.jet:4 added this module through the root's `Compiler` value" # the call's place
+file: added/.jet/build/app absent
+step: jet build handed/main.jet
+exit: 1
+stderr: ~ "Note: `meta.add` in `install` at " # the dependency's function made the module
+stderr: ~ "tool.jet:4 added this module through the root's `Compiler` value" # the call's place in the dependency
+file: handed/.jet/build/app absent
+step: jet build rewritten/main.jet
+exit: 1
+stderr: ~ "Note: `meta.rewrite_body` in `build` at " # the rewrite names its maker
+stderr: ~ "main.jet:4 gave `count` this body" # and the function it rewrote
+file: rewritten/.jet/build/app absent

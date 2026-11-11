@@ -1,0 +1,12 @@
+build: fn(b: Build) -[Meta.Generate]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.add(#code {
+        count: fn() -> Int { "not a number" }
+    }, scope: "count")
+    b.default(app)
+}
+
+run: fn() {
+    print(count())
+}

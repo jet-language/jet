@@ -347,14 +347,21 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
 }
 // A report in a module `b.generate` made names the build file call that
 // made it, as its note (`detail`); the report itself names the module's
-// virtual source. A report in a rewritten function names the rewrite.
+// virtual source. A report in a module a `Compiler` value made names the
+// call and the function that made it, which may be a dependency's function
+// the root handed the value to.
 jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String, rows: [BuildSessionGeneratedModule], build_path: String, build_source: String) Never! {
     loop index in 0..<diagnostics.len() {
         if diagnostics[index].detail != None -> next
         note := String?{None}
         loop row in rows {
             if diagnostics[index].source_path != Val(jet_driver_generated_module_path(package, row.path)) -> next
-            note = if row.rewrites == .Val(function) -> { Val(" Note: `meta.rewrite_body` gave `{function}` this body") } else -> { Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module") }
+            maker: row.producer ?? ""
+            note = if {
+                row.rewrites == .Val(function) -> Val(" Note: `meta.rewrite_body` in {maker} gave `{function}` this body")
+                row.producer != None -> Val(" Note: `meta.add` in {maker} added this module through the root's `Compiler` value")
+                else -> Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module")
+            }
             break
         }
         diagnostics[index].detail = note

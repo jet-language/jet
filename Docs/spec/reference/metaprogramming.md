@@ -380,6 +380,9 @@ generated module `rewrite_body/f` of the value's target, checked with the
 program, and its original text is withdrawn from its file. A line `#{f.body}`
 in the block pastes the original body there, so a rewrite can wrap it. It uses
 `Meta.Rewrite`, which a row denies with `-[!Meta.Rewrite]>`.
+A report in code a `Compiler` value made ends with a note that names the call
+and the function that made it, with its place: the root's own `build`, or a
+dependency's function the root handed the value to.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.

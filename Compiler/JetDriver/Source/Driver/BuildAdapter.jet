@@ -162,17 +162,19 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // its `Code` value's formatted items as the generated source and the scope
 // it joins (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
 // function's name and its `Code` value's formatted statements as the new
-// body (JetBuildSession `compiler.rewrite_body`).
+// body (JetBuildSession `compiler.rewrite_body`). The last argument is the
+// calling function and its place, which reports from the module name.
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
-    if (member != "Compiler.add" && member != "Compiler.rewrite_body") || args.len() != 3 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
+    if (member != "Compiler.add" && member != "Compiler.rewrite_body") || args.len() != 4 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
     compiler: jet_eval_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     rewrite: member == "Compiler.rewrite_body"
     code_index: if rewrite -> 2 else -> 1
     text_index: if rewrite -> 1 else -> 2
     source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
     text: jet_eval_build_session_input(args[text_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+    producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
     method: if rewrite -> "compiler.rewrite_body" else -> "compiler.add"
-    reply: build_session_call(session, method, [BuildSessionValue]{compiler, text}, Val(source), false, span.start, span.end)
+    reply: build_session_call(session, method, [BuildSessionValue]{compiler, text, producer}, Val(source), false, span.start, span.end)
     if reply == {
         .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}
         .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}

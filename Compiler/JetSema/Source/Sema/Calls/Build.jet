@@ -317,6 +317,8 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     // `meta.add` writes declarations, so it uses `Meta.Generate`: allowed
     // unless the calling function's row denies it.
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.{method}", span, [EffectRowEntry]{EffectRowEntry{name: META_GENERATE, span: span}}, diagnostics) -> return failed
+    // The session reads the `Code` value, the scope, then the caller.
+    values.push(sema_call_compiler_producer(environment, program, scopes, span))
     value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
@@ -363,10 +365,18 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
     ownership: sema_ownership_check_method_call(state, "Compiler.rewrite_body", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.rewrite_body", span, [EffectRowEntry]{EffectRowEntry{name: META_REWRITE, span: span}}, diagnostics) -> return failed
-    // The session reads the function's name, then the `Code` value.
+    // The session reads the function's name, the `Code` value, then the caller.
     name: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: function}}}, args[0].span)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code}}}, span)
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code, sema_call_compiler_producer(environment, program, scopes, span)}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// The function calling a `Compiler` method and where, "`f` at file:line",
+// which a report from what the call made names: it tells the root's own
+// build from a dependency's function the root handed the value to.
+sema_call_compiler_producer: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> TExpr Never! {
+    location: sema_expression_panic_location(environment, program, scopes, span)
+    sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "`{location.function}` at {location.file}:{location.line}"}}}, span)
 }
 
 // A `b.generate` template's formatted items and the build locals it splices.

@@ -1,0 +1,16 @@
+build: fn(b: Build) -[Meta.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(count, #code {
+        "not a number"
+    })
+    b.default(app)
+}
+
+run: fn() {
+    print(count())
+}
+
+count: fn() -> Int {
+    1
+}
