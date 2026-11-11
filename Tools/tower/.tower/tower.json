@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99516,
+    "rev": 99517,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65420,6 +65420,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T13:29:20.600Z"
+        },
+        {
+          "n": 24,
+          "text": "jet fmt keeps a file's meaning and layout intent before any repo-wide reformat (#6005 c23 waits on this). Found by ScriptAPI on a0.0.44, 2026-11-11: (1) jet fmt deletes a #!/usr/bin/env jet first line (Tools/agent/Land.jet's output starts at its line 2); (2) it drops the blank line after a // --- x --- banner, which turns the banner into the next fn's doc comment; (3) a call whose argument is a triple-quoted text block is laid out with its args and ) at the call's own indent (the value is unchanged). Fix: keep the shebang byte for byte, keep a blank line that separates a standalone comment from a declaration, and indent text-block call arguments one level. Proof: fmt UI/golden cases for all three, and jet fmt --check over Tools/agent shows no shebang or banner hunks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:26:42.992Z"
         }
       ],
       "refs": [],
@@ -65430,10 +65439,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-11-11T13:29:20.600Z",
+      "updated": "2026-11-11T17:26:42.992Z",
       "updatedBy": "Main",
       "goals": [],
-      "criteriaLastN": 23
+      "criteriaLastN": 24
     },
     {
       "id": "c018gdah",
@@ -197586,6 +197595,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:26:42.992Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#24 jet fmt keeps a file's meaning and layout intent before any "
+    },
     {
       "at": "2026-11-11T17:22:39.240Z",
       "by": "Main",
