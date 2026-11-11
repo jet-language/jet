@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, CtValue, DeriveBodyItem, Diagnostic, Expr, Item, NamedCtValue, ParamZone, Span, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, type_name]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, CtValue, DeriveBodyItem, Diagnostic, Expr, Item, NamedCtValue, ParamZone, Span, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -79,6 +79,11 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
         }
         method == "error" && arity == 5 -> parameters = [Type]{Type.Named{name: "SourceSpan"}, Type.String, Type.String, Type.String, Type.String}
         method == "default" && arity == 1 -> parameters = [Type]{target}
+        // The root-only `Compiler` value for one target (sema_build_compiler_site).
+        method == "compiler" && arity == 1 -> {
+            parameters = [Type]{target}
+            result = Type.Named{name: "Compiler"}
+        }
         method == "args" && arity == 0 -> result = strings
         method == "plan" && (arity == 0 || arity == 1) -> {
             if arity == 1 -> parameters.push(target)
@@ -98,7 +103,7 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" -> return "1"
+    if method == "default" || method == "compiler" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" -> return "1"
     if method == "run" -> return "3"
     if method == "args" || method == "jet" -> return "0"
     if method == "error" -> return "5"
@@ -142,6 +147,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
         return failed
     }
     if method != "generate" && template_count > 0 -> return failed
+    if method == "compiler" && !sema_build_compiler_site(environment, span, diagnostics) -> return failed
     values := [TExpr]{}
     params := [SemaCallParam]{}
     ordinary := [CallArg]{}
@@ -186,6 +192,22 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     loop value in generated -> values.push(value.copy())
     value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// Only the root package's own build source makes the `Compiler` value: a
+// `b.compiler` call written in any other package is E0776, wherever its
+// `Build` came from, so a root that hands its `Build` to a dependency's
+// function hands it no compiler control. The root is the package of the
+// load's entry module.
+sema_build_compiler_site: fn(environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    root := ""
+    if environment.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, graph.entry_module_identity) == .Val(entry) -> root = graph.modules[entry].package_identity.copy()
+    }
+    if root != "" && environment.package_identity == root -> return true
+    row: diagnostic_registry_row("E0776") ?? panic("E0776 must have a registry row")
+    diagnostics.push(sema_error("E0776", span, row.what, row.why, row.fix))
+    false
 }
 
 // A `b.generate` template's formatted items and the build locals it splices.

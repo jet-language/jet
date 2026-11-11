@@ -173,6 +173,14 @@ BuildSessionOption: struct {
     end: Int
 }
 
+// One `Compiler` value `b.compiler(target)` made: the target it acts on and
+// the call's span, its provenance.
+BuildSessionCompiler: struct {
+    target: Int
+    start: Int
+    end: Int
+}
+
 BuildSessionState: struct {
     id: Int
     active: Bool
@@ -199,6 +207,8 @@ BuildSessionState: struct {
     // The folder of each package package.jet lists, by its name
     // (`b.dependency(name)`).
     dependencies: [String: String]{[String: String]{}}
+    // The `Compiler` values this build made, by handle id.
+    compilers: [BuildSessionCompiler]{[BuildSessionCompiler]{}}
     start: Int
     end: Int
 }
@@ -285,6 +295,7 @@ build_session_handle: fn(state: BuildSessionState, value: BuildSessionValue, kin
             "BuildProbe" -> state.probes.len()
             "BuildFile" -> state.files.len()
             "BuildSigningIdentity" -> state.signing.len()
+            "Compiler" -> state.compilers.len()
             else -> 0
         }
         if id < count -> return Val(id)
@@ -382,6 +393,15 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
         state.default_target = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
+    // Sema admits the call only in the root package's own build source
+    // (sema_build_compiler_site); the session binds the value to one of this
+    // build's targets, and it expires with the build like every handle.
+    if method == "compiler" {
+        if args.len() != 1 -> return build_session_fail(state, "`b.compiler` takes one target")
+        target: build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "compiler target does not belong to this build")
+        state.compilers.push(BuildSessionCompiler{target: target, start: start, end: end})
+        return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
     }
     if method == "args" {
         if args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")

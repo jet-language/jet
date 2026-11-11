@@ -357,8 +357,11 @@ More powerful operations are effects, not a separate opt-in. The `Meta`
 effects in `core.compiler` (`Generate`, `Include`, `Rewrite`, `Types` and
 `Raw`) are allowed unless a row denies them, and reading the program needs
 none. Operations above checked generation also need the `Compiler` value,
-which only the root package's own build source makes (`b.compiler(app)`); a
-dependency can't make one, and a function that receives it acts for the root.
+which only the root package's own build source makes (`b.compiler(app)`). A
+`b.compiler` call written in any other package is E0776, even when the root
+passed that package its `Build`, so a dependency can't make one. A function
+that receives the value acts for the root, and the value expires with the
+build that made it.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.
@@ -375,7 +378,7 @@ and rewrite written function bodies, each change rechecked with the callers it
 affects and recorded in a receipt that does not promise equivalence. Some
 limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
-facts, and no host permission carried by a Meta effect. The advanced operations
-are ratified contract and not yet built. The source examples and the two
-executable registries linked above are the evidence; this page does not turn
-a schema row into an implementation claim.
+facts, and no host permission carried by a Meta effect. `b.compiler` itself is
+built; the operations on the value are ratified contract and not yet built.
+The source examples and the two executable registries linked above are the
+evidence; this page does not turn a schema row into an implementation claim.

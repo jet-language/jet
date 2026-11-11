@@ -6171,6 +6171,16 @@ MarkerGeneratesOutsideRow: struct {
     }
 }
 
+CompilerValueOutsideRoot: struct {
+    impl Diagnostic {
+        code: "E0776"
+        meaning: "`b.compiler` is called outside the root package's own build source"
+        what: fn(self) -> String { "`b.compiler` is called outside the root package's own build source" }
+        why: fn(self) -> String { "Only the package being built makes the `Compiler` value; a dependency that receives the root's `Build` gets no compiler control from it" }
+        fix: fn(self) -> String { "Call `b.compiler(target)` in the root package's `build: fn` and pass the value to the function that needs it" }
+    }
+}
+
 LiveQueryFootprintConflict: struct {
     key: String
     registered: String

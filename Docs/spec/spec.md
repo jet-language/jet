@@ -5752,6 +5752,12 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 A `jet build` that runs no `build: fn`, such as `jet build main.jet -- a`,
 refuses the words with E2104 instead of dropping them.
 
+`b.compiler(target)` returns the `Compiler` value that acts on one of the
+build's targets. Only the root package's own build source can make it: a
+`b.compiler` call written in any other package is E0776, even inside a
+function the root hands its `Build` to. The value expires with the build that
+made it.
+
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
 probe finds, and a step's `.output(path)` is a file that step makes, so one
