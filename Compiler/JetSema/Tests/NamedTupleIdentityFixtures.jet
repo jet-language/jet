@@ -16,13 +16,12 @@ named_tuple_identity_fixture: fn() {
         {name: "nanoseconds", ty: Type.Int},
         {name: "seconds", ty: Type.Int},
     }}
-    rules_type: Type.Tuple{fields: [TypeTupleField]{
-        {name: "cause", ty: Type.Option{inner: Type.String}},
-        {name: "code", ty: Type.Option{inner: Type.Int}},
-        {name: "kind", ty: Type.Int},
+    clock_type: Type.Tuple{fields: [TypeTupleField]{
+        {name: "clock_available", ty: Type.Bool},
+        {name: "nanos", ty: Type.String},
     }}
     assert(type_identity_equal(named_tuple_identity_registry_return("core.net.tls", "__host_wall_sample"), sample_type))
-    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__walk_rules"), rules_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__temp_clock_raw"), clock_type))
     line: named_tuple_identity_line_from_source()
     assert(!line.eof && line.line == "" && line.cause == None)
 }

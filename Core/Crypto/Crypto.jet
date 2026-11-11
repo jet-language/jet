@@ -14,6 +14,7 @@ use {
     random: core.crypto.random
     core.crypto.vault.[KeyUnlock, WrappedVaultKey]
     core.files.[basename, dirname, join]
+    rt: jet.runtime.files
     fixedcrypto: __core_crypto_ct
     hashes: __core_crypto_md
     byte_words.[load_le32, push_le32]
@@ -721,7 +722,7 @@ jetc_source: fn(path: String, error: FileCryptoError) -> JetcFd FileCryptoError!
     Ok(file)
 }
 jetc_same_source: fn(left: __JetcStat, right: __JetcStat) -> Bool Never! {
-    identity: if core.files.__os_family() == "unix" -> left.dev == right.dev && left.ino == right.ino else -> true
+    identity: if rt.os_family() == "unix" -> left.dev == right.dev && left.ino == right.ino else -> true
     identity && left.len == right.len && left.mtime == right.mtime && left.mtime_ns == right.mtime_ns
 }
 jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
@@ -750,18 +751,18 @@ jetc_stage: fn(parent: JetcParent) -> JetcTemp FileCryptoError! {
     Ok(stage)
 }
 jetc_io_fault: fn(name: String, error: FileCryptoError) FileCryptoError! {
-    if core.files.__fault_should_fail(name) -> return Err(error)
+    if rt.fault_should_fail(name) -> return Err(error)
     Ok()
 }
 jetc_read: fn(file: JetcFd, count: Int, name: String, error: FileCryptoError) -> Secret FileCryptoError! {
     loop {
-        if core.files.__fault_should_fail("{name}.interrupted") -> next
+        if rt.fault_should_fail("{name}.interrupted") -> next
         jetc_io_fault(name, error)
-        if core.files.__fault_should_fail("{name}.eof") -> return Ok(Secret{bytes: [U8]{}})
-        requested: if core.files.__fault_should_fail("{name}.short") -> jetc_min(count, 17) else -> count
+        if rt.fault_should_fail("{name}.eof") -> return Ok(Secret{bytes: [U8]{}})
+        requested: if rt.fault_should_fail("{name}.short") -> jetc_min(count, 17) else -> count
         result: core.crypto.__jetc_read(file.fd, requested)
         if result.value < 0 {
-            if result.errno == 4 && core.files.__os_family() == "unix" -> next
+            if result.errno == 4 && rt.os_family() == "unix" -> next
             return Err(error)
         }
         return Ok(Secret{bytes: result.bytes.move()})
@@ -784,13 +785,13 @@ jetc_write: fn(file: JetcFd, bytes: [U8], name: String) FileCryptoError! {
 jetc_write_span: fn(file: JetcFd, bytes: [U8], start: Int, end: Int, name: String) FileCryptoError! {
     offset := start
     loop offset < end {
-        if core.files.__fault_should_fail("{name}.interrupted") -> next
+        if rt.fault_should_fail("{name}.interrupted") -> next
         jetc_io_fault(name, .DestinationIO)
-        if core.files.__fault_should_fail("{name}.zero") -> return Err(.DestinationIO)
-        count: if core.files.__fault_should_fail("{name}.short") -> jetc_min(end - offset, 17) else -> end - offset
+        if rt.fault_should_fail("{name}.zero") -> return Err(.DestinationIO)
+        count: if rt.fault_should_fail("{name}.short") -> jetc_min(end - offset, 17) else -> end - offset
         result: core.crypto.__jetc_write(file.fd, bytes, offset, count)
         if result.value < 0 {
-            if result.errno == 4 && core.files.__os_family() == "unix" -> next
+            if result.errno == 4 && rt.os_family() == "unix" -> next
             return Err(.DestinationIO)
         }
         if result.value == 0 -> return Err(.DestinationIO)
@@ -2029,7 +2030,7 @@ __blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
 }
 
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {
-    if core.files.__os_family() == "unix" && !core.files.__path_windows() {
+    if rt.os_family() == "unix" && !core.files.__path_windows() {
         root: core.files.mktemp("jetc-source-contract")
         core.files.create_dir_all(root) ?? panic("create directory")
         source: Path.from(core.files.join(root, "source"))
