@@ -1,0 +1,32 @@
+Count: struct {
+    value: Int
+}
+
+fresh: fn(n: Int) -[]> Int {
+    cell: Shared{Count{value: 0}}
+    loop i in 0..<n -> cell.value += i
+    cell.value
+}
+
+local: fn(n: Int) -[]> Int {
+    cell: Cell.new(0)
+    loop i in 0..<n -> cell.set(cell.get() + i)
+    cell.get()
+}
+
+lent: fn(c: &Shared<Count>) -[]> Int {
+    c.value += 1
+    c.value
+}
+
+peek: fn(c: Shared<Count>) -[]> Int {
+    c.value
+}
+
+run: fn() {
+    held := Shared{Count{value: 4}}
+    print(fresh(4))
+    print(local(5))
+    print(lent(held))
+    print(peek(held))
+}

@@ -1815,6 +1815,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     autodiff_obligation_start := lambda_context.autodiff_obligations.len()
     failure_edge_start := lambda_context.failure_edges.len()
     failure_union_edge_start := lambda_context.failure_union_edges.len()
+    module_write_start := lambda_context.module_writes.len()
     lambda_context.autodiff_safe_panic = false
     lambda_context.autodiff_unsafe_panic = false
     frame := sema_scope_enter(lambda_scopes, lambda_state, "lambda@{lambda.span.start}")
@@ -2455,6 +2456,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         context.callback_return_row = lambda_context.callback_return_row
     }
     sema_expression_lambda_merge_context_facts(lambda_context, context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
+    // A state write in the body belongs to the function that writes the
+    // lambda, as its effects do: the body runs on the function's behalf, so
+    // a pure function may not hide a write in a lambda (E3401).
+    loop write_index in module_write_start..<lambda_context.module_writes.len() -> context.module_writes.push(lambda_context.module_writes[write_index].copy())
     // The lambda's flat nodes are rows of its arena, which continues this one.
     sema_arena_take_back(context, lambda_context.arena.move())
     // #3708: the callback's propagated failures stay rows of the enclosing

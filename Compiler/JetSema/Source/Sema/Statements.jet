@@ -8301,6 +8301,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // A bare `None` start can check as a value after its E0308.
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)
                         if !binding.mutable && binding.pattern == None && sema_shared_cycle_cell_init(binding.init) -> sema_scope_mark_fresh_cell(scopes, binding.name, binding.init)
+                        if !binding.mutable && binding.pattern == None && sema_scope_own_cell_init(binding.init) -> sema_scope_mark_own_cell(scopes, binding.name)
                     }
                     .None -> {
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)

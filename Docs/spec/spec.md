@@ -2141,8 +2141,11 @@ positive right. Ambient effects such as `IO` still violate that empty ceiling.
 Writing module state is not an effect, but a `-[]>` function may not do it,
 itself or through any function it calls (E3401): a module `Shared` holder's
 value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
-outlive the call, so a later call could see the write. Its own locals stay
-free to change.
+outlive the call, so a later call could see the write. A cell reached through
+a read parameter, `self`, an alias or a lambda capture may be such a cell, so
+writing it, taking its `guard_edit()` lease included, is E3401 too. Its own
+locals, a cell it builds (`Shared{…}`, `Cell.new(…)`), and a `&` parameter
+its caller lends for writing stay free to change.
 `Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
 memory, waiting, or panic denial still rejects a reachable operation
 (D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).

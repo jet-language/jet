@@ -1,0 +1,28 @@
+Count: struct {
+    value: Int
+}
+
+HITS: Shared{Count{value: 0}}
+
+Tick: trait {
+    tick: fn(self) -[]> Int
+}
+
+Hit: struct {
+    n: Int
+
+    impl Tick {
+        tick: fn(self) -> Int {
+            HITS.value += self.n
+            HITS.value
+        }
+    }
+}
+
+total: fn(t: Tick) -[]> Int {
+    t.tick()
+}
+
+run: fn() {
+    print(total(Hit{n: 1}))
+}

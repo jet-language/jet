@@ -105,6 +105,10 @@ SemaScopeBinding: struct {
     // write into another cell can see the stored value is built in place
     // (SharedCycles.jet).
     fresh_cell: Expr?{None}
+    // A `:` name bound to a cell this body builds (`Shared{…}` or
+    // `Cell.new(…)`): writes through it stay the body's own
+    // (sema_scope_record_module_write).
+    own_cell: Bool{false}
     // L0517: a `:` name bound to `path.normalize().to_string()` holds the
     // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
     normalized_path_text: Bool{false}
@@ -2220,14 +2224,47 @@ sema_scope_binding_row: fn(environment: SemaScopeEnvironment, table: SemaScopeTa
     row
 }
 
-// A write through `place` whose root is a module-level binding (`STATE` in
-// `STATE.rows[0].count`) writes module state: it is recorded in
-// `context.module_writes`. A write to a local records nothing.
+// A write through `place` writes state that outlives the call unless its
+// root is a cell the body built itself: it is recorded in
+// `context.module_writes`. A module-level root (`STATE` in
+// `STATE.rows[0].count`, or a module name before it) is module state by
+// name. A parameter or local root (`self`, an alias, a loop name or a
+// capture) may hold a module cell, so its write is recorded as `held`. Two
+// roots are the body's to write: a `:` local bound to a new cell
+// (SemaScopeBinding.own_cell), and a `&` parameter, whose caller lends the
+// place for writing and sees the write in the signature.
 sema_scope_record_module_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
     name: sema_scope_place_root(place) ?? return
     index: sema_scope_resolve_index(scopes, name) ?? return
-    if sema_scope_binding_symbol(environment, scopes, index).kind != SymbolKind.Constant -> return
+    kind: sema_scope_binding_symbol(environment, scopes, index).kind
+    if kind != SymbolKind.Parameter && kind != SymbolKind.Local {
+        context.module_writes.push(TEffectSpan{name: name, span: span})
+        return
+    }
+    if scopes.bindings[index].own_cell -> return
+    if kind == SymbolKind.Parameter && scopes.bindings[index].access == AccessConvention.Write -> return
+    context.module_writes.push(TEffectSpan{name: name, span: span, held: true})
+}
+
+// A place lent to a `&` parameter: the callee's writes through it are not
+// recorded (sema_scope_record_module_write), so the caller records a module
+// root as its own write. A local or parameter it lends is its own to lend.
+sema_scope_record_lent_write: fn(place: Expr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
+    name: sema_scope_place_root(place) ?? return
+    index: sema_scope_resolve_index(scopes, name) ?? return
+    kind: sema_scope_binding_symbol(environment, scopes, index).kind
+    if kind == SymbolKind.Parameter || kind == SymbolKind.Local -> return
     context.module_writes.push(TEffectSpan{name: name, span: span})
+}
+
+// An initializer that builds a new cell: `Shared{…}` (optionally in `Val`)
+// or `Cell.new(…)`.
+sema_scope_own_cell_init: fn(init: Expr) -> Bool Never! {
+    if sema_shared_cycle_cell_init(init) -> return true
+    if init == .MethodCall(receiver, method, _, _, _, args, _) {
+        if receiver == .Ident(name, _, _) -> return name == "Cell" && method == "new" && args.len() == 1
+    }
+    false
 }
 
 sema_scope_place_root: fn(place: Expr) -> String? Never! {
@@ -2268,6 +2305,14 @@ sema_scope_mark_fresh_cell: fn(table: &SemaScopeTable, name: String, init: Expr)
     sema_scope_note_binding_edit(table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Marks the `:` binding `name` just declared as a cell the body built (see
+// SemaScopeBinding.own_cell).
+sema_scope_mark_own_cell: fn(table: &SemaScopeTable, name: String) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].own_cell = true
 }
 
 // Keeps `literal` on the binding `name` just declared (see

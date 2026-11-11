@@ -582,6 +582,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
+        // A module place lent for writing is written by the callee (E3401 in
+        // a pure caller); a `&` parameter does not record its own writes.
+        if parameter.convention == AccessConvention.Write -> sema_scope_record_lent_write(args[index].expr, expr_span(args[index].expr), environment, scopes, context)
         // A bare name a take parameter receives is that parameter's take, as
         // `name.move()` was. A resource has one cleanup owner, so a take that
         // would copy it out of a place read in place (E0211) or out of a

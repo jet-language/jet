@@ -1,0 +1,49 @@
+Count: struct {
+    value: Int
+}
+
+HITS: Shared{Count{value: 0}}
+
+Tally: struct {
+    count: Shared<Count>
+
+    bump: fn(self) -[]> Int {
+        self.count.value += 1
+        self.count.value
+    }
+}
+
+alias: fn() -[]> Int {
+    held: HITS.copy()
+    held.value += 1
+    held.value
+}
+
+leased: fn(c: Shared<Count>) -[]> Int {
+    lease: c.guard_edit()
+    lease.value.value += 1
+    lease.value.value
+}
+
+hidden: fn() -[]> Int {
+    step: () -> { HITS.value += 1 }
+    step()
+    HITS.value
+}
+
+write_back: fn(c: Shared<Count>) -> Int {
+    c.value += 1
+    c.value
+}
+
+relay: fn(c: Shared<Count>) -[]> Int {
+    write_back(c)
+}
+
+run: fn() {
+    print(Tally{count: HITS.copy()}.bump())
+    print(alias())
+    print(leased(HITS))
+    print(hidden())
+    print(relay(HITS))
+}

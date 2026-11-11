@@ -131,6 +131,7 @@ sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, in
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     values: [TExpr]{snapshot, replacement}
     result: Type.Result{ok: Type.Bool, err: Type.Named{name: SEMA_SHARED_REVISION_ERROR_TYPE}}
+    sema_scope_record_module_write(receiver, span, environment, scopes, context)
     sema_call_shared_owner_host_value(receiver_value, "try_replace", values, result, span, expected, environment, program, scopes, context, diagnostics)
 }
 
@@ -164,6 +165,8 @@ sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: T
     }
     marker: TagMarker.Internal{internal_tag: if method == "guard_edit" -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead}
     result: Type.Tagged{marker: marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{inner}}}
+    // An edit lease is the write: every edit through the guard reaches the cell.
+    if method == "guard_edit" -> sema_scope_record_module_write(receiver, span, environment, scopes, context)
     sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, scopes, state, context, diagnostics)
 }
 
@@ -361,6 +364,8 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
                 sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
+            // An edit lease is the write: every edit through the guard reaches the cell.
+            if method == "guard_edit" -> sema_scope_record_module_write(receiver, span, environment, scopes, context)
             return sema_call_shared_owner_nullary(receiver, receiver_value, method, sema_call_cell_guard_type(method == "guard_edit", inner), span, expected, environment, program, scopes, state, context, diagnostics)
         }
         return SemaMethodSpecialCheck{handled: false, value: None}

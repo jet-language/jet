@@ -1040,19 +1040,24 @@ sema_effect_pure_diagnostic: fn(node: SemaEffectNode, reached: [String]) -> Diag
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
 }
 
-// A pure function that writes module state (`path` is the function alone) or
-// reaches a function that does (`path` runs from the pure function to it).
-// The report points at the write.
+// A pure function that writes state outliving the call (`path` is the
+// function alone) or reaches a function that does (`path` runs from the pure
+// function to it). The report points at the write; a write through a held
+// cell (a parameter or local) names the holder.
 sema_effect_pure_state_diagnostic: fn(nodes: [SemaEffectNode], path: [Int]) -> Diagnostic {
     node: nodes[path[0]]
     writer: nodes[path[path.len() - 1]]
     write: writer.module_writes[0]
     chain: loop step in path -> nodes[step].chain_name
+    written: if write.held -> "a cell through `{write.name}`" else -> "module state `{write.name}`"
     if path.len() == 1 {
-        diagnostic: sema_error("E3401", write.span, "`{node.name}` writes module state `{write.name}`", "module state outlives the call, so a later call sees the write, but `{node.name}` declares `-[]>`", "pass the state in and return the new value, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+        why: if write.held -> "`{write.name}` may hold a module cell, and a write to it outlives the call so a later read sees it, but `{node.name}` declares `-[]>`" else -> "module state outlives the call, so a later call sees the write, but `{node.name}` declares `-[]>`"
+        instead: if write.held -> "take the cell as a `&` parameter so the caller lends it for writing, return the new value instead" else -> "pass the state in and return the new value"
+        diagnostic: sema_error("E3401", write.span, "`{node.name}` writes {written}", why, "{instead}, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
         return diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
     }
-    diagnostic: sema_error("E3401", write.span, "`{node.name}` reaches a write of module state `{write.name}`", "{chain.join(" → ")} writes `{write.name}`, which outlives the call — the whole call chain must be pure inside `{node.name}`", "move the write out of `{writer.chain_name}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+    target: if write.held -> "a cell through `{write.name}`" else -> "`{write.name}`"
+    diagnostic: sema_error("E3401", write.span, "`{node.name}` reaches a write of {written}", "{chain.join(" → ")} writes {target}, which outlives the call — the whole call chain must be pure inside `{node.name}`", "move the write out of `{writer.chain_name}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
     diagnostic_with_rights(diagnostic, "pure", chain, [String]{}, None)
 }
 

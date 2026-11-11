@@ -1,0 +1,24 @@
+Count: struct {
+    value: Int
+}
+
+HITS: Shared{Count{value: 0}}
+
+write: fn(c: Shared<Count>) -[]> Int {
+    c.value += 1
+    c.value
+}
+
+write_back: fn(c: Shared<Count>) -> Int {
+    c.value += 1
+    c.value
+}
+
+relay: fn(c: Shared<Count>) -[]> Int {
+    write_back(c)
+}
+
+run: fn() {
+    print(write(HITS))
+    print(relay(HITS))
+}

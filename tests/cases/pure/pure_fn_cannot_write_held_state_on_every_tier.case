@@ -1,0 +1,62 @@
+# A `-[]>` function may not write a cell it only holds, on every tier: a
+# `Shared` parameter (alias.jet, the G8 review's probe), a read `self`, a
+# local alias of a module cell, a `guard_edit()` lease, a lambda's write and
+# a write reached through a helper or a trait dispatch are all E3401. A cell
+# the function builds itself, a local `Cell`, and a `&` parameter its caller
+# lends stay free to write; lending module state to a `&` parameter is the
+# caller's write.
+fixture: pure_fn_cannot_write_held_state_on_every_tier/input
+env: NO_COLOR=1
+step: jet check alias.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`write` writes a cell through `c`" # the parameter route
+stderr: ~ "`c` may hold a module cell" # the reason names the holder
+step: jet run --optimize=none alias.jet
+exit: 1
+stderr: ~ "`write` writes a cell through `c`" # O0 refuses it
+stdout: !~ "1" # nothing runs
+step: jet run --optimize=basic alias.jet
+exit: 1
+stderr: ~ "`write` writes a cell through `c`" # O1 refuses it
+stdout: !~ "1" # nothing runs
+step: jet run --optimize=full alias.jet
+exit: 1
+stderr: ~ "`write` writes a cell through `c`" # O2 refuses it
+stdout: !~ "1" # nothing runs
+step: jet check held.jet
+exit: 1
+stderr: count "Error [" = 5 # bump, alias, leased, hidden and relay
+stderr: ~ "writes a cell through `self`" # a read receiver's cell
+stderr: ~ "`alias` writes a cell through `held`" # a local alias of a module cell
+stderr: ~ "`leased` writes a cell through `c`" # an edit lease is the write
+stderr: ~ "`hidden` writes module state `HITS`" # a lambda's write is its function's
+stderr: ~ "`relay` reaches a write of a cell through `c`" # through an inferred helper
+stderr: ~ "Call chain: relay → write_back" # the chain names the helper
+step: jet check trait.jet
+exit: 1
+stderr: ~ "`total` reaches a write of module state `HITS`" # through a trait dispatch
+step: jet run --optimize=none trait.jet
+exit: 1
+stderr: ~ "`total` reaches a write of module state `HITS`" # O0 refuses it
+step: jet run --optimize=basic trait.jet
+exit: 1
+stderr: ~ "`total` reaches a write of module state `HITS`" # O1 refuses it
+step: jet run --optimize=full trait.jet
+exit: 1
+stderr: ~ "`total` reaches a write of module state `HITS`" # O2 refuses it
+step: jet check lent.jet
+exit: 1
+stderr: count "Error [" = 1 # pin only; add writes the place it is lent
+stderr: ~ "`pin` writes module state `pinned`" # lending module state is the caller's write
+step: jet check ok.jet
+exit: 0
+step: jet run --optimize=none ok.jet
+exit: 0
+stdout: = "6\n10\n5\n5\n"
+step: jet run --optimize=basic ok.jet
+exit: 0
+stdout: = "6\n10\n5\n5\n"
+step: jet run --optimize=full ok.jet
+exit: 0
+stdout: = "6\n10\n5\n5\n"
