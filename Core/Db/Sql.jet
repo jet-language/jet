@@ -46,8 +46,7 @@ JetSQLSelectItem: enum {
     Wildcard
     Field(field: String, alias: String?)
     Aggregate(function: JetSQLAggregate, field: String?, alias: String?)
-}
-impl JetSQLSelectItem {
+
     // Rust output_name:45–58.
     output_name: fn(self) -> String Never! {
         if self == {
@@ -72,7 +71,6 @@ impl JetSQLSelectItem {
         }
     }
 }
-
 #Test("SQL projection field access returns owned names without consuming items") {
     field: JetSQLSelectItem.Field{field: "price", alias: Val("display")}
     assert_eq(field.field(), Val("price"))
@@ -324,8 +322,9 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
 // Rust JetSqlValue:108–168. Public SQL scalar carrier, distinct from
 // Core Dyn/DBValue; adapters marshal only at entry.
 #Equatable
-JetSQLValue: enum { Null Bool(Bool) Int(I64) Float(Float) Text(String) }
-impl JetSQLValue {
+JetSQLValue: enum {
+    Null Bool(Bool) Int(I64) Float(Float) Text(String)
+
     literal: fn(token: String) -> JetSQLValue Never! {
         trimmed := sql_text.trim(token) // #4303
         bytes: sql_text.utf8_bytes(trimmed)

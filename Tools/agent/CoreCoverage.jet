@@ -622,13 +622,16 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         if is_owner_kind(value) && token(tokens, i - 1) == ":" -> pending = Owner{name: token(tokens, i - 2), kind: value.copy()}
         if value == {
             // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
-            // type's body belongs to that type. An impl of a reserved `__` trait is
-            // named by that trait too: its methods are that trait's, outside the surface.
+            // type's body belongs to that type. An impl of a reserved `__` trait, bare
+            // or dotted, is named by that trait too: its methods are that trait's,
+            // outside the surface.
             "impl" -> {
                 owner := token(tokens, i + 1)
                 if scopes.len() > 0 {
                     enclosing: scopes[scopes.len() - 1]
-                    if token(tokens, i + 2) != "." && (enclosing.kind == "struct" || enclosing.kind == "enum") -> owner = enclosing.name.copy()
+                    if token(tokens, i + 2) != "." && (enclosing.kind == "struct" || enclosing.kind == "enum") {
+                        owner = if owner.starts_with("__") -> "{enclosing.name}.{owner}" else -> enclosing.name.copy()
+                    }
                 }
                 if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") -> owner = "{owner}.{token(tokens, i + 3)}"
                 pending = Owner{name: owner.copy(), kind: "impl"}
@@ -1637,9 +1640,9 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 }
 
 #Test("an impl of a reserved trait is named by that trait, outside the surface") {
-    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{}}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
-    assert_eq(function_ids(found), [String]{"core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
-    assert_eq(found.map(row -> outside_surface(row)), [Bool]{false, true, false})
+    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(&self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
+    assert_eq(function_ids(found), [String]{"core.demo.Reader.__Cursor.next", "core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
+    assert_eq(found.map(row -> outside_surface(row)), [Bool]{true, false, true, false})
 }
 
 #Test("return types preserve builtin, prelude and compound spellings") {

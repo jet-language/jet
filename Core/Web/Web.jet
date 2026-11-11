@@ -64,16 +64,7 @@ page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, 
 __AppCall: struct {
     request: HTTPRequest
     data: String
-}
 
-__AppReply: enum {
-    Page(WebPage)
-    JSON(String)
-    Rejected(String)
-    Failed(String)
-}
-
-impl __AppCall {
     __input: fn<Target: Decode>(self, name: String) -> Target? { self.request.__route_input<Target>(name) }
 
     __body: fn<Target: Decode>(self) -[Net]> Target? Never! {
@@ -103,6 +94,13 @@ impl __AppCall {
     __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
 }
 
+__AppReply: enum {
+    Page(WebPage)
+    JSON(String)
+    Rejected(String)
+    Failed(String)
+}
+
 __AppHandlerCell: struct {
     call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!
 }
@@ -110,9 +108,7 @@ __AppHandlerCell: struct {
 // A registered adapter. Copies share the one handler.
 __AppHandler: struct {
     __cell: Shared<__AppHandlerCell>
-}
 
-impl __AppHandler {
     // A handler failure is the route's 500 answer, never the server's.
     run: fn(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
         guard: self.__cell.guard_read()
@@ -183,28 +179,7 @@ __AppState: struct {
 /// Copies share the one graph.
 App: struct {
     __state: Shared<__AppState>
-}
 
-app: fn() -> App Never! {
-    App{__state: shared __AppState{
-        routes: [__AppRoute]{},
-        actions: [__AppAction]{},
-        mounts: [__AppMount]{},
-        routes_from: [String]{},
-        not_found: None,
-        security: [String]{},
-        assets: [String]{},
-        split: [String]{},
-        cache: [String]{},
-        a11y: [String]{},
-        adapters: [String]{},
-        hydration: "dev-overlay",
-        mode: "csr",
-        explicit_mode: false,
-    }}
-}
-
-impl App {
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding.
     __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
@@ -358,6 +333,25 @@ impl App {
     serve: fn(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
     serve_on: fn(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+}
+
+app: fn() -> App Never! {
+    App{__state: shared __AppState{
+        routes: [__AppRoute]{},
+        actions: [__AppAction]{},
+        mounts: [__AppMount]{},
+        routes_from: [String]{},
+        not_found: None,
+        security: [String]{},
+        assets: [String]{},
+        split: [String]{},
+        cache: [String]{},
+        a11y: [String]{},
+        adapters: [String]{},
+        hydration: "dev-overlay",
+        mode: "csr",
+        explicit_mode: false,
+    }}
 }
 
 __app_mode: fn(app: App, mode: String) -> App Never! {
@@ -767,10 +761,13 @@ __openapi_mux: fn(routes: HTTPMux) -> String Never! {
 
 // An OpenAPI contract or document problem: `web.openapi` stops with it.
 #Error
-__OpenAPIFault: struct { message: String }
-impl __OpenAPIFault.Display { display: fn(self) -> String { self.message.copy() } }
-impl __OpenAPIFault.Debug { debug: fn(&&self) -> String { self.message } }
+__OpenAPIFault: struct {
+    message: String
 
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
 __openapi_fault: fn(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
 
 __OpenAPIParameter: struct {

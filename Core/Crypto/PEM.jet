@@ -67,12 +67,12 @@ impl des.DESError -> PEMError { PEMError.DES(self) }
 PEMBlock: struct {
     der: [U8]
     used: Int
-}
 
-impl PEMBlock.Close {
-    close: fn(&&self) {
-        der := self.der.move()
-        core.crypto.wipe(der)
+    impl Close {
+        close: fn(&&self) {
+            der := self.der.move()
+            core.crypto.wipe(der)
+        }
     }
 }
 

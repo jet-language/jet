@@ -129,12 +129,12 @@ LMOTSPrivate: struct {
     params: LMOTSParams
     keys: [[U8]]
     usable: Bool
-}
 
-impl LMOTSPrivate.Close {
-    close: fn(&&self) {
-        keys := self.keys.move()
-        loop i in 0..<keys.len() -> core.crypto.wipe(keys[i])
+    impl Close {
+        close: fn(&&self) {
+            keys := self.keys.move()
+            loop i in 0..<keys.len() -> core.crypto.wipe(keys[i])
+        }
     }
 }
 
@@ -474,11 +474,11 @@ lms_sign: fn<R: RNG>(ctx: &LMSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
 // A test generator that hands out one fixed buffer, repeated as needed.
 FixedRNG: struct {
     bytes: [U8]
-}
 
-impl FixedRNG.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! {
-        loop i in 0..<out.len() -> out[i] = self.bytes[i %% self.bytes.len()]
-        true
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            loop i in 0..<out.len() -> out[i] = self.bytes[i %% self.bytes.len()]
+            true
+        }
     }
 }

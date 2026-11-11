@@ -146,9 +146,7 @@ __HTTPHandlerCell: struct {
 /// share the one handler.
 HTTPHandler: struct {
     __cell: Shared<__HTTPHandlerCell>
-}
 
-impl HTTPHandler {
     handle: fn(self, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
         guard: self.__cell.guard_read()
         guard.value.call(request)
@@ -197,9 +195,7 @@ __HTTPMuxState: struct {
 /// Routes and middleware for a server. Copies share the one route table.
 HTTPMux: struct {
     __state: Shared<__HTTPMuxState>
-}
 
-impl HTTPMux {
     // `mux.get(pattern, handler)` and its sibling verbs land here with the
     // route's checked contract when the pattern is a literal. The compiler
     // wrote that contract complete, and `web.openapi(mux)` checks it against
@@ -275,9 +271,7 @@ HTTPServer: struct {
     __tls: HTTPServerTLS?
     __done: Sender<Int>
     __finished: Receiver<Int>
-}
 
-impl HTTPServer {
     local_addr: fn(self) -[Net]> String HTTPError! {
         self.__listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
     }

@@ -284,13 +284,15 @@ FileLock: struct {
 // opens, waits and identity checks therefore close without unlinking a name.
 // Close reads the consumed receiver in place. Rebinding it (`held := self.move()`)
 // would make a second owner whose scope-end Close re-enters this one.
-__LockFd: struct { fd: Int }
-impl __LockFd.Close {
-    close: fn(&&self) {
-        _: core.files.__lock_close(self.fd)
+__LockFd: struct {
+    fd: Int
+
+    impl Close {
+        close: fn(&&self) {
+            _: core.files.__lock_close(self.fd)
+        }
     }
 }
-
 // The FileLock becomes the descriptor's one owner: the caller's guard is
 // disarmed in place (-1 closes nothing), so its scope-end Close never closes
 // the descriptor the FileLock now holds.
@@ -315,11 +317,11 @@ __LockWait: struct {
 /// the OS lock without removing any filesystem name.
 AdvisoryLock: struct {
     priv handle: Int
-}
 
-impl AdvisoryLock.Close {
-    close: fn(&&self) {
-        core.files.__close_directory(self.handle)
+    impl Close {
+        close: fn(&&self) {
+            core.files.__close_directory(self.handle)
+        }
     }
 }
 
@@ -589,6 +591,12 @@ Directory: struct {
     pass_to: fn(self, spec: ProcessSpec, at: Int) -[FS, Exec, Env]> ProcessSpec IOError! {
         process_directory(spec, self, at, false)
     }
+
+    impl Close {
+        close: fn(&&self) {
+            core.files.__close_directory(self.handle)
+        }
+    }
 }
 
 // Compiler-private store bridge, not a public filesystem API. The store
@@ -733,13 +741,6 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
         assert(names == [String]{"held.txt"})
         close(twin)
         remove_all(root) ?? panic("cleanup")
-    }
-}
-
-
-impl Directory.Close {
-    close: fn(&&self) {
-        core.files.__close_directory(self.handle)
     }
 }
 
@@ -1535,12 +1536,7 @@ symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) 
 /// `report()` or `failures`.
 BestEffort: struct {
     failures: [IOError]
-}
 
-/// A new, empty best-effort record: `done := files.best_effort()`.
-best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
-
-impl BestEffort {
     copy_file: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
         if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
     }
@@ -1586,6 +1582,9 @@ impl BestEffort {
         lines.join("\n")
     }
 }
+
+/// A new, empty best-effort record: `done := files.best_effort()`.
+best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
 
 
 hard_link: fn(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
@@ -1908,16 +1907,20 @@ Walk: struct {
     /// Every entry in walk order, or the first error the walk meets.
     list: fn(&&self) -[FS]> [WalkEntry] IOError! {
         out := [WalkEntry]{}
-        loop entry in self -> out.push(entry?)
+        // The cursor's own `next`, not `loop entry in self`: the seed that
+        // builds this Core does not yet take a type's nested Iterable as a
+        // loop source inside the type's own body.
+        cursor := self.iter()
+        loop cursor.next() == .Val(entry) -> out.push(entry?)
         Ok(out)
     }
-}
 
-impl Walk.Iterable {
-    Iter: __WalkCursor
+    impl Iterable {
+        Iter: __WalkCursor
 
-    iter: fn(&&self) -> __WalkCursor {
-        __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, skip: self.skip, context: 0, frames: [__WalkFrame]{}, done: false}
+        iter: fn(&&self) -> __WalkCursor {
+            __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, skip: self.skip, context: 0, frames: [__WalkFrame]{}, done: false}
+        }
     }
 }
 
@@ -1931,51 +1934,51 @@ __WalkCursor: struct {
     context: Int
     frames: [__WalkFrame]
     done: Bool
-}
 
-impl __WalkCursor.Iterator {
-    Item: WalkEntry IOError!
+    impl Iterator {
+        Item: WalkEntry IOError!
 
-    // Yield the next entry, descending first into each child directory whose
-    // subtree key sorts before it.
-    next: fn(&self) -[FS]> (WalkEntry IOError!)? {
-        if self.done -> return None
-        if self.context == 0 {
-            if __walk_open(self) == .Err(error) {
-                __walk_finish(self)
-                return Val(Err(error))
-            }
-        }
-        loop self.frames.len() > 0 {
-            top: self.frames.len() - 1
-            entries: self.frames[top].entries.len()
-            children: self.frames[top].children.len()
-            if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
-                child: self.frames[top].children.pop() ?? panic("walk child")
-                depth: self.frames[top].depth + 1
-                if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
-                    .Ok(frame) -> {
-                        core.files.__walk_release(self.context, child.directory)
-                        self.frames.push(frame)
-                    }
-                    .Err(error) -> {
-                        core.files.__walk_release(self.context, child.directory)
-                        return Val(Err(error))
-                    }
+        // Yield the next entry, descending first into each child directory whose
+        // subtree key sorts before it.
+        next: fn(&self) -[FS]> (WalkEntry IOError!)? {
+            if self.done -> return None
+            if self.context == 0 {
+                if __walk_open(self) == .Err(error) {
+                    __walk_finish(self)
+                    return Val(Err(error))
                 }
-                next
             }
-            if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
-            _ := self.frames.pop()
+            loop self.frames.len() > 0 {
+                top: self.frames.len() - 1
+                entries: self.frames[top].entries.len()
+                children: self.frames[top].children.len()
+                if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
+                    child: self.frames[top].children.pop() ?? panic("walk child")
+                    depth: self.frames[top].depth + 1
+                    if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
+                        .Ok(frame) -> {
+                            core.files.__walk_release(self.context, child.directory)
+                            self.frames.push(frame)
+                        }
+                        .Err(error) -> {
+                            core.files.__walk_release(self.context, child.directory)
+                            return Val(Err(error))
+                        }
+                    }
+                    next
+                }
+                if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
+                _ := self.frames.pop()
+            }
+            __walk_finish(self)
+            None
         }
-        __walk_finish(self)
-        None
     }
-}
 
-impl __WalkCursor.Close {
-    close: fn(&&self) {
-        if self.context != 0 -> core.files.__walk_close(self.context)
+    impl Close {
+        close: fn(&&self) {
+            if self.context != 0 -> core.files.__walk_close(self.context)
+        }
     }
 }
 

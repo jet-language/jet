@@ -115,16 +115,16 @@ HashCtx: struct {
     used: Int
     // Bytes absorbed so far.
     total: Int
-}
 
-impl HashCtx.Close {
-    close: fn(&&self) {
-        buf := self.buf.move()
-        core.crypto.wipe(buf)
-        s32 := self.s32.move()
-        loop i in 0..<s32.len() -> s32[i] = U32{0}
-        s64 := self.s64.move()
-        loop i in 0..<s64.len() -> s64[i] = U64{0}
+    impl Close {
+        close: fn(&&self) {
+            buf := self.buf.move()
+            core.crypto.wipe(buf)
+            s32 := self.s32.move()
+            loop i in 0..<s32.len() -> s32[i] = U32{0}
+            s64 := self.s64.move()
+            loop i in 0..<s64.len() -> s64[i] = U64{0}
+        }
     }
 }
 

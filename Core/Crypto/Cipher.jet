@@ -35,16 +35,22 @@ AESKey: struct {
     sk: [U64]
     rk: [U8]
     dk: [U8]
-}
 
-impl AESKey.Close {
-    close: fn(&&self) {
-        sk := self.sk.move()
-        loop i in 0..<sk.len() -> sk[i] = U64{0}
-        rk := self.rk.move()
-        core.crypto.wipe(rk)
-        dk := self.dk.move()
-        core.crypto.wipe(dk)
+    impl Close {
+        close: fn(&&self) {
+            sk := self.sk.move()
+            loop i in 0..<sk.len() -> sk[i] = U64{0}
+            rk := self.rk.move()
+            core.crypto.wipe(rk)
+            dk := self.dk.move()
+            core.crypto.wipe(dk)
+        }
+    }
+
+    impl ForwardBlock {
+        encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
+        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CTR32, ctr, src, off, count, out) }
+        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CBC_ENC, iv, src, off, count, out) }
     }
 }
 
@@ -761,12 +767,6 @@ ForwardBlock: trait {
     /// chaining value `iv`, appended to `out`; `iv` ends holding the last
     /// ciphertext block (the CBC_ENC operation of `blocks`).
     cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!
-}
-
-impl AESKey.ForwardBlock {
-    encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CTR32, ctr, src, off, count, out) }
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CBC_ENC, iv, src, off, count, out) }
 }
 
 // ---------------------------------------------------------------------------

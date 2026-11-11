@@ -368,74 +368,74 @@ WindowRewriteWalker: struct {
     mwin: Int
     src: Int
     tab: Int
-}
 
-impl WindowRewriteWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        op: a.exprs[e].op
-        if p.walks[t].u2 >= 0 {
-            if op != tk.TK_COLUMN -> return ast.WRC_CONTINUE
-            found := false
-            loop i in 0..<ast.src_len(a, self.src) {
-                si: ast.src_item(a, self.src, i)
-                if a.exprs[e].itable == a.items[si].cursor {
-                    found = true
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            op: a.exprs[e].op
+            if p.walks[t].u2 >= 0 {
+                if op != tk.TK_COLUMN -> return ast.WRC_CONTINUE
+                found := false
+                loop i in 0..<ast.src_len(a, self.src) {
+                    si: ast.src_item(a, self.src, i)
+                    if a.exprs[e].itable == a.items[si].cursor {
+                        found = true
+                        break
+                    }
+                }
+                if !found -> return ast.WRC_CONTINUE
+            }
+            if op == tk.TK_FUNCTION {
+                if !ast.has(a, e, ast.EP_WIN_FUNC) -> return ast.WRC_CONTINUE
+                win := self.mwin
+                loop win >= 0 {
+                    if a.exprs[e].y == win -> return ast.WRC_PRUNE
+                    win = a.windows[win].next_win
+                }
+            } else if op != tk.TK_IF_NULL_ROW && op != tk.TK_AGG_FUNCTION && op != tk.TK_COLUMN {
+                return ast.WRC_CONTINUE
+            }
+            if p.db.malloc_failed -> return ast.WRC_ABORT
+            sub := p.walks[t].u
+            icol := -1
+            loop i in 0..<ast.list_len(a, sub) {
+                x: ast.list_expr(a, sub, i)
+                if ast.expr_compare(a, x, e, -1) == 0 {
+                    icol = i
                     break
                 }
             }
-            if !found -> return ast.WRC_CONTINUE
-        }
-        if op == tk.TK_FUNCTION {
-            if !ast.has(a, e, ast.EP_WIN_FUNC) -> return ast.WRC_CONTINUE
-            win := self.mwin
-            loop win >= 0 {
-                if a.exprs[e].y == win -> return ast.WRC_PRUNE
-                win = a.windows[win].next_win
+            if icol < 0 {
+                dup: ast.expr_dup(a, e, 0)
+                if a.exprs[dup].op == tk.TK_AGG_FUNCTION -> a.exprs[dup].op = tk.TK_FUNCTION
+                sub = ast.expr_list_append(a, sub, dup)
+                p.walks[t].u = sub
             }
-        } else if op != tk.TK_IF_NULL_ROW && op != tk.TK_AGG_FUNCTION && op != tk.TK_COLUMN {
-            return ast.WRC_CONTINUE
+            f: a.exprs[e].flags.bit_and(ast.EP_COLLATE)
+            ast.expr_delete(a, e)
+            n := ast.zero_expr(tk.TK_COLUMN)
+            n.icolumn = if icol < 0 -> ast.list_len(a, sub) - 1 else -> icol
+            n.itable = a.windows[self.mwin].eph_csr
+            n.y = self.tab
+            n.flags = f
+            a.exprs[e] = n
+            if p.db.malloc_failed -> return ast.WRC_ABORT
+            ast.WRC_CONTINUE
         }
-        if p.db.malloc_failed -> return ast.WRC_ABORT
-        sub := p.walks[t].u
-        icol := -1
-        loop i in 0..<ast.list_len(a, sub) {
-            x: ast.list_expr(a, sub, i)
-            if ast.expr_compare(a, x, e, -1) == 0 {
-                icol = i
-                break
-            }
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            save: p.walks[t].u2
+            if save == s -> return ast.WRC_CONTINUE
+            p.walks[t].u2 = s
+            _: cg.pwalk_select(p, a, s)
+            p.walks[t].u2 = save
+            ast.WRC_PRUNE
         }
-        if icol < 0 {
-            dup: ast.expr_dup(a, e, 0)
-            if a.exprs[dup].op == tk.TK_AGG_FUNCTION -> a.exprs[dup].op = tk.TK_FUNCTION
-            sub = ast.expr_list_append(a, sub, dup)
-            p.walks[t].u = sub
-        }
-        f: a.exprs[e].flags.bit_and(ast.EP_COLLATE)
-        ast.expr_delete(a, e)
-        n := ast.zero_expr(tk.TK_COLUMN)
-        n.icolumn = if icol < 0 -> ast.list_len(a, sub) - 1 else -> icol
-        n.itable = a.windows[self.mwin].eph_csr
-        n.y = self.tab
-        n.flags = f
-        a.exprs[e] = n
-        if p.db.malloc_failed -> return ast.WRC_ABORT
-        ast.WRC_CONTINUE
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        save: p.walks[t].u2
-        if save == s -> return ast.WRC_CONTINUE
-        p.walks[t].u2 = s
-        _: cg.pwalk_select(p, a, s)
-        p.walks[t].u2 = save
-        ast.WRC_PRUNE
-    }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // selectWindowRewriteEList: rewrite the terms of `elist`, appending what
@@ -479,40 +479,40 @@ expr_list_append_list: fn(a: &ast.AST, list0: Int, append: Int, int_to_null: Boo
 // new subquery, is a level further out.
 WindowAggDepthWalker: struct {
     unused: Int
-}
 
-impl WindowAggDepthWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].op2 >= p.walks[t].depth -> a.exprs[e].op2 += 1
-        ast.WRC_CONTINUE
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].op2 >= p.walks[t].depth -> a.exprs[e].op2 += 1
+            ast.WRC_CONTINUE
+        }
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { cg.walker_depth_increase(p) }
+        has_select2: fn(self) -[]> Bool Never! { true }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { cg.walker_depth_decrease(p) }
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { cg.walker_depth_increase(p) }
-    has_select2: fn(self) -[]> Bool Never! { true }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { cg.walker_depth_decrease(p) }
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // disallowAggregatesInOrderByCb: an aggregate in the ORDER BY of a SELECT
 // that is no aggregate query is an error.
 DisallowAggOrderByWalker: struct {
     unused: Int
-}
 
-impl DisallowAggOrderByWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].agg_info < 0 {
-            name: ast.text(a.exprs[e].token ?? [U8]{})
-            ast.error(a, "misuse of aggregate: {name}()")
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].agg_info < 0 {
+                name: ast.text(a.exprs[e].token ?? [U8]{})
+                ast.error(a, "misuse of aggregate: {name}()")
+            }
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        has_select: fn(self) -[]> Bool Never! { false }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { false }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // Whether the first terms of `sort` match `ob`, term for term

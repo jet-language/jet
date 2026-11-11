@@ -7,16 +7,7 @@ TDigest: struct {
     impl Display {
         display: fn(self) -> String { "TDigest" }
     }
-}
 
-Centroid: struct {
-    mean: Float
-    weight: Float
-}
-
-new: fn() -> TDigest Never! { TDigest.new() }
-
-impl TDigest {
     new: fn() -> TDigest Never! {
         TDigest{centroids: [Centroid]{}}
     }
@@ -31,6 +22,13 @@ impl TDigest {
         step_quantile(self.centroids, q)
     }
 }
+
+Centroid: struct {
+    mean: Float
+    weight: Float
+}
+
+new: fn() -> TDigest Never! { TDigest.new() }
 
 insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
     if values.len() == 0 -> return 0

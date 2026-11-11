@@ -936,14 +936,14 @@ authority_validate_runtime: fn(runtime: ServiceRuntime) ServiceError! {
 // An empty path holds nothing: a tree without a state store has no journal.
 __ServiceFileLock: struct {
     path: String
-}
-impl __ServiceFileLock.Close {
-    close: fn(&&self) {
-        if self.path == "" -> return
-        service_remove(self.path).drop("lock release is best-effort; a stale lock is recovered by age")
+
+    impl Close {
+        close: fn(&&self) {
+            if self.path == "" -> return
+            service_remove(self.path).drop("lock release is best-effort; a stale lock is recovered by age")
+        }
     }
 }
-
 authority_file_lock: fn(store: String, suffix: String) -> __ServiceFileLock ServiceError! {
     authority_validate_store_path(store)
     path: "{store}.{suffix}.lock"
@@ -1570,8 +1570,7 @@ stat_cause: fn(error: IOError) -> String Never! {
 }
 
 // Select path grammar at compile time, not through an Env capability.
-StatePathPlatform: struct {}
-impl StatePathPlatform {
+StatePathPlatform: struct {
     windows: fn(self) -> Bool Never! {
         comptime if #build.target.os == {
             .Linux -> { return false }
@@ -1581,7 +1580,6 @@ impl StatePathPlatform {
         }
     }
 }
-
 StatePathPrefix: struct {
     length: Int
     verbatim: Bool

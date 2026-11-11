@@ -1801,126 +1801,126 @@ run_parser: fn<B: SQLBuilder>(b: &B, a: &ast.AST) -[DB]> Int Never! {
 SQLRecorder: struct {
     log: [String]
     sel: Int
-}
 
-impl SQLRecorder.SQLBuilder {
-    finish_coding: fn(&self, a: &ast.AST) Never! { self.log.push("finish") }
-    begin_transaction: fn(&self, a: &ast.AST, kind: Int) Never! { self.log.push("begin {kind}") }
-    end_transaction: fn(&self, a: &ast.AST, op: Int) Never! { self.log.push("end {op}") }
-    savepoint: fn(&self, a: &ast.AST, op: Int, name: ast.SQLTok) Never! {
-        t: ast.tok_text(a, name)
-        self.log.push("savepoint {op} {t}")
-    }
-    start_table: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) Never! {
-        t1: ast.tok_text(a, name1)
-        t2: ast.tok_text(a, name2)
-        self.log.push("start_table {t1}|{t2} temp={is_temp} view={is_view} virtual={is_virtual} noerr={no_err}")
-    }
-    end_table: fn(&self, a: &ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) Never! {
-        t: ast.tok_text(a, end)
-        self.log.push("end_table {t} opts={tab_opts} select={select}")
-    }
-    add_column: fn(&self, a: &ast.AST, name: ast.SQLTok, typ: ast.SQLTok) Never! {
-        t1: ast.tok_text(a, name)
-        t2: ast.tok_text(a, typ)
-        self.log.push("column {t1} {t2}")
-    }
-    add_default_value: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
-        t: ast.text(a.ctx.sql[start..<end].copy())
-        self.log.push("default {t}")
-    }
-    add_not_null: fn(&self, a: &ast.AST, on_error: Int) Never! { self.log.push("not_null {on_error}") }
-    add_primary_key: fn(&self, a: &ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) Never! {
-        self.log.push("primary_key list={list} onerr={on_error} autoinc={autoinc} order={sort_order}")
-    }
-    create_index: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) Never! {
-        t: ast.tok_text(a, name1)
-        n: ast.list_len(a, list)
-        self.log.push("create_index {t} cols={n} onerr={on_error} type={idx_type}")
-    }
-    add_check_constraint: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
-        t: ast.text(a.ctx.sql[start..<end].copy())
-        self.log.push("check {t}")
-    }
-    create_foreign_key: fn(&self, a: &ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) Never! {
-        t: ast.tok_text(a, to)
-        self.log.push("foreign_key {t} flags={flags}")
-    }
-    defer_foreign_key: fn(&self, a: &ast.AST, deferred: Int) Never! { self.log.push("defer {deferred}") }
-    add_collate_type: fn(&self, a: &ast.AST, name: ast.SQLTok) Never! {
-        t: ast.tok_text(a, name)
-        self.log.push("collate {t}")
-    }
-    add_generated: fn(&self, a: &ast.AST, e: Int, typ: ast.SQLTok) Never! {
-        t: ast.tok_text(a, typ)
-        self.log.push("generated {t}")
-    }
-    drop_table: fn(&self, a: &ast.AST, name: Int, is_view: Int, no_err: Int) Never! { self.log.push("drop_table view={is_view} noerr={no_err}") }
-    create_view: fn(&self, a: &ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) Never! {
-        t: ast.tok_text(a, name1)
-        self.log.push("create_view {t}")
-    }
-    select_output: fn(&self, a: &ast.AST, select: Int) Never! {
-        self.sel = select
-        self.log.push("select")
-    }
-    delete_from: fn(&self, a: &ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) Never! { self.log.push("delete") }
-    add_returning: fn(&self, a: &ast.AST, list: Int) Never! {
-        n: ast.list_len(a, list)
-        self.log.push("returning {n}")
-    }
-    update: fn(&self, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) Never! {
-        n: ast.src_len(a, src)
-        self.log.push("update src={n} onerr={on_error}")
-    }
-    insert: fn(&self, a: &ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) Never! {
-        up: upsert >= 0
-        self.log.push("insert onerr={on_error} upsert={up}")
-    }
-    drop_index: fn(&self, a: &ast.AST, name: Int, if_exists: Int) Never! { self.log.push("drop_index {if_exists}") }
-    vacuum: fn(&self, a: &ast.AST, name: ast.SQLTok, into: Int) Never! { self.log.push("vacuum") }
-    pragma: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! {
-        t1: ast.tok_text(a, name1)
-        t2: ast.tok_text(a, name2)
-        v: ast.tok_text(a, value)
-        self.log.push("pragma {t1}|{t2}={v} minus={minus}")
-    }
-    begin_trigger: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) Never! {
-        t: ast.tok_text(a, name1)
-        self.log.push("begin_trigger {t} time={tr_tm} op={op}")
-    }
-    finish_trigger: fn(&self, a: &ast.AST, steps: Int, all: ast.SQLTok) Never! {
-        t: ast.tok_text(a, all)
-        n := 0
-        st := steps
-        loop st >= 0 {
-            n += 1
-            st = a.steps[st].next_step
+    impl SQLBuilder {
+        finish_coding: fn(&self, a: &ast.AST) Never! { self.log.push("finish") }
+        begin_transaction: fn(&self, a: &ast.AST, kind: Int) Never! { self.log.push("begin {kind}") }
+        end_transaction: fn(&self, a: &ast.AST, op: Int) Never! { self.log.push("end {op}") }
+        savepoint: fn(&self, a: &ast.AST, op: Int, name: ast.SQLTok) Never! {
+            t: ast.tok_text(a, name)
+            self.log.push("savepoint {op} {t}")
         }
-        self.log.push("finish_trigger steps={n} {t}")
-    }
-    drop_trigger: fn(&self, a: &ast.AST, name: Int, no_err: Int) Never! { self.log.push("drop_trigger") }
-    attach: fn(&self, a: &ast.AST, filename: Int, dbname: Int, key: Int) Never! { self.log.push("attach") }
-    detach: fn(&self, a: &ast.AST, dbname: Int) Never! { self.log.push("detach") }
-    reindex: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! { self.log.push("reindex") }
-    analyze: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! { self.log.push("analyze") }
-    alter_rename_table: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! { self.log.push("rename_table") }
-    alter_begin_add_column: fn(&self, a: &ast.AST, src: Int) Never! { self.log.push("begin_add_column") }
-    alter_finish_add_column: fn(&self, a: &ast.AST, col_def: ast.SQLTok) Never! {
-        t: ast.tok_text(a, col_def)
-        self.log.push("finish_add_column {t}")
-    }
-    alter_drop_column: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! { self.log.push("drop_column") }
-    alter_rename_column: fn(&self, a: &ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) Never! { self.log.push("rename_column") }
-    vtab_begin_parse: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) Never! {
-        t: ast.tok_text(a, module_name)
-        self.log.push("vtab_begin {t}")
-    }
-    vtab_finish_parse: fn(&self, a: &ast.AST, end: ast.SQLTok) Never! { self.log.push("vtab_finish") }
-    vtab_arg_init: fn(&self, a: &ast.AST) Never! { self.log.push("vtab_arg") }
-    vtab_arg_extend: fn(&self, a: &ast.AST, t: ast.SQLTok) Never! {
-        x: ast.tok_text(a, t)
-        self.log.push("vtab_extend {x}")
+        start_table: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) Never! {
+            t1: ast.tok_text(a, name1)
+            t2: ast.tok_text(a, name2)
+            self.log.push("start_table {t1}|{t2} temp={is_temp} view={is_view} virtual={is_virtual} noerr={no_err}")
+        }
+        end_table: fn(&self, a: &ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) Never! {
+            t: ast.tok_text(a, end)
+            self.log.push("end_table {t} opts={tab_opts} select={select}")
+        }
+        add_column: fn(&self, a: &ast.AST, name: ast.SQLTok, typ: ast.SQLTok) Never! {
+            t1: ast.tok_text(a, name)
+            t2: ast.tok_text(a, typ)
+            self.log.push("column {t1} {t2}")
+        }
+        add_default_value: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
+            t: ast.text(a.ctx.sql[start..<end].copy())
+            self.log.push("default {t}")
+        }
+        add_not_null: fn(&self, a: &ast.AST, on_error: Int) Never! { self.log.push("not_null {on_error}") }
+        add_primary_key: fn(&self, a: &ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) Never! {
+            self.log.push("primary_key list={list} onerr={on_error} autoinc={autoinc} order={sort_order}")
+        }
+        create_index: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) Never! {
+            t: ast.tok_text(a, name1)
+            n: ast.list_len(a, list)
+            self.log.push("create_index {t} cols={n} onerr={on_error} type={idx_type}")
+        }
+        add_check_constraint: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
+            t: ast.text(a.ctx.sql[start..<end].copy())
+            self.log.push("check {t}")
+        }
+        create_foreign_key: fn(&self, a: &ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) Never! {
+            t: ast.tok_text(a, to)
+            self.log.push("foreign_key {t} flags={flags}")
+        }
+        defer_foreign_key: fn(&self, a: &ast.AST, deferred: Int) Never! { self.log.push("defer {deferred}") }
+        add_collate_type: fn(&self, a: &ast.AST, name: ast.SQLTok) Never! {
+            t: ast.tok_text(a, name)
+            self.log.push("collate {t}")
+        }
+        add_generated: fn(&self, a: &ast.AST, e: Int, typ: ast.SQLTok) Never! {
+            t: ast.tok_text(a, typ)
+            self.log.push("generated {t}")
+        }
+        drop_table: fn(&self, a: &ast.AST, name: Int, is_view: Int, no_err: Int) Never! { self.log.push("drop_table view={is_view} noerr={no_err}") }
+        create_view: fn(&self, a: &ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) Never! {
+            t: ast.tok_text(a, name1)
+            self.log.push("create_view {t}")
+        }
+        select_output: fn(&self, a: &ast.AST, select: Int) Never! {
+            self.sel = select
+            self.log.push("select")
+        }
+        delete_from: fn(&self, a: &ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) Never! { self.log.push("delete") }
+        add_returning: fn(&self, a: &ast.AST, list: Int) Never! {
+            n: ast.list_len(a, list)
+            self.log.push("returning {n}")
+        }
+        update: fn(&self, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) Never! {
+            n: ast.src_len(a, src)
+            self.log.push("update src={n} onerr={on_error}")
+        }
+        insert: fn(&self, a: &ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) Never! {
+            up: upsert >= 0
+            self.log.push("insert onerr={on_error} upsert={up}")
+        }
+        drop_index: fn(&self, a: &ast.AST, name: Int, if_exists: Int) Never! { self.log.push("drop_index {if_exists}") }
+        vacuum: fn(&self, a: &ast.AST, name: ast.SQLTok, into: Int) Never! { self.log.push("vacuum") }
+        pragma: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! {
+            t1: ast.tok_text(a, name1)
+            t2: ast.tok_text(a, name2)
+            v: ast.tok_text(a, value)
+            self.log.push("pragma {t1}|{t2}={v} minus={minus}")
+        }
+        begin_trigger: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) Never! {
+            t: ast.tok_text(a, name1)
+            self.log.push("begin_trigger {t} time={tr_tm} op={op}")
+        }
+        finish_trigger: fn(&self, a: &ast.AST, steps: Int, all: ast.SQLTok) Never! {
+            t: ast.tok_text(a, all)
+            n := 0
+            st := steps
+            loop st >= 0 {
+                n += 1
+                st = a.steps[st].next_step
+            }
+            self.log.push("finish_trigger steps={n} {t}")
+        }
+        drop_trigger: fn(&self, a: &ast.AST, name: Int, no_err: Int) Never! { self.log.push("drop_trigger") }
+        attach: fn(&self, a: &ast.AST, filename: Int, dbname: Int, key: Int) Never! { self.log.push("attach") }
+        detach: fn(&self, a: &ast.AST, dbname: Int) Never! { self.log.push("detach") }
+        reindex: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! { self.log.push("reindex") }
+        analyze: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! { self.log.push("analyze") }
+        alter_rename_table: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! { self.log.push("rename_table") }
+        alter_begin_add_column: fn(&self, a: &ast.AST, src: Int) Never! { self.log.push("begin_add_column") }
+        alter_finish_add_column: fn(&self, a: &ast.AST, col_def: ast.SQLTok) Never! {
+            t: ast.tok_text(a, col_def)
+            self.log.push("finish_add_column {t}")
+        }
+        alter_drop_column: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! { self.log.push("drop_column") }
+        alter_rename_column: fn(&self, a: &ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) Never! { self.log.push("rename_column") }
+        vtab_begin_parse: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) Never! {
+            t: ast.tok_text(a, module_name)
+            self.log.push("vtab_begin {t}")
+        }
+        vtab_finish_parse: fn(&self, a: &ast.AST, end: ast.SQLTok) Never! { self.log.push("vtab_finish") }
+        vtab_arg_init: fn(&self, a: &ast.AST) Never! { self.log.push("vtab_arg") }
+        vtab_arg_extend: fn(&self, a: &ast.AST, t: ast.SQLTok) Never! {
+            x: ast.tok_text(a, t)
+            self.log.push("vtab_extend {x}")
+        }
     }
 }
 

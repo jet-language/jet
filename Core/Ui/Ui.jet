@@ -111,6 +111,14 @@ UIPreview: struct {
 // One program's previews or playgrounds: at most 64, each with its own name.
 UIPreviewRegistry: struct {
     entries: [UIPreview]
+
+    // Builds the node tree of the preview named `name`.
+    render: fn(self, name: String) -> UINode UIPreviewError! {
+        loop entry in self.entries {
+            if entry.name == name -> return Ok((entry.body)())
+        }
+        Err(UIPreviewError.UnknownPreview(name))
+    }
 }
 
 #Error
@@ -227,16 +235,6 @@ playground: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewp
 // Registers previews and playgrounds alike; each entry's `kind` tells them apart.
 previews: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(entries) }
 
-impl UIPreviewRegistry {
-    // Builds the node tree of the preview named `name`.
-    render: fn(self, name: String) -> UINode UIPreviewError! {
-        loop entry in self.entries {
-            if entry.name == name -> return Ok((entry.body)())
-        }
-        Err(UIPreviewError.UnknownPreview(name))
-    }
-}
-
 key_event: fn(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
 resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
     InputEvent.Resize{size: size(width, height)}
@@ -316,13 +314,7 @@ UIBackendState: struct {
 
 NullBackend: struct {
     priv state: Shared<UIBackendState>
-}
 
-TUIBackend: struct {
-    priv state: Shared<UIBackendState>
-}
-
-impl NullBackend {
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
     measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
@@ -374,7 +366,9 @@ impl NullBackend {
     }
 }
 
-impl TUIBackend {
+TUIBackend: struct {
+    priv state: Shared<UIBackendState>
+
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
     measure: fn(self, tree: UINode, constraint: SizeConstraint) -> Size { measure_tree(tree, constraint) }
@@ -459,9 +453,7 @@ impl TUIBackend {
 // holds no pixels.
 Image: struct {
     priv canvas: draw.Image
-}
 
-impl Image {
     width: fn(self) -> Int { self.canvas.width }
 
     height: fn(self) -> Int { self.canvas.height }
@@ -475,9 +467,7 @@ impl Image {
 // A texture atlas: named regions of one PNG texture.
 TextureAtlas: struct {
     priv atlas: draw.TextureAtlas
-}
 
-impl TextureAtlas {
     // The atlas's name: its `atlas:` line, or its file's stem.
     name: fn(self) -> String { self.atlas.name.copy() }
 
@@ -802,71 +792,7 @@ WindowState: struct {
 // the last copy is dropped.
 Window: struct {
     priv state: Shared<WindowState>
-}
 
-// Opens a window of `width` x `height` logical units, titled `title`,
-// on the environment's display server. The Wayland wire part is the one
-// display-server client, and only Linux runs Wayland: on any other OS the
-// build leaves it out and there is no display server to open on.
-open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError! {
-    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
-        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
-    }
-    comptime if #build.target.os == {
-        .Linux -> {
-            if !wayland.available() -> return Err(UIError.NoDisplay)
-            link: wayland.connect(width, height, title)
-            state: WindowState{
-                width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
-                link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
-                canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
-                maximized: false, fullscreen: false,
-            }
-            return Ok(Window{state: shared state})
-        }
-        else -> { return Err(UIError.NoDisplay) }
-    }
-}
-
-// A window with no device at scale 1: frame `i` carries `script[i]`, one
-// more frame carries `.Close`, and each frame presented or drawn records a
-// checksum of its pixels.
-headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError! {
-    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
-        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
-    }
-    state: WindowState{
-        width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
-        link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
-        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
-        maximized: false, fullscreen: false,
-    }
-    Ok(Window{state: shared state})
-}
-
-// How evenly frames reached the screen and how fast input showed.
-// `presented` frames were shown; `missed` counts refreshes frames were
-// late by against the vblank they aimed at; `discarded` frames were never
-// shown (a hidden window). Intervals run present to present; input
-// latency runs from an input event to the frame that showed it reaching
-// the screen (ms resolution: input times are whole ms). All times are
-// nanoseconds.
-FrameStats: struct {
-    presented: Int
-    missed: Int
-    discarded: Int
-    refresh_ns: Int
-    median_ns: Int
-    p99_ns: Int
-    input_samples: Int
-    input_median_ns: Int
-    input_p99_ns: Int
-    // Present-to-present intervals by refreshes spanned: [0] one
-    // refresh (every vblank), [1] two, [2] three, [3] four or more.
-    spans: [Int]
-}
-
-impl Window {
     // The window's frames, paced by the display alone: one per refresh
     // while the program presents, none while it is idle until input
     // arrives.
@@ -1070,98 +996,160 @@ impl Window {
     }
 }
 
+// Opens a window of `width` x `height` logical units, titled `title`,
+// on the environment's display server. The Wayland wire part is the one
+// display-server client, and only Linux runs Wayland: on any other OS the
+// build leaves it out and there is no display server to open on.
+open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    comptime if #build.target.os == {
+        .Linux -> {
+            if !wayland.available() -> return Err(UIError.NoDisplay)
+            link: wayland.connect(width, height, title)
+            state: WindowState{
+                width: link.width(), height: link.height(), scale: link.scale(), frames: 0, closed: false, failure: None,
+                link: Val(shared link), script: [[UIEvent]]{}, checksums: [Int]{}, cursor: UICursor.Default,
+                canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+                maximized: false, fullscreen: false,
+            }
+            return Ok(Window{state: shared state})
+        }
+        else -> { return Err(UIError.NoDisplay) }
+    }
+}
+
+// A window with no device at scale 1: frame `i` carries `script[i]`, one
+// more frame carries `.Close`, and each frame presented or drawn records a
+// checksum of its pixels.
+headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError! {
+    if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
+        return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
+    }
+    state: WindowState{
+        width: width, height: height, scale: 1.0, frames: 0, closed: false, failure: None,
+        link: None, script: script, checksums: [Int]{}, cursor: UICursor.Default,
+        canvas: draw.no_image(), typeset: draw.typeset(), drawn: false, presented: false, damage: [UIRect]{}, keys: [Key]{}, buttons: [UIPointerButton]{}, mouse_x: 0, mouse_y: 0, clipboard: "",
+        maximized: false, fullscreen: false,
+    }
+    Ok(Window{state: shared state})
+}
+
+// How evenly frames reached the screen and how fast input showed.
+// `presented` frames were shown; `missed` counts refreshes frames were
+// late by against the vblank they aimed at; `discarded` frames were never
+// shown (a hidden window). Intervals run present to present; input
+// latency runs from an input event to the frame that showed it reaching
+// the screen (ms resolution: input times are whole ms). All times are
+// nanoseconds.
+FrameStats: struct {
+    presented: Int
+    missed: Int
+    discarded: Int
+    refresh_ns: Int
+    median_ns: Int
+    p99_ns: Int
+    input_samples: Int
+    input_median_ns: Int
+    input_p99_ns: Int
+    // Present-to-present intervals by refreshes spanned: [0] one
+    // refresh (every vblank), [1] two, [2] three, [3] four or more.
+    spans: [Int]
+}
+
 Frames: struct {
     priv state: Shared<WindowState>
+
+    impl Iterable {
+        Iter: FrameCursor
+        iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
+    }
 }
 
 FrameCursor: struct {
     priv state: Shared<WindowState>
-}
 
-impl Frames.Iterable {
-    Iter: FrameCursor
-    iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
-}
-
-impl FrameCursor.Iterator {
-    Item: Frame
-    // The next frame, once it is due; none after the frame that carried
-    // `.Close`. A frame that drew and presented nothing shows what it drew
-    // first, copying only the pixels its draws changed (one pixel when
-    // they all fell outside, so its frames keep coming); a display server
-    // that fails then records the failure and ends the frames.
-    next: fn(&self) -[Env, Net, Time]> Frame? {
-        guard := self.state.guard_edit()
-        if guard.value.drawn && !guard.value.presented {
+    impl Iterator {
+        Item: Frame
+        // The next frame, once it is due; none after the frame that carried
+        // `.Close`. A frame that drew and presented nothing shows what it drew
+        // first, copying only the pixels its draws changed (one pixel when
+        // they all fell outside, so its frames keep coming); a display server
+        // that fails then records the failure and ends the frames.
+        next: fn(&self) -[Env, Net, Time]> Frame? {
+            guard := self.state.guard_edit()
+            if guard.value.drawn && !guard.value.presented {
+                if guard.value.link == .Val(link) {
+                    damage: if guard.value.damage.len() > 0 -> guard.value.damage.copy() else -> [UIRect]{UIRect{x: 0, y: 0, width: 1, height: 1}}
+                    connection := link.guard_edit()
+                    if wayland.present(connection.value, guard.value.canvas.pixels, damage) == .Err(error) {
+                        guard.value.failure = Val(error)
+                        guard.value.closed = true
+                    }
+                } else {
+                    guard.value.checksums.push(checksum(guard.value.canvas.pixels))
+                }
+            }
+            guard.value.drawn = false
+            guard.value.presented = false
+            guard.value.damage.clear()
+            if guard.value.closed -> return None
+            events := [UIEvent]{}
+            index: guard.value.frames
+            time_ns := 0
+            delta_ns := 0
             if guard.value.link == .Val(link) {
-                damage: if guard.value.damage.len() > 0 -> guard.value.damage.copy() else -> [UIRect]{UIRect{x: 0, y: 0, width: 1, height: 1}}
                 connection := link.guard_edit()
-                if wayland.present(connection.value, guard.value.canvas.pixels, damage) == .Err(error) {
-                    guard.value.failure = Val(error)
-                    guard.value.closed = true
-                }
+                events = wayland.next_frame(connection.value)
+                guard.value.width = connection.value.width()
+                guard.value.height = connection.value.height()
+                guard.value.scale = connection.value.scale()
+                time_ns = connection.value.time_ns()
+                delta_ns = connection.value.delta_ns()
+                if connection.value.failure() == .Val(failure) -> guard.value.failure = Val(failure)
             } else {
-                guard.value.checksums.push(checksum(guard.value.canvas.pixels))
+                time_ns = index * HEADLESS_REFRESH_NS
+                delta_ns = if index == 0 -> 0 else -> HEADLESS_REFRESH_NS
+                if index < guard.value.script.len() -> events = guard.value.script[index].copy() else -> events.push(UIEvent.Close)
+                loop event in events {
+                    if event == .Resize(width, height) {
+                        guard.value.width = width
+                        guard.value.height = height
+                    }
+                }
             }
-        }
-        guard.value.drawn = false
-        guard.value.presented = false
-        guard.value.damage.clear()
-        if guard.value.closed -> return None
-        events := [UIEvent]{}
-        index: guard.value.frames
-        time_ns := 0
-        delta_ns := 0
-        if guard.value.link == .Val(link) {
-            connection := link.guard_edit()
-            events = wayland.next_frame(connection.value)
-            guard.value.width = connection.value.width()
-            guard.value.height = connection.value.height()
-            guard.value.scale = connection.value.scale()
-            time_ns = connection.value.time_ns()
-            delta_ns = connection.value.delta_ns()
-            if connection.value.failure() == .Val(failure) -> guard.value.failure = Val(failure)
-        } else {
-            time_ns = index * HEADLESS_REFRESH_NS
-            delta_ns = if index == 0 -> 0 else -> HEADLESS_REFRESH_NS
-            if index < guard.value.script.len() -> events = guard.value.script[index].copy() else -> events.push(UIEvent.Close)
+            was_keys: guard.value.keys.copy()
+            was_buttons: guard.value.buttons.copy()
             loop event in events {
-                if event == .Resize(width, height) {
-                    guard.value.width = width
-                    guard.value.height = height
+                if event == {
+                    .Close -> guard.value.closed = true
+                    .KeyDown(key) -> if !guard.value.keys.contains(key) -> guard.value.keys.push(key.copy())
+                    .KeyUp(key) -> guard.value.keys = without_key(guard.value.keys, key)
+                    .PointerDown(button) -> if !guard.value.buttons.contains(button) -> guard.value.buttons.push(button.copy())
+                    .PointerUp(button) -> guard.value.buttons = without_button(guard.value.buttons, button)
+                    .PointerMove(x, y) -> {
+                        guard.value.mouse_x = x
+                        guard.value.mouse_y = y
+                    }
+                    // Keys and buttons held when the window loses the
+                    // keyboard are released for it.
+                    .Focus(false) -> {
+                        guard.value.keys = [Key]{}
+                        guard.value.buttons = [UIPointerButton]{}
+                    }
+                    .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) -> {}
                 }
             }
-        }
-        was_keys: guard.value.keys.copy()
-        was_buttons: guard.value.buttons.copy()
-        loop event in events {
-            if event == {
-                .Close -> guard.value.closed = true
-                .KeyDown(key) -> if !guard.value.keys.contains(key) -> guard.value.keys.push(key.copy())
-                .KeyUp(key) -> guard.value.keys = without_key(guard.value.keys, key)
-                .PointerDown(button) -> if !guard.value.buttons.contains(button) -> guard.value.buttons.push(button.copy())
-                .PointerUp(button) -> guard.value.buttons = without_button(guard.value.buttons, button)
-                .PointerMove(x, y) -> {
-                    guard.value.mouse_x = x
-                    guard.value.mouse_y = y
-                }
-                // Keys and buttons held when the window loses the
-                // keyboard are released for it.
-                .Focus(false) -> {
-                    guard.value.keys = [Key]{}
-                    guard.value.buttons = [UIPointerButton]{}
-                }
-                .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) -> {}
+            frame: Frame{
+                state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height, scale: guard.value.scale,
+                time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
+                was_keys: was_keys, keys: guard.value.keys.copy(), was_buttons: was_buttons, buttons: guard.value.buttons.copy(),
+                mouse_x: guard.value.mouse_x, mouse_y: guard.value.mouse_y,
             }
+            guard.value.frames += 1
+            Val(frame)
         }
-        frame: Frame{
-            state: self.state.copy(), index: index, width: guard.value.width, height: guard.value.height, scale: guard.value.scale,
-            time: Float{time_ns} / 1000000000.0, delta: Float{delta_ns} / 1000000000.0, pending: events,
-            was_keys: was_keys, keys: guard.value.keys.copy(), was_buttons: was_buttons, buttons: guard.value.buttons.copy(),
-            mouse_x: guard.value.mouse_x, mouse_y: guard.value.mouse_y,
-        }
-        guard.value.frames += 1
-        Val(frame)
     }
 }
 
@@ -1187,9 +1175,7 @@ Frame: struct {
     priv buttons: [UIPointerButton]
     priv mouse_x: Int
     priv mouse_y: Int
-}
 
-impl Frame {
     events: fn(self) -> [UIEvent] { self.pending.copy() }
 
     // Shows `pixels`: `height` rows of `width` RGBA pixels, 4 bytes each.

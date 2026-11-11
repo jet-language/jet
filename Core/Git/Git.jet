@@ -22,37 +22,7 @@ use {
 /// environment acts on this tree alone, and git's own errors go to stderr.
 Repo: struct {
     dir: String
-}
 
-/// Why `land` or `commit` stopped; git's own message is on stderr.
-#Error
-GitError: enum {
-    /// The patch does not apply to the tree.
-    NoApply
-    /// git refused the commit (a hook, nothing to commit) or did not run.
-    NoCommit
-}
-
-/// A commit `land` made: its short sha and every path it committed, in
-/// git's order.
-Landed: struct {
-    sha: String
-    paths: [String]
-}
-
-/// One file the tracked files and a tested tree hold differently: `tracked`
-/// when the work tree tracks and has it, `tested` when the tested tree has
-/// it; with both, their bytes differ.
-Drift: struct {
-    path: String
-    tracked: Bool
-    tested: Bool
-}
-
-/// The work tree at `dir`.
-repo: fn(dir: String) -> Repo Never! { Repo{dir: dir} }
-
-impl Repo {
     /// `line` as a ProcessSpec run in the work tree, the caller's git
     /// environment unset and its errors shown, for a run that sets stdio,
     /// a timeout or more environment first:
@@ -140,6 +110,34 @@ impl Repo {
         found
     }
 }
+
+/// Why `land` or `commit` stopped; git's own message is on stderr.
+#Error
+GitError: enum {
+    /// The patch does not apply to the tree.
+    NoApply
+    /// git refused the commit (a hook, nothing to commit) or did not run.
+    NoCommit
+}
+
+/// A commit `land` made: its short sha and every path it committed, in
+/// git's order.
+Landed: struct {
+    sha: String
+    paths: [String]
+}
+
+/// One file the tracked files and a tested tree hold differently: `tracked`
+/// when the work tree tracks and has it, `tested` when the tested tree has
+/// it; with both, their bytes differ.
+Drift: struct {
+    path: String
+    tracked: Bool
+    tested: Bool
+}
+
+/// The work tree at `dir`.
+repo: fn(dir: String) -> Repo Never! { Repo{dir: dir} }
 
 // The steps behind the Repo calls: not part of the git surface.
 priv internal: module {

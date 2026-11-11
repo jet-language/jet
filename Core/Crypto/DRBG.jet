@@ -70,12 +70,12 @@ CTRDrbg: struct {
     reseed_interval: Int
     // Seeded from an entropy source (mbedtls: f_entropy set).
     seeded: Bool
-}
 
-impl CTRDrbg.Close {
-    close: fn(&&self) {
-        counter := self.counter.move()
-        core.crypto.wipe(counter)
+    impl Close {
+        close: fn(&&self) {
+            counter := self.counter.move()
+            core.crypto.wipe(counter)
+        }
     }
 }
 
@@ -303,12 +303,24 @@ HMACDrbg: struct {
     reseed_interval: Int
     // Seeded from an entropy source; a buffer-seeded instance never reseeds.
     seeded: Bool
-}
 
-impl HMACDrbg.Close {
-    close: fn(&&self) {
-        v := self.v.move()
-        core.crypto.wipe(v)
+    impl Close {
+        close: fn(&&self) {
+            v := self.v.move()
+            core.crypto.wipe(v)
+        }
+    }
+
+    /// A buffer-seeded HMAC_DRBG as a random source: it never reseeds, so it
+    /// needs no entropy. ECDSA's RFC 6979 nonces draw from one.
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            none := NoEntropy{}
+            bytes := hmac_drbg_random(self, none, out.len()) ?? return false
+            loop i in 0..<out.len() -> out[i] = bytes[i]
+            core.crypto.wipe(bytes)
+            true
+        }
     }
 }
 
@@ -457,21 +469,9 @@ hmac_drbg_update_seed: fn<E: RNG>(ctx: &HMACDrbg, entropy: &E, file: [U8]) -> [U
     Ok(out)
 }
 
-/// A buffer-seeded HMAC_DRBG as a random source: it never reseeds, so it
-/// needs no entropy. ECDSA's RFC 6979 nonces draw from one.
-impl HMACDrbg.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! {
-        none := NoEntropy{}
-        bytes := hmac_drbg_random(self, none, out.len()) ?? return false
-        loop i in 0..<out.len() -> out[i] = bytes[i]
-        core.crypto.wipe(bytes)
-        true
-    }
-}
-
 /// The absent entropy source of a buffer-seeded generator.
-NoEntropy: struct {}
-
-impl NoEntropy.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+NoEntropy: struct {
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+    }
 }

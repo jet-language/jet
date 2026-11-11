@@ -156,16 +156,16 @@ __BrowserEngine: struct {
     child: ProcessChild
     profile: String
     session_url: String
-}
 
-impl __BrowserEngine.Close {
-    close: fn(&&self) {
-        // Close cannot fail: an engine that already exited cannot be
-        // signalled, and wait still reaps it.
-        if self.session_url != "" -> http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
-        self.child.kill().drop("an exited engine needs no signal")
-        self.child.wait().drop("the engine receipt is not reported")
-        files.remove_all(self.profile).drop("profile removal at close is best-effort")
+    impl Close {
+        close: fn(&&self) {
+            // Close cannot fail: an engine that already exited cannot be
+            // signalled, and wait still reaps it.
+            if self.session_url != "" -> http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
+            self.child.kill().drop("an exited engine needs no signal")
+            self.child.wait().drop("the engine receipt is not reported")
+            files.remove_all(self.profile).drop("profile removal at close is best-effort")
+        }
     }
 }
 

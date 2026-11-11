@@ -261,12 +261,12 @@ traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: &Int, end: Int, must
 /// Collects the entries of a SEQUENCE OF.
 SequenceItems: struct {
     items: [ASN1Buf]
-}
 
-impl SequenceItems.SequenceVisitor {
-    visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never! {
-        self.items.push(ASN1Buf{tag_id: tag_id, p: start, len: len})
-        0
+    impl SequenceVisitor {
+        visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never! {
+            self.items.push(ASN1Buf{tag_id: tag_id, p: start, len: len})
+            0
+        }
     }
 }
 

@@ -104,16 +104,15 @@ DataError: struct {
     index: Int?
     reason: String
     cause: EncodingError?
-}
 
-impl DataError.Display {
-    display: fn(self) -> String { data_error_text(self) }
-}
-impl DataError.Debug {
-    debug: fn(&&self) -> String { data_error_text(self) }
-}
+    impl Display {
+        display: fn(self) -> String { data_error_text(self) }
+    }
 
-impl DataError {
+    impl Debug {
+        debug: fn(&&self) -> String { data_error_text(self) }
+    }
+
     new: fn(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
@@ -217,6 +216,17 @@ DataLimits: struct {
     max_sort_rows: Int
     max_join_rows: Int
     max_output_rows: Int
+
+    // Typed data declarations and provider-backed boundaries.
+    safe: fn() -> DataLimits Never! {
+        DataLimits{
+            encoding: encoding.EncodingLimits.safe(),
+            max_groups: 100000,
+            max_sort_rows: 1000000,
+            max_join_rows: 1000000,
+            max_output_rows: 1000000,
+        }
+    }
 }
 
 
@@ -716,19 +726,6 @@ JetDataPlotPlan: struct {
     layout: JetDataPlotLayout
     encoding: JetDataPlotEncoding
     schema: JetDataPlotSchema
-}
-
-// Typed data declarations and provider-backed boundaries.
-impl DataLimits {
-    safe: fn() -> DataLimits Never! {
-        DataLimits{
-            encoding: encoding.EncodingLimits.safe(),
-            max_groups: 100000,
-            max_sort_rows: 1000000,
-            max_join_rows: 1000000,
-            max_output_rows: 1000000,
-        }
-    }
 }
 
 track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {

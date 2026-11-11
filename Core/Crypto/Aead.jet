@@ -97,14 +97,14 @@ rev64: fn(v: U64) -> U64 Never! {
 GHASHKey: struct {
     h: [U8]
     hw: [U64]
-}
 
-impl GHASHKey.Close {
-    close: fn(&&self) {
-        h := self.h.move()
-        core.crypto.wipe(h)
-        hw := self.hw.move()
-        cipher.wipe_words(hw)
+    impl Close {
+        close: fn(&&self) {
+            h := self.h.move()
+            core.crypto.wipe(h)
+            hw := self.hw.move()
+            cipher.wipe_words(hw)
+        }
     }
 }
 
@@ -210,18 +210,18 @@ GCM: struct {
     stream: [U8]
     ad_len: Int
     len: Int
-}
 
-impl GCM.Close {
-    close: fn(&&self) {
-        ctr := self.ctr.move()
-        core.crypto.wipe(ctr)
-        base := self.base.move()
-        core.crypto.wipe(base)
-        acc := self.acc.move()
-        core.crypto.wipe(acc)
-        stream := self.stream.move()
-        core.crypto.wipe(stream)
+    impl Close {
+        close: fn(&&self) {
+            ctr := self.ctr.move()
+            core.crypto.wipe(ctr)
+            base := self.base.move()
+            core.crypto.wipe(base)
+            acc := self.acc.move()
+            core.crypto.wipe(acc)
+            stream := self.stream.move()
+            core.crypto.wipe(stream)
+        }
     }
 }
 
@@ -420,14 +420,14 @@ CCM: struct {
     plain_len: Int
     tag_len: Int
     processed: Int
-}
 
-impl CCM.Close {
-    close: fn(&&self) {
-        y := self.y.move()
-        core.crypto.wipe(y)
-        ctr := self.ctr.move()
-        core.crypto.wipe(ctr)
+    impl Close {
+        close: fn(&&self) {
+            y := self.y.move()
+            core.crypto.wipe(y)
+            ctr := self.ctr.move()
+            core.crypto.wipe(ctr)
+        }
     }
 }
 
@@ -830,14 +830,14 @@ ChaCha20: struct {
     stream: [U8]
     used: Int
     blocks_left: Int
-}
 
-impl ChaCha20.Close {
-    close: fn(&&self) {
-        state := self.state.move()
-        loop i in 0..<state.len() -> state[i] = U32{0}
-        stream := self.stream.move()
-        core.crypto.wipe(stream)
+    impl Close {
+        close: fn(&&self) {
+            state := self.state.move()
+            loop i in 0..<state.len() -> state[i] = U32{0}
+            stream := self.stream.move()
+            core.crypto.wipe(stream)
+        }
     }
 }
 
@@ -949,18 +949,18 @@ Poly1305: struct {
     pad: [U64]
     buf: [U8]
     fill: Int
-}
 
-impl Poly1305.Close {
-    close: fn(&&self) {
-        r := self.r.move()
-        cipher.wipe_words(r)
-        h := self.h.move()
-        cipher.wipe_words(h)
-        pad := self.pad.move()
-        cipher.wipe_words(pad)
-        buf := self.buf.move()
-        core.crypto.wipe(buf)
+    impl Close {
+        close: fn(&&self) {
+            r := self.r.move()
+            cipher.wipe_words(r)
+            h := self.h.move()
+            cipher.wipe_words(h)
+            pad := self.pad.move()
+            cipher.wipe_words(pad)
+            buf := self.buf.move()
+            core.crypto.wipe(buf)
+        }
     }
 }
 

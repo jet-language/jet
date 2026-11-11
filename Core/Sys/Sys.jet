@@ -786,13 +786,11 @@ set_current_dir: fn(path: String) IOError! -[FS, Env]> {
 // never mapped, so a peer that truncates its file cannot fault this one.
 Fd: struct {
     priv token: Int
-}
 
-impl Fd.Close {
-    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
-}
+    impl Close {
+        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+    }
 
-impl Fd {
     // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
     // (fewer at its end; none past it). Both bounds are in the types, so a
     // runtime value comes through `Int(lo..hi).from_int(n)?` first.
@@ -852,40 +850,11 @@ __fd_token: fn(fd: Fd) -> Int { fd.token }
 SharedMemory: struct {
     priv token: Int
     priv size: Int
-}
 
-impl SharedMemory.Close {
-    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
-}
-
-FD_READ_MAX: 16777216
-SHARED_MEMORY_MAX: 1073741824
-
-// `size` zeroed bytes of shared memory, 1 B to 1 GiB.
-shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
-    bytes: wrapping(size + 0)
-    Ok(SharedMemory{token: core.sys.__shared_create_raw(bytes), size: bytes})
-}
-
-// How SharedMemory bounds its accesses: not part of the sys surface. Offsets
-// and lengths are range-typed, so only the end of an access is left to check
-// here; each sum stays below 2^31 and the `wrapping` gate never wraps.
-priv shared_bounds: module {
-    // Whether `count` bytes from byte `offset` lie inside `memory`.
-    shared_range_valid: fn(memory: SharedMemory, offset: Int(0..1073741824), count: Int(0..1073741824)) -> Bool {
-        wrapping(offset + count) <= memory.size
+    impl Close {
+        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
     }
-}
 
-// A 32-bit pixel layout with a padding byte, named as wl_shm and DRM name
-// them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
-// is R, G, B, X.
-PixelFormat: enum {
-    XRGB8888
-    XBGR8888
-}
-
-impl SharedMemory {
     len: fn(self) -> Int { self.size }
 
     // Copies `bytes` in at byte `offset`.
@@ -930,6 +899,33 @@ impl SharedMemory {
 
     // A new descriptor for this memory, to pass to another process.
     descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+}
+
+FD_READ_MAX: 16777216
+SHARED_MEMORY_MAX: 1073741824
+
+// `size` zeroed bytes of shared memory, 1 B to 1 GiB.
+shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
+    bytes: wrapping(size + 0)
+    Ok(SharedMemory{token: core.sys.__shared_create_raw(bytes), size: bytes})
+}
+
+// How SharedMemory bounds its accesses: not part of the sys surface. Offsets
+// and lengths are range-typed, so only the end of an access is left to check
+// here; each sum stays below 2^31 and the `wrapping` gate never wraps.
+priv shared_bounds: module {
+    // Whether `count` bytes from byte `offset` lie inside `memory`.
+    shared_range_valid: fn(memory: SharedMemory, offset: Int(0..1073741824), count: Int(0..1073741824)) -> Bool {
+        wrapping(offset + count) <= memory.size
+    }
+}
+
+// A 32-bit pixel layout with a padding byte, named as wl_shm and DRM name
+// them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
+// is R, G, B, X.
+PixelFormat: enum {
+    XRGB8888
+    XBGR8888
 }
 
 atexit: fn(handler: fn()) Never! -[Env]> {

@@ -99,21 +99,7 @@ Regex: struct {
     priv needle_text: String
     priv prefix: [U8]
     priv dfa: Dfa
-}
 
-/// `start` and `end` are character (Unicode scalar) positions in the text.
-/// `groups` holds each capture group's text, `""` for a group that took no
-/// part; `group`, `group_start` and `group_end` tell the two apart.
-Match: struct {
-    start: Int
-    end: Int
-    text: String
-    groups: [String]
-    priv spans: [Int]
-    priv names: [String]
-}
-
-impl Regex {
     is_match: fn(self, text: String) -> Bool Never! { is_match(self, text) }
     full_match: fn(self, text: String) -> Bool Never! { full_match(self, text) }
     match: fn(self, text: String) -> Match? Never! { match(self, text) }
@@ -149,7 +135,17 @@ impl Regex {
     }
 }
 
-impl Match {
+/// `start` and `end` are character (Unicode scalar) positions in the text.
+/// `groups` holds each capture group's text, `""` for a group that took no
+/// part; `group`, `group_start` and `group_end` tell the two apart.
+Match: struct {
+    start: Int
+    end: Int
+    text: String
+    groups: [String]
+    priv spans: [Int]
+    priv names: [String]
+
     /// Group `n`'s text: 0 is the whole match; None when the pattern has no
     /// group `n` or the group took no part in this match.
     group: fn(self, n: Int) -> String? Never! {
@@ -567,12 +563,7 @@ PatternParser: struct {
     his: [Int]
     groups: Int
     names: [String]
-}
 
-/// A syntax error at character `at` of the pattern.
-fail: fn(at: Int, reason: String) -> RegexError Never! { RegexError{offset: at, reason: reason} }
-
-impl PatternParser {
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
     parse_alt: fn(&self, open: Int) -> Int RegexError! {
@@ -939,6 +930,9 @@ impl PatternParser {
     }
 }
 
+/// A syntax error at character `at` of the pattern.
+fail: fn(at: Int, reason: String) -> RegexError Never! { RegexError{offset: at, reason: reason} }
+
 hex_value: fn(c: Int) -> Int Never! {
     if c >= 48 && c <= 57 -> return c - 48
     if c >= 97 && c <= 102 -> return c - 87
@@ -982,9 +976,7 @@ Compiler: struct {
     xs: [Int]
     ys: [Int]
     too_big: Bool
-}
 
-impl Compiler {
     push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
         self.ops.push(op)
@@ -1292,9 +1284,7 @@ DfaBuilder: struct {
     work: Int
     budget: Int
     too_big: Bool
-}
 
-impl DfaBuilder {
     /// Walks epsilon edges from `stack`, appending consuming pcs to `out`
     /// and the targets of `$` to `ends` (only `at_end`, which walks them
     /// too); returns whether a Match was reached.
@@ -1556,43 +1546,7 @@ VM: struct {
     aslot: [Int]
     apos: [Int]
     aprev: [Int]
-}
 
-Run: struct {
-    start: Int
-    end: Int
-    caps: [Int]
-}
-
-new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
-    seen: filled(size, -1)
-    // Every pc is entered once per epoch and pushes at most two edges, and
-    // the current and next thread sets hold at most one thread per pc, so
-    // these rows never grow during the scan.
-    rows: 2 * size + 2
-    VM{
-    seen: seen,
-    epoch: 0,
-    hi: hi,
-    full: full,
-    sp: 0,
-    spc: filled(rows, 0),
-    sstart: filled(rows, 0),
-    scaps: filled(rows, 0),
-    nt: 0,
-    tpc: filled(rows, 0),
-    tstart: filled(rows, 0),
-    tcaps: filled(rows, 0),
-    m_pc: -1,
-    m_start: -1,
-    m_caps: -1,
-    aslot: [Int]{},
-    apos: [Int]{},
-    aprev: [Int]{},
-    }
-}
-
-impl VM {
     /// Drop every thread and capture record; the scan restarts afresh.
     reset: fn(&self) Never! {
         self.nt = 0
@@ -1704,6 +1658,40 @@ impl VM {
         out[0] = start
         out[1] = end
         out
+    }
+}
+
+Run: struct {
+    start: Int
+    end: Int
+    caps: [Int]
+}
+
+new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
+    seen: filled(size, -1)
+    // Every pc is entered once per epoch and pushes at most two edges, and
+    // the current and next thread sets hold at most one thread per pc, so
+    // these rows never grow during the scan.
+    rows: 2 * size + 2
+    VM{
+    seen: seen,
+    epoch: 0,
+    hi: hi,
+    full: full,
+    sp: 0,
+    spc: filled(rows, 0),
+    sstart: filled(rows, 0),
+    scaps: filled(rows, 0),
+    nt: 0,
+    tpc: filled(rows, 0),
+    tstart: filled(rows, 0),
+    tcaps: filled(rows, 0),
+    m_pc: -1,
+    m_start: -1,
+    m_caps: -1,
+    aslot: [Int]{},
+    apos: [Int]{},
+    aprev: [Int]{},
     }
 }
 
@@ -2104,9 +2092,7 @@ decode_all: fn(raw: [U8]) -> [Int] Never! {
 CharCursor: struct {
     byte: Int
     count: Int
-}
 
-impl CharCursor {
     at: fn(&self, raw: [U8], byte: Int) -> Int Never! {
         if byte < self.byte {
             self.byte = 0

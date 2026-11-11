@@ -1008,11 +1008,9 @@ BitReader: struct {
     i: Int
     bit: Int
     bad: Bool
-}
 
-// Bit-reader state is advanced through `&self` methods so every nested read
-// writes the caller's reader, never a copy.
-impl BitReader {
+    // Bit-reader state is advanced through `&self` methods so every nested read
+    // writes the caller's reader, never a copy.
     read_bit: fn(&self) -> Int Never! {
         if self.i >= self.data.len() {
             self.bad = true

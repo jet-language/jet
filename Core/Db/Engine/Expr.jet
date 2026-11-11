@@ -365,33 +365,33 @@ expr_is_single_table_constraint: fn(a: &ast.AST, e: Int, src: Int, i_src: Int) -
 // e_code the answer.
 ConstOrGroupByWalker: struct {
     unused: Int
-}
 
-impl ConstOrGroupByWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        gb: p.walks[t].u
-        loop i in 0..<ast.list_len(a, gb) {
-            g: ast.list_expr(a, gb, i)
-            if ast.expr_compare(a, e, g, -1) < 2 {
-                c: expr_nn_coll_seq(p, a, g)
-                if is_binary(c) -> return ast.WRC_PRUNE
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            gb: p.walks[t].u
+            loop i in 0..<ast.list_len(a, gb) {
+                g: ast.list_expr(a, gb, i)
+                if ast.expr_compare(a, e, g, -1) < 2 {
+                    c: expr_nn_coll_seq(p, a, g)
+                    if is_binary(c) -> return ast.WRC_PRUNE
+                }
             }
+            if ast.has(a, e, ast.EP_X_IS_SELECT) {
+                p.walks[t].e_code = 0
+                return ast.WRC_ABORT
+            }
+            w := ast.SQLConstWalker{code: p.walks[t].e_code, cur: 0}
+            rc: w.walk_expr_cb(a, e)
+            p.walks[t].e_code = w.code
+            rc
         }
-        if ast.has(a, e, ast.EP_X_IS_SELECT) {
-            p.walks[t].e_code = 0
-            return ast.WRC_ABORT
-        }
-        w := ast.SQLConstWalker{code: p.walks[t].e_code, cur: 0}
-        rc: w.walk_expr_cb(a, e)
-        p.walks[t].e_code = w.code
-        rc
+        has_select: fn(self) -[]> Bool Never! { false }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { false }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // sqlite3ExprIsConstantOrGroupBy: whether `e` is constants and BINARY copies
@@ -1933,21 +1933,21 @@ expr_if_false_dup: fn(p: &cg.Parse, a: &ast.AST, e0: Int, dest: Int, jump_if_nul
 ParseVarMatch: struct {
     vars: [base.Mem]
     used: [Int]
-}
 
-impl ParseVarMatch.SQLVarMatch {
-    var_match: fn(&self, a: &ast.AST, var: Int, e: Int) -> Bool Never! {
-        found: value_from_expr(a, e, base.UTF8, base.AFF_BLOB)
-        if found == .Val(pr) {
-            i_var: a.exprs[var].icolumn
-            self.used.push(i_var)
-            if i_var < 1 || i_var > self.vars.len() -> return false
-            pl := mem.mem_copy(self.vars[i_var - 1])
-            if pl.flags.bit_and(base.MEM_NULL) != 0 -> return false
-            if base.value_type(pl) == base.SQL_TEXT -> _: mem.value_text(pl, base.UTF8)
-            return record.mem_compare(pl, pr, record.COLL_NONE) == 0
+    impl SQLVarMatch {
+        var_match: fn(&self, a: &ast.AST, var: Int, e: Int) -> Bool Never! {
+            found: value_from_expr(a, e, base.UTF8, base.AFF_BLOB)
+            if found == .Val(pr) {
+                i_var: a.exprs[var].icolumn
+                self.used.push(i_var)
+                if i_var < 1 || i_var > self.vars.len() -> return false
+                pl := mem.mem_copy(self.vars[i_var - 1])
+                if pl.flags.bit_and(base.MEM_NULL) != 0 -> return false
+                if base.value_type(pl) == base.SQL_TEXT -> _: mem.value_text(pl, base.UTF8)
+                return record.mem_compare(pl, pr, record.COLL_NONE) == 0
+            }
+            false
         }
-        false
     }
 }
 
@@ -2006,6 +2006,54 @@ expr_implies_expr: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int, i_tab: Int) -
 // is for a RIGHT JOIN.
 ImpliesNotNullRowWalker: struct {
     unused: Int
+
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            if ast.has(a, e, ast.EP_OUTER_ON) -> return ast.WRC_PRUNE
+            // Any inner-join use of the cursor is ignored for a RIGHT JOIN.
+            if ast.has(a, e, ast.EP_INNER_ON) && p.walks[t].mw_flags != 0 -> return ast.WRC_PRUNE
+            op: a.exprs[e].op
+            if op == tk.TK_ISNOT || op == tk.TK_ISNULL || op == tk.TK_NOTNULL || op == tk.TK_IS || op == tk.TK_VECTOR || op == tk.TK_FUNCTION || op == tk.TK_TRUTH || op == tk.TK_CASE -> return ast.WRC_PRUNE
+            if op == tk.TK_COLUMN {
+                if p.walks[t].u == a.exprs[e].itable {
+                    p.walks[t].e_code = 1
+                    return ast.WRC_ABORT
+                }
+                return ast.WRC_PRUNE
+            }
+            if op == tk.TK_OR || op == tk.TK_AND {
+                both_imply_not_null_row(p, a, a.exprs[e].left, a.exprs[e].right)
+                return ast.WRC_PRUNE
+            }
+            if op == tk.TK_IN {
+                // x NOT IN () and x NOT IN (SELECT 1 WHERE false) can be true.
+                if !ast.has(a, e, ast.EP_X_IS_SELECT) && ast.list_len(a, a.exprs[e].x) > 0 -> _: cg.pwalk_expr(p, a, a.exprs[e].left)
+                return ast.WRC_PRUNE
+            }
+            if op == tk.TK_BETWEEN {
+                _: cg.pwalk_expr(p, a, a.exprs[e].left)
+                list: a.exprs[e].x
+                lo: ast.list_expr(a, list, 0)
+                hi: ast.list_expr(a, list, 1)
+                both_imply_not_null_row(p, a, lo, hi)
+                return ast.WRC_PRUNE
+            }
+            if is_comparison(op) {
+                // A virtual table may take x=NULL as a constraint.
+                l: a.exprs[e].left
+                r: a.exprs[e].right
+                if a.exprs[l].op == tk.TK_COLUMN && a.exprs[l].y >= 0 && is_virtual(p.db, a.exprs[l].y) -> return ast.WRC_PRUNE
+                if a.exprs[r].op == tk.TK_COLUMN && a.exprs[r].y >= 0 && is_virtual(p.db, a.exprs[r].y) -> return ast.WRC_PRUNE
+            }
+            ast.WRC_CONTINUE
+        }
+        has_select: fn(self) -[]> Bool Never! { false }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
+    }
 }
 
 // bothImplyNotNullRow.
@@ -2017,54 +2065,6 @@ both_imply_not_null_row: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int) Never! 
         p.walks[t].e_code = 0
         _: cg.pwalk_expr(p, a, e2)
     }
-}
-
-impl ImpliesNotNullRowWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        if ast.has(a, e, ast.EP_OUTER_ON) -> return ast.WRC_PRUNE
-        // Any inner-join use of the cursor is ignored for a RIGHT JOIN.
-        if ast.has(a, e, ast.EP_INNER_ON) && p.walks[t].mw_flags != 0 -> return ast.WRC_PRUNE
-        op: a.exprs[e].op
-        if op == tk.TK_ISNOT || op == tk.TK_ISNULL || op == tk.TK_NOTNULL || op == tk.TK_IS || op == tk.TK_VECTOR || op == tk.TK_FUNCTION || op == tk.TK_TRUTH || op == tk.TK_CASE -> return ast.WRC_PRUNE
-        if op == tk.TK_COLUMN {
-            if p.walks[t].u == a.exprs[e].itable {
-                p.walks[t].e_code = 1
-                return ast.WRC_ABORT
-            }
-            return ast.WRC_PRUNE
-        }
-        if op == tk.TK_OR || op == tk.TK_AND {
-            both_imply_not_null_row(p, a, a.exprs[e].left, a.exprs[e].right)
-            return ast.WRC_PRUNE
-        }
-        if op == tk.TK_IN {
-            // x NOT IN () and x NOT IN (SELECT 1 WHERE false) can be true.
-            if !ast.has(a, e, ast.EP_X_IS_SELECT) && ast.list_len(a, a.exprs[e].x) > 0 -> _: cg.pwalk_expr(p, a, a.exprs[e].left)
-            return ast.WRC_PRUNE
-        }
-        if op == tk.TK_BETWEEN {
-            _: cg.pwalk_expr(p, a, a.exprs[e].left)
-            list: a.exprs[e].x
-            lo: ast.list_expr(a, list, 0)
-            hi: ast.list_expr(a, list, 1)
-            both_imply_not_null_row(p, a, lo, hi)
-            return ast.WRC_PRUNE
-        }
-        if is_comparison(op) {
-            // A virtual table may take x=NULL as a constraint.
-            l: a.exprs[e].left
-            r: a.exprs[e].right
-            if a.exprs[l].op == tk.TK_COLUMN && a.exprs[l].y >= 0 && is_virtual(p.db, a.exprs[l].y) -> return ast.WRC_PRUNE
-            if a.exprs[r].op == tk.TK_COLUMN && a.exprs[r].y >= 0 && is_virtual(p.db, a.exprs[r].y) -> return ast.WRC_PRUNE
-        }
-        ast.WRC_CONTINUE
-    }
-    has_select: fn(self) -[]> Bool Never! { false }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // sqlite3ExprImpliesNonNullRow: whether `e0` can be true only when some
@@ -2094,23 +2094,23 @@ IdxCoverWalker: struct {
     cur: Int
     cols: [Int]
     code: Int
-}
 
-impl IdxCoverWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op != tk.TK_COLUMN || a.exprs[e].itable != self.cur -> return ast.WRC_CONTINUE
-        c: a.exprs[e].icolumn
-        loop x in self.cols {
-            if x == c -> return ast.WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op != tk.TK_COLUMN || a.exprs[e].itable != self.cur -> return ast.WRC_CONTINUE
+            c: a.exprs[e].icolumn
+            loop x in self.cols {
+                if x == c -> return ast.WRC_CONTINUE
+            }
+            self.code = 1
+            ast.WRC_ABORT
         }
-        self.code = 1
-        ast.WRC_ABORT
+        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { false }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // sqlite3ExprCoveredByIndex: whether index ix on the table of cursor i_cur
@@ -2130,29 +2130,29 @@ expr_covered_by_index: fn(db: conn.Conn, a: &ast.AST, e: Int, i_cur: Int, ix: In
 // expression is the node walked gets a copy of it, as the node may change.
 AggInfoPersistWalker: struct {
     unused: Int
-}
 
-impl AggInfoPersistWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        ai: a.exprs[e].agg_info
-        if ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_REDUCED)) || ai < 0 -> return ast.WRC_CONTINUE
-        iagg: a.exprs[e].iagg
-        if a.exprs[e].op != tk.TK_AGG_FUNCTION {
-            if iagg < p.aggs[ai].cols.len() && p.aggs[ai].cols[iagg].c_expr == e {
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            ai: a.exprs[e].agg_info
+            if ast.has(a, e, ast.EP_TOKEN_ONLY.bit_or(ast.EP_REDUCED)) || ai < 0 -> return ast.WRC_CONTINUE
+            iagg: a.exprs[e].iagg
+            if a.exprs[e].op != tk.TK_AGG_FUNCTION {
+                if iagg < p.aggs[ai].cols.len() && p.aggs[ai].cols[iagg].c_expr == e {
+                    d: ast.expr_dup(a, e, 0)
+                    p.aggs[ai].cols[iagg].c_expr = d
+                }
+            } else if iagg < p.aggs[ai].funcs.len() && p.aggs[ai].funcs[iagg].f_expr == e {
                 d: ast.expr_dup(a, e, 0)
-                p.aggs[ai].cols[iagg].c_expr = d
+                p.aggs[ai].funcs[iagg].f_expr = d
             }
-        } else if iagg < p.aggs[ai].funcs.len() && p.aggs[ai].funcs[iagg].f_expr == e {
-            d: ast.expr_dup(a, e, 0)
-            p.aggs[ai].funcs[iagg].f_expr = d
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // sqlite3AggInfoPersistWalkerInit and sqlite3WalkSelect over SELECT `s`.
@@ -2201,108 +2201,108 @@ find_or_create_agg_info_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int, e: Int) N
 // fills and its depth the SELECT nesting.
 AnalyzeAggWalker: struct {
     unused: Int
-}
 
-impl AnalyzeAggWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        nc: p.walks[t].u
-        src: p.ncs[nc].src
-        ai: p.ncs[nc].u
-        in_agg_func: p.ncs[nc].nc_flags.bit_and(ast.NC_IN_AGG_FUNC) != 0
-        op: a.exprs[e].op
-        if op == tk.TK_IF_NULL_ROW || op == tk.TK_AGG_COLUMN || op == tk.TK_COLUMN {
-            if src >= 0 {
-                loop i in 0..<ast.src_len(a, src) {
-                    if a.exprs[e].itable == a.items[ast.src_item(a, src, i)].cursor {
-                        find_or_create_agg_info_column(p, a, ai, e)
-                        break
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            nc: p.walks[t].u
+            src: p.ncs[nc].src
+            ai: p.ncs[nc].u
+            in_agg_func: p.ncs[nc].nc_flags.bit_and(ast.NC_IN_AGG_FUNC) != 0
+            op: a.exprs[e].op
+            if op == tk.TK_IF_NULL_ROW || op == tk.TK_AGG_COLUMN || op == tk.TK_COLUMN {
+                if src >= 0 {
+                    loop i in 0..<ast.src_len(a, src) {
+                        if a.exprs[e].itable == a.items[ast.src_item(a, src, i)].cursor {
+                            find_or_create_agg_info_column(p, a, ai, e)
+                            break
+                        }
                     }
                 }
+                return ast.WRC_CONTINUE
             }
-            return ast.WRC_CONTINUE
-        }
-        if op == tk.TK_AGG_FUNCTION {
-            if in_agg_func || p.walks[t].depth != a.exprs[e].op2 || a.exprs[e].agg_info >= 0 -> return ast.WRC_CONTINUE
-            nf: p.aggs[ai].funcs.len()
-            i := 0
-            loop i < nf {
-                fe: p.aggs[ai].funcs[i].f_expr
-                if fe == e || ast.expr_compare(a, fe, e, -1) == 0 -> break
-                i += 1
-            }
-            if i >= nf {
-                x: a.exprs[e].x
-                n_arg: if x >= 0 -> ast.list_len(a, x) else -> 0
-                def: cat.find_function(p.db, a.exprs[e].token ?? [U8]{}, n_arg, p.db.enc) ?? return ast.WRC_ABORT
-                item := cg.AggFunc{f_expr: e, func: def.copy(), i_distinct: -1, i_dist_addr: 0, i_ob_tab: -1, b_ob_payload: false, b_ob_unique: false, b_use_subtype: false}
-                l: a.exprs[e].left
-                // The NEEDCOLL test ignores ORDER BY on min() and max().
-                if l >= 0 && def.flags.bit_and(conn.FUNC_NEEDCOLL) == 0 {
-                    item.i_ob_tab = p.f.n_tab
-                    p.f.n_tab += 1
-                    ob: a.exprs[l].x
-                    same := false
-                    if ast.list_len(a, ob) == 1 && n_arg == 1 {
-                        ob0: ast.list_expr(a, ob, 0)
-                        x0: ast.list_expr(a, x, 0)
-                        same = ast.expr_compare(a, ob0, x0, 0) == 0
-                    }
-                    if same {
-                        item.b_ob_unique = ast.has(a, e, ast.EP_DISTINCT)
-                    } else {
-                        item.b_ob_payload = true
-                    }
-                    item.b_use_subtype = def.flags.bit_and(conn.FUNC_SUBTYPE) != 0
+            if op == tk.TK_AGG_FUNCTION {
+                if in_agg_func || p.walks[t].depth != a.exprs[e].op2 || a.exprs[e].agg_info >= 0 -> return ast.WRC_CONTINUE
+                nf: p.aggs[ai].funcs.len()
+                i := 0
+                loop i < nf {
+                    fe: p.aggs[ai].funcs[i].f_expr
+                    if fe == e || ast.expr_compare(a, fe, e, -1) == 0 -> break
+                    i += 1
                 }
-                if ast.has(a, e, ast.EP_DISTINCT) && !item.b_ob_unique {
-                    item.i_distinct = p.f.n_tab
-                    p.f.n_tab += 1
+                if i >= nf {
+                    x: a.exprs[e].x
+                    n_arg: if x >= 0 -> ast.list_len(a, x) else -> 0
+                    def: cat.find_function(p.db, a.exprs[e].token ?? [U8]{}, n_arg, p.db.enc) ?? return ast.WRC_ABORT
+                    item := cg.AggFunc{f_expr: e, func: def.copy(), i_distinct: -1, i_dist_addr: 0, i_ob_tab: -1, b_ob_payload: false, b_ob_unique: false, b_use_subtype: false}
+                    l: a.exprs[e].left
+                    // The NEEDCOLL test ignores ORDER BY on min() and max().
+                    if l >= 0 && def.flags.bit_and(conn.FUNC_NEEDCOLL) == 0 {
+                        item.i_ob_tab = p.f.n_tab
+                        p.f.n_tab += 1
+                        ob: a.exprs[l].x
+                        same := false
+                        if ast.list_len(a, ob) == 1 && n_arg == 1 {
+                            ob0: ast.list_expr(a, ob, 0)
+                            x0: ast.list_expr(a, x, 0)
+                            same = ast.expr_compare(a, ob0, x0, 0) == 0
+                        }
+                        if same {
+                            item.b_ob_unique = ast.has(a, e, ast.EP_DISTINCT)
+                        } else {
+                            item.b_ob_payload = true
+                        }
+                        item.b_use_subtype = def.flags.bit_and(conn.FUNC_SUBTYPE) != 0
+                    }
+                    if ast.has(a, e, ast.EP_DISTINCT) && !item.b_ob_unique {
+                        item.i_distinct = p.f.n_tab
+                        p.f.n_tab += 1
+                    }
+                    p.aggs[ai].funcs.push(item)
                 }
-                p.aggs[ai].funcs.push(item)
+                a.exprs[e].iagg = i
+                a.exprs[e].agg_info = ai
+                return ast.WRC_PRUNE
             }
-            a.exprs[e].iagg = i
+            // An expression of an index on p.f.idx_epr, inside an aggregate's
+            // arguments, becomes a reference to that index column.
+            if !in_agg_func || p.f.idx_epr < 0 -> return ast.WRC_CONTINUE
+            ie := p.f.idx_epr
+            loop ie >= 0 {
+                dc: p.idx_exprs[ie].i_data_cur
+                ix_e: p.idx_exprs[ie].expr
+                if dc >= 0 && ast.expr_compare(a, e, ix_e, dc) == 0 -> break
+                ie = p.idx_exprs[ie].next
+            }
+            if ie < 0 -> return ast.WRC_CONTINUE
+            // C tests a[0] of the FROM list on each pass; kept as it is.
+            hit := false
+            loop _i in 0..<ast.src_len(a, src) {
+                if a.items[ast.src_item(a, src, 0)].cursor == p.idx_exprs[ie].i_data_cur {
+                    hit = true
+                    break
+                }
+            }
+            if !hit || a.exprs[e].agg_info >= 0 -> return ast.WRC_CONTINUE
+            if cg.n_err(a) > 0 -> return ast.WRC_ABORT
+            tmp := ast.zero_expr(tk.TK_AGG_COLUMN)
+            tmp.itable = p.idx_exprs[ie].i_idx_cur
+            tmp.icolumn = p.idx_exprs[ie].i_idx_col
+            tmp_e: ast.push_expr(a, tmp)
+            find_or_create_agg_info_column(p, a, ai, tmp_e)
+            if cg.n_err(a) > 0 -> return ast.WRC_ABORT
+            k: a.exprs[tmp_e].iagg
+            p.aggs[ai].cols[k].c_expr = e
             a.exprs[e].agg_info = ai
-            return ast.WRC_PRUNE
+            a.exprs[e].iagg = k
+            ast.WRC_PRUNE
         }
-        // An expression of an index on p.f.idx_epr, inside an aggregate's
-        // arguments, becomes a reference to that index column.
-        if !in_agg_func || p.f.idx_epr < 0 -> return ast.WRC_CONTINUE
-        ie := p.f.idx_epr
-        loop ie >= 0 {
-            dc: p.idx_exprs[ie].i_data_cur
-            ix_e: p.idx_exprs[ie].expr
-            if dc >= 0 && ast.expr_compare(a, e, ix_e, dc) == 0 -> break
-            ie = p.idx_exprs[ie].next
-        }
-        if ie < 0 -> return ast.WRC_CONTINUE
-        // C tests a[0] of the FROM list on each pass; kept as it is.
-        hit := false
-        loop _i in 0..<ast.src_len(a, src) {
-            if a.items[ast.src_item(a, src, 0)].cursor == p.idx_exprs[ie].i_data_cur {
-                hit = true
-                break
-            }
-        }
-        if !hit || a.exprs[e].agg_info >= 0 -> return ast.WRC_CONTINUE
-        if cg.n_err(a) > 0 -> return ast.WRC_ABORT
-        tmp := ast.zero_expr(tk.TK_AGG_COLUMN)
-        tmp.itable = p.idx_exprs[ie].i_idx_cur
-        tmp.icolumn = p.idx_exprs[ie].i_idx_col
-        tmp_e: ast.push_expr(a, tmp)
-        find_or_create_agg_info_column(p, a, ai, tmp_e)
-        if cg.n_err(a) > 0 -> return ast.WRC_ABORT
-        k: a.exprs[tmp_e].iagg
-        p.aggs[ai].cols[k].c_expr = e
-        a.exprs[e].agg_info = ai
-        a.exprs[e].iagg = k
-        ast.WRC_PRUNE
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { cg.walker_depth_increase(p) }
+        has_select2: fn(self) -[]> Bool Never! { true }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { cg.walker_depth_decrease(p) }
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { cg.walker_depth_increase(p) }
-    has_select2: fn(self) -[]> Bool Never! { true }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { cg.walker_depth_decrease(p) }
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // sqlite3ExprAnalyzeAggregates: add the aggregate functions and columns of

@@ -209,43 +209,43 @@ test_op: fn(opcode: Int, p4: conn.P4) -> conn.VdbeOp Never! {
 TestHost: struct {
     interrupt_at: Int
     progress_calls: Int
-}
 
-impl TestHost.Host {
-    vtab_has: fn(&self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
-    vtab_version: fn(&self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
-    vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! { base.OK }
-    vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) Never! -[DB]> {}
-    vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? { None }
-    vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! { base.ERROR }
-    vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! { base.ERROR }
-    vtab_eof: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
-    vtab_next: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
-    vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! { base.ERROR }
-    vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
-    vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
-    vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
-    vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
-    vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
-    vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
-    func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) Never! -[DB]> {}
-    commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
-    rollback_hook: fn(&self, _db: &conn.Conn) Never! -[DB]> {}
-    has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
-    update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) Never! -[DB]> {}
-    progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! {
-        self.progress_calls += 1
-        self.progress_calls == self.interrupt_at
+    impl Host {
+        vtab_has: fn(&self, _db: conn.Conn, _vt: Int, _method: Int) -[]> Bool Never! { false }
+        vtab_version: fn(&self, _db: conn.Conn, _vt: Int) -[]> Int Never! { 0 }
+        vtab_call: fn(&self, _db: &conn.Conn, _vt: Int, _method: Int, _arg: Int) -[DB]> Int Never! { base.OK }
+        vtab_close: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: Int) Never! -[DB]> {}
+        vtab_take_errmsg: fn(&self, _db: conn.Conn, _vt: Int) -[]> [U8]? { None }
+        vtab_open: fn(&self, _db: &conn.Conn, _vt: Int, _cursor: &Int) -[DB]> Int Never! { base.ERROR }
+        vtab_filter: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _idx_num: Int, _idx_str: [U8]?, _arg: Int, _argc: Int) -[DB]> Int Never! { base.ERROR }
+        vtab_eof: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Bool Never! { true }
+        vtab_next: fn(&self, _db: &conn.Conn, _cursor: Int) -[DB]> Int Never! { base.ERROR }
+        vtab_column: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _cursor: Int, _col: Int) -[DB]> Int Never! { base.ERROR }
+        vtab_rowid: fn(&self, _db: &conn.Conn, _cursor: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
+        vtab_update: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _vt: Int, _arg: Int, _argc: Int, _rowid: &Int) -[DB]> Int Never! { base.ERROR }
+        vtab_rename: fn(&self, _db: &conn.Conn, _vt: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
+        vtab_integrity: fn(&self, _db: &conn.Conn, _vt: Int, _schema: [U8], _table: [U8], _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+        vtab_call_create: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+        vtab_call_destroy: fn(&self, _db: &conn.Conn, _i_db: Int, _name: [U8]) -[DB]> Int Never! { base.ERROR }
+        func_call: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe, _method: Int) Never! -[DB]> {}
+        commit_hook: fn(&self, _db: &conn.Conn) -[DB]> Int Never! { 0 }
+        rollback_hook: fn(&self, _db: &conn.Conn) Never! -[DB]> {}
+        has_update_hook: fn(&self, _db: conn.Conn) -[]> Bool Never! { false }
+        update_hook: fn(&self, _db: &conn.Conn, _op: Int, _db_name: [U8], _table: [U8], _rowid: Int) Never! -[DB]> {}
+        progress: fn(&self, _db: &conn.Conn) -[DB]> Bool Never! {
+            self.progress_calls += 1
+            self.progress_calls == self.interrupt_at
+        }
+        trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) Never! -[DB]> {}
+        profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) Never! -[DB]> {}
+        wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! { base.OK }
+        sql_exec: fn(&self, _db: &conn.Conn, _sql: [U8], _quiet: Bool, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+        init_one: fn(&self, _db: &conn.Conn, _i_db: Int, _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+        parse_schema: fn(&self, _db: &conn.Conn, _i_db: Int, _where: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.OK }
+        load_analysis: fn(&self, _db: &conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
+        run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
+        reprepare: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe) -[DB]> Int Never! { base.ERROR }
     }
-    trace: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _event: Int, _text: [U8]) Never! -[DB]> {}
-    profile: fn(&self, _db: &conn.Conn, _v: conn.Vdbe, _elapsed_ns: Int) Never! -[DB]> {}
-    wal_hook: fn(&self, _db: &conn.Conn, _db_name: [U8], _n_frame: Int) -[DB]> Int Never! { base.OK }
-    sql_exec: fn(&self, _db: &conn.Conn, _sql: [U8], _quiet: Bool, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
-    init_one: fn(&self, _db: &conn.Conn, _i_db: Int, _flags: Int, _msg: &[U8]?) -[DB]> Int Never! { base.OK }
-    parse_schema: fn(&self, _db: &conn.Conn, _i_db: Int, _where: [U8], _msg: &[U8]?) -[DB]> Int Never! { base.OK }
-    load_analysis: fn(&self, _db: &conn.Conn, _i_db: Int) -[DB]> Int Never! { base.OK }
-    run_vacuum: fn(&self, _db: &conn.Conn, _i_db: Int, _into: base.Mem?, _msg: &[U8]?) -[DB]> Int Never! { base.ERROR }
-    reprepare: fn(&self, _db: &conn.Conn, _v: &conn.Vdbe) -[DB]> Int Never! { base.ERROR }
 }
 
 #Test("filterHash sums integers and buckets text and blobs") {

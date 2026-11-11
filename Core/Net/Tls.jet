@@ -33,17 +33,51 @@ ClientConfig: struct {
     identity: ClientIdentity?{None}
     min_version: TLSVersion{TLSVersion.TLS12}
     max_version: TLSVersion{TLSVersion.TLS13}
+
+    // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
+    default: fn() -> ClientConfig Never! { ClientConfig{} }
+
+    with_alpn: fn(self, protocols: [String]) -> ClientConfig IOError! {
+        message: __alpn_problem(protocols)
+        if message != "" -> return Err(__config_error("ClientConfig.with_alpn", message))
+        Ok(__config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    with_trust: fn(self, trust: TLSClientTrust) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    with_client_identity: fn(self, identity: ClientIdentity) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.min_version, self.max_version))
+    }
+
+    with_version_bounds: fn(self, /, *, min: TLSVersion, max: TLSVersion) -> ClientConfig IOError! {
+        if __version_rank(min) > __version_rank(max) -> return Err(__config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), min, max))
+    }
 }
 // `from_pem` stores the validated PEM text; `identity(cert, key)` is a plain
 // carrier that the handshake validates.
 ClientIdentity: struct {
     cert: String{""}
     key: String{""}
+
+    // Validates a PEM certificate chain and the leaf's PEM private key.
+    from_pem: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
+        identity: __identity_validate(cert_chain, private_key) ?? return Err(__config_error("ClientIdentity.from_pem", err.message))
+        Ok(identity)
+    }
 }
 // `from_pem` stores validated PEM roots; `roots(path)` names a bundle file.
 RootCertificates: struct {
     path: String{""}
     pem: String{""}
+
+    // Validates one or more PEM CERTIFICATE blocks and nothing else.
+    from_pem: fn(pem: [U8]) -> RootCertificates IOError! {
+        text: __roots_validate(pem) ?? return Err(__config_error("RootCertificates.from_pem", err.message))
+        Ok(RootCertificates{pem: text})
+    }
 }
 TLSClientTrust: enum {
     System
@@ -73,7 +107,91 @@ TLSVersion: enum {
 }
 
 // A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
-TLSStream: struct { state: Shared<__TLSState>?{None} }
+TLSStream: struct {
+    state: Shared<__TLSState>?{None}
+
+    read: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
+        if max_bytes <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read limit must be positive")))
+        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __read(guard.value, max_bytes, end_ns)
+    }
+
+    // Appends up to `limit` plaintext bytes to `buffer` and returns the
+    // count, 0 at the end of the stream. The bytes move from the engine's
+    // record buffer into `buffer`, so a caller that clears and reuses one
+    // List reads without allocating (#5976).
+    read_into: fn(self, &buffer: [U8], limit: Int, /, *, deadline: Duration) -[Net, Time.Wait]> Int IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read_into limit must be positive")))
+        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __read_into(guard.value, buffer, limit, end_ns)
+    }
+
+    write_all: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+        end_ns: __deadline_end(deadline, "tls write all") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Write, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __write_all(guard.value, bytes, end_ns)
+    }
+
+    ready: fn(self, interest: NetReadyInterest, /, *, deadline: Duration) -[Net, Time.Wait]> NetReady IOError! {
+        operation: if __wants_write_only(interest) -> IOOperation.Write else -> IOOperation.Read
+        end_ns: __deadline_end(deadline, "tls ready") ?? return Err(__net_to_io(err))
+        if end_ns <= core.time.__clock_mono_ns() -> return Err(__net_to_io(__deadline_error("tls ready")))
+        state: __state(self) ?? return Err(__io_error(operation, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Err(__io_error(operation, "TLS stream is closed"))
+        want_read: !__wants_write_only(interest)
+        want_write: __wants_write(interest)
+        loop {
+            if want_read {
+                buffered: __fill_pending(guard.value, operation, end_ns, false) ?? return Err(err)
+                if buffered -> return Ok(NetReady{readable: true, writable: false})
+            }
+            raw: __wait(guard.value.tcp, interest, end_ns, "tls ready") ?? return Err(__net_to_io(err))
+            readable := false
+            if want_read && raw.readable {
+                readable = __fill_pending(guard.value, operation, end_ns, true) ?? return Err(err)
+            }
+            writable: want_write && raw.writable
+            if readable || writable -> return Ok(NetReady{readable: readable, writable: writable})
+        }
+    }
+
+    // Sends close_notify, shuts down the socket's write side and closes the
+    // stream, freeing the engine and wiping its buffers. Closing a closed
+    // stream succeeds.
+    close: fn(self) IOError! -[Net, Time.Wait]> {
+        state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Ok()
+        _: __close_write(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
+        guard.value.closed = true
+        __release(guard.value)
+        Ok()
+    }
+
+    // Sends close_notify and shuts down the write side; reads stay open.
+    close_write: fn(self, /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+        end_ns: __deadline_end(deadline, "tls close write") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Err(__io_error(.Close, "TLS stream is closed"))
+        __close_write(guard.value, end_ns, "tls close write")
+    }
+
+    // The verified server identity. Server-side and closed streams have none
+    // and report an empty identity.
+    peer_identity: fn(self) -> TLSPeerIdentity Never! {
+        state: __state(self) ?? return __empty_identity()
+        guard := state.guard_edit()
+        if guard.value.peer == .Val(peer) -> return peer.copy()
+        __empty_identity()
+    }
+}
 
 // A configuration before setup: the engine's config, the roots loaded so
 // far, and the generator the connection draws from.
@@ -94,20 +212,20 @@ __TLSState: struct {
     read_eof: Bool
     write_closed: Bool
     closed: Bool
-}
 
-// The engine's secrets and the plaintext the stream holds die wiped: when the
-// last handle to the state goes, after a failed handshake included, the
-// engine is freed (mbedtls_ssl_free) and the buffers zeroed. `close` does the
-// same at once.
-impl __TLSState.Close {
-    close: fn(&&self) {
-        ssl := self.ssl.move()
-        ssltls.ssl_free(ssl)
-        buffer := self.buffer.move()
-        ssldefs.ssl_wipe(buffer)
-        pending := self.pending.move()
-        ssldefs.ssl_wipe(pending)
+    // The engine's secrets and the plaintext the stream holds die wiped: when the
+    // last handle to the state goes, after a failed handshake included, the
+    // engine is freed (mbedtls_ssl_free) and the buffers zeroed. `close` does the
+    // same at once.
+    impl Close {
+        close: fn(&&self) {
+            ssl := self.ssl.move()
+            ssltls.ssl_free(ssl)
+            buffer := self.buffer.move()
+            ssldefs.ssl_wipe(buffer)
+            pending := self.pending.move()
+            ssldefs.ssl_wipe(pending)
+        }
     }
 }
 
@@ -126,9 +244,13 @@ __Got: struct {
 }
 
 #Error
-__TLSFailure: struct { message: String }
-impl __TLSFailure.Display { display: fn(self) -> String { self.message.copy() } }
-impl __TLSFailure.Debug { debug: fn(&&self) -> String { self.message } }
+__TLSFailure: struct {
+    message: String
+
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
 __fail: fn(message: String) -> __TLSFailure Never! { __TLSFailure{message: message} }
 
 // Mbed TLS 3.6 status codes this policy acts on; the engine's errors map to
@@ -223,90 +345,6 @@ __server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFai
     Ok(context)
 }
 
-impl TLSStream {
-    read: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
-        if max_bytes <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read limit must be positive")))
-        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
-        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
-        guard := state.guard_edit()
-        __read(guard.value, max_bytes, end_ns)
-    }
-
-    // Appends up to `limit` plaintext bytes to `buffer` and returns the
-    // count, 0 at the end of the stream. The bytes move from the engine's
-    // record buffer into `buffer`, so a caller that clears and reuses one
-    // List reads without allocating (#5976).
-    read_into: fn(self, &buffer: [U8], limit: Int, /, *, deadline: Duration) -[Net, Time.Wait]> Int IOError! {
-        if limit <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read_into limit must be positive")))
-        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
-        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
-        guard := state.guard_edit()
-        __read_into(guard.value, buffer, limit, end_ns)
-    }
-
-    write_all: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
-        end_ns: __deadline_end(deadline, "tls write all") ?? return Err(__net_to_io(err))
-        state: __state(self) ?? return Err(__io_error(.Write, "TLS stream is closed"))
-        guard := state.guard_edit()
-        __write_all(guard.value, bytes, end_ns)
-    }
-
-    ready: fn(self, interest: NetReadyInterest, /, *, deadline: Duration) -[Net, Time.Wait]> NetReady IOError! {
-        operation: if __wants_write_only(interest) -> IOOperation.Write else -> IOOperation.Read
-        end_ns: __deadline_end(deadline, "tls ready") ?? return Err(__net_to_io(err))
-        if end_ns <= core.time.__clock_mono_ns() -> return Err(__net_to_io(__deadline_error("tls ready")))
-        state: __state(self) ?? return Err(__io_error(operation, "TLS stream is closed"))
-        guard := state.guard_edit()
-        if guard.value.closed -> return Err(__io_error(operation, "TLS stream is closed"))
-        want_read: !__wants_write_only(interest)
-        want_write: __wants_write(interest)
-        loop {
-            if want_read {
-                buffered: __fill_pending(guard.value, operation, end_ns, false) ?? return Err(err)
-                if buffered -> return Ok(NetReady{readable: true, writable: false})
-            }
-            raw: __wait(guard.value.tcp, interest, end_ns, "tls ready") ?? return Err(__net_to_io(err))
-            readable := false
-            if want_read && raw.readable {
-                readable = __fill_pending(guard.value, operation, end_ns, true) ?? return Err(err)
-            }
-            writable: want_write && raw.writable
-            if readable || writable -> return Ok(NetReady{readable: readable, writable: writable})
-        }
-    }
-
-    // Sends close_notify, shuts down the socket's write side and closes the
-    // stream, freeing the engine and wiping its buffers. Closing a closed
-    // stream succeeds.
-    close: fn(self) IOError! -[Net, Time.Wait]> {
-        state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
-        guard := state.guard_edit()
-        if guard.value.closed -> return Ok()
-        _: __close_write(guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
-        guard.value.closed = true
-        __release(guard.value)
-        Ok()
-    }
-
-    // Sends close_notify and shuts down the write side; reads stay open.
-    close_write: fn(self, /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
-        end_ns: __deadline_end(deadline, "tls close write") ?? return Err(__net_to_io(err))
-        state: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
-        guard := state.guard_edit()
-        if guard.value.closed -> return Err(__io_error(.Close, "TLS stream is closed"))
-        __close_write(guard.value, end_ns, "tls close write")
-    }
-
-    // The verified server identity. Server-side and closed streams have none
-    // and report an empty identity.
-    peer_identity: fn(self) -> TLSPeerIdentity Never! {
-        state: __state(self) ?? return __empty_identity()
-        guard := state.guard_edit()
-        if guard.value.peer == .Val(peer) -> return peer.copy()
-        __empty_identity()
-    }
-}
-
 read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
     stream.read(n, deadline: __forever())
@@ -377,46 +415,6 @@ is_tls13: fn(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
 is_tls12: fn(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
 
 // ---- client configuration ---------------------------------------------------
-
-impl ClientConfig {
-    // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
-    default: fn() -> ClientConfig Never! { ClientConfig{} }
-
-    with_alpn: fn(self, protocols: [String]) -> ClientConfig IOError! {
-        message: __alpn_problem(protocols)
-        if message != "" -> return Err(__config_error("ClientConfig.with_alpn", message))
-        Ok(__config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.min_version, self.max_version))
-    }
-
-    with_trust: fn(self, trust: TLSClientTrust) -> ClientConfig IOError! {
-        Ok(__config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.min_version, self.max_version))
-    }
-
-    with_client_identity: fn(self, identity: ClientIdentity) -> ClientConfig IOError! {
-        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.min_version, self.max_version))
-    }
-
-    with_version_bounds: fn(self, /, *, min: TLSVersion, max: TLSVersion) -> ClientConfig IOError! {
-        if __version_rank(min) > __version_rank(max) -> return Err(__config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
-        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), min, max))
-    }
-}
-
-impl RootCertificates {
-    // Validates one or more PEM CERTIFICATE blocks and nothing else.
-    from_pem: fn(pem: [U8]) -> RootCertificates IOError! {
-        text: __roots_validate(pem) ?? return Err(__config_error("RootCertificates.from_pem", err.message))
-        Ok(RootCertificates{pem: text})
-    }
-}
-
-impl ClientIdentity {
-    // Validates a PEM certificate chain and the leaf's PEM private key.
-    from_pem: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
-        identity: __identity_validate(cert_chain, private_key) ?? return Err(__config_error("ClientIdentity.from_pem", err.message))
-        Ok(identity)
-    }
-}
 
 __config_with: fn(config: ClientConfig, alpn: [String], trust: TLSClientTrust, identity: ClientIdentity?, min: TLSVersion, max: TLSVersion) -> ClientConfig Never! {
     ClientConfig{host: config.host.copy(), alpn: alpn, trust: trust, identity: identity, min_version: min, max_version: max}

@@ -41,9 +41,7 @@ Sh: struct {
     impl Equatable {
         equal: fn(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
     }
-}
 
-impl Sh {
     args: fn(self) -> [String] Never! { self.argv.copy() }
     raw: fn(text: String) -> Sh Never! {
         argv := [String]{}
@@ -83,6 +81,27 @@ impl Sh {
     }
     // The receipt of the command run with its stdout and stderr captured.
     run: fn(self) -[Exec, Time.Wait]> ProcessReceipt IOError! { self.spec().run() }
+
+    // A checked `Sh{…}` literal: literal text splits on whitespace and each
+    // hole's display text is one argv item.
+    impl CheckedText {
+        Error: Never
+        Hole: String
+
+        check: fn(_text: String) Never! -[]> { return Ok() }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+        build: fn(parts: [String], holes: [String]) -[]> Sh {
+            argv := [String]{}
+            sh_split_into(parts[0], argv)
+            loop index in 0..<holes.len() {
+                argv.push(holes[index].copy())
+                sh_split_into(parts[index + 1], argv)
+            }
+            Sh{argv: argv}
+        }
+    }
 }
 
 sh_split_into: fn(text: String, argv: &[String]) Never! {
@@ -97,28 +116,6 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
     }
     if word != "" -> argv.push(word)
 }
-
-// A checked `Sh{…}` literal: literal text splits on whitespace and each
-// hole's display text is one argv item.
-impl Sh.CheckedText {
-    Error: Never
-    Hole: String
-
-    check: fn(_text: String) Never! -[]> { return Ok() }
-
-    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
-
-    build: fn(parts: [String], holes: [String]) -[]> Sh {
-        argv := [String]{}
-        sh_split_into(parts[0], argv)
-        loop index in 0..<holes.len() {
-            argv.push(holes[index].copy())
-            sh_split_into(parts[index + 1], argv)
-        }
-        Sh{argv: argv}
-    }
-}
-
 
 args: fn() -[Exec.Args]> [String] Never! { args_from_argv(core.process.argv()) }
 
@@ -657,6 +654,14 @@ ProcessChunks: struct {
     __stdout: ProcessStdoutStream?{None}
     __stderr: ProcessStderrStream?{None}
     __size: Int
+
+    impl Iterable {
+        Iter: __ProcessChunkCursor
+
+        iter: fn(&&self) -> __ProcessChunkCursor {
+            __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
+        }
+    }
 }
 
 __ProcessChunkCursor: struct {
@@ -664,32 +669,24 @@ __ProcessChunkCursor: struct {
     stderr: ProcessStderrStream?
     size: Int
     done: Bool
-}
 
-impl __ProcessChunkCursor.Iterator {
-    Item: [U8]
+    impl Iterator {
+        Item: [U8]
 
-    next: fn(&self) -[Exec, Time.Wait]> [U8]? {
-        if self.done -> return None
-        piece := [U8]{}
-        if self.stdout == .Val(stream) {
-            piece = stream.read(self.size) ?? [U8]{}
-        } else if self.stderr == .Val(stream) {
-            piece = stream.read(self.size) ?? [U8]{}
+        next: fn(&self) -[Exec, Time.Wait]> [U8]? {
+            if self.done -> return None
+            piece := [U8]{}
+            if self.stdout == .Val(stream) {
+                piece = stream.read(self.size) ?? [U8]{}
+            } else if self.stderr == .Val(stream) {
+                piece = stream.read(self.size) ?? [U8]{}
+            }
+            if piece.len() == 0 {
+                self.done = true
+                return None
+            }
+            Val(piece)
         }
-        if piece.len() == 0 {
-            self.done = true
-            return None
-        }
-        Val(piece)
-    }
-}
-
-impl ProcessChunks.Iterable {
-    Iter: __ProcessChunkCursor
-
-    iter: fn(&&self) -> __ProcessChunkCursor {
-        __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
     }
 }
 

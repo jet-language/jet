@@ -1118,21 +1118,21 @@ walker_depth_decrease: fn(p: &Parse) Never! { p.walks[walk_top(p)].depth -= 1 }
 // A Gen for tests that reach nothing above this part.
 CodegenTestGen: struct {
     calls: Int
-}
 
-impl CodegenTestGen.Gen {
-    read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
-    authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY }
-    nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
-    select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
-    select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
-    select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
-    view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
-    eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
-    vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
-    vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
-    vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+    impl Gen {
+        read_schema: fn(self, p: &Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+        authorize: fn(self, p: &Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { if code == conn.AUTH_READ -> conn.AUTH_IGNORE else -> conn.AUTH_DENY }
+        nested_parse: fn(self, p: &Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+        select: fn(self, p: &Parse, a: &ast.AST, s: Int, dest: &SelectDest) -[DB]> Int Never! { 0 }
+        select_prep: fn(self, p: &Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+        select_expand: fn(self, p: &Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        result_set_of_select: fn(self, p: &Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+        view_get_column_names: fn(self, p: &Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+        eponymous_table: fn(self, p: &Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+        vtab_overload_function: fn(self, p: &Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
+        vtab_best_index: fn(self, p: &Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
+        vtab_find_function: fn(self, p: &Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+    }
 }
 
 #Test("temporary registers and ranges are reused as expr.c reuses them") {

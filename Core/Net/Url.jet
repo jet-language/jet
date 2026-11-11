@@ -51,9 +51,7 @@ URL: struct {
             self.fragment_text == rhs.fragment_text && self.raw == rhs.raw
         }
     }
-}
 
-impl URL {
     scheme: fn(self) -> String Never! { self.scheme_text.copy() }
     path: fn(self) -> String Never! { self.path_text.copy() }
     query: fn(self) -> String Never! { self.query_text.copy() }
@@ -162,6 +160,23 @@ impl URL {
         rows.push([String]{key, value})
         with_query(self, rows)
     }
+
+    // A checked `URL{"…{host}…"}` literal: `check` validates the skeleton before
+    // the program runs; holes stay opaque, so their slashes and dot segments never
+    // become URL grammar.
+    impl CheckedText {
+        Error: URLLiteralError
+        Hole: String
+
+        check: fn(text: String) URLLiteralError! -[]> {
+            if __url_literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
+            return Ok()
+        }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+        build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
+    }
 }
 
 with_query: fn(url: URL, rows: [[String]]) -> URL Never! {
@@ -190,23 +205,6 @@ userinfo_text: fn(url: URL) -> String Never! {
 // Why a checked URL literal was rejected.
 #Error
 URLLiteralError: struct { reason: String }
-
-// A checked `URL{"…{host}…"}` literal: `check` validates the skeleton before
-// the program runs; holes stay opaque, so their slashes and dot segments never
-// become URL grammar.
-impl URL.CheckedText {
-    Error: URLLiteralError
-    Hole: String
-
-    check: fn(text: String) URLLiteralError! -[]> {
-        if __url_literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
-        return Ok()
-    }
-
-    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
-
-    build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
-}
 
 // A marker that occurs in none of `literals`, standing for each hole while the
 // skeleton parses.

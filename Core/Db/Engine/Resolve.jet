@@ -119,43 +119,43 @@ RefSrcWalker: struct {
     refs: [Int]
     exclude: [Int]
     code: Int
-}
 
-impl RefSrcWalker.SQLWalker {
-    // exprRefToSrcList.
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        op: a.exprs[e].op
-        if op != tk.TK_COLUMN && op != tk.TK_AGG_COLUMN -> return ast.WRC_CONTINUE
-        cur: a.exprs[e].itable
-        loop c in self.refs {
-            if c == cur {
-                self.code = self.code.bit_or(1)
-                return ast.WRC_CONTINUE
+    impl SQLWalker {
+        // exprRefToSrcList.
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            op: a.exprs[e].op
+            if op != tk.TK_COLUMN && op != tk.TK_AGG_COLUMN -> return ast.WRC_CONTINUE
+            cur: a.exprs[e].itable
+            loop c in self.refs {
+                if c == cur {
+                    self.code = self.code.bit_or(1)
+                    return ast.WRC_CONTINUE
+                }
+            }
+            loop c in self.exclude {
+                if c == cur -> return ast.WRC_CONTINUE
+            }
+            self.code = self.code.bit_or(2)
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        // selectRefEnter.
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+            src: a.selects[s].src
+            loop i in 0..<ast.src_len(a, src) -> self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+        // selectRefLeave.
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {
+            n := ast.src_len(a, a.selects[s].src)
+            loop n > 0 && self.exclude.len() > 0 {
+                _: self.exclude.pop()
+                n -= 1
             }
         }
-        loop c in self.exclude {
-            if c == cur -> return ast.WRC_CONTINUE
-        }
-        self.code = self.code.bit_or(2)
-        ast.WRC_CONTINUE
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    // selectRefEnter.
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
-        src: a.selects[s].src
-        loop i in 0..<ast.src_len(a, src) -> self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
-        ast.WRC_CONTINUE
-    }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { true }
-    // selectRefLeave.
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {
-        n := ast.src_len(a, a.selects[s].src)
-        loop n > 0 && self.exclude.len() > 0 {
-            _: self.exclude.pop()
-            n -= 1
-        }
-    }
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // sqlite3ReferencesSrcList: 1 when aggregate `e` refers to a table of FROM
@@ -257,18 +257,18 @@ window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDe
 // incrAggFunctionDepth's walker: TK_AGG_FUNCTION nodes move `n` levels out.
 IncrAggDepthWalker: struct {
     n: Int
-}
 
-impl IncrAggDepthWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_AGG_FUNCTION -> a.exprs[e].op2 = a.exprs[e].op2 + self.n
-        ast.WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_AGG_FUNCTION -> a.exprs[e].op2 = a.exprs[e].op2 + self.n
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { false }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // incrAggFunctionDepth.
@@ -1168,18 +1168,18 @@ resolve_order_group_by: fn(p: &cg.Parse, a: &ast.AST, sel: Int, ob: Int, z_type:
 // resolveRemoveWindowsCb's walker.
 RemoveWindowsWalker: struct {
     sel: Int
-}
 
-impl RemoveWindowsWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if ast.has(a, e, ast.EP_WIN_FUNC) -> ast.window_unlink_from_select(a, a.exprs[e].y)
-        ast.WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if ast.has(a, e, ast.EP_WIN_FUNC) -> ast.window_unlink_from_select(a, a.exprs[e].y)
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { false }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // windowRemoveExprFromSelect: the windows of `e` leave SELECT `sel`'s list.
@@ -1371,15 +1371,15 @@ resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int)
 // NC_NoSelect, resolveSelectStep).
 ResolveWalker: struct {
     select: Bool
-}
 
-impl ResolveWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { resolve_expr_step(p, a, e) }
-    has_select: fn(self) -[]> Bool Never! { self.select }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { resolve_select_step(p, a, s) }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { resolve_expr_step(p, a, e) }
+        has_select: fn(self) -[]> Bool Never! { self.select }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { resolve_select_step(p, a, s) }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
+    }
 }
 
 // The aggregate and window flags each expression reports: NC_HasAgg,
@@ -1472,21 +1472,21 @@ resolve_self_reference: fn(p: &cg.Parse, a: &ast.AST, t: Int, typ: Int, e: Int, 
 // A Gen with no schema, authorizer or SELECT machinery.
 ResolveTestGen: struct {
     calls: Int
-}
 
-impl ResolveTestGen.Gen {
-    read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
-    authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { base.OK }
-    nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
-    select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! { 0 }
-    select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
-    select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
-    view_get_column_names: fn(self, p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
-    eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
-    vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
-    vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
-    vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+    impl Gen {
+        read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+        authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! { base.OK }
+        nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) Never! -[DB]> {}
+        select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! { 0 }
+        select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) Never! -[DB]> {}
+        select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! { -1 }
+        view_get_column_names: fn(self, p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+        eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+        vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! { def.copy() }
+        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> (rc: Int, err: [U8]?) Never! { (rc: base.ERROR, err: None) }
+        vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! { 0 }
+    }
 }
 
 resolve_test_col: fn(name: String, not_null: Int) -> conn.Column Never! {

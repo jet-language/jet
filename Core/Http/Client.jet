@@ -550,9 +550,13 @@ C_BUILD_INT_MAX: 9223372036854775807
 C_BUILD_READ_BYTES: 8192
 
 #Error
-__BuildHTTPFailure: struct { message: String }
-impl __BuildHTTPFailure.Display { display: fn(self) -> String { self.message.copy() } }
-impl __BuildHTTPFailure.Debug { debug: fn(&&self) -> String { self.message } }
+__BuildHTTPFailure: struct {
+    message: String
+
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
 __build_fail: fn(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPFailure{message: message} }
 
 // The connection (exactly one of tcp/tls), the bytes of the last read with

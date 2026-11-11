@@ -3578,6 +3578,15 @@ vec_pbkdf2_public: fn(c: Dyn) -> Bool {
 /// they must not correlate with the timings, and need not be unpredictable.
 CtRand: struct {
     s: U64
+
+    // The same xorshift as a premaster's random source, for timings that must
+    // not carry an HMAC_DRBG's own spread.
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            loop i in 0..<out.len() -> out[i] = U8{ct_next(self).bit_and(U64{255})}
+            true
+        }
+    }
 }
 
 #Policy(arithmetic: .Wrapping)
@@ -3594,15 +3603,6 @@ ct_bytes: fn(r: &CtRand, n: Int) -> [U8] Never! {
     out := [U8]{}
     loop _ in 0..<n -> out.push(U8{ct_next(r).bit_and(U64{255})})
     out
-}
-
-// The same xorshift as a premaster's random source, for timings that must
-// not carry an HMAC_DRBG's own spread.
-impl CtRand.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! {
-        loop i in 0..<out.len() -> out[i] = U8{ct_next(self).bit_and(U64{255})}
-        true
-    }
 }
 
 ct_abs: fn(x: Float) -> Float Never! { if x < (Float{0}) -> Float{0} - x else -> x }

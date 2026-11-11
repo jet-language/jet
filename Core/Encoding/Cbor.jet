@@ -40,8 +40,7 @@ CBOROptions: struct {
     max_items: Int
     max_bytes: Int
     require_canonical: Bool
-}
-impl CBOROptions {
+
     safe: fn() -> CBOROptions Never! {
         CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
     }
@@ -68,8 +67,7 @@ CBORError: struct {
     impl Debug {
         debug: fn(&&self) -> String { self.display_text() }
     }
-}
-impl CBORError {
+
     kind_name: fn(self) -> String Never! {
         if self.kind == {
             .Syntax -> "Syntax"
@@ -87,7 +85,6 @@ impl CBORError {
         "{out}: {self.reason}"
     }
 }
-
 
 to_bytes: fn<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
 to_bytes_canonical: fn<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }

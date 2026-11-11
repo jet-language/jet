@@ -162,6 +162,111 @@ JobQueue: struct {
     endpoint: ServiceEndpoint
     authority: String
     name: String
+
+    receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
+        guard := self.data.guard_edit()
+        record: queue_find(guard.value.driver, self.authority, self.name, id) ?? return Err(err)
+        Ok(queue_receipt(record, false))
+    }
+    inspect: fn(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
+        queue_validate_nonnegative_limit(limit, "inspection limit") ?? return Err(err)
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
+        guard := self.data.guard_edit()
+        queue_inspect_on_driver(guard.value.driver, self.authority, self.name, limit, include_payload && false)
+    }
+    events: fn(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
+        guard := self.data.guard_edit()
+        queue_events_on_driver(guard.value.driver, self.authority, self.name, id)
+    }
+    claim: fn(self, worker: String, limit: Int) -[DB, Rand, Time]> [JobQueueClaim] ServiceError! {
+        queue_validate_nonnegative_limit(limit, "claim limit") ?? return Err(err)
+        queue_validate_text(worker, "queue worker", 256, false) ?? return Err(err)
+        if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue claim limit must be positive and within capacity"))
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_claim_transaction(self, worker, limit) ?? return Err(err)
+        queue_publish_transitions(committed.observations)
+        Ok(committed.claims)
+    }
+    heartbeat: fn(self, claim: JobQueueClaim) -[DB, Time]> JobQueueReceipt ServiceError! {
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_heartbeat_transaction(self, claim) ?? return Err(err)
+        queue_publish_optional_transition(committed.observation)
+        Ok(committed.receipt)
+    }
+    acknowledge: fn(self, claim: JobQueueClaim, result: JobResult) -[DB, Time]> JobQueueReceipt ServiceError! {
+        queue_validate_result(result) ?? return Err(err)
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_acknowledge_transaction(self, claim, result) ?? return Err(err)
+        queue_publish_optional_transition(committed.observation)
+        Ok(committed.receipt)
+    }
+    fail: fn(self, claim: JobQueueClaim, failure: JobError) -[DB, Time]> JobQueueReceipt ServiceError! {
+        queue_validate_error(failure) ?? return Err(err)
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_fail_transaction(self, claim, failure) ?? return Err(err)
+        queue_publish_optional_transition(committed.observation)
+        Ok(committed.receipt)
+    }
+    cancel: fn(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
+        queue_validate_text(reason, "queue cancellation reason", 1024, false) ?? return Err(err)
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_cancel_transaction(self, id, reason, lease_token) ?? return Err(err)
+        queue_publish_optional_transition(committed.observation)
+        Ok(committed.receipt)
+    }
+    dead_letter: fn(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
+        queue_validate_text(reason, "queue dead-letter reason", 1024, false) ?? return Err(err)
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_dead_letter_transaction(self, id, reason, lease_token) ?? return Err(err)
+        queue_publish_optional_transition(committed.observation)
+        Ok(committed.receipt)
+    }
+    recover_expired: fn(self) ServiceError! -[DB, Time]> {
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        committed: queue_recover_transaction(self) ?? return Err(err)
+        queue_publish_transitions(committed)
+        Ok()
+    }
+    status: fn(self) -[DB, Time]> JobQueueStatus ServiceError! {
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        status: queue_read_status(self) ?? return Err(err)
+        queue_publish_status(status)
+        Ok(status)
+    }
+    pause: fn(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, true) }
+    resume: fn(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, false) }
+    wait: fn(self, timeout: Duration) -[DB, Time, Time.Wait]> JobQueueStatus ServiceError! {
+        millis: timeout.ns /% 1000000
+        if millis < 0 || millis > 31536000000 -> return Err(ServiceError.Policy("queue wait timeout is outside the supported range"))
+        deadline: queue_saturating_add(queue_now(), millis)
+        loop {
+            status: self.status() ?? return Err(err)
+            if status.depth > 0 || queue_now() >= deadline -> return Ok(status)
+            remaining: queue_saturating_sub(deadline, queue_now())
+            delay: if remaining < 1 -> 1 else if remaining > 25 -> 25 else -> remaining
+            #Unsafe("match the queue's existing raw wall-clock wait without advancing controlled scheduler time") {
+                core.jobs.__sleep_ms(delay)
+            }
+        }
+    }
+    prune: fn(self) -[DB, Time]> Int ServiceError! {
+        now: queue_now()
+        service.__authority_validate(self.endpoint) ?? return Err(err)
+        guard := self.data.guard_edit()
+        queue_begin(guard.value.driver) ?? return Err(err)
+        result: queue_prune_on_driver(guard.value.driver, self.authority, self.name, 604800000, now) ?? {
+            _: db.__driver_rollback(guard.value.driver)
+            return Err(err)
+        }
+        queue_finish(guard.value.driver, result)
+    }
 }
 
 // Only the immutable startup snapshot is read: logical Env overlays do not
@@ -269,113 +374,6 @@ queue_enqueue_request: fn(queue: JobQueue, request: EnqueueRequest) -[DB, Time]>
     queue_publish_transitions(committed.observations)
     if committed.receipts.len() == 0 -> return Err(queue_unavailable("queue enqueue returned no receipt"))
     Ok(committed.receipts[0])
-}
-
-impl JobQueue {
-    receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        guard := self.data.guard_edit()
-        record: queue_find(guard.value.driver, self.authority, self.name, id) ?? return Err(err)
-        Ok(queue_receipt(record, false))
-    }
-    inspect: fn(self, limit: Int, include_payload: Bool) -[DB]> [JobQueueRecord] ServiceError! {
-        queue_validate_nonnegative_limit(limit, "inspection limit") ?? return Err(err)
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue inspection limit must be positive and bounded"))
-        guard := self.data.guard_edit()
-        queue_inspect_on_driver(guard.value.driver, self.authority, self.name, limit, include_payload && false)
-    }
-    events: fn(self, id: String) -[DB]> [JobQueueEvent] ServiceError! {
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_events_on_driver(guard.value.driver, self.authority, self.name, id)
-    }
-    claim: fn(self, worker: String, limit: Int) -[DB, Rand, Time]> [JobQueueClaim] ServiceError! {
-        queue_validate_nonnegative_limit(limit, "claim limit") ?? return Err(err)
-        queue_validate_text(worker, "queue worker", 256, false) ?? return Err(err)
-        if limit <= 0 || limit > 1024 -> return Err(ServiceError.Policy("queue claim limit must be positive and within capacity"))
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_claim_transaction(self, worker, limit) ?? return Err(err)
-        queue_publish_transitions(committed.observations)
-        Ok(committed.claims)
-    }
-    heartbeat: fn(self, claim: JobQueueClaim) -[DB, Time]> JobQueueReceipt ServiceError! {
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_heartbeat_transaction(self, claim) ?? return Err(err)
-        queue_publish_optional_transition(committed.observation)
-        Ok(committed.receipt)
-    }
-    acknowledge: fn(self, claim: JobQueueClaim, result: JobResult) -[DB, Time]> JobQueueReceipt ServiceError! {
-        queue_validate_result(result) ?? return Err(err)
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_acknowledge_transaction(self, claim, result) ?? return Err(err)
-        queue_publish_optional_transition(committed.observation)
-        Ok(committed.receipt)
-    }
-    fail: fn(self, claim: JobQueueClaim, failure: JobError) -[DB, Time]> JobQueueReceipt ServiceError! {
-        queue_validate_error(failure) ?? return Err(err)
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_fail_transaction(self, claim, failure) ?? return Err(err)
-        queue_publish_optional_transition(committed.observation)
-        Ok(committed.receipt)
-    }
-    cancel: fn(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
-        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        queue_validate_text(reason, "queue cancellation reason", 1024, false) ?? return Err(err)
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_cancel_transaction(self, id, reason, lease_token) ?? return Err(err)
-        queue_publish_optional_transition(committed.observation)
-        Ok(committed.receipt)
-    }
-    dead_letter: fn(self, id: String, reason: String, lease_token: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
-        queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
-        queue_validate_text(reason, "queue dead-letter reason", 1024, false) ?? return Err(err)
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_dead_letter_transaction(self, id, reason, lease_token) ?? return Err(err)
-        queue_publish_optional_transition(committed.observation)
-        Ok(committed.receipt)
-    }
-    recover_expired: fn(self) ServiceError! -[DB, Time]> {
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        committed: queue_recover_transaction(self) ?? return Err(err)
-        queue_publish_transitions(committed)
-        Ok()
-    }
-    status: fn(self) -[DB, Time]> JobQueueStatus ServiceError! {
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        status: queue_read_status(self) ?? return Err(err)
-        queue_publish_status(status)
-        Ok(status)
-    }
-    pause: fn(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, true) }
-    resume: fn(self) -[DB, Time]> JobQueueStatus ServiceError! { queue_set_paused(self, false) }
-    wait: fn(self, timeout: Duration) -[DB, Time, Time.Wait]> JobQueueStatus ServiceError! {
-        millis: timeout.ns /% 1000000
-        if millis < 0 || millis > 31536000000 -> return Err(ServiceError.Policy("queue wait timeout is outside the supported range"))
-        deadline: queue_saturating_add(queue_now(), millis)
-        loop {
-            status: self.status() ?? return Err(err)
-            if status.depth > 0 || queue_now() >= deadline -> return Ok(status)
-            remaining: queue_saturating_sub(deadline, queue_now())
-            delay: if remaining < 1 -> 1 else if remaining > 25 -> 25 else -> remaining
-            #Unsafe("match the queue's existing raw wall-clock wait without advancing controlled scheduler time") {
-                core.jobs.__sleep_ms(delay)
-            }
-        }
-    }
-    prune: fn(self) -[DB, Time]> Int ServiceError! {
-        now: queue_now()
-        service.__authority_validate(self.endpoint) ?? return Err(err)
-        guard := self.data.guard_edit()
-        queue_begin(guard.value.driver) ?? return Err(err)
-        result: queue_prune_on_driver(guard.value.driver, self.authority, self.name, 604800000, now) ?? {
-            _: db.__driver_rollback(guard.value.driver)
-            return Err(err)
-        }
-        queue_finish(guard.value.driver, result)
-    }
 }
 queue_set_paused: fn(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus ServiceError! {
     now: queue_now()

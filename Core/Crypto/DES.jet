@@ -42,12 +42,12 @@ DES_BLOCK_SIZE: 8
 /// Triple-DES (mbedtls_des_context, mbedtls_des3_context).
 DESKey: struct {
     sk: [U32]
-}
 
-impl DESKey.Close {
-    close: fn(&&self) {
-        sk := self.sk.move()
-        loop i in 0..<sk.len() -> sk[i] = U32{0}
+    impl Close {
+        close: fn(&&self) {
+            sk := self.sk.move()
+            loop i in 0..<sk.len() -> sk[i] = U32{0}
+        }
     }
 }
 

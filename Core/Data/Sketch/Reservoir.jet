@@ -7,18 +7,7 @@ ReservoirSampler: struct {
             "ReservoirSampler(n={self.state.count})"
         }
     }
-}
 
-ReservoirState: struct {
-    capacity: Int
-    items: [String]
-    count: U64
-    rng: U64
-}
-
-new: fn(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
-
-impl ReservoirSampler {
     new: fn(capacity: Int) -> ReservoirSampler Never! {
         limit: if capacity < 1 -> 1 else -> capacity
         ReservoirSampler{state: ReservoirState{
@@ -48,6 +37,15 @@ impl ReservoirSampler {
         self.state.items.copy()
     }
 }
+
+ReservoirState: struct {
+    capacity: Int
+    items: [String]
+    count: U64
+    rng: U64
+}
+
+new: fn(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
 
 #Test("reservoir keeps filled slots and native minimum capacity") {
     sampler := new(3)

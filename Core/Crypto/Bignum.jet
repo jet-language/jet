@@ -705,12 +705,12 @@ core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [U64], a_limbs: 
 Mpi: struct {
     s: Int
     p: [U64]
-}
 
-impl Mpi.Close {
-    close: fn(&&self) {
-        p := self.p.move()
-        cipher.wipe_words(p)
+    impl Close {
+        close: fn(&&self) {
+            p := self.p.move()
+            cipher.wipe_words(p)
+        }
     }
 }
 
@@ -1859,14 +1859,14 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
 /// small bound every draw is rejected.
 FailingDraws: struct {
     left: Int
-}
 
-impl FailingDraws.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! {
-        if self.left == 0 -> return false
-        self.left -= 1
-        loop i in 0..<out.len() -> out[i] = U8{0xFF}
-        true
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            if self.left == 0 -> return false
+            self.left -= 1
+            loop i in 0..<out.len() -> out[i] = U8{0xFF}
+            true
+        }
     }
 }
 

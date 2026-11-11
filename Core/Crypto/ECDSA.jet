@@ -345,13 +345,13 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
 FailingAfter: struct {
     left: Int
     inner: drbg.HMACDrbg
-}
 
-impl FailingAfter.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! {
-        if self.left == 0 -> return false
-        self.left -= 1
-        self.inner.fill(out)
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            if self.left == 0 -> return false
+            self.left -= 1
+            self.inner.fill(out)
+        }
     }
 }
 

@@ -466,15 +466,13 @@ EventID: struct {
 // drawing when `bound` is not positive.
 HistoryRNG: struct {
     __state: Shared<__HistoryRngState>
+
+    next_u64: fn(self) -> Int Never! { __history_rng_next(self) }
+    below: fn(self, bound: Int) -> Int Never! { __history_rng_below(self, bound) }
 }
 
 __HistoryRngState: struct {
     word: U64
-}
-
-impl HistoryRNG {
-    next_u64: fn(self) -> Int Never! { __history_rng_next(self) }
-    below: fn(self, bound: Int) -> Int Never! { __history_rng_below(self, bound) }
 }
 
 // A generator seeded by the low 64 bits of a non-negative seed.

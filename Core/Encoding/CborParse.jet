@@ -99,9 +99,7 @@ Parser: struct {
     items: Int
     live: Int
     options: CBOROptions
-}
 
-impl Parser {
     charge: fn(&self, size: Int, offset: Int, path: String, what: String) CBORError! {
         if size > self.options.max_bytes - self.live -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         self.live += size

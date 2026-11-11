@@ -89,8 +89,7 @@ EncodingFormat: enum {
     XML
     CBOR
     ETF
-}
-impl EncodingFormat {
+
     as_str: fn(self) -> String Never! {
         if self == {
             .JSON -> "JSON"
@@ -104,7 +103,6 @@ impl EncodingFormat {
         }
     }
 }
-
 #Equatable
 EncodingErrorKind: enum {
     Syntax
@@ -163,8 +161,7 @@ EncodingError: struct {
     impl Debug {
         debug: fn(&&self) -> String { self.display_text() }
     }
-}
-impl EncodingError {
+
     new: fn(format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> EncodingError Never! {
         EncodingError{format: format, kind: kind, byte_offset: byte_offset, line: line, column: column, path: path, reason: reason, cause: None}
     }
@@ -176,7 +173,6 @@ impl EncodingError {
         encoding_error_text(self.format.as_str(), encoding_kind_name(self.kind), self.byte_offset, self.line, self.column, self.path, self.reason)
     }
 }
-
 #Equatable
 EncodingLimits: struct {
     buffer_bytes: Int
@@ -185,13 +181,11 @@ EncodingLimits: struct {
     max_total_bytes: Int?
     max_expansion_depth: Int
     max_expansion_bytes: Int
-}
-impl EncodingLimits {
+
     safe: fn() -> EncodingLimits Never! {
         EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
     }
 }
-
 /// Error returned by the root hexadecimal decoder.
 #Error
 HexError: struct {
@@ -202,8 +196,7 @@ HexError: struct {
     impl Debug {
         debug: fn(&&self) -> String { self.reason }
     }
-}
-impl HexError {
+
     new: fn(reason: String) -> HexError Never! { HexError{reason: reason} }
 }
 /// Convert one nibble to lowercase ASCII. Callers must pass `0..15`.
@@ -396,9 +389,7 @@ __DecodeSource: trait {
 // which decodes the value at the cursor as a tree. Each route returns what
 // this body returns for the same input. The generic parameters are not
 // spelled `T` (see json.__decode_typed).
-__Decoding: struct {}
-
-impl __Decoding {
+__Decoding: struct {
     read: fn<Target: Decode, Source: __DecodeSource>(reader: &Source) -> Target [FieldError]! {
         value: reader.capture().decode<Target>() ?? return Err(err)
         Ok(value)
@@ -471,9 +462,7 @@ __DecodeTree: struct {
     key: String
     open: [Dyn]
     at: [Int]
-}
 
-impl __DecodeTree {
     new: fn(tree: Dyn) -> __DecodeTree Never! {
         __DecodeTree{pending: tree.copy(), key: "", open: [Dyn]{}, at: [Int]{}}
     }
@@ -488,115 +477,115 @@ impl __DecodeTree {
         _ := self.open.pop()
         _ := self.at.pop()
     }
-}
 
-impl __DecodeTree.__DecodeSource {
-    begin_object: fn(&self) -> Bool Never! {
-        object: if self.pending == {
-            .Object(_) -> true
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
-        }
-        if object -> self.enter()
-        object
-    }
-
-    next_key: fn(&self) -> Bool Never! {
-        top: self.open.len() - 1
-        if top < 0 -> return false
-        position: self.at[top] + 1
-        found := false
-        key := ""
-        value := Dyn.Null
-        if self.open[top] == {
-            .Object(entries) -> {
-                if position < entries.len() {
-                    key = entries[position].key.copy()
-                    value = entries[position].value.copy()
-                    found = true
-                }
+    impl __DecodeSource {
+        begin_object: fn(&self) -> Bool Never! {
+            object: if self.pending == {
+                .Object(_) -> true
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
             }
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
+            if object -> self.enter()
+            object
         }
-        if !found {
-            self.leave()
-            return false
-        }
-        self.at[top] = position
-        self.key = key
-        self.pending = value
-        true
-    }
 
-    key_is: fn(self, name: String) -> Bool Never! { self.key == name }
-
-    key_text: fn(self) -> String Never! { self.key.copy() }
-
-    begin_array: fn(&self) -> Bool Never! {
-        array: if self.pending == {
-            .Array(_) -> true
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> false
-        }
-        if array -> self.enter()
-        array
-    }
-
-    next_item: fn(&self) -> Bool Never! {
-        top: self.open.len() - 1
-        if top < 0 -> return false
-        position: self.at[top] + 1
-        found := false
-        value := Dyn.Null
-        if self.open[top] == {
-            .Array(items) -> {
-                if position < items.len() {
-                    value = items[position].copy()
-                    found = true
+        next_key: fn(&self) -> Bool Never! {
+            top: self.open.len() - 1
+            if top < 0 -> return false
+            position: self.at[top] + 1
+            found := false
+            key := ""
+            value := Dyn.Null
+            if self.open[top] == {
+                .Object(entries) -> {
+                    if position < entries.len() {
+                        key = entries[position].key.copy()
+                        value = entries[position].value.copy()
+                        found = true
+                    }
                 }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
             }
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
+            if !found {
+                self.leave()
+                return false
+            }
+            self.at[top] = position
+            self.key = key
+            self.pending = value
+            true
         }
-        if !found {
-            self.leave()
-            return false
+
+        key_is: fn(self, name: String) -> Bool Never! { self.key == name }
+
+        key_text: fn(self) -> String Never! { self.key.copy() }
+
+        begin_array: fn(&self) -> Bool Never! {
+            array: if self.pending == {
+                .Array(_) -> true
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> false
+            }
+            if array -> self.enter()
+            array
         }
-        self.at[top] = position
-        self.pending = value
-        true
-    }
 
-    take_null: fn(&self) -> Bool Never! {
-        if self.pending == {
-            .Null -> true
-            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
+        next_item: fn(&self) -> Bool Never! {
+            top: self.open.len() - 1
+            if top < 0 -> return false
+            position: self.at[top] + 1
+            found := false
+            value := Dyn.Null
+            if self.open[top] == {
+                .Array(items) -> {
+                    if position < items.len() {
+                        value = items[position].copy()
+                        found = true
+                    }
+                }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {}
+            }
+            if !found {
+                self.leave()
+                return false
+            }
+            self.at[top] = position
+            self.pending = value
+            true
         }
-    }
 
-    skip: fn(&self) Never! { self.pending = Dyn.Null }
+        take_null: fn(&self) -> Bool Never! {
+            if self.pending == {
+                .Null -> true
+                .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
+            }
+        }
 
-    capture: fn(&self) -> Dyn Never! {
-        value: self.pending.copy()
-        self.pending = Dyn.Null
-        value
-    }
+        skip: fn(&self) Never! { self.pending = Dyn.Null }
 
-    read_int: fn(&self) -> Int [FieldError]! {
-        value: self.pending.decode<Int>() ?? return Err(err)
-        Ok(value)
-    }
+        capture: fn(&self) -> Dyn Never! {
+            value: self.pending.copy()
+            self.pending = Dyn.Null
+            value
+        }
 
-    read_bool: fn(&self) -> Bool [FieldError]! {
-        value: self.pending.decode<Bool>() ?? return Err(err)
-        Ok(value)
-    }
+        read_int: fn(&self) -> Int [FieldError]! {
+            value: self.pending.decode<Int>() ?? return Err(err)
+            Ok(value)
+        }
 
-    read_float: fn(&self) -> Float [FieldError]! {
-        value: self.pending.decode<Float>() ?? return Err(err)
-        Ok(value)
-    }
+        read_bool: fn(&self) -> Bool [FieldError]! {
+            value: self.pending.decode<Bool>() ?? return Err(err)
+            Ok(value)
+        }
 
-    read_string: fn(&self) -> String [FieldError]! {
-        value: self.pending.decode<String>() ?? return Err(err)
-        Ok(value)
+        read_float: fn(&self) -> Float [FieldError]! {
+            value: self.pending.decode<Float>() ?? return Err(err)
+            Ok(value)
+        }
+
+        read_string: fn(&self) -> String [FieldError]! {
+            value: self.pending.decode<String>() ?? return Err(err)
+            Ok(value)
+        }
     }
 }
 

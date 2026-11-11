@@ -38,69 +38,9 @@ DBValue: enum {
     Text(String)
     Bool(Bool)
     Blob([U8])
-}
 
-#Equatable
-__PoolLifecycle: enum {
-    Open
-    Draining
-    Drained
-}
+    impl Display { display: fn(self) -> String { render_value(self) } }
 
-// Receipts have always been opaque public values: the pool produces them;
-// source owns their exact counters, equality and textual projection.
-#Equatable
-DBPoolReceipt: struct {
-    lifecycle: __PoolLifecycle
-    max: Int
-    available: Int
-    leased: Int
-    opening: Int
-    ready: Bool
-    acquires: Int
-    releases: Int
-    timeouts: Int
-    open_failures: Int
-    unhealthy: Int
-    replacements: Int
-    replacement_failures: Int
-}
-impl DBPoolReceipt.Display { display: fn(self) -> String { pool_receipt_text(self) } }
-impl DBPoolReceipt.Debug { debug: fn(&&self) -> String { pool_receipt_text(self) } }
-
-pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
-    lifecycle: if receipt.lifecycle == {
-        .Open -> "open"
-        .Draining -> "draining"
-        .Drained -> "drained"
-    }
-    ready: if receipt.ready -> 1 else -> 0
-    "db.pool lifecycle={lifecycle} max={receipt.max} available={receipt.available} leased={receipt.leased} opening={receipt.opening} ready={ready} acquires={receipt.acquires} releases={receipt.releases} timeouts={receipt.timeouts} open_failures={receipt.open_failures} unhealthy={receipt.unhealthy} replacements={receipt.replacements} replacement_failures={receipt.replacement_failures}"
-}
-
-#Test("pool receipt text keeps every counter and lifecycle spelling") {
-    receipt := DBPoolReceipt{
-        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
-        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
-        unhealthy: 7, replacements: 8, replacement_failures: 9,
-    }
-    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
-    receipt.lifecycle = .Draining
-    receipt.ready = false
-    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=draining max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
-    receipt.lifecycle = .Drained
-    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
-}
-
-#[Error, Equatable]
-DBError: struct { message: String }
-
-impl DBError.Display { display: fn(self) -> String { self.message.copy() } }
-impl DBError.Debug { debug: fn(&&self) -> String { self.message } }
-impl DBError -> Err { Err(self.message) }
-impl DBValue.Display { display: fn(self) -> String { render_value(self) } }
-
-impl DBValue {
     is_null: fn(self) -> Bool Never! {
         if self == .Null -> return true
         false
@@ -137,6 +77,69 @@ impl DBValue {
     }
 }
 
+#Equatable
+__PoolLifecycle: enum {
+    Open
+    Draining
+    Drained
+}
+
+// Receipts have always been opaque public values: the pool produces them;
+// source owns their exact counters, equality and textual projection.
+#Equatable
+DBPoolReceipt: struct {
+    lifecycle: __PoolLifecycle
+    max: Int
+    available: Int
+    leased: Int
+    opening: Int
+    ready: Bool
+    acquires: Int
+    releases: Int
+    timeouts: Int
+    open_failures: Int
+    unhealthy: Int
+    replacements: Int
+    replacement_failures: Int
+
+    impl Display { display: fn(self) -> String { pool_receipt_text(self) } }
+
+    impl Debug { debug: fn(&&self) -> String { pool_receipt_text(self) } }
+}
+pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
+    lifecycle: if receipt.lifecycle == {
+        .Open -> "open"
+        .Draining -> "draining"
+        .Drained -> "drained"
+    }
+    ready: if receipt.ready -> 1 else -> 0
+    "db.pool lifecycle={lifecycle} max={receipt.max} available={receipt.available} leased={receipt.leased} opening={receipt.opening} ready={ready} acquires={receipt.acquires} releases={receipt.releases} timeouts={receipt.timeouts} open_failures={receipt.open_failures} unhealthy={receipt.unhealthy} replacements={receipt.replacements} replacement_failures={receipt.replacement_failures}"
+}
+
+#Test("pool receipt text keeps every counter and lifecycle spelling") {
+    receipt := DBPoolReceipt{
+        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
+        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
+        unhealthy: 7, replacements: 8, replacement_failures: 9,
+    }
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Draining
+    receipt.ready = false
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=draining max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Drained
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+}
+
+#[Error, Equatable]
+DBError: struct {
+    message: String
+
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
+
+impl DBError -> Err { Err(self.message) }
 row_value: fn(row: [String: DBValue], column: String) -> DBValue DBError! {
     value: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})
     Ok(value)
@@ -256,37 +259,36 @@ __db_closed: fn() -> DBError Never! { __db_error("database connection is closed"
 SQL: struct {
     text: String
     values: [DBValue]
-}
-impl SQL {
+
     raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
     template: fn(self) -> String Never! { self.text.copy() }
     params: fn(self) -> [DBValue] Never! { self.values.copy() }
-}
-impl SQL.Display { display: fn(self) -> String { self.text.copy() } }
 
-impl SQL.CheckedText {
-    Error: Never
-    Hole: DBValue
+    impl Display { display: fn(self) -> String { self.text.copy() } }
 
-    // Every SQL text is accepted; its holes are what keeps a query safe.
-    check: fn(_text: String) Never! -[]> { return Ok() }
+    impl CheckedText {
+        Error: Never
+        Hole: DBValue
 
-    // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
-    // variant; anything else binds its display text.
-    encode_hole: fn<T: Printable>(value: T) -[]> DBValue {
-        if T == {
-            DBValue -> value.copy()
-            Int -> DBValue.Int(value)
-            Float -> DBValue.Float(value)
-            Bool -> DBValue.Bool(value)
-            [U8] -> DBValue.Blob(value.copy())
-            else -> DBValue.Text("{value}")
+        // Every SQL text is accepted; its holes are what keeps a query safe.
+        check: fn(_text: String) Never! -[]> { return Ok() }
+
+        // A DBValue binds as-is; Int, Float, Bool and byte lists bind as their own
+        // variant; anything else binds its display text.
+        encode_hole: fn<T: Printable>(value: T) -[]> DBValue {
+            if T == {
+                DBValue -> value.copy()
+                Int -> DBValue.Int(value)
+                Float -> DBValue.Float(value)
+                Bool -> DBValue.Bool(value)
+                [U8] -> DBValue.Blob(value.copy())
+                else -> DBValue.Text("{value}")
+            }
         }
+
+        build: fn(parts: [String], holes: [DBValue]) -[]> SQL { __sql_literal(parts, holes) }
     }
-
-    build: fn(parts: [String], holes: [DBValue]) -[]> SQL { __sql_literal(parts, holes) }
 }
-
 __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
     if literals.len() != values.len() + 1 -> panic("typed SQL literal pieces do not match its holes")
     text := literals[0].copy()
@@ -702,11 +704,61 @@ __DBState: struct {
     written: [String]
 }
 
-DBConnection: struct { state: Shared<__DBState> }
+DBConnection: struct {
+    state: Shared<__DBState>
+
+    with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
+        DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
+    }
+    begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
+    commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
+    rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
+    close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
+
+    // One line: where the database lives and whether it is still open.
+    impl Display {
+        display: fn(self) -> String {
+            guard: self.state.guard_edit()
+            status: if __driver_closed(guard.value.driver) -> "closed" else -> "open"
+            "DBConnection({guard.value.path}, {status})"
+        }
+    }
+}
 DBScope: struct {
     state: Shared<__DBState>
     policy: RowPolicy
     user: String
+
+    // A live binding over one policy-checked SELECT. `core.web.state` reads
+    // it; each re-run applies this scope's policy again, and a write to the
+    // table it reads (or a rollback of one) re-runs it on the next read. The
+    // user, the policy-applied SQL and its values identify the binding.
+    live: fn(self, sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError! {
+        scoped: __policy_apply(sql, self.policy, self.user, false) ?? return Err(err)
+        tokens: __sql_tokens(scoped.text.bytes())
+        if tokens.len() == 0 || tokens[0].word != "select" -> return Err(__db_error("a live query must be one SELECT"))
+        key := [String]{web.__live_arg<String>(self.user), web.__live_arg<String>(scoped.text)}
+        loop value in scoped.values -> key.push(web.__live_arg<DBValue>(value))
+        scope: self.copy()
+        query: sql.copy()
+        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
+    }
+    close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
+
+    // A policy scope is the typed-SQL driver a generic `<T: Driver>` takes.
+    impl Driver {
+        query: fn(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { __scope_query(self, sql, false) }
+        query_one: fn(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
+            rows := __scope_query(self, sql, false) ?? return Err(err)
+            if rows.len() == 0 -> return Ok(None)
+            first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
+            Ok(Val(first))
+        }
+        execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { __scope_execute(self, sql, false) }
+        begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
+        commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
+        rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
+    }
 }
 
 __db_open: fn(path: String, failure: String) -> DBConnection Never! {
@@ -743,25 +795,6 @@ __db_rollback: fn(state: Shared<__DBState>) -> Bool Never! {
 __db_shutdown: fn(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
     __driver_shutdown(guard.value.driver)
-}
-
-impl DBConnection {
-    with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
-        DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
-    }
-    begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
-    commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
-    rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
-    close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
-}
-
-// One line: where the database lives and whether it is still open.
-impl DBConnection.Display {
-    display: fn(self) -> String {
-        guard: self.state.guard_edit()
-        status: if __driver_closed(guard.value.driver) -> "closed" else -> "open"
-        "DBConnection({guard.value.path}, {status})"
-    }
 }
 
 // A write marks every live binding over its table for a re-run.
@@ -807,39 +840,6 @@ __sql_table: fn(sql: SQL) -> String? Never! {
     target: __sql_target_index(tokens, kind)
     if target < 0 -> return None
     Val(tokens[target].word.copy())
-}
-
-impl DBScope {
-    // A live binding over one policy-checked SELECT. `core.web.state` reads
-    // it; each re-run applies this scope's policy again, and a write to the
-    // table it reads (or a rollback of one) re-runs it on the next read. The
-    // user, the policy-applied SQL and its values identify the binding.
-    live: fn(self, sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError! {
-        scoped: __policy_apply(sql, self.policy, self.user, false) ?? return Err(err)
-        tokens: __sql_tokens(scoped.text.bytes())
-        if tokens.len() == 0 || tokens[0].word != "select" -> return Err(__db_error("a live query must be one SELECT"))
-        key := [String]{web.__live_arg<String>(self.user), web.__live_arg<String>(scoped.text)}
-        loop value in scoped.values -> key.push(web.__live_arg<DBValue>(value))
-        scope: self.copy()
-        query: sql.copy()
-        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
-    }
-    close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
-}
-
-// A policy scope is the typed-SQL driver a generic `<T: Driver>` takes.
-impl DBScope.Driver {
-    query: fn(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { __scope_query(self, sql, false) }
-    query_one: fn(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
-        rows := __scope_query(self, sql, false) ?? return Err(err)
-        if rows.len() == 0 -> return Ok(None)
-        first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
-        Ok(Val(first))
-    }
-    execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { __scope_execute(self, sql, false) }
-    begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
-    commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
-    rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
 }
 
 // ---- transactions and migrations -----------------------------------------
@@ -1144,38 +1144,79 @@ __PoolState: struct {
     replacement_failures: Int
 }
 
-DBPool: struct { state: Shared<__PoolState> }
+DBPool: struct {
+    state: Shared<__PoolState>
+
+    acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
+        deadline_ns: __pool_deadline(deadline)
+        waiter := __PoolWaiter{pool: self.state.copy(), ticket: -1}
+        defer close(waiter)
+        loop {
+            claim := __pool_claim(self.state, waiter.ticket, deadline_ns)
+            if claim.failure == .Val(failure) -> return Err(__db_error(failure.message))
+            if claim.drivers.len() > 0 {
+                driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
+                return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}})
+            }
+            waiter.ticket = claim.ticket
+            if !claim.retry -> time.sleep(1ms)
+        }
+    }
+    ready: fn(self) -[DB, Time.Wait]> Bool DBError! {
+        state: __pool_ready_state(self.state)
+        if state == 0 -> return Ok(false)
+        if state == 1 -> return Ok(true)
+        lease: self.acquire() ?? return Err(err)
+        lease.close() ?? return Err(err)
+        Ok(true)
+    }
+    drain: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBPoolReceipt DBError! {
+        deadline_ns: __pool_deadline(deadline)
+        loop {
+            if __pool_drain_step(self.state, deadline_ns) == {
+                .Ok(step) -> { if step == .Val(receipt) -> return Ok(receipt) }
+                .Err(failure) -> return Err(failure)
+            }
+            time.sleep(1ms)
+        }
+    }
+    receipt: fn(self) -[DB]> DBPoolReceipt Never! {
+        guard: self.state.guard_read()
+        __pool_receipt(guard.value)
+    }
+}
 
 __LeaseState: struct {
     pool: Shared<__PoolState>
     drivers: [__Driver]
-}
-impl __LeaseState.Close {
-    close: fn(&&self) {
-        drivers := self.drivers.move()
-        loop drivers.len() > 0 {
-            driver: drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
-            __pool_release(self.pool, driver)
+
+    impl Close {
+        close: fn(&&self) {
+            drivers := self.drivers.move()
+            loop drivers.len() > 0 {
+                driver: drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
+                __pool_release(self.pool, driver)
+            }
         }
     }
 }
-
 // A queued acquire's place in line. Closing it leaves the queue, so an acquire
 // that ends early (its task cancelled at the wait) never blocks later waiters.
 __PoolWaiter: struct {
     pool: Shared<__PoolState>
     ticket: Int
-}
-impl __PoolWaiter.Close {
-    close: fn(&&self) {
-        if self.ticket < 0 -> return
-        guard := self.pool.guard_edit()
-        __pool_remove_waiter(guard.value, self.ticket)
+
+    impl Close {
+        close: fn(&&self) {
+            if self.ticket < 0 -> return
+            guard := self.pool.guard_edit()
+            __pool_remove_waiter(guard.value, self.ticket)
+        }
     }
 }
+DBLease: struct {
+    state: Shared<__LeaseState>
 
-DBLease: struct { state: Shared<__LeaseState> }
-impl DBLease {
     close: fn(self) DBError! -[DB]> {
         guard := self.state.guard_edit()
         if guard.value.drivers.len() == 0 -> return Ok()
@@ -1183,9 +1224,9 @@ impl DBLease {
         __pool_release(guard.value.pool, driver)
         Ok()
     }
-}
-impl DBLease.Display { display: fn(self) -> String { "db.lease" } }
 
+    impl Display { display: fn(self) -> String { "db.lease" } }
+}
 __pool_deadline: fn(deadline: Duration) -> Int Never! {
     now: core.time.__clock_mono_ns()
     if deadline.ns > 9223372036854775807 - now -> return 9223372036854775807
@@ -1367,46 +1408,6 @@ pool: fn(url: String, *, max: Int) -[DB]> DBPool DBError! {
     }})
 }
 
-impl DBPool {
-    acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
-        deadline_ns: __pool_deadline(deadline)
-        waiter := __PoolWaiter{pool: self.state.copy(), ticket: -1}
-        defer close(waiter)
-        loop {
-            claim := __pool_claim(self.state, waiter.ticket, deadline_ns)
-            if claim.failure == .Val(failure) -> return Err(__db_error(failure.message))
-            if claim.drivers.len() > 0 {
-                driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
-                return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}})
-            }
-            waiter.ticket = claim.ticket
-            if !claim.retry -> time.sleep(1ms)
-        }
-    }
-    ready: fn(self) -[DB, Time.Wait]> Bool DBError! {
-        state: __pool_ready_state(self.state)
-        if state == 0 -> return Ok(false)
-        if state == 1 -> return Ok(true)
-        lease: self.acquire() ?? return Err(err)
-        lease.close() ?? return Err(err)
-        Ok(true)
-    }
-    drain: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBPoolReceipt DBError! {
-        deadline_ns: __pool_deadline(deadline)
-        loop {
-            if __pool_drain_step(self.state, deadline_ns) == {
-                .Ok(step) -> { if step == .Val(receipt) -> return Ok(receipt) }
-                .Err(failure) -> return Err(failure)
-            }
-            time.sleep(1ms)
-        }
-    }
-    receipt: fn(self) -[DB]> DBPoolReceipt Never! {
-        guard: self.state.guard_read()
-        __pool_receipt(guard.value)
-    }
-}
-
 // ---- typed rows ----------------------------------------------------------
 
 __dyn_value: fn(value: DBValue) -> Dyn Never! {
@@ -1454,12 +1455,17 @@ CachedStatement: struct { stmt: Int, sql: String }
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
 // The connection is the Jet engine's; `live` is false once it is shut down.
 // The fields are `priv`: only core.db opens, drives and closes a connection.
-__Driver: struct { priv database: conn.Conn, priv cache: [CachedStatement], priv live: Bool }
-impl __Driver.Close {
-    close: fn(&&self) {
-        if !self.live -> return
-        held := __Driver{database: self.database.move(), cache: self.cache.move(), live: true}
-        _: __driver_shutdown(held)
+__Driver: struct {
+    priv database: conn.Conn
+    priv cache: [CachedStatement]
+    priv live: Bool
+
+    impl Close {
+        close: fn(&&self) {
+            if !self.live -> return
+            held := __Driver{database: self.database.move(), cache: self.cache.move(), live: true}
+            _: __driver_shutdown(held)
+        }
     }
 }
 __driver_closed: fn(driver: __Driver) -> Bool Never! { !driver.live }

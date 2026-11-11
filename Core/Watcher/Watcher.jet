@@ -76,6 +76,10 @@ WatchDomain: enum {
     File
     Process
     Port
+
+    impl Equatable {
+        equal: fn(self, rhs: WatchDomain) -> Bool { watch_domain_tag(self) == watch_domain_tag(rhs) }
+    }
 }
 
 WatchEventKind: enum {
@@ -96,6 +100,10 @@ WatchKind: enum {
     Error
     Exited
     Ready
+
+    impl Equatable {
+        equal: fn(self, rhs: WatchKind) -> Bool { watch_kind_tag(self) == watch_kind_tag(rhs) }
+    }
 }
 
 watch_domain_tag: fn(value: WatchDomain) -> Int Never! {
@@ -132,13 +140,6 @@ watch_kind_name: fn(value: WatchKind) -> String Never! {
         .Ready -> "Ready"
     }
 }
-impl WatchDomain.Equatable {
-    equal: fn(self, rhs: WatchDomain) -> Bool { watch_domain_tag(self) == watch_domain_tag(rhs) }
-}
-impl WatchKind.Equatable {
-    equal: fn(self, rhs: WatchKind) -> Bool { watch_kind_tag(self) == watch_kind_tag(rhs) }
-}
-
 WatchEvent: struct {
     domain: WatchDomain
     kind: WatchKind
@@ -146,23 +147,21 @@ WatchEvent: struct {
     detail: String
     pid: Int
     port: Int
-}
 
-impl WatchEvent {
     __show: fn(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"
     }
     __debug: fn(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path:Debug}, detail: {self.detail:Debug}, pid: {self.pid}, port: {self.port} }}"
     }
-}
-impl WatchEvent.Equatable {
-    equal: fn(self, rhs: WatchEvent) -> Bool {
-        self.domain == rhs.domain && self.kind == rhs.kind && self.path == rhs.path &&
-        self.detail == rhs.detail && self.pid == rhs.pid && self.port == rhs.port
+
+    impl Equatable {
+        equal: fn(self, rhs: WatchEvent) -> Bool {
+            self.domain == rhs.domain && self.kind == rhs.kind && self.path == rhs.path &&
+            self.detail == rhs.detail && self.pid == rhs.pid && self.port == rhs.port
+        }
     }
 }
-
 watch_domain_of: fn(target: Int) -> WatchDomain Never! {
     if {
         target == 1 -> WatchDomain.Process
