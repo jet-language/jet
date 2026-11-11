@@ -53,4 +53,12 @@ time: module {
 
     // The zone data embedded for `path`, when the build embeds it.
     #Import(c) embedded_zone_bytes: fn(path: String) -> [U8]? = "jet_time_raw_embedded_zone_bytes"
+
+    // A workflow sleep of `nanos` nanoseconds that ends in a code instead of
+    // unwinding: 0 slept, 1 cancelled, 2 deadline (HostTime.jet).
+    #Import(c) priv workflow_sleep_wait: fn(nanos: Int) -[Time.Wait]> Int = "jet_services_workflow_sleep_wait"
+
+    // The wall clock read for a service's own record stamps, which its
+    // owner already holds the Time authority for (core.service).
+    #Import(c) priv service_wall_sample: fn() -> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
 }
