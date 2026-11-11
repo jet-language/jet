@@ -162,10 +162,14 @@ JetFmtMark: struct {
 }
 
 // Rust `Result<String, Vec<Diagnostic>>` from `format_source_with_options`.
+// `structure_change` says why a formatted text was refused because it would
+// not mean what the source means (Structure.jet); that is a formatter defect,
+// never a problem in the source, so it carries no diagnostic.
 JetFormatResult: struct {
     ok: Bool
     text: String
     diagnostics: [Diagnostic]
+    structure_change: String?{None}
 }
 
 // ---- Prec ----
@@ -1718,16 +1722,28 @@ jfmt_inline_rules: fn(applications: [AppliedRuleApplication]) -> [AppliedRuleApp
 // construct follows.
 jfmt_fmt_rules_before: fn(f: &JetFmt, site: RuleSite, start: Int) {
     loop application in f.inline_rules {
-        if !jfmt_rule_at(application, site) -> next
-        if application.target == .Val(target) {
-            anchor: if site == RuleSite.Parameter || site == RuleSite.Method -> jfmt_trim_start_bytes(f.src_bytes, target.end) else -> target.start
-            if anchor == start {
-                jfmt_write(f, "#")
-                jfmt_fmt_marker(f, application.marker)
-                jfmt_write(f, " ")
-            }
-        }
+        if !jfmt_rule_anchored(f, application, site, start) -> next
+        jfmt_write(f, "#")
+        jfmt_fmt_marker(f, application.marker)
+        jfmt_write(f, " ")
     }
+}
+
+// Whether `application` is a `site` rule row of the item that starts at
+// `start`.
+jfmt_rule_anchored: fn(f: JetFmt, application: AppliedRuleApplication, site: RuleSite, start: Int) -> Bool Never! {
+    if !jfmt_rule_at(application, site) -> return false
+    target: application.target ?? return false
+    anchor: if site == RuleSite.Parameter || site == RuleSite.Method -> jfmt_trim_start_bytes(f.src_bytes, target.end) else -> target.start
+    anchor == start
+}
+
+// Whether any inline rule row belongs to the `site` item at `start`.
+jfmt_rules_anchored_at: fn(f: JetFmt, site: RuleSite, start: Int) -> Bool Never! {
+    loop application in f.inline_rules {
+        if jfmt_rule_anchored(f, application, site, start) -> return true
+    }
+    false
 }
 
 jfmt_rule_at: fn(application: AppliedRuleApplication, site: RuleSite) -> Bool Never! {
@@ -1769,6 +1785,18 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     jfmt_format_program_with(f, prog)
 }
 
+// The page argument of a file's `#HTML(…)`, from its escaped text:
+// `Path{"…"}`, or `"…"` where the source wrote a plain string. That spelling
+// is the E0930 error `jet check` reports, so the formatter keeps it rather
+// than change the program.
+jfmt_html_page: fn(prog: Program, escaped: String) -> String Never! {
+    loop application in prog.rule_facts {
+        if application.target != None || application.marker.name != MARKER_HTML || application.marker.args.len() == 0 -> next
+        if application.marker.args[0] == .Expr(value) && value == .Str(_, _, _) -> return "\"{escaped}\""
+    }
+    "Path{{\"{escaped}\"}}"
+}
+
 jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
     jfmt_fmt_launch_line(f)
     first := true
@@ -1796,7 +1824,7 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
         if prog.no_prelude -> rules.push("NoPrelude")
         if web_default -> rules.push("Target(Web)")
         if prog.web_target_ceiling == .Val(bucket) -> rules.push("Target({jfmt_web_bucket_name(bucket)})")
-        if prog.html_path == .Val(html_path) -> rules.push("HTML(Path{{\"{jfmt_escape_str_lit(html_path)}\"}})")
+        if prog.html_path == .Val(html_path) -> rules.push("HTML({jfmt_html_page(prog, jfmt_escape_str_lit(html_path))})")
         jfmt_write(f, "#[{rules.join(", ")}]")
         jfmt_newline(f)
         first = false
@@ -1844,13 +1872,14 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
             jfmt_newline(f)
         }
     }
-    // `#HTML(Path{"path.html"})`.
+    // `#HTML(Path{"path.html"})`, or the plain string where the source wrote
+    // one (jfmt_html_page).
     if prog.html_path == .Val(html_path) {
         if !grouped_file_rules && !has_ordered_file_rules {
             if !first -> jfmt_blank_line_between_items(f)
             first = false
             escaped: html_path.replace("\\", "\\\\").replace("\"", "\\\"")
-            jfmt_write(f, "#HTML(Path{{\"{escaped}\"}})")
+            jfmt_write(f, "#HTML({jfmt_html_page(prog, escaped)})")
             jfmt_newline(f)
         }
     } else if !grouped_file_rules && !has_ordered_file_rules {
@@ -2007,7 +2036,18 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
     prog := parsed.program
     // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
-    JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
+    text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify)
+    // Without simplify, a format changes layout only: the text must parse to
+    // the same program. A source the parser had to recover is repaired on
+    // purpose, so only a clean parse is compared.
+    if !simplify_requested && text != src && jfmt_structure_clean(parsed.diagnostics) {
+        source_program: if library -> parse_generated_source(source).program else -> parse_source(source).program
+        reparsed: if library -> parse_generated_source(text.bytes()) else -> parse_source(text.bytes())
+        if jfmt_structure_change(source_program, reparsed.program, reparsed.diagnostics) == .Val(change) {
+            return JetFormatResult{ok: false, text: "", diagnostics: [Diagnostic]{}, structure_change: Val(change)}
+        }
+    }
+    JetFormatResult{ok: true, text: text, diagnostics: [Diagnostic]{}}
 }
 
 // The source spans of author grouping parentheses that the printed

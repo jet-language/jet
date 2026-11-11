@@ -1,0 +1,111 @@
+// A format keeps meaning: jfmt_format_source_in compares the program of the
+// source and of its formatted text without positions (Structure.jet).
+use {
+    jet_parser.[jet_format_source, jfmt_structure, jfmt_structure_change, parse_source]
+    jet_foundation.[Diagnostic]
+}
+
+STRUCTURE_WRITTEN: "pick: fn(n: Int) -> String {{\n  if {{ n == 1 -> \"one\" else -> \"many\" }}\n}}\n"
+STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }}\n}}\n"
+
+#Test("positions and node ids are not structure") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    laid_out: parse_source(STRUCTURE_LAID_OUT.bytes()).program
+    assert_eq(jfmt_structure(written), jfmt_structure(laid_out))
+    assert_eq(jfmt_structure_change(written, laid_out, [Diagnostic]{}) ?? "same", "same")
+    formatted: jet_format_source(STRUCTURE_WRITTEN, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+}
+
+#Test("a changed program names the innermost node that differs") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    changed: parse_source(STRUCTURE_WRITTEN.replace("n == 1", "n == 2").bytes()).program
+    change: jfmt_structure_change(written, changed, [Diagnostic]{}) ?? ""
+    assert(change.starts_with("the first difference is in `Int`: `"))
+    assert(change.contains("1"))
+    assert(change.contains("` became `2"))
+}
+
+#Test("a formatted text that does not parse is a structure change") {
+    written: parse_source(STRUCTURE_WRITTEN.bytes()).program
+    broken: parse_source("pick: fn(n: Int) -> String {{\n".bytes())
+    assert(broken.diagnostics.len() > 0)
+    change: jfmt_structure_change(written, broken.program, broken.diagnostics) ?? ""
+    assert(change.starts_with("the formatted text does not parse ("))
+}
+
+#Test("a debug trace's offsets and an else arm's layout are not structure") {
+    written: parse_source("pick: fn(c: Color) -> Int {{\n  debug(c)\n  if c == {{ .Red -> 1 else -> 2 }}\n}}\n".bytes()).program
+    laid_out: parse_source("\npick: fn(c: Color) -> Int {{\n    debug(c)\n    if c == {{\n        .Red -> 1\n        else -> 2\n    }}\n}}\n".bytes()).program
+    assert(written.debug_sites.len() == 1)
+    assert_eq(jfmt_structure(written), jfmt_structure(laid_out))
+}
+
+#Test("a loop's arrow body and a variant pattern's added dot are not structure") {
+    arrow: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs -> print(x)\n    if first == {{\n        Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
+    braced: parse_source("walk: fn(xs: [Shape], first: Shape) -> Int {{\n    loop x in xs {{\n        print(x)\n    }}\n    if first == {{\n        .Circle(r) -> r\n        else -> 0\n    }}\n}}\n".bytes()).program
+    assert_eq(jfmt_structure(arrow), jfmt_structure(braced))
+}
+
+#Test("the dot of None, Val and Ok stays as written") {
+    source: "pick: fn(x: Int?) -> Int {{\n    if x == {{\n        None -> 0\n        Val(n) -> n\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("        None -> 0\n"))
+    assert(formatted.text.contains("        Val(n) -> n\n"))
+    dotted: parse_source(source.replace("None ->", ".None ->").bytes()).program
+    assert(jfmt_structure(dotted) != jfmt_structure(parse_source(source.bytes()).program))
+}
+
+#Test("a bracketed single import keeps its brackets") {
+    source: "use geo.[Point]\n\nrun: fn() {{\n    print(Point)\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("use geo.[Point]\n"))
+    assert_eq(formatted.structure_change ?? "none", "none")
+}
+
+// A `return` right after an arm's `->` makes the parser read the table as
+// statements; braced, the block's last table would read as a value.
+#Test("a statement table keeps a long return arm on its arrow line") {
+    long_call: "measure_every_shape_in_the_drawing(shape, drawing, scale, offset_x, offset_y)"
+    source: "area: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(r) -> return {long_call}\n        .Square(side) -> return side * side\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains(".Circle(r) -> return {long_call}\n"))
+}
+
+#Test("an else-if arm after a braced arm keeps its braces") {
+    source: "walk: fn(xs: [Int]) {{\n    loop x in xs {{\n        if x > 2 {{\n            print(x)\n            next\n        }} else if x > 1 {{\n            next\n        }} else if x > 0 {{\n            print(0)\n        }}\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("}} else if x > 1 {{ next }} else if x > 0 {{ print(0) }}\n"))
+}
+
+#Test("grouping parentheses are not structure, quoted text is") {
+    written: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    (a) * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    bare: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    assert_eq(jfmt_structure(written), jfmt_structure(bare))
+    regrouped: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * b + 1\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
+    assert(jfmt_structure(written) != jfmt_structure(regrouped))
+    quoted: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"a\" }}\n".bytes()).program
+    assert(jfmt_structure(bare) != jfmt_structure(quoted))
+}
+
+#Test("a plain string page of HTML keeps its spelling") {
+    formatted: jet_format_source("#[Target(Web), HTML(\"dashboard.html\")]\nrun: fn() {{\n    print(\"hi\")\n}}\n", false)
+    assert(formatted.ok)
+    assert(formatted.text.starts_with("#[Target(Web), HTML(\"dashboard.html\")]\n"))
+    typed: jet_format_source("#[Target(Web), HTML(Path{{\"dashboard.html\"}})]\nrun: fn() {{\n    print(\"hi\")\n}}\n", false)
+    assert(typed.text.starts_with("#[Target(Web), HTML(Path{{\"dashboard.html\"}})]\n"))
+}
+
+#Test("a module binding keeps its markers") {
+    formatted: jet_format_source("ring: module<T>(capacity: Int, label: String) {{\n#Meta(category: label)\nSIZE: comptime {{ capacity }}\n}}\nrun: fn() {{}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    #Meta(category: label) SIZE: comptime {{ capacity }}\n"))
+}

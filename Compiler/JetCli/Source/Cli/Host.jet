@@ -2873,11 +2873,18 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
         if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
     }
     result: jet_cli_fmt_ordinary(materialized, simplify, jet_cli_fmt_is_library_source(origin))
+    if result.structure_change == .Val(change) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_fmt_structure_report(origin, change))}
     if result.ok -> return jet_cli_fmt_formatted(result.text)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
     if copy_marks_inserted -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_diagnostic_from_row("E0122", [ManifestEntry]{ManifestEntry{key: "file", value: origin}}, None)})
     jet_cli_fmt_rejected(result.diagnostics)
+}
+
+// The formatter would have changed what `origin` means: a formatter defect,
+// reported as one, with the file left as written.
+jet_cli_fmt_structure_report: fn(origin: String, change: String) -> String Never! {
+    "{jet_cli_ice("`jet fmt` would change the syntax tree of `{origin}`, so the file stays as written; {change}\n  --> {origin}").stderr}\n"
 }
 
 // The ordinary formatter with one leading inline `package: { … }` carrier kept

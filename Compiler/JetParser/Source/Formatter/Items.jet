@@ -28,7 +28,10 @@ use jet_foundation.[
     Item,
     ItemTemplateLoop,
     MARKER_FLATTEN,
+    MARKER_INLINE,
+    MARKER_META,
     MARKER_SKIP,
+    MARKER_STATIC,
     MARKER_UNTAGGED,
     Marker,
     MarkerCallArg,
@@ -2496,6 +2499,17 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
     }
     // `#Name $limit: 1`: a module binding's markers are its Declaration-site rows.
     jfmt_fmt_rules_before(f, RuleSite.Declaration, c.span.start)
+    // A binding in a module body has no rule rows; its markers print from
+    // the binding itself (`#Meta(…) NAME: v`). `#Static` and `#Inline` print
+    // from `attrs` below, and a `#Meta` row from `meta` above.
+    if !jfmt_rules_anchored_at(f, RuleSite.Declaration, c.span.start) {
+        loop marker in c.markers {
+            if marker.name == MARKER_STATIC || marker.name == MARKER_INLINE || (c.meta != None && marker.name == MARKER_META) -> next
+            jfmt_write(f, "#")
+            jfmt_fmt_marker(f, marker)
+            jfmt_write(f, " ")
+        }
+    }
     // `#Persist` on a bare binding (not on `comptime`).
     // Preserve `:` vs `:=`.
     if c.is_persist {
@@ -2660,11 +2674,15 @@ jfmt_fmt_import_row: fn(f: &JetFmt, imp: ImportDecl) {
         }
         .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
             if items.len() == 0 -> return
-            // The dotless single-item spelling (`use math.clamp`) only means
-            // the same thing when nothing else in the path carries a dot or an
-            // alias: `use core.math.[abs]` would re-read as a module import.
+            // The dotless single-item spelling (`use math.clamp`) stays only
+            // where it was written: its row takes the item as its own alias
+            // (the casing check reads it as a module alias, so `use m.Point`
+            // is E0357), while `use m.[Point]` takes the module's. And it
+            // only means the same thing when nothing else in the path carries
+            // a dot or an alias: `use core.math.[abs]` would re-read as a
+            // module import.
             first: items[0]
-            collapses: items.len() == 1 && first.alias == None && !first.original.contains(".") && !module_alias.contains(".")
+            collapses: items.len() == 1 && first.alias == None && !first.original.contains(".") && !module_alias.contains(".") && imp.alias != module_alias
             if collapses {
                 jfmt_write(f, "{module_alias}.{first.original}")
                 return

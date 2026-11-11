@@ -1,0 +1,266 @@
+// A format keeps meaning: the formatted text parses to the same program as
+// the source, compared without positions. jfmt_format_source_in refuses a
+// result whose program differs, so no formatter defect can rewrite what a
+// file means; the report names the first node that differs.
+use {
+    jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, Program]
+}
+
+// The structure of `program`: its whole debug form, with what records a
+// position or a layout of the text blanked: every `Span`, every node `id`,
+// the offset that ends a label the parser names (`__jet_value_loop_62`), the
+// braced bodies the parser lists by position (`block_spans`, which grows
+// when the formatter braces an arm body), the `else` arms sema's fix edits
+// rewrite in place (`else_arms`: spans plus the table's written layout), and
+// the offsets of a debug trace site (`name_start`, `close_end`; its `text`
+// stays, because the trace prints it). Three spellings the formatter makes
+// canonical are blanked too, because nothing reads them for meaning: whether
+// a loop body was written after `->` or in braces (`arrow_body`, which sema
+// only saves and restores), the leading dot of a variant pattern
+// (`leading_dot`) other than `None`, `Val` and `Ok` (jfmt_pattern_dot_means),
+// and grouping parentheses (a `Paren` node stands for its value: the tree
+// already holds the grouping, and sema and lowering look through it).
+// Quoted text is compared as written.
+jfmt_structure: fn(program: Program) -> String Never! {
+    shown: "{program:Debug}"
+    bytes: shown.bytes()
+    span_head: "Span {{ start: ".bytes()
+    number_heads: [[U8]]{"id: ".bytes(), "name_start: ".bytes(), "close_end: ".bytes()}
+    list_heads: [[U8]]{"block_spans: [".bytes(), "else_arms: [".bytes()}
+    label_head: "\"__jet_".bytes()
+    arrow_head: "arrow_body: ".bytes()
+    dot_head: "leading_dot: ".bytes()
+    paren_head: "Paren {{ value: ".bytes()
+    paren_tail: ", span: ".bytes()
+    out := [U8]{}
+    at := 0
+    // The brace depth outside quoted text, and the depth at which each open
+    // `Paren` node's tail (`, span: …, id: … }`) follows its value.
+    depth := 0
+    parens := [Int]{}
+    loop at < bytes.len() {
+        if parens.len() > 0 && parens[parens.len() - 1] == depth && jfmt_structure_holds(bytes, at, paren_tail) {
+            at = jfmt_structure_node_close(bytes, at) + 1
+            _: parens.pop()
+            next
+        }
+        named: at == 0 || !jfmt_structure_name_byte(bytes[at - 1])
+        if named && jfmt_structure_holds(bytes, at, paren_head) {
+            parens.push(depth)
+            at += paren_head.len()
+            next
+        }
+        if named && (jfmt_structure_holds(bytes, at, arrow_head) || (jfmt_structure_holds(bytes, at, dot_head) && jfmt_structure_pattern_dot_free(bytes, at))) {
+            head: if bytes[at] == (U8{97}) -> arrow_head else -> dot_head
+            loop byte in head -> out.push(byte)
+            at += head.len()
+            loop at < bytes.len() && jfmt_structure_name_byte(bytes[at]) -> at += 1
+            next
+        }
+        if jfmt_structure_holds(bytes, at, span_head) {
+            close := at
+            loop close < bytes.len() && bytes[close] != (U8{125}) -> close += 1
+            out.push(U8{83})
+            at = close + 1
+            next
+        }
+        list_head: if named -> jfmt_structure_head_at(bytes, at, list_heads) else -> None
+        if list_head == .Val(head) {
+            loop byte in head -> out.push(byte)
+            at = jfmt_structure_list_close(bytes, at + head.len())
+            next
+        }
+        if jfmt_structure_holds(bytes, at, label_head) {
+            close := at + 1
+            loop close < bytes.len() && bytes[close] != (U8{34}) -> close += 1
+            digits := close
+            loop digits > at + 1 && bytes[digits - 1] >= (U8{48}) && bytes[digits - 1] <= (U8{57}) -> digits -= 1
+            loop index in at..<digits -> out.push(bytes[index])
+            out.push(U8{34})
+            at = close + 1
+            next
+        }
+        // Quoted text is copied as written: no head inside it is a field.
+        if bytes[at] == (U8{34}) {
+            close: jfmt_structure_quote_close(bytes, at)
+            loop index in at..<close -> out.push(bytes[index])
+            at = close
+            next
+        }
+        number_head: if named -> jfmt_structure_head_at(bytes, at, number_heads) else -> None
+        if number_head == .Val(head) {
+            loop byte in head -> out.push(byte)
+            at += head.len()
+            loop at < bytes.len() && bytes[at] >= (U8{48}) && bytes[at] <= (U8{57}) -> at += 1
+            next
+        }
+        if bytes[at] == (U8{123}) -> depth += 1
+        if bytes[at] == (U8{125}) -> depth -= 1
+        out.push(bytes[at])
+        at += 1
+    }
+    String.from_bytes_lossy(out)
+}
+
+jfmt_structure_head_at: fn(bytes: [U8], at: Int, heads: [[U8]]) -> [U8]? Never! {
+    loop head in heads {
+        if jfmt_structure_holds(bytes, at, head) -> return Val(head)
+    }
+    None
+}
+
+// The index just past the quoted text that opens at `at`, over `\` escapes.
+jfmt_structure_quote_close: fn(bytes: [U8], at: Int) -> Int Never! {
+    index := at + 1
+    loop index < bytes.len() {
+        if bytes[index] == (U8{92}) {
+            index += 2
+            next
+        }
+        if bytes[index] == (U8{34}) -> return index + 1
+        index += 1
+    }
+    bytes.len()
+}
+
+// The index of the `}` that closes the node whose last fields start at `at`
+// (a `Paren` node's `, span: Span { … }, id: N }`).
+jfmt_structure_node_close: fn(bytes: [U8], at: Int) -> Int Never! {
+    level := 0
+    index := at
+    loop index < bytes.len() {
+        if bytes[index] == (U8{123}) -> level += 1
+        if bytes[index] == (U8{125}) {
+            if level == 0 -> return index
+            level -= 1
+        }
+        index += 1
+    }
+    bytes.len()
+}
+
+// The index of the `]` that closes a list whose items start at `at`,
+// skipping the brackets inside quoted text (`"errors[0]"`).
+jfmt_structure_list_close: fn(bytes: [U8], at: Int) -> Int Never! {
+    depth := 0
+    index := at
+    loop index < bytes.len() {
+        if Int.from_u8(bytes[index]) == {
+            34 -> index = jfmt_structure_quote_close(bytes, index) - 1
+            91 -> depth += 1
+            93 -> {
+                if depth == 0 -> return index
+                depth -= 1
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    bytes.len()
+}
+
+jfmt_structure_holds: fn(bytes: [U8], at: Int, marker: [U8]) -> Bool Never! {
+    if at + marker.len() > bytes.len() -> return false
+    loop (offset, byte) in marker {
+        if bytes[at + offset] != byte -> return false
+    }
+    true
+}
+
+jfmt_structure_name_byte: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+// The variant patterns whose leading dot the checker reads: a dotless `None`
+// or `Val(x)` tests an optional whatever the subject, and `.Ok(…)` on a
+// `T? E!` value is the retired nested spelling (E0392). The formatter keeps
+// their dot as written.
+jfmt_pattern_dot_means: fn(variant: String) -> Bool Never! {
+    variant == "None" || variant == "Val" || variant == "Ok"
+}
+
+// Whether the `leading_dot: ` at `at` belongs to a variant pattern whose dot
+// the formatter may add: a `Variant {{ variant: "NAME", … }}` node, NAME not
+// one of jfmt_pattern_dot_means.
+jfmt_structure_pattern_dot_free: fn(bytes: [U8], at: Int) -> Bool Never! {
+    depth := 0
+    open := at - 1
+    loop open >= 0 {
+        code: Int.from_u8(bytes[open])
+        if code == 125 || code == 93 -> depth += 1
+        if code == 123 || code == 91 {
+            if depth == 0 -> break
+            depth -= 1
+        }
+        open -= 1
+    }
+    if open < 0 || bytes[open] != (U8{123}) -> return false
+    if jfmt_structure_node(bytes, open + 1) != "Variant" -> return false
+    head: " variant: \"".bytes()
+    if !jfmt_structure_holds(bytes, open + 1, head) -> return false
+    start: open + 1 + head.len()
+    end := start
+    loop end < bytes.len() && bytes[end] != (U8{34}) -> end += 1
+    !jfmt_pattern_dot_means(String.from_bytes_lossy(bytes[start..<end]))
+}
+
+// The parser reported nothing but lints: the program is exactly what the
+// text says, with no recovery a format would repair.
+jfmt_structure_clean: fn(diagnostics: [Diagnostic]) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_LINT -> return false
+    }
+    true
+}
+
+// Why `formatted` does not mean what `source` means (both parsed the same
+// way), or None when their programs are the same.
+jfmt_structure_change: fn(source: Program, formatted: Program, formatted_diagnostics: [Diagnostic]) -> String? Never! {
+    loop diagnostic in formatted_diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_LINT -> return Val("the formatted text does not parse ({diagnostic.code}: {diagnostic.what})")
+    }
+    before: jfmt_structure(source)
+    after: jfmt_structure(formatted)
+    if before == after -> return None
+    Val(jfmt_structure_difference(before, after))
+}
+
+// The first difference of two structures: the innermost node holding it, and
+// a few bytes of each side from there.
+jfmt_structure_difference: fn(before: String, after: String) -> String Never! {
+    old: before.bytes()
+    new: after.bytes()
+    at := 0
+    loop at < old.len() && at < new.len() && old[at] == new[at] -> at += 1
+    "the first difference is in `{jfmt_structure_node(old, at)}`: `{jfmt_structure_window(old, at)}` became `{jfmt_structure_window(new, at)}`"
+}
+
+// The name of the innermost `Name {{ … }}` node open at `at`.
+jfmt_structure_node: fn(bytes: [U8], at: Int) -> String Never! {
+    depth := 0
+    open := at - 1
+    loop open >= 0 {
+        code: Int.from_u8(bytes[open])
+        if code == 125 -> depth += 1
+        if code == 123 {
+            if depth == 0 -> break
+            depth -= 1
+        }
+        open -= 1
+    }
+    if open < 0 -> return "Program"
+    end := open
+    loop end > 0 && bytes[end - 1] == (U8{32}) -> end -= 1
+    start := end
+    loop start > 0 && jfmt_structure_name_byte(bytes[start - 1]) -> start -= 1
+    String.from_bytes_lossy(bytes[start..<end])
+}
+
+JFMT_STRUCTURE_WINDOW: 60
+
+jfmt_structure_window: fn(bytes: [U8], at: Int) -> String Never! {
+    if at >= bytes.len() -> return "(end)"
+    end: if at + JFMT_STRUCTURE_WINDOW < bytes.len() -> at + JFMT_STRUCTURE_WINDOW else -> bytes.len()
+    String.from_bytes_lossy(bytes[at..<end])
+}
