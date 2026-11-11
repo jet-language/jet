@@ -62,7 +62,11 @@ vocabulary](vocabulary.md).
   and `\\`; another escape is E0001. Interpolation uses `{expr}`. The format
   selector rail is closed: `{value:Debug}`, `{value:Pretty}`,
   `{value:Fixed(2)}`, `{value:Grouped(2)}`, and `{value:Unit(name|bare)}` are
-  the registered forms. `{{` and `}}` produce literal braces; an unmatched
+  the registered forms. The number of a numbered selector (`Pad`, `PadLeft`,
+  `Fixed`, `Grouped`, `Sci`, `Percent`, `Hex`) is any `Int` expression, such as
+  `{name:Pad(width)}`; another type is E0112. It runs after the value, and a
+  negative number acts as zero; an integer literal stays a constant
+  (D-SCRIPT-LOCAL-CLOCK1=A). `{{` and `}}` produce literal braces; an unmatched
   brace is E0001 (S8, S20).
 - A run of N backticks opens a raw ordinary `String`; the next maximal run of
   exactly N backticks closes it. Other runs remain text. Raw text has no

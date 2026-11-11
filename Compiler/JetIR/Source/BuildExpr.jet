@@ -2943,7 +2943,7 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
     pointer_row: ir_pointer_row(m)
     builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
     b.fresh[builder] = false
-    loop part in parts {
+    loop (index, part) in parts {
         if part == {
             .Literal(text) -> {
                 args := [Int]{builder}
@@ -2951,22 +2951,27 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
                 _: ir_runtime(m, b, "jet_rt_string_builder_push_static", args, -1)
             }
             .Interpolation(value, format) -> {
+                // A computed selector number prints through the part before it.
+                if format == .Number -> next
+                count: ir_string_count(parts, index)
                 // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
                 // core.text.fmt kernel the reference lowers it to
                 // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
                 kernel: if format == {
                     .Fixed(_) -> "jet_fmt_decimal"
                     .Grouped(_) -> "jet_fmt_grouped"
-                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> ""
+                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> ""
                 }
                 precision: if format == {
                     .Fixed(digits) | .Grouped(digits) -> digits
-                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> 0
+                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> 0
                 }
                 if kernel != "" && ir_untag(ir_ty(p, b, value)) == .Float {
                     slot: ir_expr(m, p, b, value)
                     if ir_failed(b) -> return -1
-                    digits: ir_word_const(m, b, precision)
+                    // The kernels treat a negative precision as zero.
+                    digits: if count >= 0 -> ir_expr(m, p, b, count) else -> ir_word_const(m, b, precision)
+                    if ir_failed(b) || digits < 0 -> return -1
                     string_row: ir_string_row(m)
                     text: ir_runtime(m, b, kernel, [Int]{slot, digits}, string_row)
                     _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
@@ -2976,7 +2981,7 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
                 }
                 // Every other selector is its Core/Text/Fmt.jet helper.
                 if format != .Display && format != .Debug {
-                    text: ir_string_format(m, p, b, value, format, span)
+                    text: ir_string_format(m, p, b, value, format, count, span)
                     if ir_failed(b) || text < 0 -> return -1
                     _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
                     ir_release(m, b, text)
@@ -3005,6 +3010,15 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
     }
     string_row: ir_string_row(m)
     ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+}
+
+// The Int node of the computed selector number of the part at `index`: the
+// TStrFormat.Number part after it, else -1.
+ir_string_count: fn(parts: [BodyStrPart], index: Int) -> Int Never! {
+    if index + 1 < parts.len() {
+        if parts[index + 1] == .Interpolation(count, .Number) -> return count
+    }
+    -1
 }
 
 // `s = "{s}…"` on a String the variable still owns: the rest of the text is

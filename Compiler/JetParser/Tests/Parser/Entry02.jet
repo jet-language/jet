@@ -437,3 +437,35 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert(found_integer)
     assert(found_interpolation)
 }
+
+// A selector number that is not an integer literal is an expression: the
+// hole is the value with the selector's constant 0, then a StrFormat.Count
+// part holding the number. A literal number stays the selector's constant.
+#Test("selector_number_may_be_an_int_expression") {
+    src: `show: fn(x: String, width: Int) -> String { "[{x:Pad(width)}] [{x:PadLeft(width + 2, ".")}] [{x:Pad(8)}]" }`
+    function: entry02_func(entry02_program(src), "show")
+    shapes := [String]{}
+    loop statement in function.body {
+        if statement == .Expr(.Str(parts, _, _)) {
+            loop part in parts {
+                if part == {
+                    .Lit(_) | .Byte(_) -> {}
+                    .Interp(value, format) -> {
+                        if format == {
+                            .Pad(width, _) -> shapes.push("Pad({width})")
+                            .PadLeft(width, fill) -> shapes.push("PadLeft({width}, {fill})")
+                            .Count -> shapes.push(if value == .Ident(name, _, _) -> "Count({name})" else -> "Count(expr)")
+                            .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> shapes.push("other")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert(shapes.join(" ") == "Pad(0) Count(width) PadLeft(0, .) Count(expr) Pad(8)", shapes.join(" "))
+    once: entry02_format(src)
+    assert(once.contains(`"[{x:Pad(width)}] [{x:PadLeft(width + 2, ".")}] [{x:Pad(8)}]"`), once)
+    assert(once == entry02_format(once))
+    missing: entry02_diag(entry02_errors(`show: fn(x: Float) -> String { "{x:Fixed()}" }`), "E0003")
+    assert(missing.what == "Expected decimal places inside `:Fixed( )`", missing.what)
+}

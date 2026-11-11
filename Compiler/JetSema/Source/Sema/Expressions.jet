@@ -1050,6 +1050,7 @@ sema_expr_string_format: fn(format: StrFormat) -> TStrFormat Never! {
         .Bin -> TStrFormat.Bin
         .Oct -> TStrFormat.Oct
         .Unit(unit_format) -> TStrFormat.Unit{format: sema_expr_tree_unit_format(unit_format)}
+        .Count -> TStrFormat.Number
     }
 }
 
@@ -2552,7 +2553,7 @@ sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environme
             if ty == Type.String || ty == Type.Float || integer -> return true
             selector: if format == {
                 .Pad(_, _) -> "Pad"
-                .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> "PadLeft"
+                .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Count -> "PadLeft"
             }
             diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:{selector}(n)`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
         }
@@ -2560,8 +2561,32 @@ sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environme
             if sema_expr_scalable_unit_type(ty, environment, program) -> return true
             diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
         }
-        .Display | .Debug | .Pretty -> return true
+        .Display | .Debug | .Pretty | .Count -> return true
     }
+    false
+}
+
+// A computed selector number (StrFormat.Count) is an
+// Int, else E0112 at the number. The selector's helpers treat a negative
+// number as zero.
+sema_expr_check_selector_count: fn(checked: TExpr, parts: [StrPart], index: Int, diagnostics: &[Diagnostic]) -> Bool {
+    if checked.ty == Type.Int -> return true
+    selector := "selector"
+    if index > 0 {
+        if parts[index - 1] == .Interp(_, format) {
+            selector = if format == {
+                .Fixed(_) -> ":Fixed(n)"
+                .Grouped(_) -> ":Grouped(n)"
+                .Hex(_) -> ":Hex(n)"
+                .Pad(_, _) -> ":Pad(n)"
+                .PadLeft(_, _) -> ":PadLeft(n)"
+                .Sci(_) -> ":Sci(n)"
+                .Percent(_) -> ":Percent(n)"
+                .Display | .Debug | .Pretty | .Bin | .Oct | .Unit(_) | .Count -> "selector"
+            }
+        }
+    }
+    diagnostics.push(sema_error("E0112", checked.span, "the number of `{selector}` is {sema_type_show(checked.ty)}, not Int", "a selector number is an Int, written as a literal or computed at run time", "pass an Int, such as `:Pad(width)` with `width: Int`"))
     false
 }
 
@@ -4412,6 +4437,12 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 checked_value := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 context.allow_string_view_read = previous_string_view_read
                 checked: checked_value ?? return None
+                if format == StrFormat.Count {
+                    if !sema_expr_check_selector_count(checked, parts, index, diagnostics) -> return None
+                    tree_parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Number})
+                    index += 1
+                    next
+                }
                 // Rust expr.rs: formatting a value that holds an observable
                 // Clock reads ambient time (E3403 `Clock formatting` in a pure body).
                 if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {

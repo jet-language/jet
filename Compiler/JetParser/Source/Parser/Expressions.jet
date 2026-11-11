@@ -1186,7 +1186,8 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         }
         parser_bump(nested)
     }
-    format: parser_parse_string_format(nested)
+    count := Expr?{None}
+    format: parser_parse_string_format(nested, depth + 1, count)
     extra: parser_current(nested)
     extra_found: parser_describe_token(nested, extra)
     parser_return_hole(state, nested)
@@ -1204,6 +1205,8 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         parts.push(StrPart.Lit{text: " = "})
     }
     parts.push(StrPart.Interp{expr: value.expr, format: format.move()})
+    // A computed selector number runs after the value.
+    if count == .Val(number) -> parts.push(StrPart.Interp{expr: number, format: StrFormat.Count})
 }
 
 // Rust's debug-label spelling of one token, or "" when the token cannot
@@ -1238,8 +1241,9 @@ parser_take_nested_failure: fn(state: &JetParserState, diagnostics: [Diagnostic]
 
 // The closed interpolation selector
 // vocabulary. An unknown selector is E0914 and leaves the bare Display form.
-// `#` is the retired selector rail, still read so fmt can rewrite it.
-parser_parse_string_format: fn(state: &JetParserState) -> StrFormat {
+// `#` is the retired selector rail, still read so fmt can rewrite it. A
+// selector number that is not an integer literal is set in `count`.
+parser_parse_string_format: fn(state: &JetParserState, depth: Int, count: &Expr?) -> StrFormat {
     if parser_current_kind(state) != TOKEN_COLON && parser_current_kind(state) != TOKEN_HASH -> return StrFormat.Display
     parser_bump(state)
     if parser_current_kind(state) != TOKEN_IDENT {
@@ -1253,14 +1257,14 @@ parser_parse_string_format: fn(state: &JetParserState) -> StrFormat {
     if name == "Pretty" -> return StrFormat.Pretty
     if name == "Bin" -> return StrFormat.Bin
     if name == "Oct" -> return StrFormat.Oct
-    if name == "Fixed" -> return StrFormat.Fixed{digits: parser_parse_selector_argument(state, head, "decimal places")}
-    if name == "Grouped" -> return StrFormat.Grouped{digits: parser_parse_selector_argument(state, head, "decimal places")}
-    if name == "Sci" -> return StrFormat.Sci{digits: parser_parse_selector_argument(state, head, "decimal places")}
-    if name == "Percent" -> return StrFormat.Percent{digits: parser_parse_selector_argument(state, head, "decimal places")}
-    if name == "Hex" -> return StrFormat.Hex{digits: parser_parse_selector_argument(state, head, "width")}
+    if name == "Fixed" -> return StrFormat.Fixed{digits: parser_parse_selector_argument(state, head, "decimal places", depth, count)}
+    if name == "Grouped" -> return StrFormat.Grouped{digits: parser_parse_selector_argument(state, head, "decimal places", depth, count)}
+    if name == "Sci" -> return StrFormat.Sci{digits: parser_parse_selector_argument(state, head, "decimal places", depth, count)}
+    if name == "Percent" -> return StrFormat.Percent{digits: parser_parse_selector_argument(state, head, "decimal places", depth, count)}
+    if name == "Hex" -> return StrFormat.Hex{digits: parser_parse_selector_argument(state, head, "width", depth, count)}
     if name == "Pad" || name == "PadLeft" {
         parser_expect(state, TOKEN_LPAREN, "after `{head}` in interpolation")
-        width: parser_parse_selector_integer(state, head, "width")
+        width: parser_parse_selector_integer(state, head, "width", depth, count)
         fill := ""
         if parser_current_kind(state) == TOKEN_COMMA {
             parser_bump(state)
@@ -1286,20 +1290,31 @@ parser_parse_string_format: fn(state: &JetParserState) -> StrFormat {
     StrFormat.Display
 }
 
-// `:Fixed(n)` and the other one-integer selectors.
-parser_parse_selector_argument: fn(state: &JetParserState, head: String, parameter: String) -> Int {
+// `:Fixed(n)` and the other one-number selectors.
+parser_parse_selector_argument: fn(state: &JetParserState, head: String, parameter: String, depth: Int, count: &Expr?) -> Int {
     parser_expect(state, TOKEN_LPAREN, "after `{head}` in interpolation")
-    value: parser_parse_selector_integer(state, head, parameter)
+    value: parser_parse_selector_integer(state, head, parameter, depth, count)
     parser_expect(state, TOKEN_RPAREN, "after the {parameter} in `{head}(n)`")
     value
 }
 
-parser_parse_selector_integer: fn(state: &JetParserState, head: String, parameter: String) -> Int {
-    token: parser_bump(state)
-    if token.kind == TOKEN_INT -> return parser_integer(state, token) ?? 0
-    example: if parameter == "width" -> "16" else -> "2"
-    noun: if parameter == "width" -> "width" else -> "precision"
-    parser_add_error(state, token.span, "expected {parameter} inside `{head}( )`", "`{head}(n)` takes one nonnegative integer literal", "write a {noun} such as `{head}({example})`")
+// A selector's number. An integer literal is the selector's constant; any
+// other expression (`:Pad(width)`) is `count`, which sema checks as an Int,
+// and the constant is 0.
+parser_parse_selector_integer: fn(state: &JetParserState, head: String, parameter: String, depth: Int, count: &Expr?) -> Int {
+    current: parser_current(state)
+    next: parser_kind_at(state, 1)
+    if current.kind == TOKEN_INT && (next == TOKEN_RPAREN || next == TOKEN_COMMA) {
+        parser_bump(state)
+        return parser_integer(state, current) ?? 0
+    }
+    if current.kind == TOKEN_RPAREN || current.kind == TOKEN_COMMA || current.kind == TOKEN_EOF {
+        example: if parameter == "width" -> "16" else -> "2"
+        noun: if parameter == "width" -> "width" else -> "precision"
+        parser_add_error(state, current.span, "expected {parameter} inside `{head}( )`", "`{head}(n)` takes one Int, a literal or an expression", "write a {noun} such as `{head}({example})`")
+        return 0
+    }
+    count = Val(parser_parse_expression(state, 1, depth).expr)
     0
 }
 
