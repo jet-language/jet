@@ -363,10 +363,12 @@ While the orchestrator's batches run, every worker keeps coding to spec.
 
 A worker's unit of work is one open criterion, read from the card before any
 code is written. If its proof already passes, the worker sends the command and
-its output and takes the next criterion. A criterion with no passing proof
-after 45 minutes is written up as a blocker and the worker moves on; the
-orchestrator routes the blocker. A worker never ends its turn to wait on its
-own job.
+its output and takes the next criterion. Every item is sized at most one hour
+of code plus one hour of testing and fixes. Larger work is split into such
+items and written, never sized in hours or days, parked or noted as blocked
+for its size. The only blockers are an open owner ballot and a missing
+dependency another lane owns; the worker names it to the orchestrator in one
+line and moves on. A worker never ends its turn to wait on its own job.
 
 This is a hard owner requirement. The orchestrator never lets a worker idle.
 No worker waits on a landing, a batch, a seed, a review, or a proof: it stacks
@@ -390,6 +392,22 @@ to the worker that owns it, as one list and that worker's top priority. The
 orchestration skill's intake reference defines the submission format, batch
 integration, and landing; the skill also covers briefs, liveness, proof
 cadence, recovery, and closure.
+
+Landing throughput is the measure of progress. These standing owner orders
+keep it high:
+- Two trains run in flight whenever memory allows, composed on disjoint paths
+  so a set-aside in one never recomposes the other.
+- A submission that changes no build input of the compiler, the runtime or
+  Core (docs, tool twins, gauntlet entries, review records, tests, examples
+  the last train's compiler already proves) is tested with that compiler and
+  lands on `dev` directly, without a train, within the hour.
+- A submission meets whole criteria and names each one with its exact proof
+  command. Light work travels in its own submission, apart from compiler and
+  Core changes, so it is never held by a build.
+- Each lead reports every hour: the submissions it staged and the criterion
+  each one meets.
+- Criteria that already hold on `dev` are found by sweep, proved and met
+  directly, with no new code.
 
 The orchestrator may name one Lander and one Closer. The Lander runs the
 batch, landing and seed loop in the orchestrator's place, as a rolling train

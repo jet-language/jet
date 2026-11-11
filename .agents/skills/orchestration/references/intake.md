@@ -136,3 +136,11 @@ runs and one 39-minute full test pass. These rules bind every train:
 8. **Timings in every report.** Each train `REPORT.md` has a stage table
    (compose, gate, build, census, tests, regen, land) with wall minutes, and
    every restart names its cause.
+9. **Two trains in flight.** While MemAvailable stays above 12 GiB, the next
+   train composes, gates and builds alongside the current one, on disjoint
+   paths. Cut trains back to back, so the build slot is never empty while the
+   inbox holds ready submissions.
+10. **Direct lands.** A submission that changes no build input of the
+    compiler, the runtime or Core is tested with the last train's compiler and
+    lands on `dev` at once as its own commit, without joining a train. Sweep
+    the inbox for such submissions at every landing.
