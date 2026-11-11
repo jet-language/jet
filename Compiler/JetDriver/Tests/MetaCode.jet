@@ -1,0 +1,16 @@
+// Code a build hands the compiler (`meta.add`, `meta.rewrite_body`) never
+// writes `#Unsafe`: the adapter reads the marker from the Code's tokens, so a
+// string or a comment that mentions it is not one.
+use {
+    jet_driver.[jet_driver_code_writes_unsafe]
+}
+
+#Test("meta_code_that_writes_unsafe_is_found_by_its_tokens") {
+    assert(jet_driver_code_writes_unsafe("#Unsafe(\"generated\") {{\n    print(1)\n}}\n"))
+    assert(jet_driver_code_writes_unsafe("print(0)\n#Unsafe(\"generated\")\nadded: fn() -> Int {{ 1 }}\n"))
+    assert(!jet_driver_code_writes_unsafe("print(\"#Unsafe\")\n"))
+    assert(!jet_driver_code_writes_unsafe("// #Unsafe\nprint(1)\n"))
+    assert(!jet_driver_code_writes_unsafe("unsafe_count: 1\nprint(unsafe_count)\n"))
+    assert(!jet_driver_code_writes_unsafe("#Traced\nadded: fn() -> Int {{ 1 }}\n"))
+    assert(!jet_driver_code_writes_unsafe("print(\"time start\")\n#{{load.body}}\n"))
+}

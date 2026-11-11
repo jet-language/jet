@@ -451,6 +451,12 @@ only reads, so it needs no Meta effect, and the build refuses a value whose
 build has returned. A handler that rewrites a heard function `f` uses
 `Meta.Rewrite` like any other caller; `f.package` is the identity of the
 package that declares it.
+Code that `meta.add` or `meta.rewrite_body` hands the compiler can't write
+`#Unsafe`: it is never audited where it lands, so the call is refused (E3503)
+and the build publishes nothing. An unsafe operation stays in a function of
+the package's source, with its own `#Unsafe("reason")` block, and the code
+calls that function. A body pasted in through `#{f.body}` is the function's
+own source, and it keeps the blocks that source wrote.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.

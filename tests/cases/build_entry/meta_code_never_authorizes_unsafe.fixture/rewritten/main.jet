@@ -1,0 +1,33 @@
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#Traced
+greet: fn() -> Int { 1 }
+
+// The handler's code writes `#Unsafe`: the build refuses it.
+install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.rewrite_body(f, #code {
+                    #Unsafe("generated") {
+                        print("entered")
+                    }
+                    #{f.body}
+                })
+            }
+        },
+    )
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(greet()) }

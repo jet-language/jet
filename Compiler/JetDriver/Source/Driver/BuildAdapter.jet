@@ -9,6 +9,7 @@ use {
     build_input_url: core.net.url
     jet_eval.[jet_eval_build_failed_value]
     jet_parser.[jfmt_escape_str_lit]
+    jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
     jet_build_session.[
         BuildSession, BuildSessionDiagnostic, BuildSessionReply, BuildSessionValue, build_session_call,
         build_session_diag, build_session_graph,
@@ -209,6 +210,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
     held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     code_index: if rewrite -> 2 else -> 1
     source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
+    if jet_driver_code_writes_unsafe(source) -> return jet_driver_code_unsafe_refusal(span, if rewrite -> "meta.rewrite_body" else -> "meta.add")
     if !rewrite {
         scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
         producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
@@ -249,6 +251,33 @@ jet_driver_code_source: fn(value: TComptimeValue) -> String? Never! {
         }
     }
     None
+}
+
+// Whether a `Code` value's source writes `#Unsafe`: a `#` token, then the
+// word `Unsafe`, so a string or a comment that mentions it is not one. Code a
+// build hands the compiler is never audited where it lands, so it can't
+// authorize an unsafe operation. A body pasted in through `#{f.body}` is the
+// function's own audited source and is not part of this text.
+jet_driver_code_writes_unsafe: fn(source: String) -> Bool Never! {
+    bytes: source.bytes()
+    tokens: lex(bytes).tokens
+    loop index in 1..<tokens.len() {
+        if tokens[index - 1].kind != TOKEN_HASH || tokens[index].kind != TOKEN_IDENT -> next
+        word: String.from_bytes(bytes.slice(tokens[index].span.start, tokens[index].span.end)) ?? ""
+        if word == "Unsafe" -> return true
+    }
+    false
+}
+
+jet_driver_code_unsafe_refusal: fn(span: Span, call: String) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
+        code: "E3503",
+        what: "`{call}`'s code writes `#Unsafe`",
+        why: "Code a build hands the compiler is never audited where it lands, so it can't authorize an unsafe operation; only `#Unsafe` written in a package's own source can",
+        fix: "Move the unsafe operation into a function of the package's source with its own `#Unsafe(\"reason\")` block, and call that function from the code",
+        start: span.start,
+        end: span.end,
+    })}
 }
 
 // Whether `text`, read as a path under the build file's directory, names a

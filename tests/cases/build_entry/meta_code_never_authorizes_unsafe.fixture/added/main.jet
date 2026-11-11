@@ -1,0 +1,18 @@
+// `meta.add` code that writes `#Unsafe`: the build refuses it.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.add(#code {
+        added_count: fn() -> Int {
+            #Unsafe("generated") {
+                print("added")
+            }
+            1
+        }
+    }, scope: "added")
+    b.default(app)
+}
+
+run: fn() {
+    print(2)
+}

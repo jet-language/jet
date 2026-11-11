@@ -211,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1421,
+  "total": 1423,
   "counts": {
     "Compiler": 746,
     "Core": 176,
@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 435
+    "tests": 437
   },
   "regions": [
     {
@@ -7154,6 +7154,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/added/main.jet",
+      "line": 7,
+      "column": 13,
+      "reason": "generated"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/rewritten/main.jet",
+      "line": 17,
+      "column": 21,
+      "reason": "generated"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/cffi/cffi_raw_status_out_pointer_reads_only_on_success.fixture/main.jet",
       "line": 16,
       "column": 5,
@@ -10183,8 +10197,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 435 |
-| **total** | **1421** |
+| tests | 437 |
+| **total** | **1423** |
 
 ### Regions
 
@@ -11180,6 +11194,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 50:5 | "call the leaf the build refuses" |
+| tests | tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/added/main.jet | 7:13 | "generated" |
+| tests | tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/rewritten/main.jet | 17:21 | "generated" |
 | tests | tests/cases/cffi/cffi_raw_status_out_pointer_reads_only_on_success.fixture/main.jet | 16:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
 | tests | tests/cases/cffi/ffi_capability_boundary_is_safe_only_inside_unsafe/input/o2/run.jet | 7:5 | "the foreign call may write through the borrowed value" |
 | tests | tests/cases/cffi/ffi_capability_boundary_is_safe_only_inside_unsafe/input/o3/run.jet | 7:5 | "the foreign call may write through the borrowed value" |

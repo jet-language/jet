@@ -1,0 +1,16 @@
+# #3526 c15: generated `#Unsafe` is never authorized. Code that a handler
+# hands the compiler through `meta.add` or `meta.rewrite_body` and that writes
+# `#Unsafe` is refused at the call (E3503), and the build publishes nothing.
+fixture: meta_code_never_authorizes_unsafe.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build added/main.jet
+exit: 1
+stderr: ~ "E3503" # the refusal is the build-authority code
+stderr: ~ "`meta.add`'s code writes `#Unsafe`" # it names the call
+file: added/.jet/build/app absent
+step: jet build rewritten/main.jet
+exit: 1
+stderr: ~ "E3503" # the refusal is the build-authority code
+stderr: ~ "`meta.rewrite_body`'s code writes `#Unsafe`" # it names the call
+file: rewritten/.jet/build/app absent
