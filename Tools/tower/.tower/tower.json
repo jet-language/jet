@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99521,
+    "rev": 99522,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85723,6 +85723,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T16:24:59.760Z"
+        },
+        {
+          "n": 9,
+          "text": "Build reuse and the jet build binary store are off by default, per the standing caches-off order. Found by G11Speed on 2026-11-11: Executor.jet:324 restores any reusable step unconditionally, BuildExecute.jet:188 always opens the store when a build has steps, and Cli/BuildCache.jet:29 keeps the binary store on by default, with no switch (cli.md:504 documents made-or-reused). Fix (G11Speed-7c): a default build opens no store and puts nothing; opting in uses only an existing switch, or the executor API for tests if none exists, and any new public opt-in spelling goes to a ballot. cli.md and the BuildExecutor action-reuse test are updated in the same cutover. Proof: a test shows a default build opens no store; the opted-in reuse test passes; and cold and warm jet build Compiler are measured n=3 before and after.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:36:48.585Z"
         }
       ],
       "refs": [],
@@ -85733,9 +85742,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-11T17:33:57.006Z",
+      "updated": "2026-11-11T17:36:48.585Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0h114mv",
@@ -197619,6 +197628,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:36:48.585Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#9 Build reuse and the jet build binary store are off by defaul"
+    },
     {
       "at": "2026-11-11T17:35:22.459Z",
       "by": "Main",
