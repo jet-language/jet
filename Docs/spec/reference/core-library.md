@@ -310,7 +310,8 @@ failure as an item: `terminal8_line` is
 cells (`level_load`, `filter_store`, …), `flush`, `process_exit` and
 `span_allocate` (`(id: Int, name: String)`), each `-[Log]>`, and the pure
 `metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
-`text_cells_*` and `etf_strings_*`.
+`text_cells_*` and `etf_strings_*` that CSV, typed data, `core.sys.decode`
+and ETF decoding enter.
 `jet.runtime.process` holds the signal subscription calls `signal_open`,
 `signal_close` and `signal_disposition` (`-[Exec]>`). Any package can call a
 binding, so a leaf whose caller must first prove a bound or a UTF-8 encoding

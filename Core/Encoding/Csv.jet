@@ -5,6 +5,7 @@ use {
     base64: core.encoding.base64
     stream: __core_encoding_stream
     encoding: core.encoding
+    rt: jet.runtime.encoding
     core.files.[FileReader, FileWriter]
     files: core.files
     mem: core.mem
@@ -81,7 +82,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
     header: rows[0]
     values := [T]{}
     errors := [FieldError]{}
-    previous: encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     loop index in 1..<rows.len() {
         row: rows[index]
         if row.len() != header.len() {
@@ -102,7 +103,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
             }
         }
     }
-    encoding.__text_cells_leave(previous)
+    rt.text_cells_leave(previous)
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 

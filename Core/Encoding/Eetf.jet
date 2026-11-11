@@ -3,7 +3,7 @@ use {
     // Standalone Erlang External Term Format, version 131 (OTP 29.0.6 / ERTS
     // 17.0.6): one term, not node distribution, LOCAL_EXT or a BEAM runtime.
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
-    encoding: core.encoding
+    rt: jet.runtime.encoding
     stream: __core_encoding_stream
     json: core.encoding.json
     binary: core.encoding.binary
@@ -140,14 +140,14 @@ to_json: fn(bytes: [U8], limits: EncodingLimits{EncodingLimits.safe()}) -> Strin
 /// Errors carry the wire path; limits are charged as `to_json` charges them.
 decode: fn<T: Decode>(bytes: [U8], layout: TermLayout{.Map}, strings: StringEncoding{.UTF8Binary}, byte_arrays: ByteEncoding{.Binary}, limits: EncodingLimits{EncodingLimits.safe()}) -> T [FieldError]! {
     tree: read(bytes, false, layout, strings, limits) ?? return Err([FieldError]{FieldError{path: err.path, reason: "{err.kind:Debug}: {err.reason}"}})
-    previous: encoding.__etf_strings_enter(if strings == .UTF8Binary -> 1 else -> 2)
+    previous: rt.etf_strings_enter(if strings == .UTF8Binary -> 1 else -> 2)
     if tree.decode<T>() == {
         .Ok(value) -> {
-            encoding.__etf_strings_leave(previous)
+            rt.etf_strings_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            encoding.__etf_strings_leave(previous)
+            rt.etf_strings_leave(previous)
             return Err(failures)
         }
     }

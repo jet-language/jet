@@ -14,6 +14,7 @@ use {
     files: core.files
     process_api: core.process
     text_parse: core.text.parse
+    rt: jet.runtime.encoding
 
     core.encoding.[Dyn]
     core.sys.[EnvError]
@@ -1413,14 +1414,14 @@ has_nul: fn(value: String) -> Bool {
 // host environment writer.
 decode: fn<Target: Decode>(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> Target [FieldError]! {
     found: __decode_tree(prefix, file, allow, names) ?? return Err(err)
-    previous: core.encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     if found.tree.decode<Target>() == {
         .Ok(value) -> {
-            core.encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            core.encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Err(__decode_errors(failures, found.origins))
         }
     }

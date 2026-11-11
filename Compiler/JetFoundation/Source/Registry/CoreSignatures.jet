@@ -572,14 +572,6 @@ core_sig_encoding_backing: fn(request: CoreCallSignatureRequest) -> CoreTypedCal
     if module_name != "core.encoding" -> return None
     if member == "__coerce_now" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     if member == "__coerce_emit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(unit)))
-    // The runtime's thread-local text-cell decode scope (DynCodec.jet): enter
-    // answers the previous state, which leave restores.
-    if member == "__text_cells_enter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Bool)))
-    if member == "__text_cells_leave" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read)}, Val(unit)))
-    // The runtime's thread-local ETF string decode scope (DynCodec.jet): enter
-    // takes the mode (1 binary, 2 byte list) and answers the previous one.
-    if member == "__etf_strings_enter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.Int)))
-    if member == "__etf_strings_leave" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(unit)))
     if member == "__read_byte" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write)}, Val(core_sig_result(Type.Option{inner: byte}, cause))))
     if member == "__read_into" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write), core_sig_positional(bytes, write), core_sig_positional(Type.Int, read)}, Val(core_sig_result(Type.Int, cause))))
     if member == "__write_bytes" || member == "__write_text" {
