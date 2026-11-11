@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0227 — Jet diagnostic</title>
-<meta name="description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.">
+<meta name="description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type doesn&#39;t mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes).">
 <meta property="og:title" content="E0227 — Jet diagnostic">
-<meta property="og:description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.">
+<meta property="og:description" content="A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type doesn&#39;t mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes).">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,16 +25,16 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0227</h1>
-<p>A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.</p>
+<p>A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type doesn&#39;t mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes).</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type gives that parameter plain read access.</p>
+<p class="diag-copy what" data-registry-field="what">A function whose parameter is marked `&amp;` or `&amp;&amp;` is used as a value where the expected function type doesn&#39;t mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes).</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A function type gives each parameter plain read access unless it marks a take (`fn(&amp;&amp;T)`), so a value of this function in an unmarked slot would lose the write or take its parameter declares.</p>
+<p class="diag-copy why" data-registry-field="why">A function type gives each parameter plain read access unless it marks a write (`fn(&amp;T)`) or a take (`fn(&amp;&amp;T)`), and a call through it passes each argument that way, so a value whose parameter access differs would lose or invent the write or take its parameter declares.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Call the function directly, take the parameter in the function type (`fn(&amp;&amp;T)`) when the function takes it, or pass a lambda that makes that call.</p>
+<p class="diag-copy fix" data-registry-field="fix">Call the function directly, mark the parameter in the function type the way the function does (`fn(&amp;T)`, `fn(&amp;&amp;T)`), or pass a lambda that makes that call.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0227</code>: <code>tests/ui/function_type_take_param.stderr</code>.</p>
 <pre class="diag">Error [jet.MoveWithoutMarker]: `f` takes `words`, but `words` is used again later
@@ -55,8 +55,8 @@ Error [jet.MarkedFunctionValue]: `count` can&#39;t be used as a function value b
     |
  24 |     slots: Slots{read_only: count, taking: count}
     |                             ^^^^^
- Why: A function type gives each parameter plain read access unless it marks a take (`fn(&amp;&amp;T)`), so a value of `count` would drop the `&amp;&amp;` its parameter declares
- Fix: Call `count` directly, take the parameter in the function type (`fn(&amp;&amp;T)`), or pass a lambda that makes that call
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(&amp;T)`) or a take (`fn(&amp;&amp;T)`), so a value of `count` would drop the `&amp;&amp;` its parameter declares
+ Fix: Call `count` directly, mark the parameter in the function type (`fn(&amp;&amp;T)`), or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
