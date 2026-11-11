@@ -1147,6 +1147,10 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
     owned := value.move()
     // `expected` is known present below this line.
     if expected == None -> return Val(owned.move())
+    // A `Never` value never arrives, so it fits every slot whatever its type:
+    // a `??` fallback, an arm or a tail of `process.fail(...)`, `panic(...)`
+    // or a `-> Never Never!` call once its carrier has propagated.
+    if sema_expr_unwrap_tag(owned.ty) == (Type.Named{name: "Never"}) -> return Val(owned.move())
     if sema_expr_expected_keeps(owned.ty, expected) -> return Val(owned.move())
     // A value of the very named type expected resolves to the same type on
     // both sides: no Dyn wrap, lift, zone or trait coercion applies to it.

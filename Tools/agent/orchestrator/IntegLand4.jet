@@ -56,7 +56,7 @@ run: fn() {
     integ: "{roots.main()}/integ/{batch}"
     if !files.read_or("{integ}/REPORT.md", "").has_line_prefix("Census rc=0 ") -> fail("integ-land: batch {batch} did not pass its census/ratchets")
     // Every git step and tree path below is the dev worktree's.
-    if files.chdir(roots.worktree()) == .Err(_) -> process.exit(2)
+    files.chdir(roots.worktree()) ?? process.exit(2)
     if (Sh{"git status --porcelain=v1 -uno"}.text()) != "" -> fail("integ-land: dev worktree has changes")
     _ := Sh{"git fetch -q origin"}.ok()
     base: files.read("{integ}/BASE").trim()

@@ -163,7 +163,7 @@ run: fn() {
     files.create_dir_all(at)
     if prepared == "" -> snapshot(roots.worktree(), tree, named)
     // From here on, a relative root or report names a path from the tree, as in the original.
-    if files.chdir(tree) == .Err(err) -> process.fail(2, "census: cd {tree}: {err}")
+    files.chdir(tree) ?? process.fail(2, "census: cd {tree}: {err}")
     seed: "{compiler}/jet"
     check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCli"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_TOOLCHAIN_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
     print("check rc={check_rc}")
