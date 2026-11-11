@@ -19,6 +19,7 @@ use {
         ContextField,
         ContractClause,
         CtEnumArg,
+        CtReport,
         CtValue,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -232,7 +233,33 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
             CtValue?{None}
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> sema_derive_static_method(expansion, receiver, method, args)
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> CtValue?{None}
+        // `target.marker(T)?.text`: a present value's field; an absent one
+        // stays absent.
+        .OptField(base, member, _, _, _, _) -> {
+            owner: sema_derive_static_value(expansion, base) ?? return None
+            if owner == {
+                .Present(inner) -> {
+                    field: sema_derive_struct_field(inner, member) ?? return None
+                    Val(CtValue.Present{value: field})
+                }
+                .Failed(_) -> Val(owner)
+                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Closure(_) -> None
+            }
+        }
+        // `value ?? fallback` over a known-time Option: its present value,
+        // else the fallback value.
+        .OrFallback(value, fallback, _, _, _) -> {
+            owner: sema_derive_static_value(expansion, value) ?? return None
+            if owner == {
+                .Present(inner) -> Val(inner)
+                .Failed(_) -> {
+                    if fallback == .Value(other) -> return sema_derive_static_value(expansion, other)
+                    None
+                }
+                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Closure(_) -> None
+            }
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> CtValue?{None}
     }
 }
 
@@ -271,6 +298,10 @@ sema_derive_static_method: fn(expansion: SemaDeriveExpansion, receiver: Expr, me
         return None
     }
     if args.len() != 1 -> return None
+    if method == "marker" {
+        written: sema_derive_marker_name(args[0].expr) ?? return None
+        return Val(sema_derive_marker_value(owner, written))
+    }
     argument: sema_derive_static_value(expansion, args[0].expr) ?? return None
     wanted := ""
     if argument == .Str(text) -> wanted = text
@@ -292,6 +323,47 @@ sema_derive_static_method: fn(expansion: SemaDeriveExpansion, receiver: Expr, me
 sema_derive_named_type: fn(value: CtValue) -> String Never! {
     if value == .Struct(owner, _) -> return owner
     ""
+}
+
+// The marker struct a template's `marker(T)` names: `T` or a dotted path.
+sema_derive_marker_name: fn(expression: Expr) -> String? Never! {
+    if expression == .Ident(name, _, _) -> return Val(name.copy())
+    if expression == .Field(base, member, _, _) {
+        owner: sema_derive_marker_name(base) ?? return None
+        return Val("{owner}.{member}")
+    }
+    None
+}
+
+// The last segment of a marker name (`Web.Route` is `Route`).
+sema_derive_marker_leaf: fn(name: String) -> String Never! {
+    parts: name.split(".").to_list()
+    if parts.len() == 0 -> return name.copy()
+    parts[parts.len() - 1].copy()
+}
+
+// `target.marker(T)` over a reflected handle: the first marker `T` in its
+// `markers` rows as a `T` whose fields are its written arguments, or the
+// absent `T?` when the handle does not carry it. The same read outside a
+// template is sema_call_reflection_marker_lookup.
+sema_derive_marker_value: fn(owner: CtValue, written: String) -> CtValue Never! {
+    wanted: sema_derive_marker_leaf(written)
+    absent: CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: written}}}
+    rows: if sema_derive_struct_field(owner, "markers") == .Val(.List(values)) -> values else -> { return absent }
+    loop row in rows {
+        name: if sema_derive_struct_field(row, "name") == .Val(.Str(text)) -> text else -> { next }
+        if sema_derive_marker_leaf(name) != wanted -> next
+        fields := [NamedCtValue]{}
+        if sema_derive_struct_field(row, "args") == .Val(.List(arguments)) {
+            loop argument in arguments {
+                label: if sema_derive_struct_field(argument, "name") == .Val(.Str(text)) -> text else -> { next }
+                value: sema_derive_struct_field(argument, "value") ?? next
+                fields.push(NamedCtValue{name: label, value: value})
+            }
+        }
+        return CtValue.Present{value: CtValue.Struct{type_name: wanted, fields: fields}}
+    }
+    absent
 }
 
 // A string literal whose interpolations are known-time scalars.

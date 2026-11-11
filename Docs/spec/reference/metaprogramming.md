@@ -248,6 +248,16 @@ field's `value()` lists that struct's own fields, so `.fields()[i].value()`
 walks a nested value level by level. A generic reflection value retains the
 substituted field type, as the same example shows for `Box<Int>`.
 
+`info.marker(T)` on a `TypeInfo`, `FieldInfo` or `MethodInfo` reads the marker
+`T` written on the reflected item as a `T?`: a `T` whose fields are the
+marker's arguments, or `None` when the item does not carry it. `T` names a
+marker struct (one with an `impl Marker` block); any other name is E1134. The
+read gives the same answer in a marker body, a marker that adds methods, a
+comptime constant and `build: fn`, as
+[`ReflectionRungs`](../../../Examples/Metaprogramming/Reflection/ReflectionRungs/run.jet)
+shows: each rung reads the type's name, kind, identity, module, field and
+marker counts and `marker(Label)?.text`, and prints the same line.
+
 The fact plane is deliberately typed and closed. The feature examples read
 range, dimension, state, effect, sendability, movedness, attribution, origin,
 view provenance, and maturity facts; consumers must use the registered fact

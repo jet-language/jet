@@ -1,0 +1,87 @@
+// Every rung reads a declaration the same way: a marker body, a marker that
+// adds a method to the type it marks, a comptime constant and fn build each
+// read the type's name, kind, identity, module, field and marker counts, and
+// the typed `marker(Label)` argument, and each prints the same line. A type
+// without `Label` reads `marker(Label)` as None at every rung.
+Label: struct {
+    text: String
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+Rungs: struct {
+
+}
+
+// The marker-body rung: its `expand` adds a method to `Rungs`.
+FromMarker: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            label: target.marker(Label)?.text ?? "none"
+            seen: "{target.name} {target.kind} {target.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            impl Rungs {
+                from_marker: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+// The derive rung: a marker that adds a method to the type it marks.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            tname: target.name
+            label: target.marker(Label)?.text ?? "none"
+            seen: "{target.name} {target.kind} {target.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
+            impl #{tname} {
+                described: fn(self) -> String { "{seen}" }
+            }
+        }
+    }
+}
+
+#[FromMarker, Describe, Label("pt")]
+Point: struct {
+    x: Int
+    y: Int
+}
+
+#Describe
+Plain: struct {
+    value: Int
+}
+
+// The comptime and fn build rungs share one ordinary function.
+describe: fn(info: TypeInfo) -> String {
+    label: info.marker(Label)?.text ?? "none"
+    "{info.name} {info.kind} {info.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
+}
+
+POINT: comptime { describe(Point.reflect()) }
+
+PLAIN: comptime { describe(Plain.reflect()) }
+
+build: fn(b: Build) {
+    loop info in b.program.types() {
+        if info.name == "Point" -> b.contribute("seen", describe(info))
+    }
+    loop package in b.program.packages() {
+        b.contribute("package", "{package.name} {package.identity} types={package.types.len()}")
+    }
+}
+
+run: fn() {
+    print("marker:   {Rungs.from_marker()}")
+    print("derive:   {Point{x: 1, y: 2}.described()}")
+    print("comptime: {POINT}")
+    print("build:    {#build.settings.seen}")
+    print("derive:   {Plain{value: 3}.described()}")
+    print("comptime: {PLAIN}")
+    print("package:  {#build.settings.package}")
+}

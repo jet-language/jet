@@ -936,7 +936,8 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, environment: SemaScopeEnv
 // Core record rows declare. Producer-only members (`TypeInfo.trait_contracts`,
 // a marker's `sites`) feed derive templates; no program can name them, and
 // the IR builds a record constant from its declared layout. A struct with no
-// declared row at all is not a Core record and keeps every field.
+// declared row at all is not a Core record and keeps every field. A written
+// marker argument keeps its value too (sema_fact_answered_member).
 sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
     if value == {
         .Struct(type_name, fields) -> {
@@ -945,7 +946,7 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
             } ?? false
             kept := [TComptimeField]{}
             loop field in fields {
-                if declared && core_record_field(type_name, field.name) == None -> next
+                if declared && core_record_field(type_name, field.name) == None && !sema_fact_answered_member(type_name, field.name) -> next
                 kept.push(TComptimeField{name: field.name, value: sema_fact_declared_value(field.value)})
             }
             return TComptimeValue.Struct{type_name: type_name, fields: kept}
@@ -955,6 +956,14 @@ sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
         // copy: a scalar leaf of the read producer value; the caller keeps the original
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> return value.copy()
     }
+}
+
+// A member with no Core record row that the compiler still answers from: a
+// written marker argument's `value` (its type is the marker parameter's) is
+// what `info.marker(T)` reads into its `T` (jet_eval_reflection_marker_value).
+// The IR lays the record out from its declared rows, so a program never sees it.
+sema_fact_answered_member: fn(type_name: String, field: String) -> Bool Never! {
+    type_name == "MarkerArgInfo" && field == "value"
 }
 
 sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {

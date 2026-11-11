@@ -8,6 +8,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     InternalTag,
+    MarkerDecl,
     ParamZone,
     Span,
     TagMarker,
@@ -269,9 +270,67 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
 }
 
 sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
-    if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
-    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
+    if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method" || method == "marker"
+    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker" || method == "marker"
     false
+}
+
+// The marker struct a `marker(T)` argument names: `T` or a dotted path to it.
+sema_call_reflection_marker_name: fn(expression: Expr) -> String? Never! {
+    if expression == .Ident(name, _, _) -> return Val(name.copy())
+    if expression == .Field(base, member, _, _) {
+        owner: sema_call_reflection_marker_name(base) ?? return None
+        return Val("{owner}.{member}")
+    }
+    None
+}
+
+// `info.marker(T)` on a TypeInfo, FieldInfo or MethodInfo: the marker `T`
+// written on the reflected item, read as a `T` whose fields are its
+// arguments, or None when the item does not carry it. `T` names a marker
+// struct (one with an `impl Marker` block) visible here, else E1134. The host
+// call carries the marker's name, then each parameter with a declared default
+// as its name and default value, which fill the arguments the use site left
+// out (jet_eval_reflection_marker_value).
+sema_call_reflection_marker_lookup: fn(
+    owner: String,
+    receiver: Expr,
+    receiver_value: TExpr,
+    args: [CallArg],
+    span: Span,
+    expected: Type?,
+    environment: SemaScopeEnvironment, program: SemaProgramTables,
+    scopes: &SemaScopeTable,
+    state: &SemaOwnershipState,
+    tail_store: &SemaStatementTailStore,
+    context: &SemaCheckContext,
+    diagnostics: &[Diagnostic],
+) -> SemaMethodSpecialCheck {
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 || args[0].label != None {
+        diagnostics.push(sema_error("E0104", span, "`{owner}.marker` expects one marker type, got {args.len()} arguments", "`marker(T)` reads the one marker `T` written on the reflected item", "call `.marker(T)` with the marker struct's name"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    written: sema_call_reflection_marker_name(args[0].expr) ?? ""
+    declaration := MarkerDecl?{None}
+    if written != "" && program.registration_graph == .Val(graph) -> declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
+    marker: declaration ?? {
+        shown: if written == "" -> "this argument" else -> "`{written}`"
+        diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block", "name a marker struct visible here, or test a marker by name with `has_marker`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.marker", span, [EffectRowEntry]{}, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    host_args := [TExpr]{sema_call_reflection_text(marker.name, span)}
+    loop param in marker.params {
+        if param.name.starts_with("$") -> next
+        default: param.value ?? next
+        checked: sema_check_expression(default, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? next
+        host_args.push(sema_call_reflection_text(param.name, span))
+        host_args.push(checked)
+    }
+    marker_type: sema_call_resolved_type(Type.Named{name: written}, environment, program)
+    value := sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 sema_call_try_reflection_metadata_method: fn(
@@ -290,6 +349,7 @@ sema_call_try_reflection_metadata_method: fn(
 ) -> SemaMethodSpecialCheck {
     owner: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_call_reflection_metadata_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method == "marker" -> return sema_call_reflection_marker_lookup(owner, receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

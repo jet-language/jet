@@ -1,0 +1,26 @@
+// `marker(T)` reads a marker written on a reflected item, so `T` names a
+// struct with an `impl Marker` block (E1134 otherwise).
+Label: struct {
+    text: String
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+#Label("pt")
+Point: struct {
+    x: Int
+}
+
+count: fn(info: TypeInfo) -> Int {
+    found := 0
+    if info.marker(Label) != None -> found += 1
+    if info.marker(Point) != None -> found += 1
+    if info.marker(Missing) != None -> found += 1
+    found
+}
+
+COUNT: comptime { count(Point.reflect()) }
+
+run: fn() { print(COUNT) }
