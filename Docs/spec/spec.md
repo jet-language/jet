@@ -1261,13 +1261,9 @@ is passed, stored, or returned, returned itself, stored in a struct field, or
 passed to a `&&T` parameter—must own its captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
-escape (**E0120**), and an escaping lambda cannot write a write parameter
-(**E0120**): the caller lent it only until the call returns. A lambda that runs
-inside the call may write it. The old `take(...)` prefix is rejected with
-**E0057**. Self-recursion through the lambda's own binding is **E0804**;
-calling a non-function is **E0803** (S47).
-[`ClosureCaptureModes`](../../Examples/Basics/Functions/ClosureCaptureModes.jet)
-shows each capture mode with its output.
+escape (**E0120**). The old `take(...)` prefix is rejected with **E0057**.
+Self-recursion through the lambda's own binding is **E0804**; calling a
+non-function is **E0803** (S47).
 
 Function values expose only read parameters when coerced from a named
 function. This rule prevents the value conversion from erasing a write or

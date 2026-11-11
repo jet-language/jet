@@ -1368,10 +1368,6 @@ sema_expression_lambda_capture_diagnostic: fn(name: String, ty: Type, task_body:
     sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; a capture here takes ownership", "make the parameter owned: `{name}: &&{type_name(ty)}`")
 }
 
-sema_expression_lambda_write_capture_diagnostic: fn(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0120", span, "`{name}` was not moved here, so a stored lambda cannot write it", "`{name}` is lent for writing only until this call returns, and a stored lambda can run after that", "make the parameter owned (`{name}: &&{type_name(ty)}`) and return the result, or write `{name}` inside this call")
-}
-
 sema_expression_lambda_view_diagnostic: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to be captured by a stored lambda", "a view borrows storage owned by the surrounding scope; retaining the lambda could outlive that storage", "copy the view into an owned value before capturing it, or keep the lambda inside the view's scope")
 }
@@ -2263,14 +2259,6 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 task_body && sema_expression_lambda_view_crossing(capture_ty, environment, program, lambda_scopes, context) -> {}
                 !escapes -> {
                     if explicit_move -> sema_expression_lambda_append_name(lambda_work.meta.moved_captures, binding.symbol.name) else -> sema_expression_lambda_append_name(lambda_work.meta.frozen_captures, binding.symbol.name)
-                }
-                // A stored lambda that writes a write parameter would hold the
-                // caller's storage by address (a written alias stays an
-                // address so a scoped task's writes land on the owner) and
-                // outlive the call that lent it.
-                !task_body && borrowed && binding.access == AccessConvention.Write && sema_expression_lambda_name_contains(lambda_work.meta.mut_captures, binding.symbol.name) -> {
-                    diagnostics.push(sema_expression_lambda_write_capture_diagnostic(binding.symbol.name, capture_ty, lambda.span))
-                    return None
                 }
                 is_view -> {
                     if explicit_move || binding.mutable {
