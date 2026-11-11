@@ -1,0 +1,255 @@
+{
+  "cardId": "c0dhc7rh",
+  "id": "D-CONTEXT-EFFECT1",
+  "title": "Where the effect for reading a task's context lives",
+  "group": "effects",
+  "ballotMode": "full",
+  "draft": false,
+  "situation": "Reading a task's deadline or thread index adds Context to a function's effects. Two earlier votes require that dependency to remain visible. The kernel vote lists twelve built-in roots, but the compiler now has thirteen, including Context. We recommend declaring Context in Core while keeping its name and read effect. This is not just moving a declaration: authority checks must still distinguish a context dependency from permission to touch the machine. Keeping a runtime-context root is a credible alternative, but needs an explicit amendment to the twelve-root rule. This vote does not remove context reads at compile time: an earlier vote expressly permits reading the build's root context.",
+  "surface": {
+    "gist": "Should Context be declared in Core, stay built in, or use an existing root?",
+    "lesson": "Reading context adds a dependency to a function's effects, even though it needs no permission. The kernel vote lists twelve roots; code adds Context as thirteen. A moves its declaration to Core. Beginners still omit rows. Compile-time reads keep the earlier rule: they see the build's root context.",
+    "trio": {
+      "current": {
+        "note": "Both reads use Context. A package may deny them without granting anything first.",
+        "code": "time_left: fn(now: Int) -[Context]> Int {\n    (context.deadline ?? now) - now\n}\nworker: fn() -[Context]> Int { context.thread }\n// authority: { deny: [Context] } rejects both"
+      },
+      "wild": {
+        "lang": "Go",
+        "note": "Go normally passes context explicitly; forwarding it costs parameters, not an effect row.",
+        "code": "func timeLeft(ctx context.Context, now time.Time) time.Duration {\n    if d, ok := ctx.Deadline(); ok { return d.Sub(now) }\n    return 0\n}"
+      }
+    },
+    "options": [
+      {
+        "key": "A",
+        "name": "Declare Context in Core",
+        "gist": "Keep the read effect, but remove its built-in declaration.",
+        "gains": ["Keeps the twelve-root rule and current app spelling."],
+        "losses": ["Needs authority changes, not just a declaration move."],
+        "proposed": {"code": "// Core declaration, proposed\n#FX\nContext: struct {\n    impl Effect {}\n}\ntime_left: fn(now: Int) -[Context]> Int {\n    (context.deadline ?? now) - now\n}"}
+      },
+      {
+        "key": "B",
+        "name": "Keep today's runtime root",
+        "gist": "Amend the kernel rule to include runtime context.",
+        "gains": ["Keeps the existing implementation."],
+        "losses": ["Keeps a Context-specific grant exemption."],
+        "proposed": {"code": "time_left: fn(now: Int) -[Context]> Int {\n    (context.deadline ?? now) - now\n}"}
+      },
+      {
+        "key": "C",
+        "name": "Remove the read effect",
+        "gist": "Allow ambient reads in empty rows.",
+        "gains": ["Fewer row annotations."],
+        "losses": ["Reverses two votes and removes context-read denials."],
+        "proposed": {"code": "time_left: fn(now: Int) -[]> Int {\n    (context.deadline ?? now) - now\n}"}
+      },
+      {
+        "key": "D",
+        "name": "Use Env.Context",
+        "gist": "Put the dependency under Env and grant it by default.",
+        "gains": ["Keeps twelve built-in roots."],
+        "losses": ["Denying Env also denies context reads."],
+        "proposed": {"code": "time_left: fn(now: Int) -[Env.Context]> Int {\n    (context.deadline ?? now) - now\n}"}
+      },
+      {
+        "key": "E",
+        "name": "Built-in root on the ordinary floor",
+        "gist": "Keep Context separate, but grant it through the existing beginner floor.",
+        "gains": ["Removes the separate no-grant exception."],
+        "losses": ["Still needs the thirteen-root amendment."],
+        "proposed": {"code": "// Context joins IO, Mem.Alloc and Exec.Args on the floor.\ntime_left: fn(now: Int) -[Context]> Int {\n    (context.deadline ?? now) - now\n}"}
+      }
+    ],
+    "recommendation": {
+      "rec": "A",
+      "why": "A preserves both ratified directions without renaming app code. Keep dependency tracking separate from machine permissions, using the existing effect checker.",
+      "gains": ["No extra beginner annotations."],
+      "losses": [{"loss": "The cutover is not yet proved.", "mitigation": "Require the read, deny, task and build-root probes before landing."}],
+      "whyNot": [
+        {"key": "B", "reason": "Credible runtime primitive, but changes the kernel rule and keeps an exception."},
+        {"key": "C", "reason": "Shorter expert rows hide the dependency; inferred beginner rows already need no writing."},
+        {"key": "D", "reason": "Couples unrelated denials and renames rows."},
+        {"key": "E", "reason": "Cleaner than B's grant rule, but still changes the kernel contract."}
+      ],
+      "tradeoff": "Library placement does not make an ambient dependency pure. Keep that distinction checked."
+    }
+  },
+  "gist": "Should Context be declared in Core, stay built in, or use an existing root?",
+  "lesson": "A context read is a tracked dependency, not necessarily a machine permission. The current Context root exceeds the kernel vote's twelve-root list. Core placement could preserve the name, inference, pure-row rejection and denials. It must not equate an empty machine-effect list with an empty dependency row. Compile-time reads retain the ratified build-root meaning.",
+  "story": "Priya's helper checks the deadline installed by its caller. She can omit its effect row; her reviewer can inspect the inferred Context dependency. A package that must not depend on that ambient input can deny Context. The question is where to declare that effect, not whether to make Priya write a row.",
+  "inWild": "// Go: explicit parameter, not a purity or ambient-read guarantee.\n// Source: https://go.dev/src/context/context.go, lines 34-54 and 72-76.\nfunc timeLeft(ctx context.Context, now time.Time) time.Duration {\n    if d, ok := ctx.Deadline(); ok { return d.Sub(now) }\n    return 0\n}",
+  "detail": "Authority checked on origin/dev at 271be24d15. Docs/spec/syntax-decisions.md:9102,9186,9298 records A for the three cited decisions, but contains only their index entries. Their full clauses were checked read-only in Tower, not inferred from that index. D-EFFTYPE-KERNEL1 option A technical lists ten machine roots plus deny-only Mem and Panic. D-JAI-CONTEXT1 EFFECT and D-CONTEXT1 SHARED require Context on reads. The latter also requires no grant and permits denial.\n\nImportant correction: D-JAI-CONTEXT1 PREP says build-time reads see the build's root context, with no scratch unless set. It does not prescribe numeric thread id zero. The current runtime assigns zero to the first/main thread. Seed-b5 prints zero for a prepared thread read and None for a prepared deadline. Those results are consistent with the contract, not evidence of a defect. The older Mem-only wording in D-RIGHTS1 must be reconciled with the later specific permission; this ballot does not reverse PREP.\n\nCommit 1e1fff240f added Context to Compiler/Prelude/Effects.jet:123-125. The generated Effect enum at Compiler/JetFoundation/Source/Registry/EffectRoots.jet:5 has thirteen cases. Policy/Authority.jet:42-47 exempts Context by name. Driver/Pipeline.jet:4795 separately inserts it into package budgets. The beginner floor at Policy/Authority.jet:24 does not contain Context.\n\nCore/Compiler/Meta.jet:11-20 demonstrates a bare #FX declaration, and Registry/EffectVocabulary.jet:25 reads all three effect sources while building. That proves the declaration form, not A's complete behavior. Core effect bounds can admit their listed machine effects (Effects/Checks.jet:741-762). Keeping a nominal Context dependency and granting no machine permission are distinct jobs.\n\nSeed-b5 probes cover both fields, inferred and written rows, an authority ceiling, denial, spawned tasks, nested restoration, compile-time values, and write-only Context blocks. A direct empty-row read gets E3401, but its text misleadingly calls the field read `call`. Env.Context is accepted as an open path today but does not cover Context: the same reader gets E0740. A is proposed, not a cutover tested with a rebuilt compiler.\n\nOwner ranking, Docs/spec/philosophy.md:28-54: safety, beginner experience, runtime performance, one mechanism, implementation simplicity and compile speed, then ecosystem breadth. A, B and E keep the same beginner path. No option has a measured performance advantage here. A is preferred for preserving ratified boundaries, not because twelve is inherently simpler than thirteen.",
+  "options": [
+    {
+      "key": "A",
+      "name": "Core declares Context with no machine power",
+      "detail": "Move the declaration to Core/Effects/Effects.jet under bare #FX, retaining bare Context rows. A read still records a nominal Context dependency even with an empty machine list. A package can deny it; an allow ceiling need not list it. Neither a direct read nor a call reaching one becomes pure.\n\nBeginner: omit the row. Expert: write Context or !Context, or a package deny. Spawned deadlines and dynamic thread identity remain unchanged. A block that only installs a deadline is not itself a Context read. Prepared reads see the build root, not the eventual runtime caller.\n\nThis is a proposed cutover. Reuse the vocabulary and effect checks, and derive no-grant treatment from declaration provenance plus its machine list. Do not test kernel emptiness alone: today's machine roots also have empty kernel arrays. Do not add a Context-only purity walker or a private Core declaration form.",
+      "technical": "Move the Prelude declaration and regenerate EffectRoots plus affected Prelude and core.compiler.lang projections. Preserve Expressions/Places.jet's intrinsic Context fact. Replace the named grant exemption and Driver budget insertion with consistent library-effect authority handling. Empty kernel means no machine permission, not no dependency.\n\nMigration includes generated root consumers, maximal rows, effect parsing, authority and notice paths, snapshots, examples and specs. Keep the existing runtime carrier and app spelling. The landing proof must cover direct and transitive reads, function values, generic and trait calls, denials, ceilings and build-root reads. None of this is proved by the Meta declaration alone.",
+      "code": "// Proposed Core/Effects/Effects.jet declaration\n#FX\nContext: struct {\n    impl Effect {}\n}\n\n// App, in a separate source file\npackage: {\n    name: \"fetcher\"\n    authority: { allow: [IO, Net] }\n}\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nworker: fn() -[Context]> Int { context.thread }\nbudget: fn(now: Int) -[Context]> Int { time_left(now) }\nrun: fn() {\n    print(budget(10))\n    print(worker())\n}\n// Replace the authority row with deny: [Context]: E0749, required.\n// This cutover is proposed; only the app spelling runs on seed-b5 today."
+    },
+    {
+      "key": "B",
+      "name": "Ratify the thirteenth runtime root",
+      "detail": "Keep today's built-in Context root and named no-grant rule. Amend the kernel contract explicitly: built-in primitives include task-runtime state, not only the enumerated machine powers. Reading a running thread index is plausibly a runtime primitive; external I/O is not the only useful effect.\n\nBeginner and expert code are the same as A. No declaration or app migration is needed, but the twelve-root specification changes. This keeps the existing separate grant exception and package-budget insertion. It does not fix the generic `call` diagnostic.\n\nSpawn, block restoration and build-root reads keep their current meaning. B is a valid owner choice after an explicit amendment, not something agents may silently infer from the implementation.",
+      "technical": "Current Prelude/Effects.jet:123-125 and generated EffectRoots.jet:5. Foundation Policy/Authority.jet:42-47 exempts Context from grants; Driver/Pipeline.jet:4795 adds it to package ceilings. Context is not deny-only in the purity-check sense. Making it deny-only would hide a dependency that the earlier ballots require tracking.",
+      "code": "package: {\n    name: \"fetcher\"\n    authority: { allow: [IO, Net] }\n}\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nworker: fn() -[Context]> Int { context.thread }\nbudget: fn(now: Int) -[Context]> Int { time_left(now) }\nrun: fn() {\n    print(budget(10))\n    print(worker())\n}\n// Replace allow with deny: [Context]: E0749 today."
+    },
+    {
+      "key": "C",
+      "name": "Remove the Context read effect",
+      "detail": "Allow ambient reads without adding an effect. This is a reversal of the two ratified read-effect clauses, not merely relocating a declaration. Pure rows could then depend on the task's deadline or running thread. The benefit is shorter explicit signatures, not fewer beginner annotations: inference already avoids those.\n\nContext-read denials disappear. Context-dependent memoization or constant folding would require a different contract; do not assert that either is already broken by this unimplemented option. Prepared reads would still see the build root under the existing PREP clause. Forbidding them instead would require another owner amendment.\n\nSpawn propagation and Context blocks remain. Remove obsolete effect names, grant rules, budget entries and diagnostics in one cutover; migrate written rows, tests, snapshots and documentation. The underlying ambient-input semantics remain even after their effect label is gone.",
+      "technical": "Remove the intrinsic effect recording at Expressions/Places.jet:766 and remove the Context root and authority special cases. Keep ContextRead lowering and the task carrier. Update the purity contract explicitly. This option does not make ambient state an ordinary argument or a mathematical pure input.",
+      "code": "// Proposed behavior, rejected by seed-b5 today\npackage: {\n    name: \"fetcher\"\n    authority: { allow: [IO, Net] }\n}\ntime_left: fn(now: Int) -[]> Int { (context.deadline ?? now) - now }\nworker: fn() -[]> Int { context.thread }\nbudget: fn(now: Int) -[]> Int { time_left(now) }\nrun: fn() {\n    print(budget(10))\n    print(worker())\n}\n// After removing the effect, deny: [Context] is no longer valid."
+    },
+    {
+      "key": "D",
+      "name": "Env.Context on the beginner floor",
+      "detail": "Keep the dependency but rename it Env.Context. Add that leaf to the ordinary floor, like Exec.Args, while allowing denial. Twelve roots remain. Treating task context as input to a task has a coherent rationale, but Env currently describes process environment variables.\n\nBeginner inference is unchanged. Experts rename rows and denials. A deny of Env also blocks context reads, and a deny of Env.Context blocks only this leaf. Excluding only environment-variable access would need a separate Env leaf and migration; this option does not invent one silently.\n\nSpawned tasks, block restoration and build-root reads keep their meaning. The spelling parses today because Env has no declared leaves, but it does not authorize the current Context intrinsic. Converting Env to a closed enum is unnecessary and would close other open leaf paths.",
+      "technical": "Keep Env as the existing root; declare its new leaf through the existing effect-leaf mechanism rather than adding a new root. Record Env.Context for reads and use the ordinary floor across budget and notice checks. Remove Context everywhere in the same cutover. Audit open Env leaf uses before making the vocabulary closed. Amend the earlier ballots' exact Context name.",
+      "code": "// Proposed behavior; today's seed reports E0740\npackage: {\n    name: \"fetcher\"\n    authority: { allow: [IO, Net] }\n}\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nworker: fn() -[Env.Context]> Int { context.thread }\nbudget: fn(now: Int) -[Env.Context]> Int { time_left(now) }\nrun: fn() {\n    print(budget(10))\n    print(worker())\n}\n// Proposed deny: [Env] or deny: [Env.Context]: E0749."
+    },
+    {
+      "key": "E",
+      "name": "Context stays built in, using the ordinary floor",
+      "detail": "Keep the built-in Context root but put it on the existing beginner floor instead of using a separate no-grant exception. This separates two questions the draft had bundled: declaration location and default authority. No new syntax or renamed app row is needed.\n\nBeginner, expert, spawn, block and build-root behavior match B. Use one ordinary floor relation for package ceilings and invocation notices; do not leave the Context-only predicate beside it. A deny still wins. Context remains a dependency for pure-row checking, unlike deny-only Mem.\n\nCost: amend the twelve-root kernel contract, update the floor contract and its closed-list guard, migrate authority tests and inspect output. It may be the cleaner choice if the owner prefers Context as a runtime primitive. It is not today's authority implementation, although the app code already runs.",
+      "technical": "Retain Prelude/Effects.jet's Context declaration. Add Context to AUTHORITY_AMBIENT_BASIC_EFFECTS and remove its special grant branch and separate Driver budget insertion. Check all consumers of the floor and effect notices together. Amend the floor invariant openly instead of bypassing its executable guard.",
+      "code": "// Proposed authority handling; app spelling works today\npackage: {\n    name: \"fetcher\"\n    authority: { allow: [IO, Net] }\n}\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nworker: fn() -[Context]> Int { context.thread }\nbudget: fn(now: Int) -[Context]> Int { time_left(now) }\nrun: fn() {\n    print(budget(10))\n    print(worker())\n}\n// deny: [Context] still rejects all transitive readers."
+    }
+  ],
+  "comparisons": [
+    {
+      "lang": "Jai",
+      "note": "Jai's context supplies allocator, temporary storage, logger, print settings and thread index without forwarding parameters. push_context overrides it for a region; #add_context extends it. That is the convenience Jet is retaining, not evidence for any effect-root location. Source: Jai Community Library, Advanced, Context section; community documentation, not an executed Jai probe.",
+      "source": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Advanced#context",
+      "code": "my_context: Context;\npush_context my_context {\n    // Calls use the pushed services.\n}\n#add_context this_is_the_way := true;",
+      "limit": "The source does not establish an effect-row guarantee, a Jet-style deny policy or comparative performance. No Jai compiler was run."
+    },
+    {
+      "lang": "Odin",
+      "note": "Odin passes a scoped context pointer with its ordinary calling convention, letting libraries use substituted allocators and logging without extra parameters. It also has a contextless convention, so the draft's claim about every procedure was false. Context reads are not Jet-style dependency rows. Sources: Overview, Implicit context system and Calling conventions.",
+      "source": "https://odin-lang.org/docs/overview/#implicit-context-system",
+      "code": "time_left :: proc(now: int) -> int {\n    return context.user_index - now\n}\nplain :: proc \"contextless\" (n: int) -> int { return n }",
+      "limit": "user_index is an application value, not a deadline or physical worker index. The comparison is about plumbing only; no Odin compiler was run."
+    },
+    {
+      "lang": "Koka",
+      "note": "Koka infers effect rows and supports user-defined effects and handlers. A reader effect can make ambient access visible and locally supply its value. It also supports implicit parameters: argument inference and tracked effects are distinct choices, not synonyms. Sources: Koka book sections 3.2 and 3.4, plus its implicits release notes.",
+      "source": "https://koka-lang.github.io/koka/doc/book.html",
+      "code": "// Source's ordinary effect-row examples\nfun square1(x : int) : total int { x*x }\nfun square2(x : int) : console int { println(\"a not so secret side-effect\"); x*x }",
+      "limit": "Handlers can replace an operation's interpretation; Jet's #FX declaration only bounds permitted effects. No speed or safety superiority is claimed and no Koka compiler was run."
+    },
+    {
+      "lang": "Effekt",
+      "note": "Effekt offers lexically scoped handlers and contextual effect polymorphism. Callback effects can remain handled at their call site without explicit row-variable plumbing. Its name-based implicit value and block parameters are another convenience for forwarding dependencies. These are not all one dynamically inherited task context. Sources: effect-polymorphism and name-based-implicits pages.",
+      "source": "https://effekt-lang.org/docs/concepts/effect-polymorphism",
+      "implicitSource": "https://effekt-lang.org/tour/name-based-implicits",
+      "code": "def foo(?context: String): Unit =\n  println(s\"Called from ${context}\")",
+      "limit": "The empty requirement set in Effekt's contextual callback type is not Jet's absolute pure-row assertion. No Effekt compiler was run."
+    },
+    {
+      "lang": "Scala 3",
+      "note": "Context function types such as ExecutionContext ?=> T synthesize context arguments and allow explicit using arguments. They expose a typed dependency without manual forwarding at every call. They are not, by themselves, an effect or purity checker, a sandbox grant, or a task-context inheritance policy. Source: Scala 3 reference, Context Functions.",
+      "source": "https://docs.scala-lang.org/scala3/reference/contextual/context-functions.html",
+      "code": "import scala.concurrent.ExecutionContext\ntype Executable[T] = ExecutionContext ?=> T",
+      "limit": "This is a library-plumbing alternative, not proof that a root belongs in Core. No Scala compiler was run."
+    },
+    {
+      "lang": "Go",
+      "note": "Go recommends context.Context as an explicit first parameter and supports deadlines, cancellation and request values across goroutines. Callers may derive and pass independent contexts. That makes propagation visible but costs forwarding parameters. The draft overstated signature guarantees: a function can capture or store a context without accepting one. Source: context.go:34-54,72-76,118-163.",
+      "source": "https://go.dev/src/context/context.go",
+      "code": "func timeLeft(ctx context.Context, now time.Time) time.Duration {\n    if d, ok := ctx.Deadline(); ok { return d.Sub(now) }\n    return 0\n}",
+      "limit": "This helper returns zero for no deadline to match Jet's example. Go's Context does not supply a Jet worker index or an effect-row denial. No Go compiler was run."
+    }
+  ],
+  "rec": "A",
+  "recommendation": {
+    "why": "A preserves the ratified read dependency and twelve-root kernel without changing app spelling or the inferred beginner path. It is a direction, not a claim that moving one declaration already preserves every behavior.",
+    "gains": ["No new beginner annotations or renamed Context rows.", "Core declaration uses the existing effect form.", "Machine permission and ambient dependency stay distinct."],
+    "losses": [
+      {"loss": "Authority handling and generated root consumers need a real cutover.", "mitigation": "Use declaration provenance and the existing effect checker; prove that empty machine lists retain dependencies, pure-row rejection and denials."},
+      {"loss": "The compiler still records the intrinsic Context dependency by name.", "mitigation": "Reuse the registered nominal effect fact. Library placement must not add a private Core hook or a second checker."},
+      {"loss": "A's compatibility and performance are not measured here.", "mitigation": "Keep runtime lowering unchanged and require the focused behavior matrix before landing; make no performance superiority claim."}
+    ],
+    "whyNot": [
+      {"key": "B", "reason": "A runtime dependency is a credible primitive. But B amends the kernel contract and retains a separate no-grant branch; E is cleaner if built-in placement wins."},
+      {"key": "C", "reason": "Inference already gives beginners the short path. Removing the effect mainly shortens explicit rows while undoing dependency tracking and denial, so it is not a free simplification."},
+      {"key": "D", "reason": "D reuses a root but couples unrelated prohibitions and renames existing rows. Separating environment-variable access would need a further vocabulary migration, not just this new leaf."},
+      {"key": "E", "reason": "E fairly removes B's special grant mechanism using the existing floor. It still needs an explicit thirteen-root amendment; prefer A while the twelve-root direction remains ratified."}
+    ],
+    "tradeoff": "A retains runtime-dependent Context facts outside the machine-root enum. It must preserve one effect mechanism while distinguishing dependency tracking from authority grants; a bare #FX declaration alone is not that proof."
+  },
+  "reviewPasses": {
+    "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotContextEffect. Reviewed code, ratified clauses and seed-b5 probes; corrected the false comptime defect, qualified compatibility claims and added the ordinary-floor alternative. Recommendation A holds within stated limits; per-claim verdicts, sources and landing gates appear in claimReviews and towerGaps."
+  },
+  "reviewDate": "2026-11-11",
+  "reviewBasis": {
+    "codeRef": "origin/dev at 271be24d15",
+    "compiler": "$JET_SCRATCH_ROOT/lanes/Main/integ/seed-b5/jet",
+    "scratch": "$HOME/.cache/jet-dev/scratch/Main/ballot-context/",
+    "probeCommand": "nice -n 10 ionice -c3 $JET_SCRATCH_ROOT/lanes/Main/integ/seed-b5/jet run --threads 2 <probe.jet>",
+    "scope": "Only focused scratch programs and the unchanged origin/dev ballot validator were run. No compiler build, suite, Tower write or repository edit occurred. Proposed A, C, D and E compiler changes were not built.",
+    "optionProbes": "option-A-app.jet, option-B-app.jet and option-E-app.jet each exit 0 and print 0 then 0. A tests only its app half, not the moved Core declaration. option-C-app.jet gets E3401; option-D-app.jet gets E0740. Exact outputs are in option-results.json.",
+    "authority": [
+      {"id": "D-EFFTYPE-KERNEL1", "outcome": "A", "ratifiedAt": "2026-10-30", "source": "Tower decision option A technical; syntax-decisions.md:9186 is the index only", "checkedClause": "Compiler roots Net, FS, IO, Time, Rand, Env, Exec, FFI, GPU, Browser; deny-only Mem and Panic."},
+      {"id": "D-JAI-CONTEXT1", "outcome": "A", "ratifiedAt": "2026-10-17", "source": "Tower decision EFFECT, PROPAGATION and PREP; syntax-decisions.md:9298 is the index only", "checkedClause": "Each read adds Context; pure rows cannot read it. Spawned tasks observe spawn-time context. Build-time code reads the build root, with no scratch unless set."},
+      {"id": "D-CONTEXT1", "outcome": "A", "ratifiedAt": "2026-10-29", "source": "Tower decision SHARED: THE NAME AND THE EFFECT; syntax-decisions.md:9102 is the index only", "checkedClause": "Reads add Context; no grant is needed, denial is allowed. context is a short name for core.context and local names may shadow it."}
+    ]
+  },
+  "claimReviews": [
+    {"claim": "The kernel vote names twelve roots; current code has thirteen.", "verdict": "holds", "evidence": "D-EFFTYPE-KERNEL1 option A technical lists the twelve. Prelude/Effects.jet:123-125 adds Context; generated Registry/EffectRoots.jet:5 has thirteen. Commit 1e1fff240f introduces it."},
+    {"claim": "Both earlier context decisions require a tracked Context read effect.", "verdict": "holds", "evidence": "Tower D-JAI-CONTEXT1 EFFECT and D-CONTEXT1 SHARED. Expressions/Places.jet:757-767 types deadline as Int?, thread as Int, and records Context."},
+    {"claim": "A context read needs no grant and can be denied.", "verdict": "holds", "evidence": "Policy/Authority.jet:42-47; Driver/Pipeline.jet:4794-4797. ceiling.jet exits 0 and prints 0,0 without a Context grant. deny.jet exits 1 with E0749 on both readers and run."},
+    {"claim": "Inferred and written Context rows work today.", "verdict": "holds", "evidence": "inferred.jet and row-context.jet each exit 0, stdout 0 then 0, stderr empty. Both deadline and thread were read; no row was required on the inferred version."},
+    {"claim": "Direct empty-row reads are rejected, but the diagnostic names the read accurately.", "verdict": "holds within limits", "evidence": "pure.jet exits 1 with two E3401 errors, one per field. Both say impure function `call`, so rejection holds but diagnostic accuracy fails. Report that wording defect separately."},
+    {"claim": "Spawned tasks inherit deadlines and nested Context blocks restore them.", "verdict": "holds within limits", "evidence": "spawn.jet is an unchanged scratch copy of Examples/Concurrency/ContextReads.jet. It exits 0: outside -1, block 4102444800000, nested 4102444799999, restored 4102444800000, after -1, task inside 4102444800000, task outside -1, task thread true. This probes deadlines and a nonnegative thread index, not all future fields or migration between workers."},
+    {"claim": "A Context block without a read is not itself a Context read effect.", "verdict": "holds within limits", "evidence": "block-pure.jet and block-deny.jet both exit 0 and print 7 with a literal future deadline. This does not claim every Context field update is effect-free: argument expressions and block bodies retain their own effects."},
+    {"claim": "Comptime context.thread returning 0 is a defect and all options must refuse it.", "verdict": "fails", "evidence": "D-JAI-CONTEXT1 PREP expressly permits build-root reads. comptime-thread.jet prints 0; comptime-deadline.jet prints -1 for None. Both exit 0 at optimize none, basic and full. Runtime Thread.jet:67-73,115-126 assigns and reads the first/main thread's zero index; Context.jet:30-31 defines a zeroed root. The contract requires the build root, not a fixed number on every compiler host."},
+    {"claim": "Meta proves the bare #FX declaration form and generated vocabulary path.", "verdict": "holds", "evidence": "Core/Compiler/Meta.jet:11-20 and Registry/EffectVocabulary.jet:25. meta-empty.jet, meta-ceiling.jet and library-empty.jet all exit 0 with stdout 7. No actual Meta mutation was exercised."},
+    {"claim": "Moving the declaration automatically preserves programs, errors and authority while removing all special handling.", "verdict": "fails", "evidence": "A has not been built. Policy/Authority.jet:46-47 and Driver/Pipeline.jet:4795 are separate named paths. EffectVocabularyRow stores empty kernel lists for machine roots too, so testing emptiness alone is wrong. Checks.jet:741-762 preserves named coverage separately from the kernel list. library-pure.jet and meta-pure.jet returning 7 only prove a declared upper bound is not an actual read."},
+    {"claim": "Env.Context already exists as the spelling of the context-read effect.", "verdict": "fails", "evidence": "env-context.jet parses that open Env leaf but exits 1 with E0740 for both actual Context readers. Env is still a struct in Prelude/Effects.jet:51-53. D's read remapping and floor change are proposals."},
+    {"claim": "Denying Env would cover Env.Context under D.", "verdict": "holds within limits", "evidence": "Foundation Policy/Authority.jet:132-136 delegates descendant coverage to the effect-scope tree. D changes the recorded fact to Env.Context; that compiler change is unbuilt. Existing denials follow real recorded names, not the draft's proposed spelling."},
+    {"claim": "C's cache and compile-time risks follow without qualification from removing the effect.", "verdict": "holds within limits", "evidence": "Removing dependency tracking could invalidate optimizations that rely on an empty row, but C is unbuilt and no wrong cached result was demonstrated. pure.jet is rejected today. A prepared read of the build root is expressly allowed, so it is not inherently a wrong answer. The repaired text distinguishes that contract from a future runtime caller's context."},
+    {"claim": "Go signatures always reveal context readers and functions without a context parameter cannot read one.", "verdict": "fails", "evidence": "Go context.go:38-41 recommends explicit parameters; it does not enforce them. A closure or stored value can supply a Context. The repaired comparison says normally and does not claim purity."},
+    {"claim": "Every Odin procedure receives implicit context.", "verdict": "fails", "evidence": "Odin Overview Calling conventions distinguishes odin from contextless. The implicit-context section says propagation applies to the Odin calling convention. The repaired comparison names that limit."},
+    {"claim": "A is better for beginners or runtime speed than the other tracked-effect choices.", "verdict": "fails", "evidence": "The same inferred.jet runs without an annotation, regardless of declaration location. Philosophy.md:32-54 ranks beginner experience and performance above simplicity. No performance measurement distinguishes A, B, D or E. The recommendation no longer claims such an advantage."},
+    {"claim": "The ratified qualified escape core.context works today when a local shadows context.", "verdict": "fails", "evidence": "shadow.jet exits 0 and prints 30 from a local record under -[]>; import-context.jet exits 1 with E1001, no core.context module. The shared naming contract is not implemented by the current fallback intrinsic. It must not be described as a complete ordinary Core module."},
+    {"claim": "Ordinary explicit parameters are a viable pure helper baseline.", "verdict": "holds within limits", "evidence": "explicit.jet passes deadline as Int?, exits 0 and prints 0 under -[]>. The acquisition boundary still needs ambient context or scheduler input. This is usable now but does not decide where the Context effect lives, so it is not presented as a separate root-location option."},
+    {"claim": "Only a suspend function can read Kotlin coroutineContext.", "verdict": "fails", "evidence": "The CoroutineScope.coroutineContext API is an ordinary abstract val of type CoroutineContext. A scope holder can read it without a suspend function. Source: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-scope/coroutine-context.html. The overbroad comparison was removed."},
+    {"claim": "Jai provides ambient substitutable services and context extensions.", "verdict": "holds within limits", "evidence": "Jai Community Library Advanced, Context, push_context and #add_context sections were fetched. This supports the documented convenience, not an effect system or measured advantage; no Jai compiler was run."},
+    {"claim": "Koka supports typed reader effects, handlers and implicit parameters.", "verdict": "holds within limits", "evidence": "Koka book 3.2 describes inference; 3.4.2 defines ask<a> and handles it with a constant; release notes describe syntactic implicits. Sources support distinct mechanisms, not equivalence to Jet authority. No Koka compiler was run."},
+    {"claim": "Effekt supports lexical handlers, contextual effect polymorphism and implicit parameters.", "verdict": "holds within limits", "evidence": "Effekt effect-polymorphism page shows a callback requiring no additional effects while its effects are handled at the lexical call site. The name-based-implicits page shows ?context: String and inferred block arguments. This is documented behavior, not an executed comparison."},
+    {"claim": "Scala 3 context function types synthesize typed context arguments.", "verdict": "holds within limits", "evidence": "Scala 3 Context Functions reference defines ExecutionContext ?=> T and explicit versus inferred using arguments. It does not establish task inheritance, purity or sandbox enforcement. No Scala compiler was run."},
+    {"claim": "A can satisfy I7 and I8 without a new user mechanism.", "verdict": "holds within limits", "evidence": "AGENTS.md:155-163 requires ratified syntax and one mechanism. A proposes the existing #FX declaration, existing Context name and existing effect facts. Its acceptance gate forbids a new Context-only checker; authority must distinguish source provenance from an empty kernel. B and E require an owner amendment; C reverses the read-effect contract; D renames it and couples denials."}
+  ],
+  "towerGaps": [
+    {"topic": "Context read diagnostic", "status": "needs Tower tracking or link to existing criterion", "evidence": "pure.jet produces E3401 calling a field read `call`.", "acceptance": "Name context.deadline or context.thread at the read, preserve the dependency call chain, and update diagnostic snapshots.", "postingImpact": "Do not post any claim that current errors accurately identify the read."},
+    {"topic": "Core context name and qualification", "status": "needs Tower tracking or link to existing #5025 naming criterion", "evidence": "D-CONTEXT1 requires ordinary core.context qualification; import-context.jet returns E1001. Local shadowing already works.", "acceptance": "Complete the ratified module/qualified escape with ordinary resolution; preserve local shadowing and both read effects.", "postingImpact": "Do not describe context as a fully working ordinary Core module today."},
+    {"topic": "A implementation and composed proof", "status": "build criterion needed if A is ratified", "evidence": "Only current seed-b5 behavior and declaration precedents were run; the proposed cutover was not compiled.", "acceptance": "Migrate generated roots and all authority, budget, CLI notice and reflection consumers together. Prove inferred/written reads, direct/transitive pure rejection, function values, generics, traits, denies, ceilings, spawned context, blocks and prepared build-root values using one effect checker.", "postingImpact": "May post A as a conditional design choice, not a proved one-line fix or a working replacement."},
+    {"topic": "Comptime policy documentation reconciliation", "status": "documentation reconciliation, not a demonstrated runtime defect", "evidence": "D-JAI-CONTEXT1 PREP permits build-root reads, while older D-RIGHTS1 describes a Mem-only comptime row. The later specific permission controls; current thread 0 and deadline None probes agree at O0/O1/O2.", "acceptance": "State the build-root Context permission in the shared compile-time row contract. If rejection is desired instead, obtain an explicit amendment to PREP; do not file thread=0 itself as a defect.", "postingImpact": "Remove the draft's universal comptime-refusal demand before posting."}
+  ],
+  "migrationReview": [
+    {"option": "A", "cost": "No app-row rename is intended. Move the declaration, regenerate vocabulary projections, and change authority and budget consumers together. This is more than a one-file relocation.", "evidence": "CoreSourceRows.jet:2800-2813 reads and joins the three sources; lines 2843-2854 regenerate EffectRoots.jet, Core/Compiler/Lang.jet and Prelude/Core.jet projections. Lang.jet:34-51 currently includes Context and Core service effects. Policy/Authority.jet:42-47 and Driver/Pipeline.jet:4795 are separate named paths.", "limit": "Source order also defines canonical row order; moving Context can change ordering relative to DB, Log and Secret. Update reflected or rendered expectations. No repository-wide migration count or rebuilt-compiler proof is claimed."},
+    {"option": "B", "cost": "No implementation or app migration for the root decision. Amend the kernel specification explicitly; independent diagnostic and naming gaps remain.", "evidence": "Current thirteen-case EffectRoots.jet:5 and successful option-B-app.jet."},
+    {"option": "C", "cost": "Remove Context rows and denials, intrinsic effect facts and policy special cases. Keep the runtime read carrier. Rewrite the pure-row and earlier read-effect contracts.", "evidence": "Expressions/Places.jet:766 and pure.jet's current E3401 are the behavior being changed; option-C-app.jet is not accepted today."},
+    {"option": "D", "cost": "Rename written Context rows and policies; remap intrinsic facts; add the floor leaf; audit open Env paths before closing its leaves. Existing deny: [Env] users acquire a broader prohibition.", "evidence": "Prelude/Effects.jet:51-53 declares Env without leaves; env-context.jet and option-D-app.jet get E0740 for real reads."},
+    {"option": "E", "cost": "No app rename. Amend the floor and kernel contracts, remove the separate Context exemption, and update budget, notice, inspect and floor-guard expectations.", "evidence": "Policy/Authority.jet:24 currently has only IO, Mem.Alloc and Exec.Args; lines 42-47 separately exempt Context. option-E-app.jet exercises only unchanged app syntax."}
+  ],
+  "changesMade": [
+    "Removed loaded framing that Context cannot plausibly be a runtime primitive; strengthened B's best case.",
+    "Replaced the false universal comptime prohibition with the ratified build-root rule and measured O0/O1/O2 results.",
+    "Distinguished the three decision-index entries from their full ratified Tower clauses, verified read-only.",
+    "Kept recommendation A but made it conditional on a real authority and generated-registry cutover, not a declaration-only promise.",
+    "Removed unchanged-error and automatic no-grant promises; explicitly declined unmeasured performance or beginner-superiority claims.",
+    "Added E: preserve the runtime root while using the ordinary floor instead of a separate Context exemption.",
+    "Expanded all options to the same deadline/thread program, an authority ceiling and denial consequences; labeled unbuilt compiler behavior.",
+    "Corrected D: Env.Context currently parses but does not authorize Context, and Env need not become a closed enum.",
+    "Qualified C's hypothetical memoization risk and corrected its compile-time framing without claiming a currently broken cache.",
+    "Corrected Go's unenforced signature guarantee and Odin's contextless exception; removed the overbroad Kotlin-only-suspend comparison.",
+    "Added sourced Jai, Koka, Effekt and Scala 3 comparisons, distinguishing handlers, implicit arguments, dependencies and authority.",
+    "Added ordinary-parameter baseline, local-shadowing and missing qualified-Core probes without proposing a second ambient mechanism.",
+    "Added owner-priority, I7/I8, migration, review provenance, per-claim verdict and Tower-gap records."
+  ],
+  "checkInstructions": "Run the unchanged origin/dev Tools/agent/ballots/Validate.jet scratch copy with seed-b5 on ballot.json. Probe sources and exact results are in the named scratch directory. Use nice -n 10 ionice -c3 for Jet commands. Validation checks payload shape and prose, not semantic completion or whether Tower identifiers are live."
+}
