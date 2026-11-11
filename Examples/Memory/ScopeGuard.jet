@@ -1,9 +1,12 @@
-// Scope-exit cleanup via `core.mem.scope.guard`.
-// `scope.guard` registers a zero-parameter callback in a must-use Guard value.
-// Registration itself does not run the callback: it runs once when the owning
-// scope exits, in reverse registration order. This covers normal success,
-// explicit failure, and plain-call failure propagation; no postfix `?` operator
-// is used. `print` gives the sample an inferred IO effect; a runtime marker is an
+// Scope-exit cleanup with `core.mem.scope.guard`.
+// `scope.guard(callback)` registers a zero-parameter callback and returns a
+// must-use `ScopeGuard`. Binding it (`_g1:`) keeps it until the owning scope
+// exits; registration itself does not run the callback. Every exit of that
+// scope runs each guard once, newest first: a normal `return Ok(...)`, a final
+// `Err(...)`, and a failure that a plain fallible call carries out of the
+// function. A guard left as a bare statement is rejected
+// (tests/ui/scope_guard_discarded.jet records the rejection and its repair).
+// `print` gives the sample an inferred IO effect; a runtime marker is an
 // observation, not a substitute for that checked effect fact.
 use scope: core.mem.scope
 
@@ -30,8 +33,9 @@ propagation_path: fn() -> Int Fail! {
 }
 
 run: fn() {
-    // `??` handles propagation_path's propagated failure at this boundary; it
-    // does not suppress the cleanup that happened while unwinding scopes.
+    // `??` is fallback recovery at this boundary. By the time it supplies -1,
+    // the guards of `with_guards` and `propagation_path` have already run on
+    // their failure exits; recovery does not skip or repeat them.
     normal_result: with_guards(true) ?? 0
     print(normal_result)
     propagated_result: propagation_path() ?? -1

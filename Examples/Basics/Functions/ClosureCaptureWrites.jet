@@ -1,5 +1,9 @@
-// S47/M2: a lambda that writes a captured `:=` local borrows it, so the write
-// lands on the owner. An escaping lambda owns a copy taken at creation.
+// What a lambda reads and changes in the locals it captures.
+// A lambda that writes a captured `:=` local and is only called directly in
+// its scope borrows that local: each call changes the owner's binding. An
+// escaping lambda (one stored in a list here) owns its captures: a copy taken
+// when it is created, so a later write to the source does not reach it. A
+// lambda's body runs only when it is called, never when it is built.
 twice: fn(f: fn(Int)) {
     f(2)
     f(3)
@@ -30,6 +34,9 @@ Box: struct {
     value: Int
 }
 
+// `next` writes `count`, so it borrows it and every call changes it. `read`
+// was built while `boxed.value` was 11 and still answers 11 after the owner
+// writes 22 through its own `:=` binding.
 closure_capture_snapshot_lesson: fn() {
     count := 10
     next: () -> {

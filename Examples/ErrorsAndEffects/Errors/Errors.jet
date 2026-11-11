@@ -1,6 +1,19 @@
-// Errors as values: success, propagation, fallback and handling.
+// Errors as values: four separate routes.
+// - Explicit failure return: `return Err(...)` leaves with a failure and the
+//   final `Ok(...)` is the success exit.
+// - Unmarked fallible call: `age: parse_age("7")` binds the success value, or
+//   leaves the calling function with the callee's failure. The call carries
+//   no extra punctuation.
+// - Fallback recovery: `parse_age("42") ?? 0` consumes the failure here and
+//   the fallback value takes its place; nothing leaves the function.
+// - Result table: `if result == { .Ok(...) ... .Err(...) ... }` reads both
+//   routes and handles each one in place.
 // `#Error` makes this application-owned family eligible for a typed failure
-// contract. `Err` and `Ok` are the only result constructors shown here.
+// contract. `run` names no failure type, and `ParseError` declares no
+// conversion into the default `Err`, so each fallible call in `run` needs a
+// fallback or a table: a bare `age: parse_age("7")` there is rejected
+// (tests/ui/fallible_entry_unhandled.jet records the rejection and its
+// repair).
 #Error
 ParseError: enum {
     Empty

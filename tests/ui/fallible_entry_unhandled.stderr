@@ -1,0 +1,8 @@
+Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `ParseError` into `Err` — no declared conversion exists
+  --> tests/ui/fallible_entry_unhandled.jet:12:10
+    |
+ 12 |     age: parse_age("7")
+    |          ^^^^^^^^^
+ Why: Ordinary fallible calls propagate automatically; `ParseError` can reach `Err` only through `impl ParseError -> Err`
+ Fix: Handle this call locally with `??`, add `impl ParseError -> Err { … }`, or change the return type
+More: jet-lang.dev/e/E2402
