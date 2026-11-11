@@ -3415,10 +3415,9 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
         loop diagnostic in sema_footprint_check(graph.modules[module_index].program.items) -> module_result.diagnostics.push(diagnostic)
         // Typestate declarations are bundle-wide; collect that view only for
         // a module that declares a state section or a typestate marker.
-        if !sema_module_is_core_source(graph.modules[module_index].module_identity) && sema_state_items_use_typestate(graph.modules[module_index].program.items) {
+        if sema_state_items_use_typestate(graph.modules[module_index].program.items) {
             bundle_items := [Item]{}
             loop registered_module_index in 0..<graph.modules.len() {
-                if sema_module_is_core_source(graph.modules[registered_module_index].module_identity) -> next
                 loop item_index in 0..<graph.modules[registered_module_index].program.items.len() -> bundle_items.push(graph.modules[registered_module_index].program.items[item_index])
             }
             loop diagnostic in sema_state_validate_declarations(graph.modules[module_index].program.items, bundle_items) -> module_result.diagnostics.push(diagnostic)
@@ -9304,8 +9303,11 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     }
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
     // Derived methods and deferred Core bodies are demanded afresh by this
-    // pass's checks.
+    // pass's checks. A compile that checks every Core body (`jet check Core`)
+    // demands every derived method too, so Core's derives get the checks a
+    // package's do.
     sema_derive_demand_reset(resolved_graph.derive_demand)
+    if resolved_graph.every_core_body -> sema_derive_demand_add(resolved_graph.derive_demand, loop (key, _) in resolved_graph.derive_method_rows -> key.copy())
     resolved_graph.derive_checked = [String:Bool]{}
     incremental: if session == .Val(_) -> true else -> false
     web_checks: sema_web_partition_active(resolved_graph)

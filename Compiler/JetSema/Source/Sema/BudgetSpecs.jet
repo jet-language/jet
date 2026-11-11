@@ -134,15 +134,14 @@ sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDi
 // One budget diagnostic and the `graph.modules` position of its source.
 BudgetLocatedDiagnostic: struct { module_index: Int, diagnostic: Diagnostic }
 
-// Every module's budgets in module order, then each owning package's
-// resolution and collision findings. Core sources declare no budgets.
+// Every module's budgets in module order, Core's among them, then each
+// owning package's resolution and collision findings.
 sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
     findings := [BudgetLocatedDiagnostic]{}
     packages := [String]{}
     group_specs := [String: [LocatedBudgetSpec]]{}
     group_catalogs := [String: BudgetAttachmentCatalog]{}
     loop (module_index, row) in graph.modules {
-        if sema_module_is_core_source(row.module_identity) -> next
         module_diagnostics := [Diagnostic]{}
         module_specs: sema_budget_elaborate_items(row.program.items, module_diagnostics)
         loop diagnostic in module_diagnostics -> findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})

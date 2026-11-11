@@ -236,30 +236,30 @@ sema_call_core_unbuilt_error: fn(callee: String, row: CoreUnbuiltRow, span: Span
     sema_error("E2104", span, "`{callee}` is not built yet", "This `jet` has no implementation of {row.feature} yet, and no other `jet` can run it.", "Remove the `{callee}` call for now; {row.feature} needs its Jet implementation first (card #{row.card}).")
 }
 
-// E2104 at a checked user call of a method (or the static `new`) of an
-// unbuilt handle type (core_unbuilt_handle); true when reported. Core's own
-// source may still name it; only a call from user code is refused, and only
-// by a compile that lowers it (sema_refuses_unbuilt).
+// E2104 at a checked call of a method (or the static `new`) of an unbuilt
+// handle type (core_unbuilt_handle); true when reported. The call is refused
+// wherever it is written, Core's own source included, and only by a compile
+// that lowers it (sema_refuses_unbuilt).
 sema_call_core_handle_unbuilt: fn(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
-    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
+    if !sema_refuses_unbuilt(program) -> return false
     row: core_unbuilt_handle(owner) ?? return false
     diagnostics.push(sema_call_core_unbuilt_error("{owner}.{method}", row, span))
     true
 }
 
-// A user call of an unbuilt Core call (core_unbuilt_call): noted
-// where the call resolves its Core member, settled once the call is checked.
+// A call of an unbuilt Core call (core_unbuilt_call): noted where the call
+// resolves its Core member, settled once the call is checked.
 SemaCoreUnbuiltCall: struct {
     module_name: String
     member: String
     span: Span
 }
 
-// Notes a call from user code that names an unbuilt Core feature. Core's own
-// source may still name it; only a call from user code is refused, and only
-// by a compile that lowers it (sema_refuses_unbuilt).
+// Notes a call that names an unbuilt Core feature, wherever it is written
+// (Core's own source included), in a compile that lowers it
+// (sema_refuses_unbuilt).
 sema_call_core_unbuilt_note: fn(module_name: String, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, unbuilt: &SemaCoreUnbuiltCall?) Never! {
-    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return
+    if !sema_refuses_unbuilt(program) -> return
     if core_unbuilt_call(module_name, member) == None -> return
     unbuilt = Val(SemaCoreUnbuiltCall{module_name: module_name, member: member, span: span})
 }

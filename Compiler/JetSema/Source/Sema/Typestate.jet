@@ -59,14 +59,10 @@ SemaStateSplit: struct {
 
 sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     table := SemaStateTable{requires: [String:String]{}, transitions: [String:SemaStateMove]{}, fn_requires: [String:String]{}, fn_transitions: [String:SemaStateMove]{}, entry_ctors: [String:String]{}}
-    loop registered in graph.modules {
-        if sema_module_is_core_source(registered.module_identity) -> next
-        sema_state_table_add_items(table, registered.program.items)
-    }
+    loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)
     table.transitions["{SEMA_STATE_TASK}::join"] = SemaStateMove{from: Val(SEMA_STATE_TASK_RUNNING), to: SEMA_STATE_TASK_JOINED}
     table.transitions["{SEMA_STATE_TASK}::detach"] = SemaStateMove{from: Val(SEMA_STATE_TASK_RUNNING), to: SEMA_STATE_TASK_DETACHED}
     loop module_index in 0..<modules.len() {
-        if sema_module_is_core_source(modules[module_index].module_identity) -> next
         registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         open_switches := [Span]{}
         loop diagnostic in modules[module_index].diagnostics {

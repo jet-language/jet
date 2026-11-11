@@ -487,7 +487,7 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
         // the program registry carries the module's own rules beside the
         // builtin rows, so it judges both kinds.
         repeat_checked := false
-        if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
+        if unresolved.len() > 0 || source_declared {
             program_registry: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
             if program_registry == .Val(registry) {
                 if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, unknown)
@@ -497,12 +497,10 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
             }
         }
         sema_marker_module_check_groups(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.items, "", true, catalog, diagnostics)
-        if !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
-            sema_marker_module_check_trait_collisions(catalog, graph.modules[module_row_index].program.items, diagnostics)
-            sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, diagnostics)
-            sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, diagnostics)
-            if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, diagnostics)
-        }
+        sema_marker_module_check_trait_collisions(catalog, graph.modules[module_row_index].program.items, diagnostics)
+        sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, diagnostics)
+        sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, diagnostics)
+        if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, diagnostics)
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_row_index].source_segments)
         sema_attach_diagnostic_source_locations(unknown, 0, graph.modules[module_row_index].source_segments)
         unknown_rules.push(unknown)
