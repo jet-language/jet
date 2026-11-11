@@ -19,11 +19,11 @@ step caller: jet explain effects generic.jet:9
 exit: 0
 stdout: ~ "effects at generic.jet:9, in `step`, nearest first" # a caller outside the module
 stdout: ~ "  module    (none written)\n" # holds no module cap
-stdout: ~ "reaches: IO via generic::counter.bump (generic.jet:9)" # and reaches IO through the instance function, under its source name
+stdout: ~ "reaches: IO via generic.counter.bump (generic.jet:9)" # and reaches IO through the instance function, under its source name
 stdout: !~ "__jet_" # no compiler-generated name
 step json: jet explain effects --json generic.jet:9
 exit: 0
-stdout: ~ "\"chain\":[\"generic::step\",\"generic::counter.bump\"]" # the JSON chain uses source names too
+stdout: ~ "\"chain\":[\"generic.step\",\"generic.counter.bump\"]" # the JSON chain uses source names too
 stdout: !~ "__jet_" # no compiler-generated name
 step caps: jet explain effects --caps generic.jet
 exit: 0

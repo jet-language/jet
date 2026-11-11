@@ -47,7 +47,7 @@ jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Neve
     calls := [JetCLIArchitectureCall]{}
     loop edge in index.calls {
         caller := SemDef?{None}
-        short: edge.caller.split("::").to_list()
+        short: edge.caller.split(".").to_list()
         loop row in index.definitions {
             definition: row.def
             if definition.module_path == edge.module_path && (definition.name == edge.caller || (short.len() > 0 && definition.name == short[short.len() - 1])) {

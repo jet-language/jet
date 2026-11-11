@@ -5107,7 +5107,10 @@ The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
   `Mem.Alloc(above: N)` facts.
 - `web` reports checked routes, actions, mounts, and policy.
 - `effects` reports resolved function rows, direct effects, callees, and
-  provenance.
+  provenance. Every function is named by its dotted source path
+  (`pricing.rates`, `Receipt.render`), and a Core callee by its Core path
+  (`core.files.exists`), so a provenance path steps into a Core call the way it
+  steps into a user call.
 - `layout` reports target-aware size, alignment, stride, and field offsets when
   the compiler has a physical layout; absent optional facts retain their reason.
 - `origin` reports typed `#Track` provenance from the checked `?OriginInfo`

@@ -37,6 +37,7 @@ use {
         ViewProvenanceMap,
         access_sigil,
         authority_covers,
+        core_identity_module,
         derivation_identity,
         derivation_record,
         expr_span,
@@ -144,9 +145,10 @@ semindex_active_scope: fn(ctx: SemWalk) -> String Never! {
     ctx.scope_identity
 }
 
-// sema `effect_key`: `Owner::name` for a method, the bare name otherwise.
+// sema `effect_key` as Jet spells the path: `Owner.name` for a method, the
+// bare name otherwise.
 semindex_effect_key: fn(owner: String?, name: String) -> String Never! {
-    if owner == .Val(owner_name) -> return "{owner_name}::{name}"
+    if owner == .Val(owner_name) -> return "{owner_name}.{name}"
     // copy: `name` stays with the caller (`name` is a read parameter: no move out of it, E0201) and
     // the returned value owns its own.
     name.copy()
@@ -1450,8 +1452,9 @@ SemSummary: struct {
 // A call from an indexed function into a callee no indexed module defines (a
 // Core function): no summary says what that callee reaches, so the callee's
 // written row (`row`, the call's effect bound) is what the call is seen to
-// reach, at the call's `span`.
+// reach, at the call's `span`. `callee` names it as an edge does.
 SemBoundaryCall: struct {
+    callee: String
     row: [String]
     span: Span
 }
@@ -1474,9 +1477,10 @@ semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
 }
 
 // sema `symbol_id` keys are `kind:{identity: module}:{owner}:{name}`; the
-// effect graph keys a function as `alias::name` or `alias::Owner::name`. A
-// module identity holds `:` itself (its source root and path), so the owner
-// and name are the last two fields and the identity is everything between.
+// effect graph keys a function by its dotted source path, `alias.name` or
+// `alias.Owner.name`. A module identity holds `:` itself (its source root and
+// path), so the owner and name are the last two fields and the identity is
+// everything between.
 SemFunctionKey: struct {
     module_identity: String
     local: String
@@ -1489,12 +1493,20 @@ semindex_function_key: fn(key: String) -> SemFunctionKey? Never! {
     owner: parts[parts.len() - 2]
     identity_parts := [String]{}
     loop index in 1..<parts.len() - 2 -> identity_parts.push(parts[index])
-    local: if owner == "" -> name else -> "{owner}::{name}"
+    local: if owner == "" -> name else -> "{owner}.{name}"
     Val(SemFunctionKey{module_identity: identity_parts.join(":"), local: local})
 }
 
+// An edge into a callee no indexed module defines: a Core callee under its
+// Core module (`core.files.exists`), the way a user callee is named under its
+// module alias, else its local key.
+semindex_outside_edge: fn(key: SemFunctionKey) -> String Never! {
+    module_name: core_identity_module(key.module_identity) ?? return key.local.copy()
+    "{module_name}.{key.local}"
+}
+
 // `qualified_effect_facts` over the checked user functions: every summary under
-// `alias::key`, plus its short key when exactly one module defines it.
+// `alias.key`, plus its short key when exactly one module defines it.
 semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
     summaries := [SemSummary]{}
     module_aliases := [String: String]{}
@@ -1515,7 +1527,7 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
                 _ := boundary_by_caller.add(fact.caller_key, group)
                 boundary_groups.push([SemBoundaryCall]{})
             }
-            boundary_groups[group].push(SemBoundaryCall{row: loop entry in row -> entry.name.copy(), span: fact.span})
+            boundary_groups[group].push(SemBoundaryCall{callee: semindex_outside_edge(callee_key), row: loop entry in row -> entry.name.copy(), span: fact.span})
         }
     }
     loop doc_module in modules {
@@ -1550,16 +1562,16 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
                 }
                 edge_locals.push(edge_key.local)
                 edge_alias: module_aliases.get(edge_key.module_identity) ?? {
-                    edges.push(edge_key.local)
+                    edges.push(semindex_outside_edge(edge_key))
                     next
                 }
-                edges.push("{edge_alias}::{edge_key.local}")
+                edges.push("{edge_alias}.{edge_key.local}")
             }
             maximal_span := Span?{None}
             if function.effects.maximal -> maximal_span = Val(function.source_span)
             boundary_calls := [SemBoundaryCall]{}
             if boundary_by_caller.get(function.key) == .Val(group) -> boundary_calls = boundary_groups[group].copy()
-            summaries.push(SemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: semindex_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: semindex_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span, boundary_calls: boundary_calls})
+            summaries.push(SemSummary{key: "{alias}.{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: semindex_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: semindex_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span, boundary_calls: boundary_calls})
         }
     }
     shorts := [SemSummary]{}
@@ -1592,7 +1604,7 @@ semindex_call_span: fn(summary: SemSummary, callee: String, modules: [JetDriverD
     loop (index, edge) in summary.raw_edges {
         local: summary.edge_locals[index]
         if local == "" -> next
-        if callee == local || callee.ends_with("::{local}") {
+        if callee == local || callee.ends_with(".{local}") {
             raw_callee = edge
             break
         }
@@ -1648,12 +1660,13 @@ semindex_witness: fn(function: String, effect_name: String, summaries: [SemSumma
 }
 
 // The first call of `summary` into a callee outside the indexed modules whose
-// written row covers `effect_name`: `function` itself reaches the effect at
-// that call (`jet explain effects` names its site).
+// written row covers `effect_name`: `function` reaches the effect through that
+// callee at the call, the same path and call span a call into an indexed
+// callee starts with (`jet explain effects` names its site).
 semindex_boundary_witness: fn(function: String, summary: SemSummary, effect_name: String) -> SemWitness? Never! {
     loop call in summary.boundary_calls {
         loop bound in call.row {
-            if authority_covers(bound, effect_name) -> return Val(SemWitness{path: [String]{function}, spans: [Span]{call.span}})
+            if authority_covers(bound, effect_name) -> return Val(SemWitness{path: [String]{function, call.callee.copy()}, spans: [Span]{call.span}})
         }
     }
     None
@@ -1750,7 +1763,7 @@ semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectI
     loop (row, edge) in summary.raw_edges {
         local: summary.edge_locals[row]
         if local == "" -> next
-        if callee == local || callee.ends_with("::{local}") {
+        if callee == local || callee.ends_with(".{local}") {
             raw_callee = edge
             break
         }
@@ -1803,7 +1816,7 @@ semindex_witness_step: fn(function: String, effect_name: String, summaries: [Sem
 // `apply_inferred_effect_rows`: a function with no written row shows its solved
 // row, sourced at its name.
 semindex_apply_inferred_rows: fn(db: &SemDB, doc_module: JetDriverDocModule, summaries: [SemSummary]) {
-    prefix: "{semindex_module_alias(doc_module)}::"
+    prefix: "{semindex_module_alias(doc_module)}."
     inline_keys := [String: String]{}
     loop item in doc_module.items {
         if item == .CodeModule(code_module) {
@@ -1840,8 +1853,7 @@ semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, su
     } else if definition.identity.starts_with("method:") {
         parts: definition.identity.split("::").to_list()
         tail: parts[parts.len() - 1]
-        suffix: ".{definition.name}"
-        if tail.ends_with(suffix) -> local_key = "{tail.slice(0, tail.len() - suffix.len())}::{definition.name}"
+        if tail.ends_with(".{definition.name}") -> local_key = tail.copy()
     }
     summary: semindex_summary(summaries, "{prefix}{local_key}") ?? return None
     rows: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}

@@ -314,7 +314,7 @@ jet_cli_find_shape_matches: fn(wanted: JetCLIFindShape, candidate: JetCLIFindSha
 // `effect_fact`: the effect summary of a source symbol.
 jet_cli_find_effect_fact: fn(symbol: SemSymbol, effects: [SemEffect]) -> SemEffect? Never! {
     if symbol.provenance == .Builtin(_) -> return None
-    key: if symbol.owner == .Val(owner) -> "{owner}::{symbol.name}" else -> symbol.name
+    key: if symbol.owner == .Val(owner) -> "{owner}.{symbol.name}" else -> symbol.name
     loop fact in effects {
         if fact.function == key -> return Val(fact)
     }
@@ -322,7 +322,7 @@ jet_cli_find_effect_fact: fn(symbol: SemSymbol, effects: [SemEffect]) -> SemEffe
         if fact.function == symbol.name -> return Val(fact)
     }
     loop fact in effects {
-        if fact.function.ends_with("::{key}") -> return Val(fact)
+        if fact.function.ends_with(".{key}") -> return Val(fact)
     }
     loop fact in effects {
         if fact.function.ends_with("__{symbol.name}") -> return Val(fact)

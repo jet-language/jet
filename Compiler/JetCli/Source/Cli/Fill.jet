@@ -82,8 +82,8 @@ jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
 // (spec.md "`Panic` and `Mem` are deny-only rows"); the hole's own `#Todo`
 // panic is one of them.
 jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) -> String Never! {
-    local: jet_cli_fill_function_name(function).replace(".", "::")
-    keys: [String]{"{alias}::{local}", local, function.name}
+    local: jet_cli_fill_function_name(function)
+    keys: [String]{"{alias}.{local}", local, function.name}
     loop key in keys {
         loop fact in facts {
             if fact.function == key {

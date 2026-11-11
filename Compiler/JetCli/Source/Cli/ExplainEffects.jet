@@ -343,26 +343,26 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
 jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: &JetCLIEffectsSite) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> jet_cli_effects_take(found, "{alias}::{namespace}{function.name}", function, caps, offset)
+            .Func(function) -> jet_cli_effects_take(found, "{alias}.{namespace}{function.name}", function, caps, offset)
             .Impl(definition) -> {
                 typed := jet_cli_effects_with_cap(caps, jet_cli_effects_type_cap(items, definition.type_name), "type")
                 if definition.trait_name == .Val(trait_name) -> typed = jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, trait_name), "trait")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.type_name}::{method.name}", method, typed, offset)
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.type_name}.{method.name}", method, typed, offset)
             }
             .Struct(definition) -> {
                 typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
                     traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, traited, offset)
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
                 }
             }
             .Enum(definition) -> {
                 typed: jet_cli_effects_with_cap(caps, definition.cap, "type")
-                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, typed, offset)
+                loop method in definition.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, typed, offset)
                 loop block in definition.trait_impls {
                     traited: jet_cli_effects_with_cap(typed, jet_cli_effects_trait_cap(items, block.trait_name), "trait")
-                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}::{namespace}{definition.name}::{method.name}", method, traited, offset)
+                    loop method in block.methods -> jet_cli_effects_take(found, "{alias}.{namespace}{definition.name}.{method.name}", method, traited, offset)
                 }
             }
             .CodeModule(nested) -> {
@@ -495,11 +495,11 @@ jet_cli_effects_source_name: fn(name: String) -> String Never! {
     sema_inline_decode_generated_suffix(name.removeprefix("__jet_")) ?? name.copy()
 }
 
-// An effect-graph key (`pricing::rates`, `generic::__jet_counter_dbump`)
+// An effect-graph key (`pricing.rates`, `generic.__jet_counter_dbump`)
 // with each part as its source spells it.
 jet_cli_effects_source_key: fn(key: String) -> String Never! {
-    parts: loop part in key.split("::") -> jet_cli_effects_source_name(part)
-    parts.join("::")
+    parts: loop part in key.split(".") -> jet_cli_effects_source_name(part)
+    parts.join(".")
 }
 
 jet_cli_effects_reaches_sorted: fn(reaches: [JetCLIEffectsReach]) -> [JetCLIEffectsReach] Never! {
@@ -596,7 +596,7 @@ jet_cli_effects_rung_line: fn(rung: JetCLIEffectsRung, width: Int) -> String Nev
     "  {jet_cli_pad(rung.rung, 10)}{jet_cli_pad(rung.text, width)}{rung.site}"
 }
 
-// `FS.Read via pricing::rates (main.jet:6)`: the first call after the site's
+// `FS.Read via pricing.rates (main.jet:6)`: the first call after the site's
 // own function, and where the site makes it.
 jet_cli_effects_reach_text: fn(reach: JetCLIEffectsReach) -> String Never! {
     via: if reach.chain.len() > 1 -> " via {reach.chain[1]}" else -> ""
@@ -643,7 +643,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         // A whole file is its module, plus its `run` when it has one.
         loop item in doc_module.items {
             if item == .Func(function) && function.name == "run" && !function.compiler_generated {
-                found.key = "{alias}::run"
+                found.key = "{alias}.run"
                 found.function = Val(function.copy())
             }
         }
