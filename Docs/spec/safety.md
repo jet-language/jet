@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1415,
+  "total": 1424,
   "counts": {
-    "Compiler": 744,
-    "Core": 170,
+    "Compiler": 746,
+    "Core": 177,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -1135,7 +1135,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1713,
+      "line": 1726,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -3381,6 +3381,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostTiming.jet",
+      "line": 26,
+      "column": 9,
+      "reason": "the probe answer is fixed for the process; a racing probe stores the same word"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostTiming.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "cpuid only reports processor identification"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Int.jet",
       "line": 10,
       "column": 5,
@@ -5530,6 +5544,41 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
+      "file": "Core/Crypto/Expert.jet",
+      "line": 293,
+      "column": 1,
+      "reason": "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Expert.jet",
+      "line": 332,
+      "column": 1,
+      "reason": "crypto expert: the caller takes custody of the secret's raw bytes and wipes them"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Expert.jet",
+      "line": 334,
+      "column": 1,
+      "reason": "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Expert.jet",
+      "line": 336,
+      "column": 1,
+      "reason": "crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Expert.jet",
+      "line": 338,
+      "column": 1,
+      "reason": "crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them"
+    },
+    {
+      "package": "Core",
       "file": "Core/Crypto/ExpertCt.jet",
       "line": 13,
       "column": 5,
@@ -5611,6 +5660,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 273,
       "column": 5,
       "reason": "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Vault.jet",
+      "line": 213,
+      "column": 1,
+      "reason": "vault key import: the caller's unlock request borrows the private key's bytes for the unlock only"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Crypto/Vault.jet",
+      "line": 216,
+      "column": 1,
+      "reason": "vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only"
     },
     {
       "package": "Core",
@@ -6392,14 +6455,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 155,
+      "line": 192,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 189,
+      "line": 234,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -7050,7 +7113,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/orchestrator/LaneCommit.jet",
-      "line": 206,
+      "line": 204,
       "column": 5,
       "reason": "signal 0 delivers nothing: it only asks whether a queued job's caller still runs"
     },
@@ -10135,14 +10198,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 744 |
-| Core | 170 |
+| Compiler | 746 |
+| Core | 177 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 8 |
 | tests | 435 |
-| **total** | **1415** |
+| **total** | **1424** |
 
 ### Regions
 
@@ -10278,7 +10341,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2162:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1713:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1726:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 131:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
@@ -10599,6 +10662,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 150:5 | "path lends length bytes; std file open rejects embedded NUL" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 158:5 | "name owns its trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 194:13 | "bytes lends used initialized bytes; data owns used native U8 elements" |
+| Compiler | Compiler/JetRuntime/Source/HostTiming.jet | 26:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
+| Compiler | Compiler/JetRuntime/Source/HostTiming.jet | 35:5 | "cpuid only reports processor identification" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 10:5 | "borrow an initialized word in a live exact-Int carrier" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |
@@ -10906,6 +10971,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Crypto.jet | 1618:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
 | Core | Core/Crypto/Crypto.jet | 1627:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
 | Core | Core/Crypto/Crypto.jet | 1633:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Expert.jet | 293:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
+| Core | Core/Crypto/Expert.jet | 332:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
+| Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
+| Core | Core/Crypto/Expert.jet | 336:1 | "crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them" |
+| Core | Core/Crypto/Expert.jet | 338:1 | "crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -10918,6 +10988,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Jetc.jet | 177:5 | "Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome" |
 | Core | Core/Crypto/Jetc.jet | 235:5 | "Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy" |
 | Core | Core/Crypto/Jetc.jet | 273:5 | "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty" |
+| Core | Core/Crypto/Vault.jet | 213:1 | "vault key import: the caller's unlock request borrows the private key's bytes for the unlock only" |
+| Core | Core/Crypto/Vault.jet | 216:1 | "vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only" |
 | Core | Core/Crypto/Vault.jet | 230:5 | "vault typed load provider boundary" |
 | Core | Core/Crypto/Vault.jet | 237:5 | "vault typed current provider boundary" |
 | Core | Core/Crypto/Vault.jet | 243:5 | "vault typed status provider boundary" |
@@ -11029,8 +11101,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4334:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4339:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4368:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 155:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 189:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 192:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 234:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 426:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 594:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
@@ -11123,7 +11195,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 335:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
-| Tools | Tools/agent/orchestrator/LaneCommit.jet | 206:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
+| Tools | Tools/agent/orchestrator/LaneCommit.jet | 204:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |

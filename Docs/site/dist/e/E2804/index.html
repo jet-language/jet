@@ -36,15 +36,33 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2804</code>: <code>tests/ui/http_route_mixed_duplicate.stderr</code>.</p>
-<pre class="diag">Error [jet.AmbiguousRoute]: Two routes both match `GET /jokes/:id`.
-  --&gt; http_route_mixed_duplicate.jet:13:9
+<p>First UI snapshot mentioning <code>E2804</code>: <code>tests/ui/http_route_custom_method.stderr</code>.</p>
+<pre class="diag">Error [jet.AmbiguousRoute]: Two routes both match `PURGE /cache`.
+  --&gt; http_route_custom_method.jet:27:9
     |
- 13 |     mux.get(&quot;/jokes/:id&quot;, (id: Int) -&gt; Ok(server.response(200, &quot;duplicate={id}&quot;)))
-    |         ^^^
+ 27 |     mux.custom(&quot;PURGE&quot;, &quot;/cache&quot;, handle)
+    |         ^^^^^^
  Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
  Fix: Remove one registration or use a distinct method and path
 More: jet-lang.dev/e/E2804
+
+Error [jet.AmbiguousRoute]: Two routes both match `PURGE /marked`.
+  --&gt; http_route_custom_method.jet:12:5
+    |
+ 12 |     #Server.Custom(&quot;PURGE&quot;, &quot;/marked&quot;)
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
+ Fix: Remove one registration or use a distinct method and path
+More: jet-lang.dev/e/E2804
+
+Error [jet.RouteMethodTokenRefused]: HTTPRouter custom route method must be a static String
+  --&gt; http_route_custom_method.jet:32:19
+    |
+ 32 |     router.custom(names[0], &quot;/cache&quot;, handle)
+    |                   ^^^^^
+ Why: Router and `#Server.Custom` routes are fully checked while building; only a mux takes a run-time method, checked when it registers
+ Fix: Use a literal or compile-time String constant, or register the route on a mux
+More: jet-lang.dev/e/E2808
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
