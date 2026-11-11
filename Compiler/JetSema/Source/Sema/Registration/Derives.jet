@@ -81,6 +81,7 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
+        expr_source_span,
         expr_span,
         owned_trait_codec,
         owned_trait_structural_names,
@@ -1931,8 +1932,15 @@ sema_derive_type_text: fn(ty: Type) -> String {
     type_name(ty)
 }
 
-sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool) -> CtValue {
-    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("type", sema_derive_type_text(ty)), NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}})
+// A field row; `default` is where the field's written default expression
+// stands (DefaultInfo, read without running it), absent when it has none.
+sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?) -> CtValue {
+    default_info := CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "DefaultInfo"}}}
+    if default == .Val(source) {
+        span: sema_derive_ct_struct("SourceSpan", [NamedCtValue]{NamedCtValue{name: "start", value: CtValue.Int{value: source.start}}, NamedCtValue{name: "end", value: CtValue.Int{value: source.end}}})
+        default_info = CtValue.Present{value: sema_derive_ct_struct("DefaultInfo", [NamedCtValue]{NamedCtValue{name: "source", value: span}})}
+    }
+    sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("type", sema_derive_type_text(ty)), NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
 sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], base: String?) -> CtValue {
@@ -1946,7 +1954,9 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
     fields := [CtValue]{}
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].computed != None -> next
-        fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub))
+        default := Span?{None}
+        if definition.fields[field_index].default == .Val(expression) -> default = Val(expr_source_span(expression))
+        fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
     }
     sema_derive_type_info(definition.name, "struct", fields, None)
 }
@@ -1962,13 +1972,13 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             .Unit -> {}
             .Single(payload_type, _) -> {
                 ty = sema_derive_type_text(payload_type)
-                payload.push(sema_derive_field_info("value", payload_type, definition.is_pub))
+                payload.push(sema_derive_field_info("value", payload_type, definition.is_pub, None))
             }
             .Named(fields) -> {
                 parts := [String]{}
                 loop field in fields {
                     parts.push("{field.name}: {sema_derive_type_text(field.ty)}")
-                    payload.push(sema_derive_field_info(field.name, field.ty, definition.is_pub))
+                    payload.push(sema_derive_field_info(field.name, field.ty, definition.is_pub, None))
                 }
                 ty = "{{{parts.join(", ")}}}"
             }

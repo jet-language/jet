@@ -465,9 +465,12 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
             field == "is_pub" -> Val(Type.Bool)
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "default" -> Val(Type.Option{inner: sema_fact_named("DefaultInfo")})
+            field == "offset" -> Val(Type.Option{inner: Type.Int})
             else -> None
         }
     }
+    if type_name == "DefaultInfo" -> return sema_fact_field_when(field == "source", sema_fact_named("SourceSpan"))
     if type_name == "TypeParamInfo" {
         return if {
             field == "name" -> Val(string)

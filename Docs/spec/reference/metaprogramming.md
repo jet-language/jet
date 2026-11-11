@@ -265,8 +265,16 @@ Jet has two related reflection paths:
    `Severity.reflect().range`, `send_report.reflect().effects`, `T.reflect().layout`, and
    `#package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
-2. `T.reflect()` returns aggregate type information for a derive body, while
+2. `T.reflect()` returns the aggregate `TypeInfo` record computed while
+   compiling. It reads the same in a marker body, a `comptime` value,
+   `build: fn` and ordinary code; in the running program it is a constant.
    `reflect.of(value)` returns the runtime reflection floor for a value.
+
+Each struct field's `FieldInfo` carries its `type`, its `offset` in bytes
+(`None` where the layout is not computed) and its `default`: `None` for a
+field without a written default, else a `DefaultInfo` whose `source` is the
+`SourceSpan` of the default expression. Reading `default` never runs the
+expression.
 
 [`reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet) combines typed
 fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/Metaprogramming/Reflection/ReflectValue.jet)

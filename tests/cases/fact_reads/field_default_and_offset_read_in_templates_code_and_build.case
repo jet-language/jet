@@ -1,0 +1,21 @@
+# A struct field's `type`, `default` and `offset` (FieldInfo) read the same
+# in a marker's `expand`, in a `comptime` value, through `T.reflect()` in
+# ordinary code, and in `build: fn` (#3520 c25). `default` is where the
+# field's written default stands (DefaultInfo `source`), read without running
+# it; a field with none reads `None`. Both tiers print the same lines, and the
+# expand, comptime and program reads name the same default site.
+fixture: field_default_and_offset_read_in_templates_code_and_build.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = field_default_and_offset_read_in_templates_code_and_build.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = field_default_and_offset_read_in_templates_code_and_build.stdout.expected
+stderr: empty
+step build_entry: jet build build_entry/main.jet
+exit: nonzero
+stderr: ~ "mass: Int at 0, default; name: String at 8, no default" # `build: fn` reads the same records
+stderr: ~ "the build entry read the fields of Rock"

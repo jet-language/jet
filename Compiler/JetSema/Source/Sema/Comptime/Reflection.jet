@@ -54,6 +54,7 @@ use jet_foundation.[
     ViewSourcePath,
     dimension_display_name,
     dimension_identity,
+    expr_source_span,
     jet_target_layout_check_alignment,
     jet_target_layout_engine_target,
     jet_target_layout_engine_with_registry,
@@ -670,7 +671,9 @@ sema_comptime_reflection_layout_info: fn(kind: String, guarantee: String, source
     })
 }
 
-sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
+// `facts` are the struct's layout on the engine's target
+// (jet_target_layout_struct_facts_in_module), computed once by the caller.
+sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: TargetLayoutEngine, facts: LayoutFacts) -> TComptimeValue Never! {
     target: jet_target_layout_engine_target(engine)
     kind := "default"
     guarantee := "optimized"
@@ -691,7 +694,6 @@ sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: Target
         }
         .None -> {}
     }
-    facts: jet_target_layout_struct_facts_in_module(engine, definition, module_identity)
     requested := Int?{None}
     effective := Int?{None}
     if definition.layout == {
@@ -808,7 +810,9 @@ sema_comptime_reflection_written_markers: fn(
 
 // One stored field or payload field, at `index` among its owner's fields. A
 // field row has no nested `fields`; those are an enum variant's payload rows
-// (sema_comptime_reflection_enum_variant_info).
+// (sema_comptime_reflection_enum_variant_info). `default` is where the
+// field's written default expression stands, read without running it, and
+// `offset` its byte offset on the selected target when the layout knows it.
 sema_comptime_reflection_field_info: fn(
     name: String,
     ty: Type,
@@ -818,6 +822,8 @@ sema_comptime_reflection_field_info: fn(
     span: Span,
     path: String,
     registry: SemaScopeMembersMarkerRegistry,
+    default: Span?,
+    offset: Int?,
 ) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
@@ -829,7 +835,16 @@ sema_comptime_reflection_field_info: fn(
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_type_fact_rows(path, ty)}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: is_pub}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span)},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default)},
+        SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(offset)},
     })
+}
+
+sema_comptime_reflection_default_info: fn(default: Span?) -> TComptimeValue Never! {
+    if default == .Val(source) -> return sema_comptime_reflection_some(sema_comptime_reflection_struct("DefaultInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_span(source)},
+    }))
+    sema_comptime_reflection_none(Type.Named{name: "DefaultInfo"})
 }
 
 sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeValue Never! {
@@ -1277,12 +1292,12 @@ sema_comptime_reflection_enum_variant_fields: fn(definition: EnumDef, variant: V
     if variant.payload == {
         .Unit -> return [TComptimeValue]{}
         .Single(ty, span) -> return [TComptimeValue]{
-            sema_comptime_reflection_field_info("value", ty, 0, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry),
+            sema_comptime_reflection_field_info("value", ty, 0, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry, None, None),
         }
         .Named(fields) -> {
             result := [TComptimeValue]{}
             loop (index, field) in fields {
-                result.push(sema_comptime_reflection_field_info(field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry))
+                result.push(sema_comptime_reflection_field_info(field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry, None, None))
             }
             return result
         }
@@ -1325,6 +1340,8 @@ sema_comptime_reflection_enum_variant_info: fn(definition: EnumDef, variant: Var
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: definition.is_pub}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(variant.name_span)},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(None)},
+        SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(None)},
     })
 }
 
@@ -1526,9 +1543,14 @@ sema_comptime_reflection_struct_type_info: fn(
     reflection_fields := [TComptimeValue]{}
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
+    layout_facts: jet_target_layout_struct_facts_in_module(engine, definition, registered_module.module_identity)
     loop field in definition.fields {
         if field.computed != None -> next
-        reflection_fields.push(sema_comptime_reflection_field_info(field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry))
+        default := Span?{None}
+        if field.default == .Val(expression) -> default = Val(expr_source_span(expression))
+        offset := Int?{None}
+        if sema_comptime_reflection_layout_field(layout_facts, field.name) == .Val(layout_field) -> offset = layout_field.offset
+        reflection_fields.push(sema_comptime_reflection_field_info(field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry, default, offset))
         dimensions.extend(sema_comptime_reflection_type_dimensions(field.ty))
     }
     method_values := [TComptimeValue]{}
@@ -1556,7 +1578,7 @@ sema_comptime_reflection_struct_type_info: fn(
         registered_module.module_path,
         identity,
         "struct",
-        sema_comptime_reflection_struct_layout(definition, engine, registered_module.module_identity),
+        sema_comptime_reflection_struct_layout(definition, engine, layout_facts),
         definition.name_span,
         reflection_fields,
         method_values,

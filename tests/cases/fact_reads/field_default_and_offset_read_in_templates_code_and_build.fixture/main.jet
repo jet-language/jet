@@ -1,0 +1,57 @@
+// A field's `type`, `default` and `offset` read the same way in a marker's
+// `expand`, in a `comptime` value and through `T.reflect()` in the program.
+// `default` says where a field's written default stands, without running
+// it; a field with none reads `None`.
+FieldFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            mass_type: info.fields[0].type
+            mass_offset: info.fields[0].offset ?? 99
+            mass_site: info.fields[0].default?.source
+            mass_default: mass_site?.start ?? 0
+            name_offset: info.fields[1].offset ?? 99
+            name_site: info.fields[1].default?.source
+            name_default: name_site?.start ?? 0
+            template_facts: fn(self) -> String { "{mass_type} at {mass_offset}, name at {name_offset}, name default {name_default}" }
+            template_mass_default: fn(self) -> String { "{mass_default}" }
+        }
+    }
+}
+
+#FieldFacts
+Rock: struct {
+    mass: Int = 5
+    name: String
+}
+
+PREPARED: comptime { Rock.reflect() }
+
+default_start: fn(info: TypeInfo, index: Int) -> Int {
+    if info.fields[index].default == .Val(found) -> return found.source.start
+    0
+}
+
+describe: fn(info: TypeInfo) -> String {
+    rows := [String]{}
+    loop (index, field) in info.fields {
+        default: if default_start(info, index) > 0 -> "default" else -> "no default"
+        rows.push("{field.name}: {field.type} at {field.offset ?? 99}, {default}")
+    }
+    rows.join("; ")
+}
+
+run: fn() {
+    rock: Rock{name: "granite"}
+    print("expand: {rock.template_facts()}")
+    print("prepared: {describe(PREPARED)}")
+    info: Rock.reflect()
+    print("program: {describe(info)}")
+    start: default_start(info, 0)
+    start_text: "{start}"
+    same: start_text == rock.template_mass_default() && start == default_start(PREPARED, 0)
+    print("one default site: {same}")
+    print("mass {rock.mass}")
+}

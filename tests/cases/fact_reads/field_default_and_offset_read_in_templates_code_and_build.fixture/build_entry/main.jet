@@ -1,0 +1,17 @@
+// `build: fn` reads the same records through `T.reflect()` and reports them.
+Rock: struct {
+    mass: Int = 5
+    name: String
+}
+
+build: fn(b: Build) {
+    info: Rock.reflect()
+    rows := [String]{}
+    loop field in info.fields {
+        default: if field.default == None -> "no default" else -> "default"
+        rows.push("{field.name}: {field.type} at {field.offset ?? 99}, {default}")
+    }
+    b.error(b.program.types()[0].span, "FIELDS", rows.join("; "), "the build entry read the fields of {info.name}", "none")
+}
+
+run: fn() {}
