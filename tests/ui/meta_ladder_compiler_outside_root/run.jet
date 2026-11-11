@@ -1,0 +1,15 @@
+// @programmable_build
+// @cli_build
+// E0776: the root hands its `Build` to `tool`, whose `b.compiler` call is
+// refused at the dependency's own line.
+use tool
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["run.jet"], [])
+    tool.take_control(b)
+    b.default(app)
+}
+
+run: fn() {
+    print("built")
+}

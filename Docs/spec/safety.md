@@ -211,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1423,
+  "total": 1424,
   "counts": {
     "Compiler": 746,
     "Core": 176,
@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 437
+    "tests": 438
   },
   "regions": [
     {
@@ -10122,6 +10122,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/ui/meta_ladder_add_never_authorizes_unsafe.jet",
+      "line": 7,
+      "column": 13,
+      "reason": "generated"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/module_write_from_fn_is_e0111.jet",
       "line": 11,
       "column": 5,
@@ -10197,8 +10204,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 437 |
-| **total** | **1423** |
+| tests | 438 |
+| **total** | **1424** |
 
 ### Regions
 
@@ -11618,6 +11625,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/lowlevel_volatile_write_without_mem.jet | 2:5 | "addr is valid" |
 | tests | tests/ui/lowlevel_volatile_write_wrong_ptr.jet | 4:5 | "plain ints are not raw pointers" |
 | tests | tests/ui/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
+| tests | tests/ui/meta_ladder_add_never_authorizes_unsafe.jet | 7:13 | "generated" |
 | tests | tests/ui/module_write_from_fn_is_e0111.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |

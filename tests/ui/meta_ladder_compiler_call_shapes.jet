@@ -1,0 +1,23 @@
+// Each call on a `Compiler` value that doesn't fit its method's shape is
+// refused when the build source is checked: an unknown method (E0102), an
+// argument a method doesn't take (E0764), a missing argument (E0104), a
+// rewrite of something that isn't a top-level function (E0764), and a
+// consent that doesn't name a loaded package as written text (E0764).
+helper: fn() -> Int { 1 }
+
+shapes: fn(meta: Compiler) {
+    meta.publish(#code { extra: fn() -> Int { 2 } })
+    meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra", 3)
+    meta.add(scope: "extra")
+    meta.add(#code { extra: fn() -> Int { 2 } })
+    meta.rewrite_body(helper)
+    meta.rewrite_body(helper, code: #code { 2 })
+    count: 3
+    meta.rewrite_body(count, #code { 2 })
+    meta.allow_rewrite("greet")
+    name: "greet"
+    meta.allow_rewrite(package: name)
+    meta.allow_rewrite(package: "orm")
+}
+
+run: fn() { print(helper()) }

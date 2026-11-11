@@ -1,0 +1,22 @@
+// @programmable_build
+// @cli_build
+// Code a build hands `meta.add` that writes `#Unsafe` is refused.
+install: fn(meta: Compiler) {
+    code: #code {
+        added_count: fn() -> Int {
+            #Unsafe("generated") {
+                print("added")
+            }
+            1
+        }
+    }
+    meta.add(code, scope: "added")
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_ladder_add_never_authorizes_unsafe.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(2) }

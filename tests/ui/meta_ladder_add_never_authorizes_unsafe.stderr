@@ -1,0 +1,11 @@
+Error [jet.BuildAuthorityDenied]: `meta.add`'s code writes `#Unsafe`
+  --> tests/ui/meta_ladder_add_never_authorizes_unsafe.jet:13:10
+    |
+ 13 |     meta.add(code, scope: "added")
+    |          ^^^
+ Why: Code a build hands the compiler is never audited where it lands, so it can't authorize an unsafe operation; only `#Unsafe` written in a package's own source can
+ Fix: Move the unsafe operation into a function of the package's source with its own `#Unsafe("reason")` block, and call that function from the code
+More: jet-lang.dev/e/E3503
+
+1 problem found
+run `jet explain E3503` to learn more
