@@ -2943,6 +2943,27 @@ jet_driver_prunable_core_modules: fn(load: JetDriverLoadResult, core_sources: [J
     identities
 }
 
+// The modules of the packages the entry package depends on: their top-level
+// bodies are lowered only when reached, as Core's are. Only a package that
+// is not the entry's is listed; a source root's loose files belong to the
+// entry. A module with foreign rows stays rooted, as in Core.
+jet_driver_prunable_dependency_modules: fn(load: JetDriverLoadResult, modules: [SemaGraphModuleResult]) -> [String] Never! {
+    dependencies := [String:Bool]{}
+    loop package in load.packages {
+        if package.identity != load.package_identity && !package.identity.starts_with("source-root:") -> dependencies[package.identity] = true
+    }
+    identities := [String]{}
+    if dependencies.len() == 0 -> return identities
+    loop semantic_module in modules {
+        if semantic_module.foreign_functions.len() > 0 || semantic_module.foreign_providers.len() > 0 -> next
+        loop module_row in load.modules {
+            if module_row.module_identity != semantic_module.module_identity -> next
+            if dependencies.get(module_row.package_identity) != None -> identities.push(semantic_module.module_identity)
+        }
+    }
+    identities
+}
+
 // The Core functions and methods a compile that lowers checks up front under
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
 // top-level functions lowering keeps with no keyed call in a checked body
@@ -4233,12 +4254,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     command_record: sema_cli_command_record(registration_graph)
     budget_spans: jet_driver_effect_budget_name_spans(load, registration_graph)
     // A user module only compile-time code uses is left out like an
-    // unreached Core module; a Test compile keeps every module's bodies, and
-    // the Core unit a `jet test` of a Core source runs is rooted whole, as an
-    // entry is, so its #Test bodies lower.
+    // unreached Core module, and a dependency package's top-level bodies are
+    // lowered only when reached, as Core's are; a Test compile keeps every
+    // module's bodies, and the Core unit a `jet test` of a Core source runs is
+    // rooted whole, as an entry is, so its #Test bodies lower.
     prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
     if request.mode != JetDriverCompileMode.Test {
         loop identity in registration_graph.comptime_only_modules -> prunable_modules.push(identity)
+        loop identity in jet_driver_prunable_dependency_modules(load, runtime_semantic_modules) -> prunable_modules.push(identity)
     }
     if request.core_tests != "" {
         tested: jet_driver_test_modules(load, request.core_tests)

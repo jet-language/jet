@@ -762,7 +762,9 @@ sent to that process reaches the program.
 compiler work: one line per event on stderr as it happens, with the elapsed
 time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
-`JET_TRACE_DETAIL=functions`, a function), throttled progress counts, and the
+`JET_TRACE_DETAIL=functions`, a function; that detail also writes one
+`ir.function` event per function the IR builder receives, so a trace names
+every body the compile lowers), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`

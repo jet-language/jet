@@ -1163,6 +1163,18 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
             break
         }
     }
+    // With per-function detail (JET_TRACE_DETAIL=functions) each function the
+    // IR builder receives is one `ir.function` event, so a trace names every
+    // body a compile lowers.
+    if trace_sink == .Val(sink) {
+        if sink.functions() {
+            total: checked.functions.len()
+            loop (index, function) in checked.functions {
+                sink.begin("ir.function", function.name, index, total)
+                sink.end("ir.function", 1)
+            }
+        }
+    }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     built := if harness == .Val(plan) -> ir_build_tests(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), plan, checks) else -> ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, result.compiler_threads)
     function_count: built.program.functions.len()
