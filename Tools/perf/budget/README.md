@@ -13,6 +13,14 @@ Columns:
   SPEED-500K.md §1 (lines per second at 16 threads).
 - `2.5s-wall`, `20ms-wall`: the owner's self-compile targets (#5479) as wall
   ns per source line. Check them with `--clock wall`.
+- `30M`, `30M-wall`: the #5479 target, 30 million lines per second from cold:
+  533.3 CPU ns per line at 16 threads, and 33.3 wall ns per line, of which
+  30.0 go to the traced phases and 3.3 to `outside_trace`, the build steps
+  around the traced compile (the package's source generators and the runtime
+  pack step). Each splits as the `1M` and `20ms-wall` columns do. The
+  compile-throughput cell checks them per corpus line, `outside_trace`
+  included:
+  `JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --budget 30M-wall`.
 
 ```
 jet run Tools/perf/budget/Check.jet -- build.trace.jsonl --column 2.5s-wall --clock wall

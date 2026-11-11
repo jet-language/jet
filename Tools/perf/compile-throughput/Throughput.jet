@@ -1,0 +1,563 @@
+#!/usr/bin/env jet
+// Compile-throughput cell (#5479 c1): live, cold, uncached compiles of the
+// compiler corpus (the compiler's packages and Core) by the compiler JET
+// names, and per mode their lines per second, wall, CPU, peak memory and
+// per-phase seconds from the compiler's own trace.
+//
+//   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR]
+//       [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE]
+//       [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]
+//       [--budget COLUMN] [--runs N]
+//
+// DIR is the source tree (default: the working directory). Each mode compiles
+// in a fresh toolchain tree copied from DIR (every file of `Compiler/` and
+// `Core/` but their `.jet` folders, and the other
+// Tools/agent/CompilerPackages.jet `inputs`), which is the compile's
+// JET_TOOLCHAIN_ROOT, with an empty JET_STORE_DIR and XDG_CACHE_HOME, so no
+// compile cache serves it (AGENTS.md: measure live). The modes:
+//
+//   check    jet check Compiler
+//   O0       jet build --threads N --optimize=none Compiler
+//   O1       jet build --threads N --optimize=basic Compiler
+//   O2       jet build --threads N --optimize=full Compiler
+//   release  jet build --threads N --release Compiler
+//   default  jet build --threads N Compiler
+//
+// Each compile runs pinned to --cpus (default: every CPU) with --threads
+// (default 12), in a --memory scope (default 16G, no swap), killed after
+// --timeout seconds (default 1200). JET_COMPILER_IDENTITY is the IDENTITY file
+// beside JET when there is one. --tool is the jet that runs
+// CompilerPackages.jet and the budget checker (default: JET). Each mode
+// compiles --runs times (default 3), one after another, each in its own
+// <work>/<mode>.<n> directory.
+//
+// Per compile it prints one row: lines (the `.jet` lines of the compiler's
+// member sources and of Core), lines/s (lines over wall), wall, CPU (user +
+// system of the compile and every process it waited for), CPU ns per line,
+// average parallelism (CPU over wall), peak memory (the scope's), the trace's
+// parsed lines (parse.user_lines + core_lines), `traced` (the opening lane's
+// first span start to its last span end) and `outside` (wall minus traced:
+// the build steps around the compile, such as source generators and the
+// runtime pack); then per mode the median compile by wall, and its top-level
+// phases of the opening lane with their wall seconds and process CPU seconds
+// (the `proc_cpu_ns` each span's end carries: every thread, over the span).
+// --out FILE appends the same as tab-separated rows (one `run` row per
+// compile, one `phase` row per phase).
+//
+// --budget COLUMN checks each mode against that column of
+// Tools/perf/budget/budget.json (#5479 c2): Tools/perf/budget/Check.jet over
+// the trace, per corpus line (`--lines`), on the wall clock for a `-wall`
+// column and the process CPU clock otherwise (its report goes to
+// <work>/<mode>.<n>/budget.txt), and `outside` against the column's
+// `outside_trace` budget when it has one. The run row's `budget` cell is ok,
+// OVER (the phases), OUTSIDE (the build steps around the compile) or
+// `error N` (the checker's exit code).
+//
+// Exit: 0 every mode compiled (and, with --budget, is within it); 1 a compile
+// failed, timed out or wrote no trace, or a budget is over; 64 usage.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+MODES: [String]{"check", "O0", "O1", "O2", "release", "default"}
+GIB: 1073741824
+
+Options: struct {
+    tree: String
+    modes: [String]
+    cpus: [Int]
+    threads: Int
+    memory: Int
+    timeout: Int
+    work: String
+    out: String
+    tool: String
+    budget: String
+    runs: Int
+}
+
+OutsideTrace: struct { budget: [String: Float] }
+BudgetFile: struct { outside_trace: OutsideTrace? }
+
+TraceArgs: struct { proc_cpu_ns: Int?, value: Int? }
+TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: TraceArgs? }
+OpenSpan: struct { kind: String, ts: Int }
+Phase: struct { kind: String, wall_ns: Int{0}, cpu_ns: Int{0}, count: Int{0} }
+Trace: struct {
+    phases: [Phase]
+    user_lines: Int
+    core_lines: Int
+    // The opening lane's first span start and last span end, microseconds.
+    first_us: Int
+    last_us: Int
+}
+
+Run: struct {
+    mode: String
+    // 1-based: the compile's place among the mode's --runs.
+    repeat: Int
+    rc: Int
+    wall_ns: Int
+    cpu_ns: Int
+    peak_bytes: Int
+    lines: Int
+    trace: Trace?
+    note: String
+    budget: String
+}
+
+usage: fn(message: String) -> Never {
+    term.eprint("Throughput.jet: {message}")
+    term.eprint("usage: JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
+    process.exit(64)
+}
+
+// `24G`, `512M`, `64K` or a byte count, in bytes.
+memory_bytes: fn(text: String) -> Int? {
+    units: [String]{"K", "M", "G"}
+    loop at in 0..<units.len() {
+        if !text.ends_with(units[at]) -> next
+        scale := 1024
+        loop _ in 0..<at -> scale *= 1024
+        n: Int.parse(text.remove_suffix(units[at])) ?? return None
+        return Val(n * scale)
+    }
+    n: Int.parse(text) ?? return None
+    Val(n)
+}
+
+// `4-9,20-25` as the CPUs it names.
+parse_cpus: fn(text: String) -> [Int] {
+    cpus := [Int]{}
+    loop part in text.split(",") {
+        span: part.trim().partition("-")
+        first: Int.parse(span.head) ?? next
+        last: if span.sep == "" -> first else -> Int.parse(span.tail) ?? first
+        loop cpu in first..<(last + 1) -> cpus.push(cpu)
+    }
+    cpus
+}
+
+parse_options: fn(args: [String]) -> Options {
+    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3}
+    index := 0
+    loop index < args.len() {
+        flag: args[index]
+        if index + 1 >= args.len() -> usage("{flag} needs a value")
+        value: args[index + 1]
+        index += 2
+        if {
+            flag == "--tree" -> options.tree = value
+            flag == "--modes" -> options.modes = value.split(",").map(m -> m.trim()).to_list()
+            flag == "--cpus" -> options.cpus = parse_cpus(value)
+            flag == "--threads" -> options.threads = Int.parse(value) ?? usage("--threads takes a count")
+            flag == "--memory" -> options.memory = memory_bytes(value) ?? usage("--memory takes a size such as 16G")
+            flag == "--timeout" -> options.timeout = Int.parse(value) ?? usage("--timeout takes seconds")
+            flag == "--work" -> options.work = value
+            flag == "--out" -> options.out = value
+            flag == "--tool" -> options.tool = value
+            flag == "--budget" -> options.budget = value
+            flag == "--runs" -> options.runs = Int.parse(value) ?? usage("--runs takes a count")
+            else -> usage("unknown option {flag}")
+        }
+    }
+    if options.runs < 1 -> usage("--runs takes a count of at least 1")
+    loop mode in options.modes {
+        if !MODES.contains(mode) -> usage("unknown mode {mode}; the modes are {MODES.join(", ")}")
+    }
+    options
+}
+
+mode_args: fn(mode: String, threads: Int) -> [String] {
+    if mode == "check" -> return [String]{"check", "Compiler"}
+    build := [String]{"build", "--threads", "{threads}"}
+    if {
+        mode == "O0" -> build.push("--optimize=none")
+        mode == "O1" -> build.push("--optimize=basic")
+        mode == "O2" -> build.push("--optimize=full")
+        mode == "release" -> build.push("--release")
+        else -> {}
+    }
+    build.push("Compiler")
+    build
+}
+
+// The compiler's own trace (JET_TRACE_FILE). The opening lane is the lane of
+// the first span (lane 1 of the native jet). Per top-level span kind on it:
+// its wall time and the process CPU its ends carry (`proc_cpu_ns`, every
+// thread over the span). The parse line counters are summed.
+read_trace: fn(text: String) -> Trace {
+    trace := Trace{phases: [Phase]{}, user_lines: 0, core_lines: 0, first_us: -1, last_us: 0}
+    at := [String: Int]{}
+    stack := [OpenSpan]{}
+    lane := -1
+    loop raw in text.split("\n") {
+        line: raw.trim().remove_suffix(",")
+        if line == "" || line == "[" || line == "]" -> next
+        // A partial last line of a killed compile is skipped.
+        event: json.decode<TraceEvent>(line) ?? next
+        if event.ph == "C" {
+            value: event.args?.value ?? 0
+            if event.name == "parse.user_lines" -> trace.user_lines += value
+            if event.name == "parse.core_lines" -> trace.core_lines += value
+            next
+        }
+        if event.ph != "B" && event.ph != "E" -> next
+        if lane < 0 -> lane = event.tid
+        if event.tid != lane -> next
+        ts: event.ts ?? next
+        if event.ph == "B" {
+            if trace.first_us < 0 -> trace.first_us = ts
+            stack.push(OpenSpan{kind: event.cat ?? event.name, ts})
+            next
+        }
+        open: stack.pop() ?? next
+        if stack.len() > 0 -> next
+        trace.last_us = ts
+        index: at.get(open.kind) ?? {
+            at[open.kind] = trace.phases.len()
+            trace.phases.push(Phase{kind: open.kind})
+            trace.phases.len() - 1
+        }
+        trace.phases[index].wall_ns += (ts - open.ts) * 1000
+        trace.phases[index].count += 1
+        trace.phases[index].cpu_ns += event.args?.proc_cpu_ns ?? 0
+    }
+    if trace.first_us < 0 -> trace.first_us = 0
+    trace
+}
+
+// Lines of text: newlines, plus a last line without one.
+count_lines: fn(text: String) -> Int {
+    count := 0
+    loop byte in text.bytes() {
+        if byte == (U8{10}) -> count += 1
+    }
+    bytes: text.bytes()
+    if bytes.len() > 0 && bytes[bytes.len() - 1] != (U8{10}) -> count += 1
+    count
+}
+
+// One CompilerPackages.jet listing of the tree.
+packages: fn(options: Options, verb: String) -> [String] {
+    tool: files.join(options.tree, "Tools/agent/CompilerPackages.jet")
+    receipt: process.cmd([String]{options.tool, tool, "--root", options.tree, verb}).output_limit(GIB).run() ?? {
+        term.eprint("Throughput.jet: cannot run {options.tool}: {err}")
+        process.exit(1)
+        return [String]{}
+    }
+    if receipt.code != 0 {
+        term.eprint("Throughput.jet: CompilerPackages.jet {verb} exited {receipt.code}:\n{receipt.errors}")
+        process.exit(1)
+    }
+    receipt.output.split("\n").filter(row -> row != "").to_list()
+}
+
+// The corpus lines: each member source of the compiler's packages and each
+// `.jet` file of Core.
+corpus_lines: fn(options: Options, inputs: [String]) -> Int {
+    total := 0
+    loop row in packages(options, "sources") {
+        cells: row.split("\t").to_list()
+        if cells.len() < 3 -> next
+        total += count_lines(files.read(files.join(options.tree, cells[2])) ?? "")
+    }
+    loop input in inputs {
+        if input.starts_with("Core/") && input.ends_with(".jet") -> total += count_lines(files.read(files.join(options.tree, input)) ?? "")
+    }
+    total
+}
+
+// A fresh toolchain tree under `project`: every file of `Compiler/` and of
+// `Core/` but their `.jet` build and store folders (the build.jet steps read
+// the generators, the Prelude and the runtime there, and the compiler's
+// `toolchain:` embeds read both), then every other input.
+copy_project: fn(options: Options, inputs: [String], project: String) -> String? {
+    loop folder in ([String]{"Compiler", "Core"}) {
+        root: files.join(options.tree, folder)
+        entries: files.walk_files(root, None, [String]{".jet"}).list() ?? return Val("cannot list {root}: {err}")
+        loop entry in entries {
+            if copy_input(options.tree, project, "{folder}/{entry.relative}") == .Val(problem) -> return Val(problem)
+        }
+    }
+    loop input in inputs {
+        if input.starts_with("Core/") || input.starts_with("Compiler/") -> next
+        if copy_input(options.tree, project, input) == .Val(problem) -> return Val(problem)
+    }
+    None
+}
+
+// Copies the file `input` of `tree` to the same place under `project`.
+copy_input: fn(tree: String, project: String, input: String) -> String? {
+    target: files.join(project, input)
+    files.create_dir_all(files.dirname(target)) ?? return Val("cannot create {files.dirname(target)}: {err}")
+    files.copy(files.join(tree, input), target) ?? return Val("cannot copy {input}: {err}")
+    None
+}
+
+// The work directory of a mode's compile: <work>/<mode>.<repeat>.
+slot_dir: fn(options: Options, mode: String, repeat: Int) -> String { files.join(options.work, "{mode}.{repeat}") }
+
+measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identity: String, mode: String, repeat: Int) -> Run {
+    base: slot_dir(options, mode, repeat)
+    files.remove_all(base) ?? ()
+    project: files.join(base, "project")
+    store: files.join(base, "store")
+    cache: files.join(base, "cache")
+    trace_file: files.join(base, "trace.jsonl")
+    failed := Run{mode, repeat, rc: 1, wall_ns: 0, cpu_ns: 0, peak_bytes: 0, lines, trace: None, note: "", budget: ""}
+    loop dir in ([String]{project, store, cache}) {
+        files.create_dir_all(dir) ?? {
+            failed.note = "cannot create {dir}: {err}"
+            return failed
+        }
+    }
+    if copy_project(options, inputs, project) == .Val(problem) {
+        failed.note = problem
+        return failed
+    }
+    argv := [String]{jet}
+    argv.extend(mode_args(mode, options.threads))
+    spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
+    if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
+    spec = spec.memory_scope(options.memory).timeout(time.duration_seconds(options.timeout)).output_limit(GIB)
+    if options.cpus.len() > 0 -> spec = spec.cpu_affinity(options.cpus.copy())
+    started: time.unix_ns()
+    receipt: spec.run() ?? {
+        failed.note = "cannot run {jet}: {err}"
+        return failed
+    }
+    wall: time.unix_ns() - started
+    files.write(files.join(base, "out"), receipt.output) ?? ()
+    files.write(files.join(base, "err"), receipt.errors) ?? ()
+    rc := receipt.code
+    if receipt.signal == .Val(number) -> rc = 128 + number
+    if receipt.timed_out -> rc = 124
+    text: files.read(trace_file) ?? ""
+    trace: if text == "" -> Trace?{None} else -> Val(read_trace(text))
+    note := ""
+    if rc != 0 -> note = receipt.errors.trim().partition("\n").head
+    if trace == None -> note = "{note} (no trace)".trim()
+    run := Run{mode, repeat, rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), peak_bytes: receipt.peak_memory_bytes ?? 0, lines, trace, note, budget: ""}
+    if options.budget != "" && run.trace == .Val(measured) -> run.budget = check_budget(options, base, lines, wall - traced_ns(measured))
+    run
+}
+
+// The --budget verdict of one mode: Check.jet over its trace per corpus line,
+// then the build steps outside the trace against the column's outside_trace.
+check_budget: fn(options: Options, base: String, lines: Int, outside_ns: Int) -> String {
+    budget_file: files.join(options.tree, "Tools/perf/budget/budget.json")
+    clock: if options.budget.ends_with("-wall") -> "wall" else -> "proc_cpu"
+    argv: [String]{options.tool, files.join(options.tree, "Tools/perf/budget/Check.jet"), files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
+    receipt: process.cmd(argv).cwd(options.tree).output_limit(GIB).run() ?? return "error {err}"
+    files.write(files.join(base, "budget.txt"), "{receipt.output}{receipt.errors}") ?? ()
+    if receipt.code > 1 -> return "error {receipt.code}"
+    verdict := if receipt.code == 1 -> "OVER" else -> "ok"
+    parsed: json.decode<BudgetFile>(files.read(budget_file) ?? "{{}}") ?? BudgetFile{outside_trace: None}
+    limit: outside_limit(parsed, options.budget)
+    if limit == .Val(ns_per_line) && lines > 0 && Float.from_int(outside_ns) / Float.from_int(lines) > ns_per_line {
+        verdict = if verdict == "ok" -> "OUTSIDE" else -> "OVER+OUTSIDE"
+    }
+    verdict
+}
+
+outside_limit: fn(file: BudgetFile, column: String) -> Float? {
+    outside: file.outside_trace ?? return None
+    outside.budget.get(column)
+}
+
+seconds: fn(ns: Int) -> String { "{Float.from_int(ns) / 1e9:Fixed(2)}" }
+
+per_second: fn(lines: Int, ns: Int) -> String {
+    if ns <= 0 -> return "-"
+    "{Float.from_int(lines) * 1e9 / Float.from_int(ns):Fixed(0)}"
+}
+
+traced_ns: fn(trace: Trace) -> Int { (trace.last_us - trace.first_us) * 1000 }
+
+// Average parallelism: CPU over wall.
+parallelism: fn(run: Run) -> String {
+    if run.wall_ns <= 0 -> return "-"
+    "{Float.from_int(run.cpu_ns) / Float.from_int(run.wall_ns):Fixed(1)}"
+}
+
+// The run row: mode, repeat, rc, lines, lines/s, wall, CPU, CPU ns per line,
+// parallelism, peak MiB, parsed lines, traced and outside seconds, budget.
+run_cells: fn(run: Run) -> [String] {
+    parsed: run.trace.map(t -> "{t.user_lines + t.core_lines}") ?? "-"
+    traced: run.trace.map(t -> traced_ns(t)) ?? 0
+    cpu_per_line: if run.lines > 0 -> "{run.cpu_ns /% run.lines}" else -> "-"
+    budget: if run.budget == "" -> "-" else -> run.budget
+    [String]{run.mode, "{run.repeat}", "{run.rc}", "{run.lines}", per_second(run.lines, run.wall_ns), seconds(run.wall_ns), seconds(run.cpu_ns), cpu_per_line, parallelism(run), "{run.peak_bytes /% 1048576}", parsed, seconds(traced), seconds(run.wall_ns - traced), budget}
+}
+
+RUN_HEADER: [String]{"mode", "run", "rc", "lines", "lines/s", "wall s", "cpu s", "cpu ns/line", "parallel", "peak MiB", "parsed", "traced s", "outside s", "budget"}
+
+// The mode's median compile by wall among those that compiled (the lower
+// middle of an even count); None when none compiled.
+median_run: fn(runs: [Run], mode: String) -> Run? {
+    compiled := runs.filter(r -> r.mode == mode && r.rc == 0)
+    if compiled.len() == 0 -> return None
+    compiled.sort_by(r -> r.wall_ns)
+    Val(compiled[(compiled.len() - 1) /% 2].copy())
+}
+
+report: fn(runs: [Run], modes: [String]) -> [String] {
+    out := [String]{RUN_HEADER.map(h -> h.pad_start(11, " ")).join(" ")}
+    loop run in runs {
+        out.push(run_cells(run).map(c -> c.pad_start(11, " ")).join(" "))
+        if run.note != "" -> out.push("  {run.mode}.{run.repeat}: {run.note}")
+    }
+    out.push("")
+    out.push("median by wall:")
+    medians := [Run]{}
+    loop mode in modes {
+        median: median_run(runs, mode) ?? next
+        out.push(run_cells(median).map(c -> c.pad_start(11, " ")).join(" "))
+        medians.push(median)
+    }
+    loop run in medians {
+        trace: run.trace ?? next
+        out.push("")
+        out.push("{run.mode}.{run.repeat} (median): phase, wall s, process cpu s")
+        phases := trace.phases.copy()
+        phases.sort_by(p -> -p.wall_ns)
+        loop phase in phases {
+            if phase.wall_ns < 10000000 && phase.cpu_ns < 10000000 -> next
+            out.push("  {phase.kind.pad_end(28, " ")} {seconds(phase.wall_ns):PadLeft(8)} {seconds(phase.cpu_ns):PadLeft(8)}")
+        }
+    }
+    out
+}
+
+// The --out rows of one compile: its `run` row, then a `phase` row per phase
+// (mode, run, kind, wall s, process cpu s, spans).
+tsv_rows: fn(run: Run, stamp: String, commit: String, jet: String, load: String) -> [String] {
+    cells := [String]{"run", stamp, commit, jet, load}
+    cells.extend(run_cells(run))
+    rows := [String]{cells.join("\t")}
+    trace: run.trace ?? return rows
+    loop phase in trace.phases {
+        rows.push([String]{"phase", stamp, commit, jet, load, run.mode, "{run.repeat}", phase.kind, seconds(phase.wall_ns), seconds(phase.cpu_ns), "{phase.count}"}.join("\t"))
+    }
+    rows
+}
+
+first_line: fn(argv: [String], cwd: String) -> String {
+    receipt: process.cmd(argv).cwd(cwd).run() ?? return "-"
+    if receipt.code != 0 -> return "-"
+    receipt.output.trim()
+}
+
+run: fn() {
+    options := parse_options(process.args())
+    jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
+    if !files.is_file(jet) -> usage("JET={jet} is not a file")
+    options.tree = files.absolute(options.tree) ?? usage("cannot resolve --tree {options.tree}")
+    if options.tool == "" -> options.tool = jet
+    if options.work == "" -> options.work = files.join(sys.temp_dir(), "jet-throughput-{time.now().to_unix_ms()}")
+    files.create_dir_all(options.work) ?? usage("cannot create the work directory {options.work}: {err}")
+    identity_file: files.join(files.dirname(jet), "IDENTITY")
+    identity: if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim() else -> ""
+    inputs: packages(options, "inputs")
+    lines: corpus_lines(options, inputs)
+    commit: first_line([String]{"git", "rev-parse", "HEAD"}, options.tree)
+    runs := [Run]{}
+    loop mode in options.modes {
+        loop repeat in 1..<(options.runs + 1) {
+            load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
+            run: measure(options, inputs, lines, jet, identity, mode, repeat)
+            // The copy, store and cache go; the trace, out and err stay.
+            loop dir in ([String]{"project", "store", "cache"}) -> files.remove_all(files.join(slot_dir(options, mode, repeat), dir)) ?? ()
+            if options.out != "" {
+                stamp: "{time.now().to_unix_ms() /% 1000}"
+                text := if files.is_file(options.out) -> "" else -> "kind\tunix_s\tcommit\tjet\tload\t{RUN_HEADER.join("\t")}\n"
+                loop row in tsv_rows(run, stamp, commit, jet, load) -> text = "{text}{row}\n"
+                files.append_all(options.out, text) ?? term.eprint("Throughput.jet: cannot append to {options.out}: {err}")
+            }
+            runs.push(run)
+        }
+    }
+    loop line in report(runs, options.modes) -> print(line)
+    print("traces: {options.work}/<mode>.<run>/trace.jsonl")
+    failed: runs.filter(r -> r.rc != 0 || r.trace == None || (r.budget != "" && r.budget != "ok"))
+    process.exit(if failed.len() > 0 -> 1 else -> 0)
+}
+
+test_trace: fn() -> String {
+    [String]{
+        "[",
+        "{{\"name\":\"trace.start\",\"ph\":\"i\",\"ts\":0,\"pid\":1,\"tid\":0}},",
+        "{{\"name\":\"sources\",\"cat\":\"sources\",\"ph\":\"B\",\"ts\":1000,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"parse.user_lines\",\"ph\":\"C\",\"ts\":1500,\"pid\":1,\"tid\":1,\"args\":{{\"value\":700}}}},",
+        "{{\"name\":\"parse.core_lines\",\"ph\":\"C\",\"ts\":1500,\"pid\":1,\"tid\":2,\"args\":{{\"value\":300}}}},",
+        "{{\"name\":\"sources\",\"cat\":\"sources\",\"ph\":\"E\",\"ts\":3000,\"pid\":1,\"tid\":1,\"args\":{{\"proc_cpu_ns\":5000000}}}},",
+        "{{\"name\":\"Mod\",\"cat\":\"sema.finalize\",\"ph\":\"B\",\"ts\":3000,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"inner\",\"cat\":\"sema.bodies\",\"ph\":\"B\",\"ts\":3500,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"other\",\"cat\":\"ir.opt\",\"ph\":\"B\",\"ts\":3600,\"pid\":1,\"tid\":2}},",
+        "{{\"name\":\"other\",\"cat\":\"ir.opt\",\"ph\":\"E\",\"ts\":3900,\"pid\":1,\"tid\":2,\"args\":{{\"proc_cpu_ns\":9000000}}}},",
+        "{{\"name\":\"inner\",\"cat\":\"sema.bodies\",\"ph\":\"E\",\"ts\":4000,\"pid\":1,\"tid\":1,\"args\":{{\"proc_cpu_ns\":11000000}}}},",
+        "{{\"name\":\"Mod\",\"cat\":\"sema.finalize\",\"ph\":\"E\",\"ts\":7000,\"pid\":1,\"tid\":1,\"args\":{{\"proc_cpu_ns\":20000000}}}},",
+        "{{\"name\":\"sources\",\"cat\":\"sources\",\"ph\":\"B\",\"ts\":8000,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"sources\",\"cat\":\"sources\",\"ph\":\"E\",\"ts\":9000,\"pid\":1,\"tid\":1,\"args\":{{\"proc_cpu_ns\":1000000}}}},",
+        "{{\"name\":\"half",
+    }.join("\n")
+}
+
+#Test("the trace gives each top-level phase of the opening lane its wall and process CPU") {
+    trace: read_trace(test_trace())
+    assert_eq(trace.user_lines, 700)
+    assert_eq(trace.core_lines, 300)
+    assert_eq(trace.first_us, 1000)
+    assert_eq(trace.last_us, 9000)
+    assert_eq(trace.phases.len(), 2)
+    assert_eq(trace.phases[0].kind, "sources")
+    assert_eq(trace.phases[0].count, 2)
+    assert_eq(trace.phases[0].wall_ns, 3000000)
+    assert_eq(trace.phases[0].cpu_ns, 6000000)
+    assert_eq(trace.phases[1].kind, "sema.finalize")
+    assert_eq(trace.phases[1].wall_ns, 4000000)
+    assert_eq(trace.phases[1].cpu_ns, 20000000)
+}
+
+#Test("modes map to the compile they measure") {
+    assert_eq(mode_args("check", 12).join(" "), "check Compiler")
+    assert_eq(mode_args("O0", 12).join(" "), "build --threads 12 --optimize=none Compiler")
+    assert_eq(mode_args("release", 8).join(" "), "build --threads 8 --release Compiler")
+    assert_eq(mode_args("default", 4).join(" "), "build --threads 4 Compiler")
+}
+
+test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
+    Run{mode: "O0", repeat, rc, wall_ns: wall_s * 1000000000, cpu_ns: wall_s * 4000000000, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
+}
+
+#Test("the median compile of a mode is the middle wall of those that compiled") {
+    runs: [Run]{test_run(1, 0, 30), test_run(2, 0, 10), test_run(3, 0, 20), test_run(4, 1, 1)}
+    median: median_run(runs, "O0") ?? panic("a median")
+    assert_eq(median.repeat, 3)
+    assert_eq(parallelism(median), "4.0")
+    assert_eq((median_run(runs.filter(r -> r.repeat != 3), "O0") ?? panic("even")).repeat, 2)
+    assert(median_run(runs, "check") == None)
+}
+
+#Test("the budget file's outside_trace budget reads by column") {
+    parsed: json.decode<BudgetFile>("{{\"columns\":[\"30M-wall\"],\"outside_trace\":{{\"phase\":\"steps\",\"budget\":{{\"30M-wall\":3.3}}}}}}") ?? panic("budget file")
+    assert_eq(outside_limit(parsed, "30M-wall") ?? 0.0, 3.3)
+    assert(outside_limit(parsed, "1M") == None)
+    bare: json.decode<BudgetFile>("{{\"columns\":[]}}") ?? panic("bare budget file")
+    assert(bare.outside_trace == None)
+}
+
+#Test("lines, sizes and CPU lists parse") {
+    assert_eq(count_lines("a\nb\n"), 2)
+    assert_eq(count_lines("a\nb"), 2)
+    assert_eq(count_lines(""), 0)
+    assert_eq(memory_bytes("16G") ?? 0, 16 * GIB)
+    assert_eq(memory_bytes("512M") ?? 0, 512 * 1048576)
+    assert_eq(parse_cpus("20-23,30").len(), 5)
+}

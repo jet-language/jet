@@ -126,6 +126,20 @@ the measured number is what ships (`D-SPEED-CHECKS1`).
 `always_on`. `Tools/perf/budget/Check.jet` prints their subtotal. It fails a
 full-unit trace (the compile reached `lower`) that lacks any always-on span.
 
+## Compile throughput
+
+[`Tools/perf/compile-throughput/Throughput.jet`](../../../Tools/perf/compile-throughput/Throughput.jet)
+measures the compiler corpus (the compiler's packages and Core) the way a user
+meets it: live, cold and uncached, with an empty store and cache. Give it any
+compiler as `JET=PATH`. Each mode (`check`, `O0`, `release` by default)
+compiles `--runs` times (default 3). Each compile reports lines per second,
+wall, CPU, CPU ns per line, average parallelism (CPU over wall), peak memory,
+and each traced phase's seconds; the mode's median compile by wall is its
+result. The `outside` column is the wall time the compiler's trace does not
+cover: the package's build steps around the compile. `--budget COLUMN` holds
+every phase, and `outside`, to that column of
+`Tools/perf/budget/budget.json` (#5479).
+
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every
