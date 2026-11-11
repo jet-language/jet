@@ -200,14 +200,18 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
 // function hands it no compiler control. The root is the package of the
 // load's entry module.
 sema_build_compiler_site: fn(environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    root := ""
-    if environment.registration_graph == .Val(graph) {
-        if sema_registration_module_index(graph, graph.entry_module_identity) == .Val(entry) -> root = graph.modules[entry].package_identity.copy()
-    }
+    root: if environment.registration_graph == .Val(graph) -> sema_build_root_package(graph) else -> ""
     if root != "" && environment.package_identity == root -> return true
     row: diagnostic_registry_row("E0776") ?? panic("E0776 must have a registry row")
     diagnostics.push(sema_error("E0776", span, row.what, row.why, row.fix))
     false
+}
+
+// The identity of the root package, the package of the load's entry module;
+// "" when the graph has no entry module.
+sema_build_root_package: fn(graph: SemaRegistrationGraph) -> String Never! {
+    entry: sema_registration_module_index(graph, graph.entry_module_identity) ?? return ""
+    graph.modules[entry].package_identity.copy()
 }
 
 // `#code { items }`: a `Code` value holding its items formatted as source,
@@ -260,15 +264,18 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
 // a `Code` value's items as the generated module `name` of the value's
 // target, checked with the program like hand-written code (JetBuildSession
 // `compiler.add`). `meta.rewrite_body(f, code)` replaces the body of the
-// root package's top-level function `f` with a `Code` value's statements
-// (JetBuildSession `compiler.rewrite_body`).
+// function `f` with a `Code` value's statements (JetBuildSession
+// `compiler.rewrite_body`). `meta.allow_rewrite(package: name)` lets the
+// value rewrite that dependency's functions (JetBuildSession
+// `compiler.allow_rewrite`).
 sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if method == "rewrite_body" -> return sema_call_compiler_rewrite_body(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "allow_rewrite" -> return sema_call_compiler_allow_rewrite(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
-        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}` or `meta.rewrite_body(f, #code {{ ... }})`"))
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.rewrite_body(f, #code {{ ... }})` or `meta.allow_rewrite(package: \"name\")`"))
         return failed
     }
     code := CallArg?{None}
@@ -324,9 +331,12 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
 }
 
 // `meta.rewrite_body(f, #code { statements })`: `f` names a top-level
-// function, sent as its name; the build replaces the body of the root
-// package's function of that name (JetDriver BuildQueries.jet), so naming
-// it lends nothing and moves nothing. Replacing a body uses `Meta.Rewrite`.
+// function, directly or through its package's import (`tool.f`), and is sent
+// as its name and its package's identity; the build replaces the body of
+// that package's function of that name (JetDriver BuildQueries.jet), so
+// naming it lends nothing and moves nothing. Replacing a body uses
+// `Meta.Rewrite`, and the build session refuses a function of a package
+// other than the root unless the value allows it (`meta.allow_rewrite`).
 sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     shape: "meta.rewrite_body(f, #code {{ ... }})"
@@ -341,17 +351,29 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
         }
     }
     function := ""
-    if args[0].expr == .Ident(name, _, _) -> function = name.copy()
-    // Only a body binding is a local; the root frame holds the module's
-    // items and imports.
-    local := false
-    if function != "" && sema_scope_resolve_index(scopes, function) == .Val(index) -> local = scopes.frames[scopes.bindings[index].frame].parent >= 0
-    top_level := false
-    if function != "" && !local && program.registration_graph == .Val(graph) {
-        if sema_registration_lookup_name(graph, environment.module_identity, function) == .Val(resolved) -> top_level = sema_resolved_kind(graph, resolved) == SymbolKind.Function
+    package := ""
+    if program.registration_graph == .Val(graph) {
+        resolved := SemaRegistrationResolvedSymbol?{None}
+        if args[0].expr == .Ident(name, _, _) {
+            // Only a body binding is a local; the root frame holds the
+            // module's items and imports.
+            local := false
+            if sema_scope_resolve_index(scopes, name) == .Val(index) -> local = scopes.frames[scopes.bindings[index].frame].parent >= 0
+            if !local -> resolved = sema_registration_lookup_name(graph, environment.module_identity, name)
+        } else if args[0].expr == .Field(base, member, _, _) && base == .Ident(alias, _, _) {
+            resolved = sema_registration_lookup_qualified(graph, environment.module_identity, alias, member)
+        }
+        // The function's package goes by its identity, which a dependency
+        // checked as its own package gives the same as the root's check.
+        if resolved == .Val(symbol) && sema_resolved_kind(graph, symbol) == SymbolKind.Function {
+            if sema_registration_module_index(graph, symbol.source_module_identity) == .Val(module_index) {
+                function = sema_resolved_name(graph, symbol)
+                package = graph.modules[module_index].package_identity.copy()
+            }
+        }
     }
-    if !top_level {
-        diagnostics.push(sema_error("E0764", args[0].span, "`meta.rewrite_body` needs a top-level function's name", "a body rewrite replaces the body of one function the root package declares, named directly", "pass a top-level function, as in `{shape}`"))
+    if function == "" {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.rewrite_body` needs a top-level function's name", "a body rewrite replaces the body of one top-level function, named directly or through its package", "pass a top-level function, as in `{shape}` or `meta.rewrite_body(tool.f, #code {{ ... }})`"))
         return failed
     }
     ordinary := [CallArg]{args[1].copy()}
@@ -365,10 +387,66 @@ sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args:
     ownership: sema_ownership_check_method_call(state, "Compiler.rewrite_body", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.rewrite_body", span, [EffectRowEntry]{EffectRowEntry{name: META_REWRITE, span: span}}, diagnostics) -> return failed
-    // The session reads the function's name, the `Code` value, then the caller.
+    // The session reads the function's name, the `Code` value, the caller,
+    // then the identity of the function's package.
     name: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: function}}}, args[0].span)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code, sema_call_compiler_producer(environment, program, scopes, span)}}}, span)
+    owner: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: package}}}, args[0].span)
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code, sema_call_compiler_producer(environment, program, scopes, span), owner}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `meta.allow_rewrite(package: "name")`: the root's consent that the value
+// may rewrite the functions of the dependency `name`, which this build loads
+// at its locked version. The name is a string literal, so the consent is one
+// line a reviewer reads; the root's own functions need none.
+sema_call_compiler_allow_rewrite: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    shape: "meta.allow_rewrite(package: \"name\")"
+    labeled: if args.len() == 1 && args[0].label == .Val(written) -> written.name == "package" else -> false
+    if !labeled || args[0].spread || args[0].flags.template_items != None {
+        diagnostics.push(sema_error("E0764", span, "`Compiler.allow_rewrite` takes one `package:` name", "`meta.allow_rewrite` names the one dependency whose functions the value may rewrite", "write `{shape}`"))
+        return failed
+    }
+    unlabelled := args[0].copy()
+    unlabelled.label = None
+    ordinary := [CallArg]{unlabelled}
+    value: sema_check_expression(unlabelled.expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    named: sema_plugin_literal_text(value) ?? {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.allow_rewrite` needs the package's name written out", "the consent is one line a reviewer reads, so it names its package as a string literal", "write `{shape}`"))
+        return failed
+    }
+    root := ""
+    known := false
+    if program.registration_graph == .Val(graph) {
+        root = sema_build_root_package(graph)
+        loop module_row in graph.modules {
+            if module_row.package_identity != root && sema_build_package_name(module_row.package_identity) == named -> known = true
+        }
+    }
+    if root != "" && sema_build_package_name(root) == named {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.allow_rewrite` names the root package `{named}`", "the root package's own functions need no consent to be rewritten", "remove this line"))
+        return failed
+    }
+    if !known {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.allow_rewrite` names `{named}`, which is no package of this build", "the consent covers one dependency this build loads, at its locked version", "name a package listed in `deps:`, as in `{shape}`"))
+        return failed
+    }
+    params := [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ownership: sema_ownership_check_method_call(state, "Compiler.allow_rewrite", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    // The consent changes no code, so it uses no Meta effect.
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.allow_rewrite", span, [EffectRowEntry]{}, diagnostics) -> return failed
+    call: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "allow_rewrite", args: [TExpr]{value}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
+}
+
+// The name in a package identity (`package:<length>:<name>:…`), as the build
+// session reads it (JetBuildSession build_session_package_dir); the identity
+// itself when it has none.
+sema_build_package_name: fn(identity: String) -> String Never! {
+    parts: identity.split(":").to_list()
+    if parts.len() >= 3 && parts[0] == "package" && (Int.parse(parts[1]) ?? -1) == parts[2].len() -> return parts[2].copy()
+    identity.copy()
 }
 
 // The function calling a `Compiler` method and where, "`f` at file:line",

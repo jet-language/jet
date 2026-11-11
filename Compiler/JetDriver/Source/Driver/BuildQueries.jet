@@ -9,7 +9,7 @@ use {
     jet_build_session.[
         BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph, build_plan_selection,
         build_plan_selected_generated, build_session_abort, build_session_append_unique,
-        build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies,
+        build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies, build_session_set_identity,
     ]
 }
 
@@ -232,6 +232,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(session, request.build_args)
     build_session_set_dependencies(session, sources.dependency_roots)
+    build_session_set_identity(session, package)
     config := jet_eval_runtime_config(request.eval_config)
     // A refused effect inside `#Impure` is reported for this gate (E3411).
     config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
@@ -286,7 +287,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     loop generated_row in selected_generated {
         row: jet_driver_build_generated_row(generated_row, package, sources.modules) ?? {
             function: generated_row.rewrites ?? ""
-            ran.push(jet_driver_diagnostic_without_span("E3502", "`meta.rewrite_body` names `{function}`, which is no function of this package with a braced body", "a body rewrite replaces the body of one of the root package's own top-level functions", "pass a function this package declares with a `{{ … }}` body"))
+            ran.push(jet_driver_diagnostic_without_span("E3502", "`meta.rewrite_body` names `{function}`, which is no function of its package with a braced body", "a body rewrite replaces the body of one top-level function its package declares", "pass a top-level function with a `{{ … }}` body"))
             next
         }
         generated.push(row)
@@ -355,7 +356,7 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
         if diagnostics[index].detail != None -> next
         note := String?{None}
         loop row in rows {
-            if diagnostics[index].source_path != Val(jet_driver_generated_module_path(package, row.path)) -> next
+            if diagnostics[index].source_path != Val(jet_driver_generated_module_path(row.package ?? package, row.path)) -> next
             maker: row.producer ?? ""
             note = if {
                 row.rewrites == .Val(function) -> Val(" Note: `meta.rewrite_body` in {maker} gave `{function}` this body")
@@ -369,15 +370,17 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
 }
 // The response row of one selected generated module. A `meta.rewrite_body`
 // row becomes its function, the declaration's own text up to its body with
-// the new body, which replaces the declaration in the package's own file
-// (the loader blanks it there). A line `#{f.body}` of the new body is the
-// original body, at that line's indentation. None when the package declares
-// no top-level function of that name with a braced body.
+// the new body, which replaces the declaration in its package's own file
+// (the loader blanks it there); the row belongs to that package, the build's
+// own or the dependency the root allowed. A line `#{f.body}` of the new body
+// is the original body, at that line's indentation. None when the package
+// declares no top-level function of that name with a braced body.
 jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
     // copy: each row's texts are views of the plan, which stays whole.
     function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy()})
+    owner: row.package ?? package
     loop module_row in modules {
-        if module_row.package_identity != package -> next
+        if module_row.package_identity != owner -> next
         loop item in module_row.program.items {
             if item == .Func(declared) && declared.name == function {
                 bytes: module_row.source.bytes()
@@ -400,7 +403,7 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                     }
                 }
                 text = "{text}}}\n"
-                return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end})})
+                return Val(JetDriverGeneratedModule{package_identity: owner.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end})})
             }
         }
     }

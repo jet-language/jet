@@ -1,0 +1,36 @@
+# #3526 c6: `meta.rewrite_body` rewrites a dependency's function only when the
+# root's build allows that package with `meta.allow_rewrite(package: "name")`.
+# - `refused`: the root rewrites `greet.hello` without consent; the call fails
+#   the build with E3514, which names the package, the function and the line
+#   to add, and nothing is built.
+# - `allowed`: the same rewrite after `meta.allow_rewrite(package: "greet")`
+#   runs the new body; the dependency's own file is unchanged.
+# - `handed`: the root allows `greet` and hands its value to greet's
+#   `install`, which rewrites greet's `hello` by its bare name; the root's own
+#   `hello` keeps its body.
+# - `unknown`: the consent names a package this build doesn't load.
+fixture: a_dependency_rewrite_needs_the_roots_consent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build refused/main.jet
+exit: 1
+stderr: ~ "E3514" # the registered refusal
+stderr: ~ "`meta.rewrite_body` would rewrite `hello` of package `greet`, which this build has not allowed" # names the function and its package
+stderr: ~ "Add `meta.allow_rewrite(package: \"greet\")` after the root's `b.compiler` call" # the line to add
+file: refused/.jet/build/app absent
+step: jet build allowed/main.jet --write-generated=on
+exit: 0
+file: allowed/.jet/generated/greet/rewrite_body/hello.jet ~ "hello: fn() -> String {" # the rewritten function is a generated module of greet
+file: greet/greet.jet ~ "\"hello from greet\"" # the dependency's own source is unchanged
+step: {work}/allowed/.jet/build/app
+exit: 0
+stdout: = "rewritten by the root\n"
+step: jet build handed/main.jet
+exit: 0
+step: {work}/handed/.jet/build/app
+exit: 0
+stdout: = "rewritten by install\nthe root's own hello\n"
+step: jet build unknown/main.jet
+exit: 1
+stderr: ~ "`meta.allow_rewrite` names `orm`, which is no package of this build" # the consent names a loaded dependency
+file: unknown/.jet/build/app absent

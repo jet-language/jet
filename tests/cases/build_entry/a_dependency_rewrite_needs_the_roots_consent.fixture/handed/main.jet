@@ -1,0 +1,19 @@
+use greet
+
+build: fn(b: Build) -[Meta.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.allow_rewrite(package: "greet")
+    greet.install(meta)
+    b.default(app)
+}
+
+run: fn() {
+    print(greet.hello())
+    print(hello())
+}
+
+// The root's own `hello`, which the dependency's `install` must not rewrite.
+hello: fn() -> String {
+    "the root's own hello"
+}

@@ -162,19 +162,35 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // its `Code` value's formatted items as the generated source and the scope
 // it joins (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
 // function's name and its `Code` value's formatted statements as the new
-// body (JetBuildSession `compiler.rewrite_body`). The last argument is the
-// calling function and its place, which reports from the module name.
+// body, then the identity of the function's package
+// (JetBuildSession `compiler.rewrite_body`). Each sends the calling function
+// and its place, which reports from the module name.
+// `meta.allow_rewrite` sends the dependency's name (JetBuildSession
+// `compiler.allow_rewrite`).
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
-    if (member != "Compiler.add" && member != "Compiler.rewrite_body") || args.len() != 4 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
-    compiler: jet_eval_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+    compiler: if args.len() > 0 -> jet_eval_build_session_input(args[0]) else -> None
+    if member == "Compiler.allow_rewrite" && args.len() == 2 {
+        held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+        package: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its package name")
+        reply: build_session_call(session, "compiler.allow_rewrite", [BuildSessionValue]{held, package}, None, false, span.start, span.end)
+        return jet_driver_compiler_reply(session, reply, span)
+    }
     rewrite: member == "Compiler.rewrite_body"
+    if !(rewrite && args.len() == 5) && !(member == "Compiler.add" && args.len() == 4) -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
+    held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     code_index: if rewrite -> 2 else -> 1
     text_index: if rewrite -> 1 else -> 2
     source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
     text: jet_eval_build_session_input(args[text_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
     producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+    values := [BuildSessionValue]{held, text, producer}
+    if rewrite -> values.push(jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's package"))
     method: if rewrite -> "compiler.rewrite_body" else -> "compiler.add"
-    reply: build_session_call(session, method, [BuildSessionValue]{compiler, text, producer}, Val(source), false, span.start, span.end)
+    reply: build_session_call(session, method, values, Val(source), false, span.start, span.end)
+    jet_driver_compiler_reply(session, reply, span)
+}
+
+jet_driver_compiler_reply: fn(session: &BuildSession, reply: BuildSessionReply, span: Span) -> JetEvalBuildReply {
     if reply == {
         .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}
         .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}

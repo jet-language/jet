@@ -1,0 +1,14 @@
+use greet
+
+build: fn(b: Build) -[Meta.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(greet.hello, #code {
+        "rewritten by the root"
+    })
+    b.default(app)
+}
+
+run: fn() {
+    print(greet.hello())
+}

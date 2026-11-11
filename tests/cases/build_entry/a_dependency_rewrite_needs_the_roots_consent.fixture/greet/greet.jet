@@ -1,0 +1,11 @@
+// A dependency whose function a root's build rewrites, and a metaprogram
+// that rewrites it through the `Compiler` value the root hands it.
+hello: fn() -> String {
+    "hello from greet"
+}
+
+install: fn(meta: Compiler) -[Meta.Rewrite]> {
+    meta.rewrite_body(hello, #code {
+        "rewritten by install"
+    })
+}

@@ -7304,6 +7304,21 @@ LockedEffectRowWidened: struct {
     }
 }
 
+RewriteWithoutConsent: struct {
+    function: String
+    package: String
+
+    impl Diagnostic {
+        code: "E3514"
+        stage: [.Build]
+        meaning: "`meta.rewrite_body` names a dependency's function the root has not allowed it to rewrite"
+        detail: true
+        what: fn(self) -> String { "`meta.rewrite_body` would rewrite `{self.function}` of package `{self.package}`, which this build has not allowed" }
+        why: fn(self) -> String { "Rewriting a dependency's code needs the root's consent, one line a reviewer reads" }
+        fix: fn(self) -> String { "Add `meta.allow_rewrite(package: \"{self.package}\")` after the root's `b.compiler` call" }
+    }
+}
+
 ReservedBuildRuleCode: struct {
     code: String
 

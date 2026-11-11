@@ -51,10 +51,13 @@ BuildSessionGeneratedModule: struct {
     // the generated module names as its source.
     start: Int
     end: Int
-    // `meta.rewrite_body(f, code)`: the function of this package whose body
-    // `source` replaces. The driver makes the module that function with the
-    // new body and withdraws the original (JetDriver BuildQueries.jet).
+    // `meta.rewrite_body(f, code)`: the function whose body `source`
+    // replaces. The driver makes the module that function with the new body
+    // and withdraws the original (JetDriver BuildQueries.jet).
     rewrites: String?{None}
+    // The identity of the dependency that declares `rewrites`, which the
+    // module belongs to; None for this build's own package.
+    package: String?{None}
     // The function that made the module through a `Compiler` value and where
     // ("`f` at file:line"), which a report from the module names.
     producer: String?{None}
@@ -180,12 +183,14 @@ BuildSessionOption: struct {
     end: Int
 }
 
-// One `Compiler` value `b.compiler(target)` made: the target it acts on and
-// the call's span, its provenance.
+// One `Compiler` value `b.compiler(target)` made: the target it acts on, the
+// call's span, its provenance, and the dependencies whose functions it may
+// rewrite (`meta.allow_rewrite`), by name.
 BuildSessionCompiler: struct {
     target: Int
     start: Int
     end: Int
+    rewritable: [String]{[String]{}}
 }
 
 BuildSessionState: struct {
@@ -216,6 +221,9 @@ BuildSessionState: struct {
     dependencies: [String: String]{[String: String]{}}
     // The `Compiler` values this build made, by handle id.
     compilers: [BuildSessionCompiler]{[BuildSessionCompiler]{}}
+    // The loader's identity of the build's package, which tells its own
+    // functions from a dependency's (`meta.rewrite_body`).
+    identity: String{""}
     start: Int
     end: Int
 }
@@ -248,6 +256,13 @@ build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
 build_session_set_dependencies: fn(session: &BuildSession, dependencies: [String: String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.dependencies = dependencies.copy()
+}
+
+// The loader's identity of the build's package (`package` may name it
+// otherwise, as a lone file's stem).
+build_session_set_identity: fn(session: &BuildSession, identity: String) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.identity = identity.copy()
 }
 
 // `build_diag`: a generated-source cycle is E3511, every other invalid graph
@@ -426,21 +441,42 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         }
         return added
     }
+    // `meta.allow_rewrite(package: name)` on a `Compiler` value: the root's
+    // consent that the value rewrites the functions of the dependency `name`.
+    if method == "compiler.allow_rewrite" {
+        if args.len() != 2 -> return build_session_fail(state, "`meta.allow_rewrite` takes one `package:` name")
+        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+        name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.allow_rewrite`'s package must be a string")
+        if !build_session_contains_string(state.compilers[compiler].rewritable, name) -> state.compilers[compiler].rewritable.push(name)
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
     // `meta.rewrite_body(f, code)` on a `Compiler` value: the code's formatted
-    // statements become the body of this package's function `f`, carried as
-    // the generated module `.jet/generated/<package>/rewrite_body/<f>.jet`
-    // of the value's target. One body rewrite per function.
+    // statements become the body of the function `f` of the package that
+    // declares it, carried as the generated module
+    // `.jet/generated/<package>/rewrite_body/<f>.jet`. A function of this
+    // package is a source of the value's target; a dependency's function is
+    // rewritten only when the value allows that package, and only in this
+    // build's copy of it. One body rewrite per function.
     if method == "compiler.rewrite_body" {
-        if args.len() != 3 -> return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
+        if args.len() != 4 -> return build_session_fail(state, "`meta.rewrite_body` takes a function and one `Code` value")
         compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
         function: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's name")
         source: generated_source ?? return build_session_fail(state, "`meta.rewrite_body` requires a `#code` block")
-        path: ".jet/generated/{build_session_package_dir(state.package)}/rewrite_body/{build_session_safe_name(function)}.jet"
-        loop old in state.generated {
-            if old.rewrites == .Val(rewritten) && rewritten == function -> return build_session_fail(state, "`meta.rewrite_body` already replaced the body of `{function}` in this build")
+        // The identity of the function's package: this build's own, or a
+        // dependency's.
+        owner: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.rewrite_body` lost its function's package")
+        own: owner == state.identity
+        package_name: build_session_package_dir(if own -> state.package else -> owner)
+        if !own && !build_session_contains_string(state.compilers[compiler].rewritable, package_name) {
+            return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
         }
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: "{function} body", path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), producer: build_session_text(args, 2)})
-        if added == .Value(_) {
+        path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
+        loop old in state.generated {
+            if old.rewrites == .Val(rewritten) && rewritten == function && (old.package ?? state.identity) == owner -> return build_session_fail(state, "`meta.rewrite_body` already replaced the body of `{function}` in this build")
+        }
+        name: if own -> "{function} body" else -> "{function} body of {package_name}"
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: build_session_text(args, 2)})
+        if own && added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
         }

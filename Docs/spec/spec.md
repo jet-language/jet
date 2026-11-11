@@ -5794,18 +5794,23 @@ block, and `meta.add(code, scope: "name")` adds them to the value's target as
 the generated module `name`, which the program checks like hand-written code.
 `meta.add` writes declarations, so it uses the `Meta.Generate` effect: allowed
 unless the calling function's row denies it (`-[!Meta.Generate]>`).
-`meta.rewrite_body(f, code)` replaces the body of the root package's
-top-level function `f` with the statements of a `#code { statements }` block.
-The function keeps its own declaration up to its body and becomes the
-generated module `rewrite_body/f` of the value's target; its original text is
-withdrawn from its file, whose other code keeps its place. The new body is
-checked like hand-written code, in that module, which sees the package's
-declarations. `f` is named directly; a local value is refused, and a function
-the package doesn't declare with a braced body fails the build (E3502). One
-build rewrites a function's body once. A line `#{f.body}` of the new body
-pastes the function's original body there, at that line's indentation, so a
-rewrite can wrap the body it replaces. Replacing a body uses the
-`Meta.Rewrite` effect, denied the same way (`-[!Meta.Rewrite]>`).
+`meta.rewrite_body(f, code)` replaces the body of the top-level function `f`
+with the statements of a `#code { statements }` block. The function keeps its
+own declaration up to its body and becomes the generated module
+`rewrite_body/f` of its package; its original text is withdrawn from its file,
+whose other code keeps its place. The new body is checked like hand-written
+code, in that module, which sees its package's declarations. `f` is named
+directly or through its package's import (`orm.query`); a local value is
+refused, and a function its package doesn't declare with a braced body fails
+the build (E3502). One build rewrites a function's body once. A line
+`#{f.body}` of the new body pastes the function's original body there, at
+that line's indentation, so a rewrite can wrap the body it replaces. Replacing
+a body uses the `Meta.Rewrite` effect, denied the same way
+(`-[!Meta.Rewrite]>`). The root package's own functions need no consent; a
+dependency's function is rewritten only after the root writes
+`meta.allow_rewrite(package: "orm")` on its value, and otherwise the call
+fails the build (E3514). The consent names the dependency the build loads at
+its locked version, and the rewrite changes only this build's copy of it.
 
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`

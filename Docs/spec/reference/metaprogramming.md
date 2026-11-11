@@ -377,13 +377,20 @@ generated module `name`, checked with the program like hand-written code.
 `authority: { deny: [Meta.Generate] }` refuses it wherever the root's build
 reaches it, a dependency's function included, and a dependency's own `allow`
 row widens nothing for its importer.
-`meta.rewrite_body(f, code)` replaces the body of the root package's own
-top-level function `f` with the statements of a `#code { statements }` block.
+`meta.rewrite_body(f, code)` replaces the body of the top-level function `f`
+with the statements of a `#code { statements }` block. `f` is named directly
+or through its package's import (`orm.query`).
 The rewritten function, its own declaration with the new body, is the
-generated module `rewrite_body/f` of the value's target, checked with the
+generated module `rewrite_body/f` of `f`'s package, checked with the
 program, and its original text is withdrawn from its file. A line `#{f.body}`
 in the block pastes the original body there, so a rewrite can wrap it. It uses
 `Meta.Rewrite`, which a row denies with `-[!Meta.Rewrite]>`.
+The root package's own functions need no consent. A dependency's function is
+rewritten only after the root writes `meta.allow_rewrite(package: "orm")` on
+its value, naming that dependency, which the build loads at its locked
+version; without it the call fails the build with E3514, which names the
+package, the function and the line to add. The rewrite changes only this
+build's copy of the dependency, never its cached source.
 A report in code a `Compiler` value made ends with a note that names the call
 and the function that made it, with its place: the root's own `build`, or a
 dependency's function the root handed the value to. The build's provenance
@@ -406,7 +413,8 @@ affects and recorded in a receipt that does not promise equivalence. Some
 limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
 facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`,
-`meta.add`, `meta.rewrite_body` and its `#{f.body}` paste are built;
+`meta.add`, `meta.rewrite_body`, its `#{f.body}` paste and
+`meta.allow_rewrite` are built;
 `meta.events` and the other operations on the value are ratified contract and
 not yet built.
 The source examples and the two executable registries linked above are the
