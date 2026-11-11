@@ -6282,6 +6282,7 @@ SemaGraphUndo: enum {
     ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String)
     NominalIndexes(symbol_rows: [String:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]])
     Counting(old: Bool)
+    FailureSolved(old: Bool)
     // A generated codec body a codec wave filled (sema_codec_fill_demanded);
     // undo returns the impl to its header.
     CodecBody(module_index: Int, row: Int)
@@ -6373,6 +6374,7 @@ sema_graph_trail_undo: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail)
                 graph.nominal_row_buckets = buckets
             }
             .Counting(old) -> graph.counting = old
+            .FailureSolved(old) -> graph.failure_solved = old
             .CodecBody(module_index, row) -> sema_codec_undo_body(graph, module_index, row)
         }
     }
@@ -9051,11 +9053,13 @@ sema_failure_module_references: fn(module_result: SemaGraphModuleResult, keys: [
 // projected function or a minted `#Error enum`, calls a projected function or
 // names one as a value is checked again against the projected graph. A
 // minted type may be named before it existed, which that module's check
-// reported, so after a mint a module with an error is checked again too. With
-// keep-going, a module with a failure obligation against a callee that kept
-// its carrier (`infallible` holds the `T Never!` projections) is checked again
-// so its traps see that error, as they do once the obligations are settled.
-sema_failure_recheck_modules: fn(modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String], keep_going: Bool) -> [Int] Never! {
+// reported, so after a mint a module with an error is checked again too. A
+// module with a failure obligation against a callee that kept its carrier
+// (`infallible` holds the `T Never!` projections) is checked again against
+// the solved graph: an inferring callback that deferred the callee's failure
+// takes the callee's carrier there, and a keep-going trap sees the error, as
+// it does once the obligations are settled.
+sema_failure_recheck_modules: fn(modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String]) -> [Int] Never! {
     union_keys := [String:Bool]{}
     loop key in unions.keys -> union_keys[key] = true
     declaring := [Bool]{}
@@ -9068,11 +9072,11 @@ sema_failure_recheck_modules: fn(modules: [SemaGraphModuleResult], unions: SemaF
     loop (module_index, module_result) in modules {
         recheck := declaring[module_index]
         if !recheck && union_keys.len() > 0 -> recheck = sema_failure_module_references(module_result, union_keys)
-        if !recheck && (unions.minted || keep_going) {
+        if !recheck {
             loop diagnostic in module_result.diagnostics {
                 if diagnostic.severity != DIAGNOSTIC_ERROR -> next
                 callee: sema_failure_obligation_callee(diagnostic, mark)
-                recheck = if callee == .Val(key) -> keep_going && plain_keys.get(key) == None else -> unions.minted
+                recheck = if callee == .Val(key) -> plain_keys.get(key) == None else -> unions.minted
                 if recheck -> break
             }
         }
@@ -9345,10 +9349,13 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     unions: sema_failure_union_infer(after_body_graph, modules, diagnostics, trail)
     if diagnostics.len() > union_start -> complete = false
     infallible: sema_failure_project_infallible(after_body_graph, inferred_infallible, trail)
+    trail.entries.push(SemaGraphUndo.FailureSolved{old: after_body_graph.failure_solved})
+    after_body_graph.failure_solved = true
     if trace_sink == .Val(sink) -> sink.end("sema.failure", inferred_infallible.len())
-    // One body pass: only the modules a union contract changes are checked
+    // One body pass: only the modules a union contract changes, or whose
+    // failure obligations name a callee the solve left fallible, are checked
     // again; the `T Never!` projections are reconciled onto the checked bodies.
-    recheck: sema_failure_recheck_modules(modules, unions, infallible, after_body_graph.keep_going)
+    recheck: sema_failure_recheck_modules(modules, unions, infallible)
     final_graph := if {
         recheck.len() > 0 -> {
             rechecked := [SemaGraphModuleResult]{}

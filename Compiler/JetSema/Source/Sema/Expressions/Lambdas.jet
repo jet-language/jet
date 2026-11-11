@@ -1811,6 +1811,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     compute_call_start := lambda_context.compute_calls.len()
     autodiff_obligation_start := lambda_context.autodiff_obligations.len()
     failure_edge_start := lambda_context.failure_edges.len()
+    failure_union_edge_start := lambda_context.failure_union_edges.len()
     lambda_context.autodiff_safe_panic = false
     lambda_context.autodiff_unsafe_panic = false
     frame := sema_scope_enter(lambda_scopes, lambda_state, "lambda@{lambda.span.start}")
@@ -2466,6 +2467,15 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         // carrier, so the enclosing default route only learns that the
         // general `Err` reaches it.
         context.failure_union_general = true
+    }
+    // A callback that infers its carrier and stayed total deferred each
+    // unannotated callee it propagates (sema_expression_propagation_conversion):
+    // those callees join the owner's failure-union row as a direct call's
+    // do, so the failures of one the solve leaves fallible reach the owner.
+    if !inline_loop && lambda_context.failure_inference && !lambda_work.meta.fallible_propagation {
+        loop edge_index in failure_union_edge_start..<lambda_context.failure_union_edges.len() {
+            if !context.failure_union_edges.contains(lambda_context.failure_union_edges[edge_index]) -> context.failure_union_edges.push(lambda_context.failure_union_edges[edge_index])
+        }
     }
     if inline_loop {
         // An inline loop body is the owner's body: its default-route failures

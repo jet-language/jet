@@ -871,6 +871,13 @@ sema_failure_declaration_inferred_never: fn(declaration: Func) -> Bool Never! {
     failure_contract_of_function(declaration.return_type, declaration.return_type_span) == .InferredNever(_)
 }
 
+// Whether the bundle failure solve has settled the unannotated contracts
+// this check reads (the recheck pass).
+sema_failure_solved: fn(program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) -> return graph.failure_solved
+    false
+}
+
 // A generator's declared `Stream<T>` is its protocol, not a failure carrier:
 // its call only builds the stream, so it never enters the failure rail.
 sema_failure_callee_is_generator: fn(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
@@ -963,10 +970,21 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             // A callback whose expected return row is a plain value has no
             // failure route of its own: an unannotated callee's failure is an
             // obligation the bundle failure solve settles, as in a named
-            // `T Never!` body, never the callback's inferred carrier.
-            if context.callback_return_closed && context.inferred_failure_carrier == None && scopes.failure_carrier == None && callee == .Val(found) && found.inferable {
-                diagnostics.push(sema_failure_no_carrier(error, span, implicit))
-                return sema_failure_defer_obligation(callee, diagnostics)
+            // `T Never!` body, never the callback's inferred carrier. A
+            // callback that infers its carrier (a `filter`, `map` or `sort_by`
+            // callback, an unconstrained lambda) defers the callee the same
+            // way before the solve, so the call takes the callee's inferred
+            // effect as a direct call does; the owner keeps the callee as an
+            // edge and a union edge. A callee the solve leaves fallible gives
+            // the callback its carrier when the module is checked again
+            // (sema_failure_recheck_modules).
+            if context.failure_inference && context.inferred_failure_carrier == None && scopes.failure_carrier == None && callee == .Val(found) && found.inferable {
+                deferred_open: !context.callback_return_closed && !sema_failure_solved(program)
+                if context.callback_return_closed || deferred_open {
+                    if deferred_open -> sema_failure_union_record_propagation(callee, error, context)
+                    diagnostics.push(sema_failure_no_carrier(error, span, implicit))
+                    return sema_failure_defer_obligation(callee, diagnostics)
+                }
             }
             target: sema_failure_parent_error(error, scopes, context) ?? {
                 diagnostics.push(sema_failure_no_carrier(error, span, implicit))
