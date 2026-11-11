@@ -4662,15 +4662,13 @@ IR_ROUTES_NATIVE_INDEX: comptime { [String]{"jet_bit_set_has", "jet_bitset_add",
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (the raw List layout leaves, crypto.wipe, volatile access and
-// stream stores, channels and timer receivers, event policy, object
-// entries), or an Iter route
+// ir_core_call (crypto.wipe, channels and timer receivers, event policy,
+// object entries), or an Iter route
 // (BuildLazy.jet ir_lazy_symbol).
 // IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 ir_route_builder_lowered: fn(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
-    if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
-    if name == "jet_raw_volatile_read" || name == "jet_raw_volatile_write" || name == "jet_raw_stream_store" -> return true
+    if name == "jet_raw_crypto_wipe" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::after_value" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
@@ -5392,14 +5390,7 @@ ir_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Co
 
 ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     canonical: ir_canonical_core_record(record)
-    if canonical.module_name == "core.mem" && (canonical.member == "__list_capacity" || canonical.member == "__list_reserve_exact" || canonical.member == "__type_size") {
-        return ir_core_list_leaf(m, p, b, ty, canonical.member, args, type_args, span)
-    }
     if canonical.module_name == "core.crypto" && canonical.member == "wipe" -> return ir_core_crypto_wipe(m, p, b, args, span)
-    if canonical.module_name == "core.mem" && (canonical.member == "volatile_read" || canonical.member == "volatile_write") {
-        return ir_core_volatile(m, p, b, canonical.member, args, type_args, span)
-    }
-    if canonical.module_name == "core.mem" && canonical.member == "stream_store" -> return ir_core_stream_store(m, p, b, args, type_args, span)
     // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
     // only, the compiler answers it (ir_host_method `compiler.member`).
     if canonical.module_name == "core.compiler" -> return ir_host_method(m, p, b, ty, "compiler.{canonical.member}", args, span)
@@ -5743,19 +5734,21 @@ ir_invocation_ambient_refusal: fn(symbol: String) -> String? Never! {
     ir_comptime_ambient_refusal(symbol)
 }
 
-// The raw List layout leaves: `__type_size<T>()` is T's List stride,
-// `__list_capacity<T>(xs)` the header's capacity,
+// The raw List layout intrinsics (Core/Mem/Mem.jet): `__type_size<T>()` is
+// T's List stride, `__list_capacity<T>(xs)` the header's capacity,
 // `__list_reserve_exact<T>(xs, n)` grows the written header to exactly len +
 // n elements (jet_rt_encoding_list_reserve_exact).
-ir_core_list_leaf: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+ir_core_list_leaf: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRuntimeIntrinsic, args: [Int], type_args: [Type], span: Span) -> Int Never! {
     if type_args.len() != 1 -> return ir_fail_slot(b, span, "raw List layout leaf requires its checked element type")
     element_ty: type_args[0].copy()
     element: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
-    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    reserves: operation == IRRuntimeIntrinsic.ListReserveExact
+    result_ty: if reserves -> Type.Bool else -> Type.Int
+    result_row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
     stride: if m.types[element].kind == .Unit -> 1 else -> ir_list_stride(m, element)
-    if member == "__type_size" -> return ir_int_constant(m, b, result_row, stride)
-    if args.len() != (if member == "__list_reserve_exact" -> 2 else -> 1) -> return ir_fail_slot(b, span, "raw List layout leaf has invalid checked arity")
-    if member == "__list_capacity" {
+    if operation == IRRuntimeIntrinsic.TypeSize -> return ir_int_constant(m, b, result_row, stride)
+    if args.len() != (if reserves -> 2 else -> 1) -> return ir_fail_slot(b, span, "raw List layout leaf has invalid checked arity")
+    if !reserves {
         list: ir_expr(m, p, b, args[0])
         if ir_failed(b) || list < 0 -> return -1
         capacity: ir_load_word(m, b, list, 8)

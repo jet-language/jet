@@ -54,7 +54,24 @@ stream_store: fn<T>(dst: &T, value: T) Never! {
     core.mem.stream_store<T>(dst, value)
 }
 
-// Encoding stream storage uses the canonical private __list_capacity,
-// __list_reserve_exact, and __type_size kernels. They are compiler-typed raw
-// layout/capacity operations, not public aliases or source wrappers.
+// The raw List layout operations Core's encoding and crypto storage measure
+// and grow its Lists with: T's List stride in bytes, a List's capacity, and
+// growing a List to exactly `len + additional` elements (false when the
+// allocation fails). Reserved `__` names, never public.
+//
+// Each operation here, and `volatile_read`, `volatile_write` and
+// `stream_store` above, is a compiler intrinsic: the compiler builds every
+// call inline (JetIR Build.jet IR_CORE_INTRINSICS) and never builds the body,
+// so a body names only the declaration's own operation.
+__type_size: fn<T>() -> Int Never! {
+    __type_size<T>()
+}
+
+__list_capacity: fn<T>(values: [T]) -> Int Never! {
+    __list_capacity<T>(values)
+}
+
+__list_reserve_exact: fn<T>(values: &[T], additional: Int) -> Bool Never! {
+    __list_reserve_exact<T>(values, additional)
+}
 
