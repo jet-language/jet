@@ -1,7 +1,8 @@
 #!/usr/bin/env jet
 // Assemble the Jetpack Jet sources into one unqualified unit. `sources.list` is
 // the only implementation order and `tests.list` the only test order; nothing is
-// globbed into a unit. Run it from the checkout root:
+// globbed into a unit. Run it by its path in a checkout, from any directory
+// (Check.jet runs it in the proof's scratch directory, never the checkout):
 //
 //   jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]
 //   jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated
@@ -19,7 +20,10 @@
 // map `jetpack.map.json` into the mode's scratch directory:
 // $JETPACK_BOOTSTRAP_SCRATCH/<mode>, else
 // $JET_STATE_ROOT/jetpack-bootstrap/<worker>-<tag>/<mode>, where the tag
-// hashes the source root and the area selection.
+// hashes the source root and the area selection. A previous `project` is
+// removed first, and only if it is one an assembly made (PROJECT_NAMES, never a
+// link, never the source tree, the toolchain root, the working directory or
+// HOME, nor a directory holding one of them); anything else is refused.
 //
 // Environment:
 //   JETPACK_BOOTSTRAP_SOURCE_ROOT  the tree to assemble (default: the working directory)
@@ -55,8 +59,15 @@ use {
     json: core.encoding.json
     fspath: core.files.path
     process: core.process
+    sys: core.sys
     term: core.term
 }
+
+SELF: "Jetpack/Bootstrap/Assemble.jet"
+
+// Everything an assembly and the `jet check`/`jet build` run on its unit write
+// into `project`: the only names a project directory this script removes holds.
+PROJECT_NAMES: [String]{".jet", "package.jet", "src"}
 
 // The trees of an area folder whose files the inventory holds to the manifests.
 TREE_KINDS: [String]{"Source", "Tests"}
@@ -89,7 +100,7 @@ run: fn() {
     }
     if args.len() > 0 && args[0] == "slice" {
         if args.len() != 1 -> usage()
-        problems: slice_problems(root, cwd) ?? refuse_as("compiler-slice", err.message)
+        problems: slice_problems(root, checkout_root(cwd)) ?? refuse_as("compiler-slice", err.message)
         loop problem in problems -> term.eprint("compiler-slice: {problem}")
         if problems.len() > 0 -> process.exit(1)
         print("compiler-slice: the Jetpack compiler slice is closed under the compiler's packages")
@@ -98,7 +109,7 @@ run: fn() {
     if args.len() > 1 -> usage()
     mode: if args.len() == 1 -> args[0] else -> "check"
     config: env_config(mode, root, cwd) ?? refuse_as("jetpack-bootstrap", err.message)
-    members: compiler_members(root, cwd) ?? refuse_as("jetpack-bootstrap", err.message)
+    members: compiler_members(root, checkout_root(cwd)) ?? refuse_as("jetpack-bootstrap", err.message)
     done: assemble(config, members) ?? refuse_as("jetpack-bootstrap", err.message)
     if done.skipped > 0 -> print("note: {done.skipped} unlisted file(s) in dependency areas are not part of this unit (another writer's work in progress)")
     print("assembled {done.units} Jet sources ({mode}, {done.claims} test claims) into {config.scratch}/project/src/jetpack.jet")
@@ -116,6 +127,13 @@ usage: fn() -> Never {
 refuse_as: fn(prefix: String, message: String) -> Never {
     term.eprint("{prefix}: {message}")
     process.exit(1)
+}
+
+// The checkout that holds this script; its tools (CompilerPackages.jet) run from it.
+checkout_root: fn(cwd: String) -> String {
+    script: resolve_path(cwd, sys.executable())
+    if !script.ends_with("/{SELF}") -> refuse_as("jetpack-bootstrap", "run {SELF} of a checkout with jet (this is {script})")
+    script.removesuffix("/{SELF}")
 }
 
 // What one assembly reads: the mode, the source root, the area selection and
@@ -374,7 +392,11 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
 
     project: "{config.scratch}/project"
     source_dir: "{project}/src"
-    if files.exists(project) -> files.remove_all(project) ?? return Err("cannot remove {project}: {err}")
+    if files.exists(project) || files.is_symlink(project) {
+        protected: [String]{config.root, process.env_get("JET_TOOLCHAIN_ROOT") ?? "", files.cwd() ?? "", process.env_get("HOME") ?? ""}
+        if project_removal_refusal(project, protected) == .Val(why) -> return Err("refusing to remove {project}: {why}")
+        files.remove_all(project) ?? return Err("cannot remove {project}: {err}")
+    }
     files.create_dir_all(source_dir) ?? return Err("cannot create {source_dir}: {err}")
     loop staged in embeds.copies {
         target: embeds.targets.get(staged) ?? ""
@@ -387,6 +409,30 @@ assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     map_text: json.to_string_pretty(source_map(config, mapped, embeds, claims)) ?? return Err("the source map cannot be encoded: {err}")
     files.write("{config.scratch}/jetpack.map.json", "{map_text}\n") ?? return Err("cannot write {config.scratch}/jetpack.map.json: {err}")
     Assembled{units: units.len(), claims: claims.len(), skipped: skipped}
+}
+
+// Why `project` is not a unit project an assembly made, so must not be removed
+// recursively; None when it is. It must be an absolute path to a real
+// directory (not a link), not `/`, neither be nor hold any `protected` path
+// (empty entries are skipped; links resolve on both sides), and hold only
+// PROJECT_NAMES. An empty or stale scratch variable that lands the project on
+// a checkout, a toolchain root, the working directory or HOME is refused here.
+project_removal_refusal: fn(project: String, protected: [String]) -> String? {
+    if !project.starts_with("/") -> return Val("{if project == "" -> "an empty path" else -> project} is not an absolute path")
+    if files.is_symlink(project) -> return Val("it is a link, not a directory an assembly made")
+    if !files.is_dir(project) -> return Val("it is not a directory")
+    real: files.canonicalize(project) ?? return Val("it cannot be resolved: {err}")
+    if real == "/" -> return Val("it is the filesystem root")
+    loop guarded in protected {
+        if guarded == "" -> next
+        held: files.canonicalize(guarded) ?? guarded.copy() // copy: an unresolvable path compares as given
+        if held == real || held.starts_with("{real}/") -> return Val("it is or holds {guarded}")
+    }
+    entries: files.list_dir(project) ?? return Val("it cannot be listed: {err}")
+    loop entry in entries {
+        if !PROJECT_NAMES.contains(entry.name) -> return Val("it holds {entry.name}, which no assembly writes")
+    }
+    None
 }
 
 append: fn(out: &[U8], text: String) {
@@ -918,11 +964,12 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
 // --- compiler slice ----------------------------------------------------------------
 
 // The compiler's library member files (a package's entry, its root run.jet,
-// is not part of a slice): Tools/agent/CompilerPackages.jet sources, run by
-// `tool_jet()` from the checkout `repo`.
+// is not part of a slice): Tools/agent/CompilerPackages.jet sources of the
+// checkout `repo`, run by `tool_jet()` in this script's working directory
+// with the tree as an explicit `--root`.
 compiler_members: fn(root: String, repo: String) -> [String] Err! {
     jet: tool_jet()
-    listed: process.cmd([String]{jet, "{repo}/{COMPILER_PACKAGES}", "--root", root, "sources"}).cwd(repo).output_limit(1073741824).run() ?? return Err("couldn't run `{jet} {COMPILER_PACKAGES} sources`: {err}")
+    listed: process.cmd([String]{jet, "{repo}/{COMPILER_PACKAGES}", "--root", root, "sources"}).output_limit(1073741824).run() ?? return Err("couldn't run `{jet} {COMPILER_PACKAGES} sources`: {err}")
     if !listed.success -> return Err("`{COMPILER_PACKAGES} sources` exited {listed.code}: {process.combined_output(listed).trim_end()}")
     Ok(member_rows(listed.output))
 }
@@ -1631,7 +1678,11 @@ put: fn(root: String, name: String, text: String) {
 // The fixture tree: three areas and one Store test. No compiler, provider or
 // runtime executes.
 area_fixture: fn() -> String {
-    root: normalize_join("/", files.mkdtemp("jetpack-assembly") ?? panic("a temporary directory cannot be made: {err}"))
+    area_fixture_at(normalize_join("/", files.mkdtemp("jetpack-assembly") ?? panic("a temporary directory cannot be made: {err}")))
+}
+
+// The fixture tree written into `root`, which is created.
+area_fixture_at: fn(root: String) -> String {
     put(root, "Jetpack/Bootstrap/areas.list", "Foundation:\nEngine: Foundation\nCLI: Foundation\n")
     put(root, "Jetpack/Bootstrap/sources.list", FIXTURE_MANIFEST)
     put(root, "Jetpack/Bootstrap/tests.list", "# == Engine (folders: Store) ==\nJetpack/Store/Tests/Fixture.jet\n")
@@ -1639,7 +1690,7 @@ area_fixture: fn() -> String {
     put(root, "Jetpack/Store/Source/Fixture.jet", "store_fixture: fn() {{}}\n")
     put(root, "Jetpack/CLI/Source/Fixture.jet", "cli_fixture: fn() {{}}\n")
     put(root, "Jetpack/Store/Tests/Fixture.jet", "#Test(\"store fixture\") {{\n    assert(true)\n}}\n")
-    root
+    root.copy() // copy: the caller keeps its path
 }
 
 fixture_config: fn(root: String, mode: String, own: String?, test_sections: [String]?) -> Config {
@@ -1724,6 +1775,44 @@ read_map: fn(root: String, mode: String) -> Dyn {
     done: assemble(fixture_config(root, "check", Val("Engine"), None), [String]{}) ?? panic(err.message)
     assert_eq(done.skipped, 1)
     files.remove_all(root) ?? ()
+}
+
+#Test("an assembly removes only a project directory an assembly made") {
+    base: normalize_join("/", files.mkdtemp("jetpack-removal") ?? panic("a temporary directory cannot be made: {err}"))
+    // A scratch whose project lands on the source tree (an empty or stale
+    // scratch variable): refused, and the tree stays whole.
+    root: area_fixture_at("{base}/project")
+    landed: Config{mode: "check", root: root.copy(), areas: None, own: None, test_sections: None, deps_from_head: false, scratch: base.copy()}
+    if assemble(landed, [String]{}) == {
+        .Err(error) -> assert_eq(error.message, "refusing to remove {root}: it is or holds {root}")
+        .Ok(_) -> panic("an assembly removed its own source tree")
+    }
+    assert(files.is_file("{root}/Jetpack/Bootstrap/sources.list"))
+    // Only an absolute, real directory holding just what an assembly writes,
+    // and holding no protected path, is removable.
+    made: "{base}/made/project"
+    put(made, "src/jetpack.jet", "")
+    put(made, "package.jet", PACKAGE_SOURCE)
+    put(made, ".jet/build/stale", "")
+    assert(project_removal_refusal(made, [String]{root, ""}) == None)
+    assert_eq(project_removal_refusal("", [String]{}) ?? "", "an empty path is not an absolute path")
+    assert_eq(project_removal_refusal(".", [String]{}) ?? "", ". is not an absolute path")
+    assert_eq(project_removal_refusal("/", [String]{}) ?? "", "it is the filesystem root")
+    assert_eq(project_removal_refusal(base, [String]{root}) ?? "", "it is or holds {root}")
+    assert_eq(project_removal_refusal("{base}/made", [String]{made}) ?? "", "it is or holds {made}")
+    put(made, "notes.txt", "")
+    assert_eq(project_removal_refusal(made, [String]{}) ?? "", "it holds notes.txt, which no assembly writes")
+    files.remove("{made}/notes.txt") ?? panic("{err}")
+    link: "{base}/link"
+    files.symlink(made, link) ?? panic("{err}")
+    assert_eq(project_removal_refusal(link, [String]{}) ?? "", "it is a link, not a directory an assembly made")
+    // A project an assembly made is replaced whole.
+    replaced: Config{mode: "check", root: root.copy(), areas: None, own: None, test_sections: None, deps_from_head: false, scratch: "{base}/made"}
+    _ := assemble(replaced, [String]{}) ?? panic(err.message)
+    assert(files.is_file("{made}/src/jetpack.jet"))
+    assert(!files.exists("{made}/.jet/build/stale"))
+    assert(files.is_file("{root}/Jetpack/Bootstrap/sources.list"))
+    files.remove_all(base) ?? ()
 }
 
 #Test("the area graph answers closures and populated areas") {
