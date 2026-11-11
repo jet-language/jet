@@ -1,0 +1,40 @@
+// What a shell or node script reads, read in one call each:
+// `sys.env_file(file)` is the environment as `. file` leaves it, read with
+// no shell, `process.env_nonempty(name)` is `${name:-…}`, `sys.cache_dir()`
+// and `sys.data_dir()` are the XDG directories, `files.normalize`, `join_all`
+// and `resolve` are node's path math, and `text.decode_latin1`,
+// `text.leading_int` and `collections.slice_clamped` read bytes as
+// `toString('latin1')`, `parseInt` and `subarray` do.
+package: {
+    name: "script_porting"
+    authority: { allow: [Env, FS, IO, Mem.Alloc, Time] }
+}
+use {
+    collections: core.collections
+    files: core.files
+    process: core.process
+    sys: core.sys
+    text: core.text
+}
+
+run: fn() {
+    sys.set("HOME", "/home/example")
+    sys.set("STAGE", "prod")
+    sys.set("XDG_CACHE_HOME", "")
+    sys.set("XDG_DATA_HOME", "/var/data")
+    root: files.mktemp("script-porting")
+    files.create_dir_all(root)
+    env_path: files.join(root, "env")
+    files.write(env_path, "# KEY=VALUE lines\nexport STAGE=\"${{STAGE:-dev}}\"\nOUT=$HOME/out\nPATHS=\"$STAGE:$OUT\"  # quoted\n")
+    vars: sys.env_file(env_path)
+    print("STAGE={vars.get("STAGE") ?? ""} OUT={vars.get("OUT") ?? ""} PATHS={vars.get("PATHS") ?? ""}")
+    print("XDG_CACHE_HOME: {process.env_nonempty("XDG_CACHE_HOME") ?? "empty is unset"}")
+    print("cache: {sys.cache_dir() ?? "none"} data: {sys.data_dir() ?? "none"}")
+    resolved: files.resolve("/srv/./jet/")
+    print("normalize: {files.normalize("a//b/../c/")} join_all: {files.join_all([String]{"/srv", "/jet", "../seeds"})} resolve: {resolved}")
+    print("latin1: {text.decode_latin1([U8]{U8{99}, U8{97}, U8{102}, U8{233}})}")
+    print("leading_int: {text.leading_int("  42 bytes") ?? -1} {text.leading_int("size") ?? -1}")
+    numbers: [Int]{1, 2, 3, 4, 5}
+    print("slice_clamped: [{collections.slice_clamped(numbers, -2, 99).map(n -> "{n}").join(",")}] [{collections.slice_clamped(numbers, 3, 1).map(n -> "{n}").join(",")}]")
+    files.remove_all(root)
+}

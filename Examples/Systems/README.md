@@ -77,6 +77,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessUsage](Process/ProcessUsage.jet) — A finished child's receipt says what it used, read from the kernel when the child is reaped.
 - [ResourceLimits](Process/ResourceLimits.jet) — This program's resource limits and usage live in core.sys.
 - [ScriptFallbacks](Process/ScriptFallbacks.jet) — `files.read_or(path, "")` and `files.list_dir_or(dir, [])` state a script's fallback in the call; `files.best_effort()` runs file operations past a failure and records it; `process.fail(code, message)` ends the run after the message on stderr.
+- [ScriptPorting](Process/ScriptPorting.jet) — What a shell or node script reads, in one call each: `sys.env_file` (the environment as `. file` leaves it, read with no shell), `process.env_nonempty` (`${NAME:-…}`), `sys.cache_dir`/`data_dir`, node's path math (`files.normalize`, `join_all`, `resolve`), and `text.decode_latin1`, `text.leading_int` and `collections.slice_clamped` for bytes.
 - [ShCommand](Process/ShCommand.jet) — `Sh{"…"}` is a whole command line, each `{hole}` one argv item; `status()`, `ok()`, `text()`, `lines()`, `run()` and `spec()` run it in one call.
 - [SysExecutable](Process/SysExecutable.jet) — `os.executable()` names the running program: the script's absolute path under `jet run`, the built binary after `jet build`.
 - [SystemPrivilegedEntry](Process/SystemPrivilegedEntry.jet) — Audited identity/session controls for a disposable user namespace only.

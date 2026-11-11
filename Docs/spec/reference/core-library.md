@@ -537,6 +537,12 @@ records the shipped surface without adding aliases:
 | `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, `Bits.copy()` (an independent set: changing the copy leaves the original as it was), and size/clear operations. |
 | `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | Byte-buffer reads/writes, cursor movement, text conversion, splitting/joining, comparison, copying, flushing, and closing. |
 
+`core.collections.slice_clamped(items, start, end)` is `items[start:end]` with
+its bounds held inside the list, as a Python slice and JavaScript's `slice` and
+`subarray` take them: a negative bound counts from the end, a bound past
+either end stops there, and an end that is not past the start gives an empty
+list.
+
 `partition` is stable, and the list sort family preserves source order for equal
 keys. `min_by` and `max_by` retain the last source item for equal keys.
 `sort`, `sort_desc`, `min` and `max` on named tuples compare members in label
@@ -1006,6 +1012,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `best_effort()` | `BestEffort` | A record for file operations a script runs best effort, keeping going past one that fails as the shell does. `done.copy_file` (which runs `copy`; a method can't be named `copy`), `copy_dir`, `remove`, `remove_all`, `create_dir_all`, `symlink` and `canonicalize` take their `core.files` namesake's arguments and record a failure in `done.failures` instead of returning it; `remove` and `remove_all` count a path already gone as done (`rm -f`, `rm -rf`), and `canonicalize` gives the path unchanged when it cannot be resolved. `done.failed()` says whether any failed and `done.report()` is one line per failure, so the run reports what failed once. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path, missing_last: Bool{false})` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. `missing_last: true` lets the last part be missing, as `readlink -f` does: the parent is resolved and the last name joined to it. |
+| `normalize(path)` / `join_all(parts)` / `resolve(path)` | `String` / `String` / `String !IOError -[FS, Env]>` | Lexical path math as node's `path.normalize`, `path.join` and `path.resolve` do it: `/` separates, empty and `.` segments go, `..` takes the segment before it (a relative path keeps a leading `..`), a trailing slash stays and `""` is `.`. `join_all` joins the non-empty parts, so `join_all(["/a", "/b"])` is `/a/b` where `join("/a", "/b")` is `/b`; `resolve` makes the path absolute against the current directory and drops a trailing slash. No file is read. |
 | `walk(root, ignore, skip: [String]{[String]{}})` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. An entry whose name is in `skip` is neither yielded nor entered (`find -name NAME -prune`). `.list()` collects them all as `[WalkEntry] !IOError`. |
 | `walk_files(root, ignore, skip:)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
@@ -2251,6 +2258,7 @@ run: fn() {
 | `current_dir()` | `String !IOError -[FS, Env]>` | Read the process working directory. |
 | `set_current_dir(path)` | `!IOError -[FS, Env]>` | Change the process working directory. |
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
+| `cache_dir()` / `data_dir()` / `config_dir()` | `?String -[Env, FS.Read]>` | The XDG base directories: `$XDG_CACHE_HOME`, `$XDG_DATA_HOME` or `$XDG_CONFIG_HOME` when set and not empty, else `.cache`, `.local/share` or `.config` under the home directory (`$HOME` when set, else the account's home in `/etc/passwd`, `%USERPROFILE%` on Windows), joined by `files.join_all`. `None` when there is no home directory. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
 | `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
@@ -2492,6 +2500,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.cwd(spec, path)` | `ProcessSpec` | Builder form that sets the child working directory; there is no zero-argument `process.cwd()`. |
 | `process.env_get(name)` | `?String -[Env]>` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |
 | `process.env_get_or(name, fallback)` | `String -[Env]>` | Read an environment variable with a fallback. |
+| `process.env_nonempty(name)` | `?String -[Env]>` | Read an environment variable that is set and not empty, as shell `${name:-…}` and JavaScript `env[name] \|\| …` read it; `None` otherwise. |
 | `process.env_keys()` | `[String] !EnvError -[Env]>` | List environment-variable names. |
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
 | `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
@@ -3225,6 +3234,8 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.is_blank(value)` / `is_graphic(value)` / `is_punctuation(value)` | `Bool` | Unicode forms of C `iswblank`, `iswgraph` and `iswpunct`: every scalar is a tab or a space separator (Zs); every scalar is visible (not whitespace, a control or a separator); every scalar is graphic and neither a letter, a digit, a combining mark nor a format character, so symbols such as `$` and `€` count. Empty text is false. |
 | `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
 | `text.trim(value)` / `trim_start(value)` / `trim_end(value)` | `String` | Remove supported whitespace at both or one end. |
+| `text.decode_latin1(bytes)` | `String` | Decode Latin-1 (ISO 8859-1): each byte is the scalar with its number, so every byte sequence decodes, as node's `toString('latin1')` and Python's `decode("latin-1")` read bytes. |
+| `text.leading_int(value)` | `?Int` | The integer the text starts with, as `parseInt(value, 10)` and C's `strtol` read one: the whitespace `trim_start` skips, an optional sign, then the longest run of ASCII digits; what follows is ignored. `None` when no digit comes first. |
 | `text.pad_start(value, width, fill)` / `pad_end(value, width, fill)` | `String` | Pad to a requested display width. |
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
 | `text.starts_any(value, prefixes)` / `ends_any(value, suffixes)` | `Bool` | Test any of several prefixes or suffixes. |
