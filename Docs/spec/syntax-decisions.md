@@ -663,7 +663,12 @@ next `|>`, so a step's own `?? return` leaves the function. `<>` is one
 longest-match lexer token beside `<:` and `:>` (`<`, `<=`, `<=>`, `<<` and `>>`
 never form it) and a primary expression legal only inside a step (E0437). Every
 step reads `<>` at least once (E0438) and may read it more often; the value is
-computed once. `<>` means the nearest enclosing step, through lambdas and string
+computed once. E0438's fix writes `<>` where it fits (D-PIPE-FIRST1=A, ratified
+2026-11-10): a bare function name becomes `name(<>)`, a call one argument
+short gets `<>` in the argument slot that accepts the value, and a method of
+the value becomes `<>.name(…)`. `jet fix` applies it only when exactly one
+placement fits; with several, the error lists each and the editor offers each,
+first slot first. `<>` means the nearest enclosing step, through lambdas and string
 holes, and a pipe inside a lambda or brackets has its own steps. Each step
 lowers before type checking to a hidden immutable binding in a frame of its own,
 so the pipe checks, owns and compiles exactly as the hand-named form; a head

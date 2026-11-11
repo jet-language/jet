@@ -5812,18 +5812,32 @@ sema_expr_check_paren: fn(value: Expr, span: Span, expected: Type?, environment:
 // no binding: the parser gave the first step that name, so it reads the head
 // in place, as `f(raw)` does. The bindings go through the ordinary statement
 // checker, so the pipe and the named form check, own and lower the same way.
+// A step that never reads `<>` is E0438: the steps before it are checked, so
+// its fix can probe where the value it receives fits (Expressions/Pipes.jet).
 sema_expr_check_pipe: fn(head: Expr, steps: [PipeStep], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Step k reads its hidden name, bound to the head (k = 0) or to step k - 1.
     bindings := [Stmt]{}
     in_place: if head == .Ident(name, _, _) -> name == steps[0].name else -> false
     if !in_place -> bindings.push(sema_expr_pipe_binding(steps[0].name, head, steps[0].span))
     loop index in 1..<steps.len() -> bindings.push(sema_expr_pipe_binding(steps[index].name, steps[index - 1].value, steps[index].span))
+    unread: sema_expr_pipe_unread_step(steps)
+    // The bindings up to the one an unread step receives.
+    if unread == .Val(index) {
+        bound: if in_place -> index else -> index + 1
+        loop bindings.len() > bound -> _ := bindings.pop()
+    }
     last: steps[steps.len() - 1]
     // copy: the scope's return type is read across the frame the pipe enters.
     return_type: scopes.return_type.copy()
     mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "pipe@{span.start}")
     checked_bindings: sema_check_statements(bindings, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
+    if unread == .Val(index) {
+        if checked_bindings.complete -> diagnostics.push(sema_expr_pipe_step_without_value(steps[index], environment, program, scopes, state, tail_store, context))
+        else -> diagnostics.push(sema_error("E0438", steps[index].span, "This pipe step doesn't use `<>`", "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value", "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step"))
+        sema_scope_leave(scopes, state)
+        return None
+    }
     if !checked_bindings.complete {
         sema_scope_leave(scopes, state)
         return None

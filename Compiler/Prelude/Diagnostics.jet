@@ -13223,11 +13223,11 @@ PipeValueOutsideStep: struct {
 PipeStepWithoutValue: struct {
     impl Diagnostic {
         code: "E0438"
-        stage: [.Parse]
         meaning: "A pipe step never reads `<>`, the value it receives"
         detail: true
-        no_fix: .Behavior
-        fix_next: "Write `<>` where the value goes, or end the pipe before this step."
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This pipe step doesn't use `<>`" }
         why: fn(self) -> String { "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value" }
         fix: fn(self) -> String { "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step" }
