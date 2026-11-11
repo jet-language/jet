@@ -49,8 +49,7 @@ run: fn() {
     save_path: option(args, "--save-path") ?? ""
     merge_path: option(args, "--merge-path") ?? ""
     if port == "" || token == "" || save_path == "" || merge_path == "" {
-        eprint("usage: Acceptance.jet --browser BROWSER --port PORT --token TOKEN --save-path PATH --merge-path PATH")
-        process.exit(2)
+        process.fail(2, "usage: Acceptance.jet --browser BROWSER --port PORT --token TOKEN --save-path PATH --merge-path PATH")
     }
     driver: open(engine, "http://127.0.0.1:{port}/#token={url.percent_encode(token)}", "http://127.0.0.1:{port}/") ?? fail(err.message)
     journey(driver, save_path, merge_path) ?? {
@@ -233,7 +232,4 @@ option: fn(args: [String], name: String) -> String? {
     None
 }
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }

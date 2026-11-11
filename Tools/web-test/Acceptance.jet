@@ -65,8 +65,7 @@ run: fn() {
     port: option(args, "--port") ?? ""
     engine: option(args, "--browser") ?? "chromium"
     if (Int.parse(port) ?? 0) <= 0 {
-        eprint("usage: Acceptance.jet --port <port> [--browser chromium|firefox]")
-        process.exit(2)
+        process.fail(2, "usage: Acceptance.jet --port <port> [--browser chromium|firefox]")
     }
     origin: "http://127.0.0.1:{port}"
     prefixes: [String]{"/click", "/reactive", "/compute", "/callback", "/lifecycle"}
@@ -289,7 +288,4 @@ option: fn(args: [String], name: String) -> String? {
     None
 }
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }

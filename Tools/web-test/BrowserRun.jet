@@ -24,10 +24,7 @@ use {
 C_HOOK: "() => {{ window.__compiledWorkloadLogs = []; console.log = (...args) => window.__compiledWorkloadLogs.push(args.map(value => String(value)).join(\" \")); }}"
 C_LOGS: "(window.__compiledWorkloadLogs || []).join(\"\\n\")"
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 // The object field `key` of a JSON value, if it has one.
 field: fn(value: Dyn, key: String) -> Dyn? Never! {

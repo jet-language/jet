@@ -65,10 +65,7 @@ run: fn() {
     port_text: option(args, "--port") ?? ""
     root_arg: option(args, "--root") ?? ""
     port: Int.parse(port_text) ?? -1
-    if port < 0 || root_arg == "" {
-        eprint("usage: Serve.jet --port <port> --root <dir>")
-        process.exit(2)
-    }
+    if port < 0 || root_arg == "" -> process.fail(2, "usage: Serve.jet --port <port> --root <dir>")
     real: files.realpath(root_arg) ?? fail("root does not exist: {root_arg}")
     directory: files.open_directory(real) ?? fail("root cannot be opened: {root_arg}")
     stat: directory.stat() ?? fail("root cannot be opened: {root_arg}")
@@ -81,10 +78,7 @@ run: fn() {
     loop -> serve_one(root, listener)
 }
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(2)
-}
+fail: fn(message: String) -> Never { process.fail(2, message) }
 
 option: fn(args: [String], name: String) -> String? {
     loop index in 0..<args.len() {

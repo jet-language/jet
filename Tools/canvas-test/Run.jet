@@ -44,14 +44,10 @@ run: fn() {
 }
 
 usage: fn(message: String) -> Never {
-    eprint("{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | driver-lifecycle [COUNT] | gecko-lifecycle")
-    process.exit(2)
+    process.fail(2, "{message}\nusage: Run.jet scenario --scenario N --port P [--browser B] [--session S] [--out-dir D] [--seed N] [--program-target T]\n       Run.jet native-lifecycle | driver-lifecycle [COUNT] | gecko-lifecycle")
 }
 
-fail: fn(message: String) -> Never {
-    eprint("FAIL {message}")
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, "FAIL {message}") }
 
 // The value after `--name`, else the environment variable `env`, else `fallback`.
 option: fn(args: [String], name: String, env: String, fallback: String) -> String {

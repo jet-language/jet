@@ -61,8 +61,7 @@ run: fn() {
     options: Options{port: option(args, "--port") ?? "", source: option(args, "--source") ?? "", transcript: option(args, "--terminal-transcript") ?? ""}
     engine: option(args, "--browser") ?? "chromium"
     if (Int.parse(options.port) ?? 0) <= 0 || options.source == "" {
-        eprint("usage: Hybrid.jet --port <port> --source <app.jet> [--terminal-transcript <file>] [--browser chromium|firefox]")
-        process.exit(2)
+        process.fail(2, "usage: Hybrid.jet --port <port> --source <app.jet> [--terminal-transcript <file>] [--browser chromium|firefox]")
     }
     driver: open(engine) ?? fail(err.message)
     matrix(driver, options) ?? {
@@ -283,7 +282,4 @@ option: fn(args: [String], name: String) -> String? {
     None
 }
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }

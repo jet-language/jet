@@ -49,8 +49,7 @@ run: fn() {
     prefix: option(args, "--prefix") ?? "/click"
     wasm_prefix: option(args, "--wasm-prefix") ?? ""
     if (Int.parse(port) ?? 0) <= 0 {
-        eprint("usage: SourceMap.jet --port <port> [--prefix /click] [--wasm-prefix /compute]")
-        process.exit(2)
+        process.fail(2, "usage: SourceMap.jet --port <port> [--prefix /click] [--wasm-prefix /compute]")
     }
     origin: "http://127.0.0.1:{port}"
     found: check_maps(origin, prefix, wasm_prefix) ?? fail(err.message)
@@ -276,7 +275,4 @@ option: fn(args: [String], name: String) -> String? {
     None
 }
 
-fail: fn(message: String) -> Never {
-    eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
