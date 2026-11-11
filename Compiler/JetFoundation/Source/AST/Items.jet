@@ -264,12 +264,15 @@ EffectDecl: struct {
 }
 
 // A type's `impl Effect { … }` block: where it starts, the written
-// `irreversible: fn(self) -> Bool` body, and the effect names the type
-// declares (the type itself, then each case of an enum family).
+// `irreversible: fn(self) -> Bool` body, the `parent: Name` setting of a
+// package effect (the effect whose kind it is, written as a row writes it:
+// `Log`, `Audit`, `audit.Audit`), and the effect names the type declares
+// (the type itself, then each case of an enum family).
 EffectImpl: struct {
     span: Span
     irreversible: Expr?
     method_span: Span?
+    parent: NamedSpan?{None}
     decls: [EffectDecl]
 }
 

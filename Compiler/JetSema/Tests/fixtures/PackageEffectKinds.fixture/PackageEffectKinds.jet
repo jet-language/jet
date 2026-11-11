@@ -1,0 +1,23 @@
+// Two packages' kinds of `Log` named side by side, a kind of a kind reached
+// from a row naming its parent, and `Log` itself allowing every kind of it.
+use audit
+use billing
+
+both: fn() -[audit.Audit, billing.Audit]> {
+    audit.record()
+    billing.charge()
+}
+
+deep: fn() -[audit.Audit]> { audit.trace() }
+
+all: fn() -[Log]> {
+    audit.record()
+    billing.charge()
+    audit.trace()
+}
+
+run: fn() {
+    both()
+    deep()
+    all()
+}

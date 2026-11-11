@@ -5870,6 +5870,26 @@ LibraryEffectListDenial: struct {
     }
 }
 
+LibraryEffectParentInvalid: struct {
+    impl Diagnostic {
+        code: "E0758"
+        meaning: "A package effect's `parent` is no open effect, its parents form a cycle, or the `#FX(…)` above it widens its parent's limit"
+        what: fn(self) -> String { "The parent `FS` of `Audit` is no open effect" }
+        why: fn(self) -> String { "A package effect is a kind of an open Prelude effect, a struct such as `Log`, or of another package effect, and the chain of parents ends without a cycle; an enum family such as `FS` is already cut into its own cases, and a kind may do at most what its parent may" }
+        fix: fn(self) -> String { "Name an open effect such as `Log` or a package effect as the parent, break the cycle, or remove from the `#FX(…)` above the kind what its parent doesn't allow" }
+    }
+}
+
+LibraryEffectKindOutsideRow: struct {
+    impl Diagnostic {
+        code: "E0759"
+        meaning: "A function whose row names a kind of an effect reaches another kind of that effect its row doesn't allow"
+        what: fn(self) -> String { "`record` reaches `Audit`, a kind of `Log` that `audit.Audit` doesn't allow" }
+        why: fn(self) -> String { "A row that names a kind of an effect allows only that kind and the kinds of it; another package's kind of the same effect is a different effect" }
+        fix: fn(self) -> String { "Name the other kind in the row, name the parent effect itself, or stop calling the function that introduces the other kind" }
+    }
+}
+
 UnknownEffectLeaf: struct {
     effect_name: String
 

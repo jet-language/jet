@@ -63,3 +63,23 @@ library_effect_fixture_accept: fn(file: String) {
     library_effect_fixture_reject("{service_root}/net.jet", "E0749")
     print("library effects: passed")
 }
+
+// Package effects: a library effect whose `impl Effect` block names a
+// `parent` is a kind of it. Its parent is an open effect without a cycle,
+// and its list only narrows the parent's (E0758); denying the parent denies
+// the kind (E0749); and a row naming one kind allows no other kind of the
+// same parent (E0759).
+#Test("package_effect_fixtures") {
+    fixture_root: "Compiler/JetSema/Tests/fixtures"
+    ui_root: "tests/ui/effects"
+    library_effect_fixture_accept("Examples/ErrorsAndEffects/Effects/PackageEffectKinds.jet")
+    library_effect_fixture_accept("{fixture_root}/PackageEffectKinds.fixture/PackageEffectKinds.jet")
+    library_effect_fixture_reject("{ui_root}/package_effect_parent_family_is_e0758.jet", "E0758")
+    library_effect_fixture_reject("{ui_root}/package_effect_parent_cycle_is_e0758.jet", "E0758")
+    library_effect_fixture_reject("{ui_root}/package_effect_list_widens_parent_is_e0758.jet", "E0758")
+    library_effect_fixture_reject("{ui_root}/package_effect_other_kind_is_e0759.jet", "E0759")
+    library_effect_fixture_reject("{ui_root}/package_effect_denying_parent_denies_kind_is_e0749.jet", "E0749")
+    library_effect_fixture_reject("{fixture_root}/PackageEffectOtherKind.fixture/PackageEffectOtherKind.jet", "E0759")
+    library_effect_fixture_reject("{fixture_root}/PackageEffectKindDenied.fixture/PackageEffectKindDenied.jet", "E0749")
+    print("package effects: passed")
+}

@@ -1,4 +1,4 @@
-// Library effects (E0756, E0757).
+// Library effects (E0756, E0757, E0758, E0759).
 //
 // A library effect is a struct or enum outside the Prelude that implements
 // `Effect`; the `#FX(…)` above it names the kernel effects it relies on. A
@@ -8,36 +8,70 @@
 // Denials keep checking what a body really reaches: `!Net` blocks a library
 // effect's network work wherever it runs, and `!graph.Query` blocks every
 // call that reaches a function whose row names `graph.Query` or a case of it.
+//
+// A package effect may be a kind of another: `Audit: struct { impl Effect {
+// parent: Log } }`. Its parent is an open Prelude effect (a struct, not an
+// enum family) or another package effect, and the chain of parents ends at
+// one without a cycle. A row naming the kind may do what its parent may, or
+// the narrower list a `#FX(…)` above it gives; a wider list is E0758, like a
+// parent that is no open effect. Allowing the parent allows the kind:
+// `-[Log]>` covers what an `Audit` function does. Denying it denies the
+// kind: `-[!Log]>` blocks every call that reaches a function whose row names
+// `Audit`. A row naming a kind allows only that kind of its parent: an
+// `-[audit.Audit]>` function that reaches another kind of `Log` it doesn't
+// name, and whose row doesn't name `Log` itself, is E0759.
 use jet_foundation.[
+    EFFECT_VOCABULARY_LEAVES,
     EFFECT_VOCABULARY_ROOTS,
     Diagnostic,
     Item,
     ModuleCap,
+    NamedSpan,
     Span,
+    authority_is_deny_only,
     diagnostic_with_rights,
+    sema_effect_covers,
 ]
 
 SemaLibraryEffect: struct {
     package_identity: String
+    // The graph row of the module that declares it.
+    module_index: Int
     name: String
     cases: [String]
     kernel: [String]
+    // The written `parent: Name` of a package effect.
+    parent: NamedSpan?{None}
+    // The effects it is a kind of, nearest first: each package effect's
+    // token, then the open Prelude effect the chain ends at.
+    ancestors: [String]{[String]{}}
+    // E0758 for its parent, reported once by the declaring module.
+    problem: Diagnostic?{None}
 }
 
 // One name a module may write for a library effect, and the kernel effects
 // it stands for. `token` names the effect, or the case, the same way in
 // every module: the declaring package's identity, `/`, then the name as that
-// package writes it (`Query`, `Query.Read`).
+// package writes it (`Query`, `Query.Read`). `ancestors` are the effects a
+// package effect is a kind of (SemaLibraryEffect.ancestors).
 SemaLibraryEffectName: struct {
     written: String
     kernel: [String]
     token: String
+    ancestors: [String]
 }
 
 // A `!` entry of a function row that names a library effect or a case.
 SemaLibraryEffectDenial: struct {
     name: SemaLibraryEffectName
     span: Span
+}
+
+// The library effects each function reaches, and the ancestors of each
+// reached token (empty for an effect that is no kind of another).
+SemaLibraryEffectReach: struct {
+    reached: [[String]]
+    ancestry: [String: [String]]
 }
 
 // `name` is a struct or enum in `items` that implements `Effect` (the parser
@@ -70,18 +104,20 @@ sema_library_effect_kernel_list: fn(cap: ModuleCap?) -> [String] Never! {
     kernel
 }
 
-sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity: String, items: [Item]) Never! {
+sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity: String, module_index: Int, items: [Item]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
                 if sema_library_effect_declared(items, definition.name) {
-                    effects.push(SemaLibraryEffect{package_identity: package_identity, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap)})
+                    parent := NamedSpan?{None}
+                    if definition.effect_impl == .Val(declared) -> parent = declared.parent
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent})
                 }
             }
             .Enum(definition) -> {
                 if sema_library_effect_declared(items, definition.name) {
                     cases: loop variant in definition.variants -> variant.name
-                    effects.push(SemaLibraryEffect{package_identity: package_identity, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap)})
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap)})
                 }
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -89,20 +125,118 @@ sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity:
     }
 }
 
-// Every library effect the graph's source modules declare.
+// Every library effect the graph's source modules declare, each package
+// effect's parent resolved (sema_library_effect_resolve).
 sema_library_effects: fn(graph: SemaRegistrationGraph) -> [SemaLibraryEffect] Never! {
     effects := [SemaLibraryEffect]{}
-    loop module_row in graph.modules {
+    loop (module_index, module_row) in graph.modules {
         if module_row.module_identity == graph.canonical_effect_module_identity -> next
-        sema_library_effect_collect(effects, module_row.package_identity, module_row.program.items)
+        sema_library_effect_collect(effects, module_row.package_identity, module_index, module_row.program.items)
     }
+    states := (loop _ in effects -> 0)
+    loop index in 0..<effects.len() -> sema_library_effect_resolve(effects, graph, states, index)
     effects
+}
+
+// An open Prelude effect: a root that is no enum family (no
+// `Root.Case` leaf) and can be granted.
+sema_library_effect_open_parent: fn(name: String) -> Bool Never! {
+    if !EFFECT_VOCABULARY_ROOTS.contains(name) || authority_is_deny_only(name) -> return false
+    prefix: "{name}."
+    loop leaf in EFFECT_VOCABULARY_LEAVES {
+        if leaf.starts_with(prefix) -> return false
+    }
+    true
+}
+
+// The row of the library effect whose token is `token`, or None for a case.
+sema_library_effect_row: fn(effects: [SemaLibraryEffect], token: String) -> Int? Never! {
+    loop (index, declared) in effects {
+        if "{declared.package_identity}/{declared.name}" == token -> return Val(index)
+    }
+    None
+}
+
+// What a written parent gives its kind: the limit and the ancestors, or the
+// problem it leaves. `blocked` when the parent has a problem of its own, so
+// one wrong parent reports once.
+SemaLibraryEffectParent: struct {
+    limit: [String]
+    ancestors: [String]
+    problem: Diagnostic?
+    blocked: Bool
+}
+
+sema_library_effect_parent_problem: fn(problem: Diagnostic) -> SemaLibraryEffectParent Never! {
+    SemaLibraryEffectParent{limit: [String]{}, ancestors: [String]{}, problem: Val(problem), blocked: false}
+}
+
+// Resolve the parent of effect `index`, its parents first: its ancestors,
+// and its kernel (the parent's limit, or the narrower `#FX(…)` list above
+// it). `states` holds 0 (not yet), 1 (on the walk) or 2 (done) per effect;
+// meeting an effect on the walk is a cycle.
+sema_library_effect_resolve: fn(effects: &[SemaLibraryEffect], graph: SemaRegistrationGraph, states: &[Int], index: Int) Never! {
+    if states[index] != 0 -> return
+    states[index] = 1
+    // copy: the walk below may resolve other rows of `effects`.
+    written: effects[index].parent.copy() ?? {
+        states[index] = 2
+        return
+    }
+    name: effects[index].name.copy() // copy: as above.
+    parent: sema_library_effect_parent(effects, graph, states, name, written, effects[index].module_index)
+    states[index] = 2
+    if parent.problem != None || parent.blocked {
+        effects[index].problem = parent.problem
+        return
+    }
+    own: effects[index].kernel
+    over: sema_effect_uncovered(own, parent.limit)
+    if over.len() > 0 -> effects[index].problem = Val(sema_error("E0758", written.span, "the `#FX(…)` above `{name}` lists `{sema_effect_show(over)}`, which its parent `{written.name}` doesn't allow", "a kind of an effect may do at most what its parent may, so the `#FX(…)` above it may narrow that, never widen it", "remove `{sema_effect_show(over)}` from the `#FX(…)` above `{name}`, or name a parent that allows it"))
+    if own.len() == 0 -> effects[index].kernel = parent.limit
+    effects[index].ancestors = parent.ancestors
+}
+
+// The parent `written` of the effect `name` declared in module
+// `module_index`: an open Prelude effect, or a package effect that module
+// can name, resolved first.
+sema_library_effect_parent: fn(effects: &[SemaLibraryEffect], graph: SemaRegistrationGraph, states: &[Int], name: String, written: NamedSpan, module_index: Int) -> SemaLibraryEffectParent Never! {
+    if EFFECT_VOCABULARY_ROOTS.contains(sema_effect_root(written.name)) {
+        if !sema_library_effect_open_parent(written.name) -> return sema_library_effect_parent_problem(sema_library_effect_parent_family(name, written))
+        return SemaLibraryEffectParent{limit: [String]{written.name}, ancestors: [String]{written.name}, problem: None, blocked: false}
+    }
+    view: sema_library_effect_view(effects, graph.modules[module_index])
+    found: sema_library_effect_find(view, written.name) ?? return sema_library_effect_parent_problem(sema_error("E0758", written.span, "the parent `{written.name}` of `{name}` is no effect", "a package effect is a kind of an open Prelude effect such as `Log`, or of a package effect this module can name", "write `parent: Log`, the name of a package effect, or `alias.Name` for one from an imported package"))
+    row: sema_library_effect_row(effects, found.token) ?? return sema_library_effect_parent_problem(sema_library_effect_parent_family(name, written))
+    if effects[row].cases.len() > 0 -> return sema_library_effect_parent_problem(sema_library_effect_parent_family(name, written))
+    if states[row] == 1 -> return sema_library_effect_parent_problem(sema_error("E0758", written.span, "the parents of `{name}` form a cycle through `{written.name}`", "a package effect is a kind of its parent, so following the parents must end at an open Prelude effect or at a package effect without one", "remove `parent: {written.name}`, or name an effect that is no kind of `{name}`"))
+    sema_library_effect_resolve(effects, graph, states, row)
+    if effects[row].problem != None || (effects[row].parent != None && effects[row].ancestors.len() == 0) -> return SemaLibraryEffectParent{limit: [String]{}, ancestors: [String]{}, problem: None, blocked: true}
+    ancestors := [String]{found.token}
+    loop ancestor in effects[row].ancestors -> ancestors.push(ancestor.copy()) // copy: the parent keeps its own list.
+    // copy: the kind keeps its own limit.
+    SemaLibraryEffectParent{limit: effects[row].kernel.copy(), ancestors: ancestors, problem: None, blocked: false}
+}
+
+// `e0758`: the parent is an enum family, one of its cases, or a deny-only
+// Prelude effect.
+sema_library_effect_parent_family: fn(name: String, written: NamedSpan) -> Diagnostic {
+    sema_error("E0758", written.span, "the parent `{written.name}` of `{name}` is no open effect", "a package effect is a kind of an open effect, a struct; an enum family such as `FS` or `DB` is already cut into its own cases, and `Panic` and `Mem` are only denied", "make `{name}` a kind of an open effect such as `Log`, or write the family's case in the rows that need it (`-[FS.Read]>`)")
+}
+
+// The package effects `source` declares whose parent is wrong (E0758).
+sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index: Int, diagnostics: &[Diagnostic]) {
+    loop declared in effects {
+        if declared.module_index != module_index -> next
+        if declared.problem == .Val(problem) -> diagnostics.push(problem.copy()) // copy: the effect list is read again by later modules.
+    }
 }
 
 sema_library_effect_add_names: fn(names: &[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
     token: "{declared.package_identity}/{declared.name}"
-    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token})
-    loop case_name in declared.cases -> names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}"})
+    // copy: each name keeps its own kernel and ancestors.
+    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy()})
+    loop case_name in declared.cases -> names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}", ancestors: [String]{}}) // copy: as above.
 }
 
 // The library effect names `source` may write: its own package's bare, and
@@ -175,18 +309,29 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
     }
 }
 
-// The library effects each node reaches: those its own row names, and every
-// one a function it can call reaches. Empty rows when no node denies one.
-sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] Never! {
+// The library effects each node reaches: those its own row names with the
+// effects they are kinds of, and every one a function it can call reaches.
+// Empty rows when no node denies one and no row names a kind.
+sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> SemaLibraryEffectReach Never! {
+    ancestry := [String: [String]]{}
+    loop node in nodes {
+        loop row in node.library_rows {
+            if row.ancestors.len() > 0 && ancestry.get(row.token) == None -> ancestry[row.token] = row.ancestors.copy() // copy: the map keeps its own list.
+        }
+    }
+    any_kind: ancestry.len() > 0
     any_denial: loop node in nodes {
         if node.library_denials.len() > 0 -> break true
     } ?? false
     reached := (loop _ in nodes -> [String]{})
-    if !any_denial -> return reached
+    if !any_denial && !any_kind -> return SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
     pending := [SemaEffectPending]{}
     loop (index, node) in nodes {
         loop row in node.library_rows {
-            if sema_effect_set_add(reached[index], row.token) -> pending.push(SemaEffectPending{node: index, name: row.token.copy()})
+            if sema_effect_set_add(reached[index], row.token) -> pending.push(SemaEffectPending{node: index, name: row.token.copy()}) // copy: the queue keeps its own name.
+            loop ancestor in row.ancestors {
+                if sema_effect_set_add(reached[index], ancestor) -> pending.push(SemaEffectPending{node: index, name: ancestor.copy()}) // copy: as above.
+            }
         }
     }
     cursor := 0
@@ -197,13 +342,16 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[St
             if sema_effect_set_add(reached[caller], incoming.name) -> pending.push(SemaEffectPending{node: caller, name: incoming.name})
         }
     }
-    reached
+    SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
 }
 
 // `e0749`: a function that denies a library effect, or one of its cases,
-// reaches a function whose row names it, one of its cases, or (for a
-// denied case) the whole effect.
-sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
+// reaches a function whose row names it, one of its cases, a kind of it, or
+// (for a denied case) the whole effect; or a function that denies a Prelude
+// effect reaches one whose row names a kind of it, and its body does not
+// already reach the denied effect itself (sema_effect_check_node reports
+// that). `solved` is the node's solved row.
+sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], solved: [String], diagnostics: &[Diagnostic]) {
     loop denial in node.library_denials {
         denied: denial.name
         loop token in reached {
@@ -217,5 +365,62 @@ sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], d
             diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
             break
         }
+    }
+    loop denied in node.prohibited {
+        if sema_effect_covered(solved, [String]{denied}).len() > 0 -> next
+        loop entry in reached {
+            if entry.contains("/") || !sema_effect_covers(denied, entry) -> next
+            span: node.prohibition_span ?? node.name_span
+            diagnostic: sema_error("E0749", span, "`{node.name}` reaches a function whose row names a kind of `{entry}`, which it prohibits with `-[!{denied}]>`", "a package effect with `parent: {entry}` is a kind of `{entry}`, so denying `{entry}` denies every kind of it, through every callee the function can reach", "remove the call that introduces the kind of `{entry}`, or drop the `-[!{denied}]>` prohibition")
+            diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
+            break
+        }
+    }
+}
+
+// `e0759`: a function whose row names a kind of an effect reaches another
+// kind of that effect its row neither names nor contains, and its row
+// doesn't name the effect itself. A row naming `audit.Audit` (a kind of
+// `Log`) may reach `audit.Audit`, the effects it is a kind of, and kinds of
+// `audit.Audit`; `billing.Audit`, another kind of `Log`, needs `Log` or
+// `billing.Audit` in the row.
+sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffectReach, reached: [String], diagnostics: &[Diagnostic]) {
+    if node.library_rows.len() == 0 -> return
+    named := [String]{}
+    own := [String]{}
+    roots := [String]{}
+    loop row in node.library_rows {
+        sema_effect_set_add(named, row.token)
+        sema_effect_set_add(own, row.token)
+        loop ancestor in row.ancestors {
+            sema_effect_set_add(own, ancestor)
+            if !ancestor.contains("/") -> sema_effect_set_add(roots, ancestor)
+        }
+    }
+    if roots.len() == 0 -> return
+    loop token in reached {
+        if !token.contains("/") || own.contains(token) -> next
+        ancestors: reach.ancestry.get(token) ?? next
+        if ancestors.len() == 0 -> next
+        root: ancestors[ancestors.len() - 1]
+        if root.contains("/") || !roots.contains(root) || ancestors.any(ancestor -> named.contains(ancestor)) -> next
+        written_root: loop bound in node.written_declared {
+            if sema_effect_covers(bound, root) -> break true
+        } ?? false
+        if written_root -> next
+        kinds: loop row in node.library_rows -> row.written
+        shown: sema_effect_show(kinds)
+        parts: token.split("/").to_list()
+        leaf: parts[parts.len() - 1]
+        // A package declares one effect per name, so a kind named like one of
+        // the row's kinds is another package's.
+        clash: loop written in kinds {
+            if written == leaf || written.ends_with(".{leaf}") -> break true
+        } ?? false
+        other: if clash -> "another package's `{leaf}`" else -> "`{leaf}`"
+        span: node.row_span ?? node.name_span
+        diagnostic: sema_error("E0759", span, "`{node.name}` reaches {other}, a kind of `{root}` that `{shown}` doesn't allow", "a row that names a kind of `{root}` allows only that kind and the kinds of it, so `{shown}` doesn't cover another package's or another declaration's kind of `{root}`", "name {other} in `{node.name}`'s row, name `{root}` itself, or stop calling the function that introduces it")
+        diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
+        return
     }
 }

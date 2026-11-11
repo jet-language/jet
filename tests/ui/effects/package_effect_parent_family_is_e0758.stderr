@@ -1,0 +1,8 @@
+Error [jet.LibraryEffectParentInvalid]: The parent `FS` of `Audit` is no open effect
+  --> tests/ui/effects/package_effect_parent_family_is_e0758.jet:3:17
+    |
+  3 |         parent: FS
+    |                 ^^
+ Why: A package effect is a kind of an open effect, a struct; an enum family such as `FS` or `DB` is already cut into its own cases, and `Panic` and `Mem` are only denied
+ Fix: Make `Audit` a kind of an open effect such as `Log`, or write the family's case in the rows that need it (`-[FS.Read]>`)
+More: jet-lang.dev/e/E0758

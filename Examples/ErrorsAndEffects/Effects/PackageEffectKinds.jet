@@ -1,0 +1,47 @@
+// A package effect is a kind of an open effect. `Audit` names `Log` as its
+// parent, so a row that names `Audit` may do what `Log` does: `record` logs
+// through `core.log`. A caller that denies `Log` denies every kind of it, so
+// `quiet` could not call `record` (E0749). A row that names one kind allows
+// only that kind: a function whose row names `Audit` and that reaches
+// `count`, a `Metrics` function, stops the check with E0759 unless its row
+// names `Metrics` or `Log` too.
+package: {
+    name: "package_effect_kinds"
+    authority: { allow: [IO, Log, Mem.Alloc] }
+}
+
+use log: core.log
+
+Audit: struct {
+    impl Effect {
+        parent: Log
+    }
+}
+
+Metrics: struct {
+    impl Effect {
+        parent: Log
+    }
+}
+
+record: fn(event: String) -[Audit]> {
+    log.info("audit: {event}")
+}
+
+count: fn(name: String) -[Metrics]> {
+    log.info("metric: {name}")
+}
+
+// Naming `Log` itself allows every kind of it.
+handle: fn(event: String) -[Log]> {
+    record(event)
+    count("events")
+}
+
+quiet: fn(event: String) -[!Log]> String { "quiet {event}" }
+
+run: fn() {
+    handle("login")
+    handle("logout")
+    print(quiet("done"))
+}

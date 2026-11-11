@@ -1,0 +1,7 @@
+// Denying a package effect denies every kind of it: `audit.trace` names
+// `Trail`, a kind of `audit.Audit` (E0749).
+use audit
+
+quiet: fn() -[!audit.Audit]> { audit.trace() }
+
+run: fn() { quiet() }

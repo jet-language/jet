@@ -2173,22 +2173,29 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand
     jfmt_end_block(f)
 }
 
-// `impl Effect { … }` in a struct or enum body: empty, or its one
-// `irreversible: fn(self) -> Bool` method on one line.
+// `impl Effect { … }` in a struct or enum body: empty, or a package
+// effect's `parent: Name` and its one `irreversible: fn(self) -> Bool`
+// method on one line each.
 jfmt_fmt_effect_impl: fn(f: &JetFmt, declared: EffectImpl) {
     jfmt_emit_leading(f, declared.span.start)
-    if declared.irreversible == None {
+    if declared.irreversible == None && declared.parent == None {
         jfmt_write(f, "impl Effect {{}}")
         return
     }
-    body: declared.irreversible ?? return
     jfmt_write(f, "impl Effect {{")
     jfmt_newline(f)
     f.indent += 1
-    if declared.method_span == .Val(span) -> jfmt_emit_leading(f, span.start)
-    jfmt_write(f, "irreversible: fn(self) -> Bool {{ ")
-    jfmt_fmt_expr(f, body, JFMT_PREC_OR_FALLBACK)
-    jfmt_write(f, " }}")
+    if declared.parent == .Val(written) {
+        jfmt_emit_leading(f, written.span.start)
+        jfmt_write(f, "parent: {written.name}")
+        if declared.irreversible != None -> jfmt_newline(f)
+    }
+    if declared.irreversible == .Val(body) {
+        if declared.method_span == .Val(span) -> jfmt_emit_leading(f, span.start)
+        jfmt_write(f, "irreversible: fn(self) -> Bool {{ ")
+        jfmt_fmt_expr(f, body, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, " }}")
+    }
     f.indent -= 1
     jfmt_end_block(f)
 }

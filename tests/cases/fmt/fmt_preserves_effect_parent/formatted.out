@@ -1,0 +1,14 @@
+Audit: struct {
+    impl Effect {
+        parent: Log
+    }
+}
+
+Ledger: struct {
+    impl Effect {
+        parent: Audit
+        irreversible: fn(self) -> Bool { true }
+    }
+}
+
+run: fn() -[Ledger]> {}

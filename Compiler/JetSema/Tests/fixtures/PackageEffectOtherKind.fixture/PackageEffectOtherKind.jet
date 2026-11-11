@@ -1,0 +1,8 @@
+// A row naming `audit.Audit` allows only that kind of `Log`: reaching
+// `billing.Audit`, another package's kind, is E0759.
+use audit
+use billing
+
+record: fn() -[audit.Audit]> { billing.charge() }
+
+run: fn() { record() }

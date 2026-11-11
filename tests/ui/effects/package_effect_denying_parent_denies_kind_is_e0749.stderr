@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `quiet` reaches a function whose row names a kind of `Log`, which it prohibits with `-[!Log]>`
+  --> tests/ui/effects/package_effect_denying_parent_denies_kind_is_e0749.jet:7:16
+    |
+  7 | quiet: fn() -[!Log]> { record() }
+    |                ^^^
+ Why: A package effect with `parent: Log` is a kind of `Log`, so denying `Log` denies every kind of it, through every callee the function can reach
+ Fix: Remove the call that introduces the kind of `Log`, or drop the `-[!Log]>` prohibition
+Denial: invocation
+Call chain: quiet
+More: jet-lang.dev/e/E0749

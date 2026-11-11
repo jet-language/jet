@@ -2224,6 +2224,33 @@ library effect when its row names it or one of its cases, so
 itself; either is E0749. The list above a library effect holds no `!`
 entries (E0757).
 
+A *package effect* is a library effect that is a kind of another effect. Its
+`impl Effect` block names the parent with `parent:` (D-EFFECT-PKGLEAF1):
+
+```jet
+Audit: struct {
+    impl Effect {
+        parent: Log
+    }
+}
+
+record: fn(event: String) -[Audit]> { log.info(event) }
+```
+
+The parent is an open Prelude effect (a struct such as `Log`, not an enum
+family such as `FS` and not a deny-only row) or another library effect
+without cases that the module can name, and following parents ends without a
+cycle; otherwise the declaration is E0758. A row that names the kind may do
+what its parent may; a `#FX(…)` above it may narrow that, and one that widens
+it is E0758. The kind takes the parent's irreversibility unless its own
+`impl Effect` block gives one. Denying the parent denies every kind of it:
+`-[!Log]>` blocks a call that reaches a function whose row names `Audit`, and
+`-[!audit.Audit]>` one whose row names a kind of `audit.Audit`; both are
+E0749. A row that names one kind allows only that kind and the kinds of it:
+two packages may each declare an `Audit` kind of `Log` without clashing, and
+a function whose row names `audit.Audit` and that reaches `billing.Audit` is
+E0759 unless its row also names `billing.Audit` or `Log`.
+
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.
 Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics

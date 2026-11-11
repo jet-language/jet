@@ -16,8 +16,10 @@ use {
         expr_span,
     ]
     jet_lexer.[
+        TOKEN_COLON,
         TOKEN_DOT,
         TOKEN_EOF,
+        TOKEN_IDENT,
         TOKEN_LBRACE,
         TOKEN_RBRACE,
     ]
@@ -34,12 +36,13 @@ parser_type_companions: fn(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [It
     items
 }
 
-// `impl Effect { … }` in a struct or enum body: empty, or the one method
+// `impl Effect { … }` in a struct or enum body: empty, the one method
 // `irreversible: fn(self) -> Bool { … }` whose body is `true`, `false`,
-// `self == .Case` or an `||` of those. The effect names are built when the
-// type closes (parser_finish_effect_type), once an enum's cases are known.
-// A `repeated` block is reported and parsed for recovery; it yields None so
-// the type keeps its first block.
+// `self == .Case` or an `||` of those, and a package effect's one setting
+// `parent: Name`. The effect names are built when the type closes
+// (parser_finish_effect_type), once an enum's cases are known. A `repeated`
+// block is reported and parsed for recovery; it yields None so the type
+// keeps its first block.
 parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
     start: parser_bump(state)
     if repeated -> parser_add_error_code(state, "E0908", start.span, "`{type_name}` has a second `impl Effect` block", "a type declares one effect, so its one method shares one block", "move these members into the first `impl Effect` block")
@@ -47,13 +50,23 @@ parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Effect` body")
     irreversible := Expr?{None}
     method_span := Span?{None}
+    parent := NamedSpan?{None}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
         token: parser_current(state)
+        if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && !parser_method_starts_here(state) {
+            written: parser_parse_effect_setting(state) ?? next
+            if parent != None {
+                parser_add_error_code(state, "E0105", written.span, "`parent` is given twice in `impl Effect`", "a package effect is a kind of one effect", "remove one `parent: …`")
+                next
+            }
+            parent = Val(written)
+            next
+        }
         if !parser_method_starts_here(state) {
             found: parser_describe_token(state, token)
-            parser_add_error(state, token.span, "expected `irreversible: fn` in `impl Effect`, found {found}", "an `impl Effect` block is empty or holds the one method `irreversible: fn(self) -> Bool`", "write `irreversible: fn(self) -> Bool {{ true }}`, or leave the block empty for an effect a rollback can undo")
+            parser_add_error(state, token.span, "expected `irreversible: fn` or `parent:` in `impl Effect`, found {found}", "an `impl Effect` block is empty or holds the method `irreversible: fn(self) -> Bool` and a package effect's `parent: Name`", "write `irreversible: fn(self) -> Bool {{ true }}`, write `parent: Log` for a kind of `Log`, or leave the block empty for an effect a rollback can undo")
             break
         }
         method: parser_parse_type_method(state)
@@ -81,7 +94,32 @@ parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Effect` body")
     if repeated -> return None
-    Val(EffectImpl{span: start.span, irreversible: irreversible, method_span: method_span, decls: [EffectDecl]{}})
+    Val(EffectImpl{span: start.span, irreversible: irreversible, method_span: method_span, parent: parent, decls: [EffectDecl]{}})
+}
+
+// `name: value` in `impl Effect`: the one setting `parent: Name`, a dotted
+// name as a row writes it. None, reported, for any other setting.
+parser_parse_effect_setting: fn(state: &JetParserState) -> NamedSpan? {
+    key_token: parser_bump(state)
+    parser_bump(state)
+    key: parser_value(state, key_token)
+    if key != "parent" {
+        _ := parser_parse_expression(state, 1, 0)
+        parser_finish_statement(state)
+        parser_add_error_code(state, "E0907", key_token.span, "`{key}` is not a setting of `Effect`", "an `impl Effect` block gives one setting, a package effect's `parent`, beside its `irreversible: fn(self) -> Bool` method", "remove `{key}`, or write `parent: Log` to make this effect a kind of `Log`")
+        return None
+    }
+    first: parser_expect_name(state, "for the parent effect after `parent:`")
+    name := parser_value(state, first)
+    end := first.span
+    loop parser_current_kind(state) == TOKEN_DOT {
+        parser_bump(state)
+        segment: parser_expect_name(state, "for an effect path segment after `.`")
+        name = "{name}.{parser_value(state, segment)}"
+        end = segment.span
+    }
+    parser_finish_statement(state)
+    Val(NamedSpan{name: name, span: parser_cover(first.span, end)})
 }
 
 parser_report_effect_body: fn(state: &JetParserState, span: Span, type_name: String) {
@@ -90,9 +128,14 @@ parser_report_effect_body: fn(state: &JetParserState, span: Span, type_name: Str
 
 // At the type's close the effect names are built: a struct declares its own
 // name; an enum declares each case `T.Case` and its root `T`, which is
-// irreversible when any case is.
+// irreversible when any case is. A package effect with a Prelude parent and
+// no `irreversible` body is irreversible when its parent is.
 parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_span: Span, effect_impl: EffectImpl?, cases: [Variant]) -> EffectImpl? {
     declared := effect_impl ?? return None
+    if cases.len() > 0 && declared.parent == .Val(written) {
+        parser_add_error_code(state, "E0907", written.span, "the effect family `{type_name}` names a parent", "a package effect that is a kind of another effect is a struct; an enum family's cases are the kinds of the family itself", "remove `parent: {written.name}`, or declare `{type_name}` as a struct with `impl Effect {{ parent: {written.name} }}`")
+        declared.parent = None
+    }
     names := [String]{}
     loop member in cases {
         unit := false
@@ -116,7 +159,12 @@ parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_sp
         if irreversible -> any = true
         case_decls.push(EffectDecl{name: "{type_name}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span})
     }
-    root: if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
+    root := if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
+    if body == None && declared.parent == .Val(written) {
+        loop row in EFFECT_VOCABULARY_ROWS {
+            if row.name == written.name -> root = row.irreversible
+        }
+    }
     decls := [EffectDecl]{EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span}}
     loop declaration in case_decls -> decls.push(declaration)
     declared.decls = decls

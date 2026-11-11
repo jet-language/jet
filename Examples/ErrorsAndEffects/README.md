@@ -38,6 +38,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [LibraryEffect](Effects/LibraryEffect.jet) — A library effect written as a type: `SQL` implements `Effect`, and the `#FX(…)` above it names the kernel effects a row that names `SQL` may do.
 - [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
 - [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
+- [PackageEffectKinds](Effects/PackageEffectKinds.jet) — A package effect is a kind of an open effect: `Audit` names `Log` as its parent, a caller that denies `Log` denies `Audit`, and a row naming `Audit` allows no other kind of `Log`.
 - [Pure](Effects/Pure.jet)
 - [ScopedEffects](Effects/ScopedEffects.jet) — An effect argument names a scope: `-[FS.Read("ScopedEffects.jet")]>` reads that one file, a folder scope covers the files below it, and a scoped denial refuses only its folder.
 - [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `&self` methods.

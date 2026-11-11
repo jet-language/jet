@@ -298,6 +298,7 @@ sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics:
         sema_effect_leaf_collect(leaves, graph.modules[source_module_index].program.items)
     }
     found := false
+    library: sema_library_effects(graph)
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start: diagnostics.len()
@@ -305,6 +306,7 @@ sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics:
         loop cap in graph.modules[source_module_index].template_caps -> sema_effect_leaf_check_cap_entries(leaves, cap, diagnostics)
         sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, diagnostics)
         sema_library_effect_check_lists(graph.modules[source_module_index].program.items, diagnostics)
+        sema_library_effect_check_parents(library, source_module_index, diagnostics)
         if diagnostics.len() > start {
             sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true

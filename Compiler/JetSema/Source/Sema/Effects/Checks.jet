@@ -364,6 +364,9 @@ SemaEffectNode: struct {
     // effects it lists (E0756), and those its row denies (E0749).
     library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
     library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}}
+    // The Prelude effects its declared row names itself, without the kernel
+    // effects its library rows add to `declared` (E0759).
+    written_declared: [String]{[String]{}}
     // Calls to a Core scope publisher with a constant argument
     // (effect_scope_published_effect): the callee's bare effect reaches this
     // body as the scoped one. A publisher it also calls with a run-time
@@ -1832,6 +1835,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 }
                 else -> {
                     _ := sema_effect_set_add(node.declared, effect_name)
+                    _ := sema_effect_set_add(node.written_declared, effect_name)
                 }
             }
         }
@@ -3898,7 +3902,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
-        sema_library_effect_check_denials(nodes[node_index], library_reach[node_index], function_diagnostics)
+        sema_library_effect_check_denials(nodes[node_index], library_reach.reached[node_index], solved[node_index], function_diagnostics)
+        sema_library_effect_check_kinds(nodes[node_index], library_reach, library_reach.reached[node_index], function_diagnostics)
         if pure_reached.len() > 0 {
             pure_nodes.push(node_index)
             pure_rows.push(pure_reached)
