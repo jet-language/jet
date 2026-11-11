@@ -89,7 +89,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
         return failed
     }
     path: sema_comptime_input_path_value(call, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
-    node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path}}, call.name_span)
+    node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: path, pin: None}}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }
 
@@ -146,6 +146,6 @@ sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [Cal
         diagnostics.push(sema_error("E3414", args[0].span, "`net.fetch` URL must be a String, not {sema_type_show(url.ty)}", "the compiler downloads the URL the String names while it builds", "pass a String URL, e.g. `net.fetch(\"https://example.com/data.txt\", sha256: \"…\")`"))
         return failed
     }
-    node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeFetch{url: url, sha256: sha256}}, span)
+    node: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: "fetch", path: url, pin: Val(sha256)}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

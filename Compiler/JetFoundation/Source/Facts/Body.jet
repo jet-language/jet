@@ -409,12 +409,11 @@ BodyHostCall: enum {
     // toolchain tree. A literal is the checked, normalized literal; a
     // computed value is checked against the same path law when the comptime
     // evaluation reaches it. The compiler reads and records the input; it
-    // never runs at runtime.
-    ComptimeInput(builtin: String, path: Int)
-    // `net.fetch(url, sha256: "…")` in comptime code: the node of its String
-    // URL and the written SHA-256 its content must hash to (E3413). The
-    // compiler fetches and checks it; it never runs at runtime.
-    ComptimeFetch(url: Int, sha256: String)
+    // never runs at runtime. `net.fetch(url, sha256: "…")` in comptime code
+    // is the `fetch` input: `path` is the node of its String URL and `pin`
+    // the written SHA-256 its content must hash to (E3413); the compiler
+    // fetches and checks it. Every other input has no pin.
+    ComptimeInput(builtin: String, path: Int, pin: String?)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
@@ -1675,11 +1674,8 @@ body_each_host_call_child: fn(tree: BodyTree, value: BodyHostCall, visit: fn(Int
         .YieldSend(f0) -> {
             visit(f0)
         }
-        .ComptimeInput(_, f1) -> {
+        .ComptimeInput(_, f1, _) -> {
             visit(f1)
-        }
-        .ComptimeFetch(f0, _) -> {
-            visit(f0)
         }
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }

@@ -283,21 +283,23 @@ jet_driver_core_comptime_inputs: fn(core_sources: [JetDriverCoreSource], source_
     None
 }
 
-// Whether a checked comptime value is exactly one comptime input.
+// Whether a checked comptime value is exactly one comptime input the driver
+// reads from disk; a pinned `net.fetch` is evaluated instead.
 jet_driver_comptime_input_expression: fn(expression: BodyExpr) -> Bool Never! {
     if body_node(expression.tree, expression.root).kind == .HostCall(call) {
-        if call == .ComptimeInput(_, _) -> return true
+        if call == .ComptimeInput(_, _, None) -> return true
     }
     false
 }
 
 // The builtin and literal path of a checked comptime value that is exactly
 // one comptime input with a literal path, which the driver reads with no
-// evaluation; None for any other value, a computed path among them.
+// evaluation; None for any other value, a computed path or a pinned
+// `net.fetch` among them.
 jet_driver_comptime_literal_input: fn(expression: BodyExpr) -> JetDriverComptimeLiteralInput? Never! {
     node: body_node(expression.tree, expression.root)
     if node.kind == .HostCall(call) {
-        if call == .ComptimeInput(builtin, path) {
+        if call == .ComptimeInput(builtin, path, None) {
             if body_node(expression.tree, path).kind == .StrLit(parts) {
                 if parts.len() == 1 && parts[0] == .Literal(text) -> return Val(JetDriverComptimeLiteralInput{builtin: builtin, path: text, span: node.span})
             }
