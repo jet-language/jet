@@ -420,7 +420,7 @@ project_removal_refusal: fn(project: String, protected: [String]) -> String? {
     loop guarded in protected {
         if guarded == "" -> next
         held: files.canonicalize(guarded) ?? guarded.copy() // copy: an unresolvable path compares as given
-        if held == real || held.starts_with("{real}/") -> return Val("it is or holds {guarded}")
+        if contained(real, held) -> return Val("it is or holds {guarded}")
     }
     entries: files.list_dir(project) ?? return Val("it cannot be listed: {err}")
     loop entry in entries {

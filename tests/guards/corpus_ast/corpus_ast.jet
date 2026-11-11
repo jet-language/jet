@@ -1329,6 +1329,8 @@ policy_semantic_role: fn(role: String) -> Bool {
 policy_applies: fn(manifest: PolicyManifest, path: String, row: PolicySourceRow, rule: String) -> Bool {
     if !policy_semantic_role(row.role) -> return false
     if rule == "raw-cli-fixed-shape" && row.profile != "typed-cli" && row.profile != "typed-cli-doc" -> return false
+    // A statement-file lesson's top-level lines are its entry.
+    if rule == "entry-explicit" && row.profile == "script-statements" -> return false
     loop scope in manifest.scopes {
         if scope.rule == rule && policy_selector_matches(scope.selector, path) -> return true
     }
@@ -2124,6 +2126,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
 
 // D-ENTRY-SCRIPT1=C: every loose top-level statement in a scoped source is one
 // `entry-explicit` occurrence; explicit `run: fn` and declaration-only files pass.
+// The statement-file profile amends it: a `script-statements` source is a program.
 policy_ast_test_explicit_entry: fn() PolicyError! {
     manifest: policy_manifest()
     // The Rust original also named Examples/learn/entry_law.jet; Examples/learn left the corpus with `jet learn` (09473f1db5).
@@ -2146,6 +2149,9 @@ policy_ast_test_explicit_entry: fn() PolicyError! {
             assert(entries == index + 1, "loose execution: {path}: expected {index + 1}, found {entries}")
         }
     }
+    // The statement-file lesson runs its top-level lines.
+    lesson: policy_evaluate_source(manifest, "Examples/Basics/ScriptStatements.jet", "total := 1\nprint(total)\n")
+    assert(!policy_has_rule(lesson, "entry-explicit"), "a script-statements lesson is a program: {policy_occurrence_messages(lesson)}")
     loop exception in manifest.exceptions -> assert(exception.rule != "entry-explicit", "entry-explicit has no occurrence exceptions")
     Ok()
 }

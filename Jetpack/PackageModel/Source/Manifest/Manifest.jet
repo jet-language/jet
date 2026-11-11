@@ -7,7 +7,7 @@ use {
     manifest_core_sys: core.sys
     jet_foundation.[
         Diagnostic, AllocatorPolicy, RuntimeLayer, Span, diagnostic_from_registry,
-        diagnostic_registry_row, foundation_json_quote,
+        diagnostic_registry_row,
     ]
     jetpack_foundation.[
         BINARY_NAME, FILE_EXT, LANG_NAME, MANIFEST_BLOCK_AUTHORITY, MANIFEST_FIELD_EDITION,
@@ -194,14 +194,28 @@ pkg_release_word: fn(token: String) -> String Never! {
     "{words.slice(0, 1).to_upper()}{words.slice(1, words.len())}"
 }
 
-// `jet --version --json`: the banner's facts as one JSON object.
+// `jet --version --json`: the banner's facts as one JSON object. An unstamped
+// build's commit and date are null.
 pkg_version_json: fn(build: JetBuild) -> String Never! {
     release: pkg_current_release_status()
-    commit: if build.commit == "" -> "null" else -> foundation_json_quote(build.commit)
-    date: if build.date == "" -> "null" else -> foundation_json_quote(build.date)
-    editions := [String]{}
-    loop edition in SUPPORTED_EDITIONS -> editions.push(foundation_json_quote(edition))
-    "{{\"version\":{foundation_json_quote(build.version)},\"release\":{foundation_json_quote(JET_VERSION)},\"released\":{build.released},\"commit\":{commit},\"date\":{date},\"channel\":{foundation_json_quote(JET_VERSION_CHANNEL)},\"release_status\":{foundation_json_quote(release.channel)},\"release_disposition\":{foundation_json_quote(release.disposition)},\"release_readiness\":{foundation_json_quote(release.readiness)},\"compatibility_policy\":{foundation_json_quote(release.policy)},\"compatibility_policy_active\":{release.policy_active},\"supported_editions\":[{editions.join(",")}],\"registry_protocol\":{foundation_json_quote(REGISTRY_COMPAT)}}}\n"
+    commit: if build.commit == "" -> Dyn.Null else -> Dyn.Text(build.commit.copy())
+    date: if build.date == "" -> Dyn.Null else -> Dyn.Text(build.date.copy())
+    report: pkg_json_render(Dyn.Object([
+        "version": Dyn.Text(build.version.copy()),
+        "release": Dyn.Text(JET_VERSION),
+        "released": Dyn.Bool(build.released),
+        "commit": commit,
+        "date": date,
+        "channel": Dyn.Text(JET_VERSION_CHANNEL),
+        "release_status": Dyn.Text(release.channel.copy()),
+        "release_disposition": Dyn.Text(release.disposition.copy()),
+        "release_readiness": Dyn.Text(release.readiness.copy()),
+        "compatibility_policy": Dyn.Text(release.policy.copy()),
+        "compatibility_policy_active": Dyn.Bool(release.policy_active),
+        "supported_editions": pkg_json_texts(SUPPORTED_EDITIONS),
+        "registry_protocol": Dyn.Text(REGISTRY_COMPAT),
+    ]))
+    "{report}\n"
 }
 
 // The one error carrier of the compiler-facing manifest API: the registered

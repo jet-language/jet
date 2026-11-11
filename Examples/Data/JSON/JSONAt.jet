@@ -8,7 +8,8 @@ run: fn() {
     print(json.at<String>(tree, "receipts/0/metrics/name") ?? panic("name"))
     print("{json.at<Int>(tree, "/receipts/0/metrics/n") ?? panic("n")}")
     print((json.at<[String]>(tree, "receipts/0/metrics/tags") ?? panic("tags")).join(" "))
-    loop path in [String]{"receipts/0/metrics/name", "receipts/0/metrics/p50"} {
+    paths: [String]{"receipts/0/metrics/name", "receipts/0/metrics/p50"}
+    loop path in paths {
         if json.at<Int>(tree, path) == {
             .Ok(n) -> print("{n}")
             .Err(errors) -> print("{errors[0]}")

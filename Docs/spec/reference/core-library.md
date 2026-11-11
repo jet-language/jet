@@ -415,6 +415,46 @@ use compiler: core.compiler
 @profiles: compiler.profiles() ?? panic("profiles")
 ```
 
+### `core.meta` — module and package metadata
+
+Every module has a `Module` value and every package a `Package` value, and the
+compiler fills both while building. `Module.name`, `file`, `doc` and `package`
+come from the compiler. A module body's first lines may set the fields that have
+defaults (`maturity`, `category`, `deprecated`), for example
+`category: "billing"`, and another module reads the value as `pricing.category`.
+Reading a field needs no import, but naming a type does
+(`use core.meta.[Module]`). Every field is known at build time, so a program
+carries only the fields its code reads.
+
+| Type | Fields |
+| --- | --- |
+| `Module` | `name`, `file`, `doc`, `package: Package`, `maturity` (default `.Tested`), `category` (default `""`), `deprecated: Deprecated?` |
+| `Deprecated` | `since`, `use`, `removed_in: String?`. A use from another module warns, and the build never fails on it. |
+| `Package` | The `package.jet` fields: `name`, `version` (default `"0.0.0"`), `description`, `license`, `authors`, `edition`, `repository`, `jet` (the self-toolchain pin), `source`, `log` (the `core.log` level filter). Code that reads a dependency's `Package` can't change it. |
+
+### `core.target` — the machines a build targets
+
+A target is a struct with no fields that implements `Machine`. Its one
+constant, `facts: MachineFacts`, gives the triple, the `MachineLayout`
+(pointer and word bits, cache line, `MachineEndian`, atomic width), the CPU
+features every CPU of the machine has, and the provider of each service: the
+allocator, panic reporting, the byte sink, the clocks, sleep, entropy, sockets,
+files, processes, the environment, the browser, the GPU and C FFI. A missing
+service is `None`. `facts.row()` derives the effects every artifact built for
+the machine is denied, one per missing service (`!Net`, `!FS`, `!IO`, `!Time`
+or `!Time.Wait`, `!Rand`, `!Env`, `!Exec`, `!GPU`, `!FFI` or `!FFI.C`,
+`!Browser`, `!Panic`, `!Mem.Alloc`), and the compiler checks every artifact
+against that row. Code reads the built target's operating system as
+`#build.target.os`.
+
+| Machine | Triple | Denied by its facts |
+| --- | --- | --- |
+| `LinuxX64` | `x86_64-unknown-linux-gnu` | none |
+| `MacOSArm64` | `aarch64-apple-darwin` | none |
+| `WindowsX64` | `x86_64-pc-windows-msvc` | none |
+| `Web` | `wasm32-unknown-unknown` | `!Exec`, `!FFI.C` |
+| `GPU` | `spirv64-unknown-unknown` | every host service, `!Panic` and `!Mem.Alloc` |
+
 ### `core.mod` — pinned library loading
 
 `core.mod.load` loads a project-contained compiled Jet library under an explicit
