@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1424,
+  "total": 1425,
   "counts": {
-    "Compiler": 746,
+    "Compiler": 747,
     "Core": 177,
     "Docs": 8,
     "Examples": 41,
@@ -1701,6 +1701,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/Authority.jet",
+      "line": 326,
+      "column": 5,
+      "reason": "runtime-init runs before any other thread exists"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CAbiSession.jet",
       "line": 20,
       "column": 5,
@@ -1821,14 +1828,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerFS.jet",
-      "line": 184,
+      "line": 190,
       "column": 9,
       "reason": "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/CompilerFS.jet",
-      "line": 205,
+      "line": 211,
       "column": 5,
       "reason": "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes"
     },
@@ -2577,49 +2584,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 265,
+      "line": 271,
       "column": 13,
       "reason": "the walk directory and terminated final part live through openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 460,
+      "line": 466,
       "column": 5,
       "reason": "the terminated borrowed path and the 256-byte statx buffer are live for the syscall"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 566,
+      "line": 572,
       "column": 13,
       "reason": "the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 574,
+      "line": 580,
       "column": 17,
       "reason": "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 581,
+      "line": 587,
       "column": 21,
       "reason": "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 658,
+      "line": 664,
       "column": 5,
       "reason": "both walk directories and terminated final parts live through renameat/renameat2"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostHeldDirectory.jet",
-      "line": 672,
+      "line": 678,
       "column": 9,
       "reason": "both walk directories and terminated final parts live through linkat"
     },
@@ -5454,91 +5461,91 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Cipher.jet",
-      "line": 79,
+      "line": 85,
       "column": 5,
       "reason": "Core cipher workspace reserves its complete operation-owned word capacity before filling"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Cipher.jet",
-      "line": 95,
+      "line": 101,
       "column": 5,
       "reason": "Core cipher output reserves its exact public output width before filling"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 285,
+      "line": 291,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 291,
+      "line": 297,
       "column": 5,
       "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 296,
+      "line": 302,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 301,
+      "line": 307,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 646,
+      "line": 652,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1187,
+      "line": 1193,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1214,
+      "line": 1220,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1520,
+      "line": 1526,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1618,
+      "line": 1624,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1627,
+      "line": 1633,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1633,
+      "line": 1639,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -5664,217 +5671,217 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 213,
+      "line": 215,
       "column": 1,
       "reason": "vault key import: the caller's unlock request borrows the private key's bytes for the unlock only"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 216,
+      "line": 218,
       "column": 1,
       "reason": "vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 230,
+      "line": 232,
       "column": 5,
       "reason": "vault typed load provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 237,
+      "line": 239,
       "column": 5,
       "reason": "vault typed current provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 243,
+      "line": 245,
       "column": 5,
       "reason": "vault typed status provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 250,
+      "line": 252,
       "column": 5,
       "reason": "vault typed versions provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 257,
+      "line": 259,
       "column": 5,
       "reason": "vault typed generation provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 264,
+      "line": 266,
       "column": 5,
       "reason": "vault typed store provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 272,
+      "line": 274,
       "column": 5,
       "reason": "vault key import: signing key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 280,
+      "line": 282,
       "column": 5,
       "reason": "vault key import: X25519 secret material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 288,
+      "line": 290,
       "column": 5,
       "reason": "vault wrapped import provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 295,
+      "line": 297,
       "column": 5,
       "reason": "vault typed rotation provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 302,
+      "line": 304,
       "column": 5,
       "reason": "vault typed retirement provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 309,
+      "line": 311,
       "column": 5,
       "reason": "vault typed revocation provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 316,
+      "line": 318,
       "column": 5,
       "reason": "vault write authorization provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 323,
+      "line": 325,
       "column": 5,
       "reason": "vault wrapped authorization provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 329,
+      "line": 331,
       "column": 5,
       "reason": "vault typed generation commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 335,
+      "line": 337,
       "column": 5,
       "reason": "vault typed store commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 341,
+      "line": 343,
       "column": 5,
       "reason": "vault key import commit: signing key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 347,
+      "line": 349,
       "column": 5,
       "reason": "vault key import commit: X25519 secret material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 353,
+      "line": 355,
       "column": 5,
       "reason": "vault wrapped import commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 359,
+      "line": 361,
       "column": 5,
       "reason": "vault typed rotation commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 365,
+      "line": 367,
       "column": 5,
       "reason": "vault typed retirement commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 371,
+      "line": 373,
       "column": 5,
       "reason": "vault typed revocation commit provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 377,
+      "line": 379,
       "column": 5,
       "reason": "vault passphrase export provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Vault.jet",
-      "line": 384,
+      "line": 386,
       "column": 5,
       "reason": "vault recipient export provider boundary"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 2419,
+      "line": 2417,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3348,
+      "line": 3346,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3682,
+      "line": 3680,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 100,
+      "line": 97,
       "column": 5,
       "reason": "inspect private typed carriers without changing public Dyn variants"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 166,
+      "line": 163,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
@@ -5895,35 +5902,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 155,
+      "line": 156,
       "column": 9,
       "reason": "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 393,
+      "line": 394,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 413,
+      "line": 414,
       "column": 5,
       "reason": "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 896,
+      "line": 897,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Csv.jet",
-      "line": 1054,
+      "line": 1055,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -5951,14 +5958,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1245,
+      "line": 1243,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1250,
+      "line": 1248,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -6105,21 +6112,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/XmlEngine.jet",
-      "line": 132,
+      "line": 138,
       "column": 5,
       "reason": "all callers iterate or check the UTF-8 byte bounds before borrowing this byte"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/XmlEngine.jet",
-      "line": 170,
+      "line": 176,
       "column": 5,
       "reason": "the caller selected a scalar-aligned window of validated UTF-8 bytes"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/XmlEngine.jet",
-      "line": 2180,
+      "line": 2677,
       "column": 5,
       "reason": "attribute whitespace compaction preserves the already validated UTF-8 byte sequence"
     },
@@ -6133,28 +6140,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 596,
+      "line": 604,
       "column": 1,
       "reason": "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 602,
+      "line": 610,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 670,
+      "line": 678,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
     {
       "package": "Core",
       "file": "Core/Http/Client.jet",
-      "line": 655,
+      "line": 659,
       "column": 5,
       "reason": "checked resolver octets and port transferred into the socket carrier"
     },
@@ -6175,21 +6182,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 363,
+      "line": 254,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 544,
+      "line": 542,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 559,
+      "line": 557,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
@@ -6455,14 +6462,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 192,
+      "line": 189,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 234,
+      "line": 231,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -6476,196 +6483,196 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 440,
+      "line": 441,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 608,
+      "line": 609,
       "column": 1,
       "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 658,
+      "line": 659,
       "column": 1,
       "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 732,
+      "line": 733,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 738,
+      "line": 739,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 743,
+      "line": 744,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 750,
+      "line": 751,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 754,
+      "line": 755,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 761,
+      "line": 762,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 771,
+      "line": 772,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 777,
+      "line": 778,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 946,
+      "line": 943,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 960,
+      "line": 957,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 974,
+      "line": 971,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 978,
+      "line": 975,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 982,
+      "line": 979,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 988,
+      "line": 985,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 994,
+      "line": 991,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 998,
+      "line": 995,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1023,
+      "line": 1020,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1030,
+      "line": 1027,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1208,
+      "line": 1205,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1212,
+      "line": 1209,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1216,
+      "line": 1213,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1223,
+      "line": 1220,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1227,
+      "line": 1224,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1390,
+      "line": 1388,
       "column": 5,
       "reason": "the caller bounded this byte position by the String storage length"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1411,
+      "line": 1409,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -10198,14 +10205,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 746 |
+| Compiler | 747 |
 | Core | 177 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 8 |
 | tests | 435 |
-| **total** | **1424** |
+| **total** | **1425** |
 
 ### Regions
 
@@ -10422,6 +10429,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 24:5 | "place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 29:5 | "place borrows one aligned8 live atomic word; LOCK CMPXCHG orders success and failure SeqCst" |
 | Compiler | Compiler/JetRuntime/Source/Atomic.jet | 34:5 | "place borrows one aligned8 live atomic word; LOCK XADD returns the previous wrapping64 value SeqCst" |
+| Compiler | Compiler/JetRuntime/Source/Authority.jet | 326:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CAbiSession.jet | 28:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/ClosureRefs.jet | 9:5 | "the caller's owned reference keeps the aligned closure header live; locked compare-exchange atomically publishes one more owner" |
@@ -10439,8 +10447,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 265:5 | "checked binary closure adapter with live environment, inputs and output slots" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 271:5 | "checked native Unit callback; its raw argument stays valid for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/Collections.jet | 277:5 | "checked Unit clone callback; source remains live and target lends writable output storage" |
-| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 184:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
-| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 205:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
+| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 190:9 | "the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes" |
+| Compiler | Compiler/JetRuntime/Source/CompilerFS.jet | 211:5 | "name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 128:5 | "startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 149:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
@@ -10547,13 +10555,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostFiles.jet | 674:9 | "the held fd and stack-local source-validated winsize word live only through ioctl" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 15:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 206:13 | "the owned walk descriptor and terminated part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 265:13 | "the walk directory and terminated final part live through openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 460:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 566:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 574:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 581:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 658:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
-| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 672:9 | "both walk directories and terminated final parts live through linkat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 271:13 | "the walk directory and terminated final part live through openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 466:5 | "the terminated borrowed path and the 256-byte statx buffer are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 572:13 | "the walk directory and terminated final part live through O_PATH&#124;O_NOFOLLOW&#124;O_CLOEXEC openat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 580:17 | "the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 587:21 | "the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 664:5 | "both walk directories and terminated final parts live through renameat/renameat2" |
+| Compiler | Compiler/JetRuntime/Source/HostHeldDirectory.jet | 678:9 | "both walk directories and terminated final parts live through linkat" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 21:5 | "value transfers one 56-byte error header and its nullable owned E4 text children" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 32:5 | "value borrows the complete error header; result exclusively owns 56 fresh bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostIO.jet | 68:5 | "value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot" |
@@ -10958,19 +10966,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Cipher.jet | 79:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
-| Core | Core/Crypto/Cipher.jet | 95:5 | "Core cipher output reserves its exact public output width before filling" |
-| Core | Core/Crypto/Crypto.jet | 285:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 291:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 296:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 301:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 646:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1187:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1214:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1520:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1618:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1627:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1633:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Cipher.jet | 85:5 | "Core cipher workspace reserves its complete operation-owned word capacity before filling" |
+| Core | Core/Crypto/Cipher.jet | 101:5 | "Core cipher output reserves its exact public output width before filling" |
+| Core | Core/Crypto/Crypto.jet | 291:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 297:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
+| Core | Core/Crypto/Crypto.jet | 302:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 307:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 652:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1193:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1220:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1526:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1624:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1633:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1639:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 293:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 332:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
@@ -10988,49 +10996,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Jetc.jet | 177:5 | "Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome" |
 | Core | Core/Crypto/Jetc.jet | 235:5 | "Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy" |
 | Core | Core/Crypto/Jetc.jet | 273:5 | "Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty" |
-| Core | Core/Crypto/Vault.jet | 213:1 | "vault key import: the caller's unlock request borrows the private key's bytes for the unlock only" |
-| Core | Core/Crypto/Vault.jet | 216:1 | "vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only" |
-| Core | Core/Crypto/Vault.jet | 230:5 | "vault typed load provider boundary" |
-| Core | Core/Crypto/Vault.jet | 237:5 | "vault typed current provider boundary" |
-| Core | Core/Crypto/Vault.jet | 243:5 | "vault typed status provider boundary" |
-| Core | Core/Crypto/Vault.jet | 250:5 | "vault typed versions provider boundary" |
-| Core | Core/Crypto/Vault.jet | 257:5 | "vault typed generation provider boundary" |
-| Core | Core/Crypto/Vault.jet | 264:5 | "vault typed store provider boundary" |
-| Core | Core/Crypto/Vault.jet | 272:5 | "vault key import: signing key material" |
-| Core | Core/Crypto/Vault.jet | 280:5 | "vault key import: X25519 secret material" |
-| Core | Core/Crypto/Vault.jet | 288:5 | "vault wrapped import provider boundary" |
-| Core | Core/Crypto/Vault.jet | 295:5 | "vault typed rotation provider boundary" |
-| Core | Core/Crypto/Vault.jet | 302:5 | "vault typed retirement provider boundary" |
-| Core | Core/Crypto/Vault.jet | 309:5 | "vault typed revocation provider boundary" |
-| Core | Core/Crypto/Vault.jet | 316:5 | "vault write authorization provider boundary" |
-| Core | Core/Crypto/Vault.jet | 323:5 | "vault wrapped authorization provider boundary" |
-| Core | Core/Crypto/Vault.jet | 329:5 | "vault typed generation commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 335:5 | "vault typed store commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 341:5 | "vault key import commit: signing key material" |
-| Core | Core/Crypto/Vault.jet | 347:5 | "vault key import commit: X25519 secret material" |
-| Core | Core/Crypto/Vault.jet | 353:5 | "vault wrapped import commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 359:5 | "vault typed rotation commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 365:5 | "vault typed retirement commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 371:5 | "vault typed revocation commit provider boundary" |
-| Core | Core/Crypto/Vault.jet | 377:5 | "vault passphrase export provider boundary" |
-| Core | Core/Crypto/Vault.jet | 384:5 | "vault recipient export provider boundary" |
-| Core | Core/Data/Data.jet | 2419:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Data/Data.jet | 3348:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3682:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Cbor.jet | 166:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Crypto/Vault.jet | 215:1 | "vault key import: the caller's unlock request borrows the private key's bytes for the unlock only" |
+| Core | Core/Crypto/Vault.jet | 218:1 | "vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only" |
+| Core | Core/Crypto/Vault.jet | 232:5 | "vault typed load provider boundary" |
+| Core | Core/Crypto/Vault.jet | 239:5 | "vault typed current provider boundary" |
+| Core | Core/Crypto/Vault.jet | 245:5 | "vault typed status provider boundary" |
+| Core | Core/Crypto/Vault.jet | 252:5 | "vault typed versions provider boundary" |
+| Core | Core/Crypto/Vault.jet | 259:5 | "vault typed generation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 266:5 | "vault typed store provider boundary" |
+| Core | Core/Crypto/Vault.jet | 274:5 | "vault key import: signing key material" |
+| Core | Core/Crypto/Vault.jet | 282:5 | "vault key import: X25519 secret material" |
+| Core | Core/Crypto/Vault.jet | 290:5 | "vault wrapped import provider boundary" |
+| Core | Core/Crypto/Vault.jet | 297:5 | "vault typed rotation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 304:5 | "vault typed retirement provider boundary" |
+| Core | Core/Crypto/Vault.jet | 311:5 | "vault typed revocation provider boundary" |
+| Core | Core/Crypto/Vault.jet | 318:5 | "vault write authorization provider boundary" |
+| Core | Core/Crypto/Vault.jet | 325:5 | "vault wrapped authorization provider boundary" |
+| Core | Core/Crypto/Vault.jet | 331:5 | "vault typed generation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 337:5 | "vault typed store commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 343:5 | "vault key import commit: signing key material" |
+| Core | Core/Crypto/Vault.jet | 349:5 | "vault key import commit: X25519 secret material" |
+| Core | Core/Crypto/Vault.jet | 355:5 | "vault wrapped import commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 361:5 | "vault typed rotation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 367:5 | "vault typed retirement commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 373:5 | "vault typed revocation commit provider boundary" |
+| Core | Core/Crypto/Vault.jet | 379:5 | "vault passphrase export provider boundary" |
+| Core | Core/Crypto/Vault.jet | 386:5 | "vault recipient export provider boundary" |
+| Core | Core/Data/Data.jet | 2417:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Data/Data.jet | 3346:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3680:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Encoding/Cbor.jet | 97:5 | "inspect private typed carriers without changing public Dyn variants" |
+| Core | Core/Encoding/Cbor.jet | 163:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 221:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 323:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/Csv.jet | 155:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
-| Core | Core/Encoding/Csv.jet | 393:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Encoding/Csv.jet | 413:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
-| Core | Core/Encoding/Csv.jet | 896:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/Csv.jet | 1054:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/Csv.jet | 156:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |
+| Core | Core/Encoding/Csv.jet | 394:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Encoding/Csv.jet | 414:5 | "a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8" |
+| Core | Core/Encoding/Csv.jet | 897:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/Csv.jet | 1055:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 549:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 113:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
 | Core | Core/Encoding/Json.jet | 121:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1245:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1250:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1243:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1248:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 16:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
 | Core | Core/Encoding/Stream.jet | 30:5 | "check the private Bytes variant immediately before borrowing its backing" |
@@ -11051,19 +11059,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Stream.jet | 1912:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
 | Core | Core/Encoding/Stream.jet | 2055:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
 | Core | Core/Encoding/Stream.jet | 2092:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
-| Core | Core/Encoding/XmlEngine.jet | 132:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
-| Core | Core/Encoding/XmlEngine.jet | 170:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
-| Core | Core/Encoding/XmlEngine.jet | 2180:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
+| Core | Core/Encoding/XmlEngine.jet | 138:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
+| Core | Core/Encoding/XmlEngine.jet | 176:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
+| Core | Core/Encoding/XmlEngine.jet | 2677:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/Yaml.jet | 440:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Files.jet | 596:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
-| Core | Core/Files/Files.jet | 602:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 670:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
-| Core | Core/Http/Client.jet | 655:5 | "checked resolver octets and port transferred into the socket carrier" |
+| Core | Core/Files/Files.jet | 604:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
+| Core | Core/Files/Files.jet | 610:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 678:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Http/Client.jet | 659:5 | "checked resolver octets and port transferred into the socket carrier" |
 | Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
 | Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
-| Core | Core/Jobs/Jobs.jet | 363:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/Jobs/Jobs.jet | 544:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/Jobs/Jobs.jet | 559:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 254:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 542:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 557:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
 | Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
@@ -11101,37 +11109,37 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4334:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4339:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4368:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 192:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 234:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 189:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 231:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 440:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 608:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
-| Core | Core/Sys/Sys.jet | 658:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
-| Core | Core/Sys/Sys.jet | 732:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 738:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 743:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 750:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 754:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 761:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 771:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 777:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 946:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 960:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 974:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 978:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 982:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 988:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 994:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 998:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1023:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1030:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1208:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1212:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1216:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 1223:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 1227:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/Testing/Testing.jet | 1390:5 | "the caller bounded this byte position by the String storage length" |
-| Core | Core/Testing/Testing.jet | 1411:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Sys/Sys.jet | 441:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 609:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 659:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 733:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 739:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 744:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 751:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 755:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 762:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 772:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 778:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 943:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 957:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 971:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 975:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 979:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 985:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 991:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 995:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1020:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1027:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1205:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1209:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1213:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1220:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1224:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Testing/Testing.jet | 1388:5 | "the caller bounded this byte position by the String storage length" |
+| Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
