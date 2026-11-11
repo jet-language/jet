@@ -1,0 +1,22 @@
+// The hook: a library metaprogram that prints "hooked" before the body of
+// each function marked `Traced`. It acts only through the `Compiler` value
+// someone hands it; importing it runs nothing.
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.rewrite_body(f, #code {
+                    print("hooked")
+                    #{f.body}
+                })
+            }
+        },
+    )
+}

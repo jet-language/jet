@@ -1,0 +1,13 @@
+// The root makes the `Compiler` value and hands it to the hook.
+use trace
+
+#Trace.Traced
+greet: fn() -> String { "plain" }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    trace.install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(greet()) }

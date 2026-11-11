@@ -1,0 +1,55 @@
+# #3526: the hook fixture. `trace` is a library metaprogram whose handler
+# prints "hooked" before each function marked `Trace.Traced`. It acts only
+# through a `Compiler` value it is handed, so only a root that makes the value
+# and hands it on runs it:
+# - `none`: no value and no hook. The app prints "plain".
+# - `imported`: the hook is imported and its marker written, but no value is
+#   made. An import runs no compiler code, so the app prints "plain".
+# - `root`: the root makes the value and hands it to the hook, and the app
+#   prints "hooked" first. The plan records the handoff at the hook's line.
+#   Once the root stops making the value, a rebuild in the same store prints
+#   "plain": no stored artifact carries the hook into a build without it.
+# - `forwarded`: the root forwards its `Build` to `grab`, a dependency whose
+#   own source asks it for a value to give the hook. That is E0776 at grab's
+#   line, and no app is built.
+# - `denied`: the root hands the hook its value but denies `Meta.Rewrite`.
+#   The denial reaches the rewrite inside the hook (E0749), and no app is built.
+# No step has a TTY, and none asks for one.
+fixture: only_the_roots_compiler_value_runs_the_hook.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build none/main.jet
+exit: 0
+step: {work}/none/.jet/build/app
+exit: 0
+stdout: = "plain\n"
+step: jet build imported/main.jet
+exit: 0
+step: {work}/imported/.jet/build/app
+exit: 0
+stdout: = "plain\n"
+step: jet build root/main.jet
+exit: 0
+step: {work}/root/.jet/build/app
+exit: 0
+stdout: = "hooked\nplain\n"
+step: jet inspect graph root/main.jet --json
+exit: 0
+json: stdout doc $.build.generated[0].made_by ~ "trace.jet:15" # the handoff to the hook is recorded at its rewrite
+json: stdout doc $.build.generated[0].authority = "Meta.Rewrite"
+copy: root/unhooked.txt root/main.jet
+step: jet build root/main.jet
+exit: 0
+step: {work}/root/.jet/build/app
+exit: 0
+stdout: = "plain\n"
+step: jet build forwarded/main.jet
+exit: 1
+stderr: ~ E0776 # the dependency's own call is refused
+stderr: ~ grab.jet:6 # at the dependency's line
+file: forwarded/.jet/build/app absent
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ E0749 # the root's denial reaches the rewrite inside the hook
+stderr: ~ "reaches the `Meta.Rewrite` effect, which the package denies with `authority: { deny: [Meta.Rewrite] }`" # the report names the root's row
+file: denied/.jet/build/app absent
