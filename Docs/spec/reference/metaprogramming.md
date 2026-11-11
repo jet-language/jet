@@ -410,6 +410,16 @@ and the function that made it, with its place: the root's own `build`, or a
 dependency's function the root handed the value to. The build's provenance
 records the same handoff as the module's `made_by`, in `jet inspect graph
 --json` and in `jet inspect explain-build <module>`.
+The authority and the consent a build grants freeze when `build` returns:
+every later call on its `Build` or `Compiler` values is refused, so the
+actions and compiles after it read the frozen state. A module a `Compiler`
+value made records both: its `authority`, the Meta effect its call performed
+(`Meta.Generate` for `meta.add`, `Meta.Rewrite` for `meta.rewrite_body`), and
+its `consent`, the dependency a `meta.allow_rewrite` line allowed (null for
+the root's own code). Both appear in its provenance, and both are inputs of
+its check node, so a change to either is a new identity for that module and
+for every compile and link node after it (`jet inspect explain-build
+<file> --json`).
 `meta.events(watch: .Functions{marked: Traced{}}, handler)` on the value calls
 the handler with `.Checked(.Function(f))`, a `CompilerEvent`, once for each
 function of the build's checked program that carries the marker of the

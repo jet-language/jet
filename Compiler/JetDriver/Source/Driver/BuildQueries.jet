@@ -31,6 +31,11 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         if jet_driver_unit_is_core(unit) -> next
         subject := ""
         digest := ""
+        // A module a `Compiler` value made is checked under the authority and
+        // consent the build froze when `build` returned: a change to either
+        // is a new node identity, as a change to its bytes is. The node sorts
+        // its inputs by name.
+        unit_inputs := [BuildGraphInputDigest]{}
         if unit.source_origin == SemaSourceOrigin.Snapshot {
             digest = sha256_hex(jet_driver_source_unit_text(request, unit) ?? return None)
             if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
@@ -47,6 +52,8 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
             if generated_index < 0 -> next
             generated: request.generated_modules[generated_index]
             digest = sha256_hex(generated.source)
+            if generated.authority != "" -> unit_inputs.push({name: "authority", digest: sha256_hex(generated.authority)})
+            if generated.consent != "" -> unit_inputs.push({name: "consent", digest: sha256_hex(generated.consent)})
             owner: loop package in load.packages {
                 if package.identity == generated.package_identity -> break package.root_index
             } ?? return None
@@ -55,7 +62,8 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         }
         // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
         // input digest needs its own copy of the same text for `name`. Both live in one node.
-        checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: digest}}))
+        unit_inputs.push({name: subject.copy(), digest: digest})
+        checks.push(build_session_compiler_node("check", subject, unit_inputs))
     }
     checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
     outputs := [String]{}
@@ -377,7 +385,7 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
 // declares no top-level function of that name with a braced body.
 jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
     // copy: each row's texts are views of the plan, which stays whole.
-    function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy()})
+    function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy(), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
     owner: row.package ?? package
     loop module_row in modules {
         if module_row.package_identity != owner -> next
@@ -403,7 +411,7 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                     }
                 }
                 text = "{text}}}\n"
-                return Val(JetDriverGeneratedModule{package_identity: owner.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end})})
+                return Val(JetDriverGeneratedModule{package_identity: owner.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end}), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
             }
         }
     }

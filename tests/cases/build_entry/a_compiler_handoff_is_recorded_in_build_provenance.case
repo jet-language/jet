@@ -1,7 +1,8 @@
 # #3526 c4: when the root hands its `Compiler` value to a dependency's
 # function, the build's provenance records the handoff. The plan's generated
-# row and the module's explanation name the call that made the module, and
-# the function and place that made it.
+# row and the module's explanation name the call that made the module, the
+# function and place that made it, and the `Meta` effect it was made under.
+# The module's check node takes that authority as an input.
 fixture: a_compiler_handoff_is_recorded_in_build_provenance.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -10,9 +11,15 @@ exit: 0
 json: stdout doc $.build.generated[0].path = ".jet/generated/handed/greeting.jet"
 json: stdout doc $.build.generated[0].made_by ^= "`meta.add` in `install` at " # the dependency's function made it
 json: stdout doc $.build.generated[0].made_by ~ "tool.jet:4" # at its call's place
+json: stdout doc $.build.generated[0].authority = "Meta.Generate"
+json: stdout doc $.build.generated[0].consent = null
 step: jet inspect explain-build .jet/generated/handed/greeting.jet handed/main.jet
 exit: 0
 stdout: ~ "made_by=`meta.add` in `install` at " # the module's explanation names its maker
+stdout: ~ "authority=Meta.Generate" # the explanation names the authority it was made under
+step: jet inspect explain-build handed/main.jet --json
+exit: 0
+json: stdout doc $.planned[?subject=".jet/generated/handed/greeting.jet"][0].inputs[1] = "authority" # the made module's check node takes its authority as an input
 step: jet build handed/main.jet
 exit: 0
 step: {work}/handed/.jet/build/app

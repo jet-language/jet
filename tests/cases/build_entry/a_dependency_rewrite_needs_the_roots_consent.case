@@ -4,7 +4,10 @@
 #   the build with E3514, which names the package, the function and the line
 #   to add, and nothing is built.
 # - `allowed`: the same rewrite after `meta.allow_rewrite(package: "greet")`
-#   runs the new body; the dependency's own file is unchanged.
+#   runs the new body; the dependency's own file is unchanged. The plan's
+#   generated row names the authority (`Meta.Rewrite`) and the consent
+#   (`greet`) the build froze when `build` returned, and the module's check
+#   node takes both as inputs (#3526 c4).
 # - `handed`: the root allows `greet` and hands its value to greet's
 #   `install`, which rewrites greet's `hello` by its bare name; the root's own
 #   `hello` keeps its body.
@@ -25,6 +28,13 @@ file: greet/greet.jet ~ "\"hello from greet\"" # the dependency's own source is 
 step: {work}/allowed/.jet/build/app
 exit: 0
 stdout: = "rewritten by the root\n"
+step: jet inspect graph allowed/main.jet --json
+exit: 0
+json: stdout doc $.build.generated[0].authority = "Meta.Rewrite"
+json: stdout doc $.build.generated[0].consent = "greet"
+step: jet inspect explain-build allowed/main.jet --json
+exit: 0
+stdout: ~ "\"authority\",\"consent\"" # the rewritten function's check node takes the authority and the consent as inputs
 step: jet build handed/main.jet
 exit: 0
 step: {work}/handed/.jet/build/app

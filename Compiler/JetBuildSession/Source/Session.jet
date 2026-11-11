@@ -61,6 +61,15 @@ BuildSessionGeneratedModule: struct {
     // The function that made the module through a `Compiler` value and where
     // ("`f` at file:line"), which a report from the module names.
     producer: String?{None}
+    // What a `Compiler` value made the module under: the `Meta` effect its
+    // call performs (`Meta.Generate` for `meta.add`, `Meta.Rewrite` for
+    // `meta.rewrite_body`) and, for a dependency's function, the package the
+    // root's `meta.allow_rewrite` consent named. Both are fixed when `build`
+    // returns, since every later call on the session is refused. Provenance
+    // reports both, and the module's check node identity digests both
+    // (JetDriver BuildQueries.jet).
+    authority: String?{None}
+    consent: String?{None}
 }
 
 BuildSessionContribution: struct {
@@ -440,7 +449,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.add`'s scope must be a string")
         source: generated_source ?? return build_session_fail(state, "`meta.add` requires a `#code` item block")
         path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2)})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val("Meta.Generate")})
         if added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
@@ -503,7 +512,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         }
         path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
         name: if own -> "{function} body" else -> "{function} body of {package_name}"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Rewrite"), consent: if own -> None else -> Val(package_name)})
         if own && added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
