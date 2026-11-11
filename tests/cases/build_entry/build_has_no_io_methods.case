@@ -1,0 +1,17 @@
+# #4276 c67: compile-time IO is the ordinary `net.fetch`, `find` and `embed_file` calls under the
+# build's effect row; `Build` keeps only plan methods. The retired `b.fetch`, `b.find` and `b.embed`
+# are each refused as unknown `Build` methods, all in one run. The lock rows for ordinary reads stay
+# proved by build_records_each_embedded_file_in_the_lock and
+# build_context_find_and_embed_are_locked_tier_one_inputs.
+fixture: fixtures/build_has_no_io_methods
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build
+exit: 1
+stderr: ~ "`Build` has no method `fetch`" # the retired fetch method
+stderr: ~ "build.jet:4:" # at the b.fetch line
+stderr: ~ "`Build` has no method `find`" # the retired find method
+stderr: ~ "build.jet:5:" # at the b.find line
+stderr: ~ "`Build` has no method `embed`" # the retired embed method
+stderr: ~ "build.jet:6:" # at the b.embed line
+stderr: ~ "3 problems found" # every refusal in one run

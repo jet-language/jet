@@ -1,0 +1,9 @@
+// Compile-time IO is ordinary functions; `Build` keeps only the plan. Each
+// retired IO method is refused, and every one is reported in the same run.
+build: fn(b: Build) {
+    _: b.fetch("https://example.com/data.txt", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    _: b.find("assets/*.txt")
+    _: b.embed("data.txt")
+    app: b.add_executable("app", ["main.jet"], [])
+    b.default(app)
+}
