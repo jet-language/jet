@@ -44,8 +44,7 @@ Evidence: struct {
 run: fn() {
     args: process.args()
     if args.len() < 4 || args[0] != "--report-dir" || args[2] != "--" {
-        term.eprint("usage: jet Tools/ci/CiEvidence.jet --report-dir DIR -- COMMAND [ARG ...]")
-        process.exit(64)
+        process.fail(64, "usage: jet Tools/ci/CiEvidence.jet --report-dir DIR -- COMMAND [ARG ...]")
     }
     process.exit(gate(repo_root(), args[1], args[3..<args.len()]))
 }

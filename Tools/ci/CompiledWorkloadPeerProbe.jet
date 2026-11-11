@@ -32,8 +32,7 @@ run: fn() {
         signal_mode()
     } else if mode == "result" {
         term.print("stdout-exact")
-        term.eprint("stderr-exact")
-        process.exit(23)
+        process.fail(23, "stderr-exact")
     } else {
         process.exit(91)
     }
@@ -41,11 +40,7 @@ run: fn() {
 
 // The working directory is writable; the file outside the root is not.
 write_mode: fn() -[Env, Exec, FS, IO]> {
-    files.write("inside", "inside\n") ?? {
-        term.eprint("inside write failed: {err}")
-        process.exit(1)
-        return
-    }
+    files.write("inside", "inside\n") ?? process.fail(1, "inside write failed: {err}")
     outside: process.env_get("PEER_OUTSIDE") ?? ""
     if files.write(outside, "outside\n") == {
         .Ok(_) -> term.print("outside=allowed")
@@ -78,13 +73,8 @@ external_reachable: fn() -[Net, Time.Wait]> Bool Never! {
 
 // Leaves a detached `delayed` child behind; the launcher must end it.
 descendant_mode: fn() -[Env, Exec, IO]> {
-    if process.cmd([String]{sys.executable(), "delayed"}).detached().spawn() == {
-        .Ok(_) -> term.print("spawned")
-        .Err(failure) -> {
-            term.eprint("descendant spawn failed: {failure}")
-            process.exit(1)
-        }
-    }
+    process.cmd([String]{sys.executable(), "delayed"}).detached().spawn() ?? process.fail(1, "descendant spawn failed: {err}")
+    term.print("spawned")
     process.exit(0)
 }
 

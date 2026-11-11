@@ -130,10 +130,7 @@ shard_counts: fn(args: [String]) -> (index: Int, count: Int) ShardError! {
     Ok((index: shard_index, count: shard_count))
 }
 
-fail: fn(error: ShardError) {
-    term.eprint(error.message)
-    process.exit(error.code)
-}
+fail: fn(error: ShardError) { process.fail(error.code, error.message) }
 
 run: fn() {
     args: process.args()
@@ -141,11 +138,7 @@ run: fn() {
         fail(err)
         return
     }
-    input: term.read_all_input() ?? {
-        term.eprint("weighted-shards: cannot read stdin: {err}")
-        process.exit(1)
-        return
-    }
+    input: term.read_all_input() ?? process.fail(1, "weighted-shards: cannot read stdin: {err}")
     rows: parse_rows(input) ?? {
         fail(err)
         return

@@ -113,16 +113,9 @@ shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
 }
 
 run: fn() {
-    if shard_plan(process.args()) == {
-        .Ok(plan) -> {
-            term.eprint(plan.summary)
-            loop suite in plan.selected -> print(suite)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(error.code)
-        }
-    }
+    plan: shard_plan(process.args()) ?? process.fail(err.code, err.message)
+    term.eprint(plan.summary)
+    loop suite in plan.selected -> print(suite)
 }
 
 plan_text: fn(args: [String]) -> String Never! {

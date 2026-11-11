@@ -121,11 +121,7 @@ Contract: struct {
 }
 
 run: fn() {
-    root: repo_root() ?? {
-        term.eprint("compiled workload gate: {err.message}")
-        process.exit(1)
-        return
-    }
+    root: repo_root() ?? process.fail(1, "compiled workload gate: {err.message}")
     process.exit(main(root, process.args()))
 }
 

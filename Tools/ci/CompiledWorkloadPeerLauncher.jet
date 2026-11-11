@@ -32,7 +32,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -89,8 +88,7 @@ run: fn() {
 }
 
 fail: fn(reason: String) -[IO, Exec, Time.Wait]> Never {
-    term.eprint("{LAUNCHER_NAME}: {reason}")
-    process.exit(EXIT_UNSUPPORTED)
+    process.fail(EXIT_UNSUPPORTED, "{LAUNCHER_NAME}: {reason}")
 }
 
 // ---- Invocation ----
