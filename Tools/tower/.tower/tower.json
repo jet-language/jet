@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99225,
+    "rev": 99232,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34160,8 +34160,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-11T05:11:40.269Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-11T10:50:17.291Z",
+      "updatedBy": "owner",
       "goals": [
         "G6"
       ],
@@ -57173,6 +57173,60 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T10:38:17.562Z"
+        },
+        {
+          "n": 54,
+          "text": "PortBars' JavaScript tokenizer lexes regex literals, so a backtick inside a regex no longer opens a template string. run-cold-context.mjs:239 inverts code and strings for the rest of the file and undercounts the original (2311 tokens for 1288 lines). Every JS original is remeasured after the fix, and a #Test pins the case. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:10.217Z"
+        },
+        {
+          "n": 55,
+          "text": "Core reads a POSIX shell environment file as `.` would source it, into a name-to-value map: assignment-only commands, export and readonly, +=, quoting, ~, $N, and ${NAME[:]-=+?word}. Today orchestrator/Roots.jet hand-writes about 330 lines of this. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:11.506Z"
+        },
+        {
+          "n": 56,
+          "text": "core.files gains lexical path normalize, join and resolve with the semantics of node's path.normalize, path.join and path.resolve: . and .. collapse, and a trailing slash is kept. Today files.join neither normalizes nor keeps the left side when the right side is absolute, and roots-mjs and run-cold-context hand-write node_normal, node_join and node_resolve. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:12.716Z"
+        },
+        {
+          "n": 57,
+          "text": "Core has an environment read where empty means unset, and XDG base directories (cache, data and config homes honoring XDG_*_HOME, with the $HOME/.cache, .local/share and .config fallbacks). roots-sh, roots-mjs and run-cold-context each hand-write these. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:14.039Z"
+        },
+        {
+          "n": 58,
+          "text": "Core has a Latin-1 bytes-to-String decode, a clamped list slice (out-of-range bounds clamp like JS subarray or a Python slice), and a leading-integer parse with parseInt semantics (leading whitespace, a sign and digits, None when there are no digits). runtime-c-census hand-writes latin1, part, js_space, trimmed_end and parse_int in about 60 lines. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:15.424Z"
+        },
+        {
+          "n": 59,
+          "text": "core.encoding.json has typed Dyn path getters: a string, integer, list or string list read at a path such as \"a/b/0\", with the path in the error. run-cold-context hand-writes str, integer, items and strings in about 100 lines, and this pairs with c53's error path. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T10:50:16.829Z"
         }
       ],
       "refs": [],
@@ -57185,12 +57239,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T10:38:17.562Z",
+      "updated": "2026-11-11T10:50:16.829Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 53
+      "criteriaLastN": 59
     },
     {
       "id": "c022g7qw",
@@ -198657,6 +198711,17 @@
       "status": "open",
       "answer": "",
       "created": "2026-11-11T10:35:32.768Z"
+    },
+    {
+      "id": "qdir9eck",
+      "cardId": "c0tsbf3w",
+      "decisionId": "D-COMPUTED-ALIAS1",
+      "by": "owner",
+      "kind": "question",
+      "text": "i dont really understand what this question is asking and why it is relevant in context. rewrite in plain english",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-11T10:50:17.291Z"
     }
   ],
   "ideas": [
@@ -199513,6 +199578,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T10:50:17.291Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qdir9eck",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T10:50:16.829Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#59 core.encoding.json has typed Dyn path getters: a string, int"
+    },
+    {
+      "at": "2026-11-11T10:50:15.424Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#58 Core has a Latin-1 bytes-to-String decode, a clamped list sl"
+    },
+    {
+      "at": "2026-11-11T10:50:14.039Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#57 Core has an environment read where empty means unset, and XD"
+    },
+    {
+      "at": "2026-11-11T10:50:12.716Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#56 core.files gains lexical path normalize, join and resolve wi"
+    },
+    {
+      "at": "2026-11-11T10:50:11.507Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#55 Core reads a POSIX shell environment file as `.` would sourc"
+    },
+    {
+      "at": "2026-11-11T10:50:10.217Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#54 PortBars' JavaScript tokenizer lexes regex literals, so a ba"
+    },
     {
       "at": "2026-11-11T10:49:04.484Z",
       "by": "Main",
