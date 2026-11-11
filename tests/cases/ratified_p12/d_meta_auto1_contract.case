@@ -1,0 +1,53 @@
+# Structural auto-derive (#4276 c6, S55): the six structural traits (Printable, Debug,
+# Equatable, Comparable, Encode, Decode) derive with no marker when the type
+# qualifies, through nominal recursion too. A handwritten implementation wins
+# over the package default, a positive marker and a refusal. `!` refuses one
+# trait at a type, and the package refuses silent generation through the named
+# `auto_derive` lint, where an explicit marker still opts a type in; the retired
+# `policy.auto_derive` boolean is refused. A nonstructural capability
+# (`Display`) is never generated.
+fixture: d_meta_auto1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_meta_auto1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_meta_auto1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_meta_auto1_contract.stdout.expected
+stderr: empty
+step signed: jet check signed/main.jet
+exit: 1
+stderr: ~ "`Mixed` doesn't support `==`" # `#!Equatable` refuses the generated equality
+stderr: ~ "--> main.jet:16:11" # a == b
+stderr: ~ "`<` can't compare or combine" # `#!Comparable` refuses the generated order
+stderr: ~ "jet-lang.dev/e/E0109" # the operator-capability code
+stderr: ~ "--> main.jet:20:11" # c < d
+stderr: !~ "main.jet:19:" # Unordered keeps its generated equality
+stderr: ~ "2 problems found" # exactly the two refusals
+step lint: jet check lint/main.jet
+exit: 1
+stderr: ~ "`Plain` doesn't support `==`" # deny: [auto_derive] refuses the silent equality
+stderr: ~ "--> main.jet:19:11" # c == d
+stderr: ~ "`<` can't compare or combine" # and the silent order
+stderr: ~ "jet-lang.dev/e/E0109" # the operator-capability code
+stderr: ~ "--> main.jet:20:11" # c < d
+stderr: !~ "main.jet:15:" # #Equatable still opts Marked in
+stderr: !~ "main.jet:16:" # #Comparable still opts Marked in
+stderr: ~ "2 problems found" # exactly the two silent derives
+step boolean: jet check boolean/main.jet
+exit: 1
+stderr: ~ "`policy.auto_derive` is not a field" # the retired boolean has no meaning
+stderr: ~ "jet-lang.dev/e/E1215" # the unknown-field code
+step optin: jet check optin/main.jet
+exit: 1
+stderr: ~ "`Point` has no method `display`" # Display is never generated
+stderr: ~ "--> main.jet:9:29" # the call to the missing method
+stderr: ~ "jet-lang.dev/e/E0102" # the missing-member code

@@ -44,6 +44,7 @@ use {
         core_input_method_modules,
         core_module_export,
         core_module_has_member,
+        lint_auto_derive_name,
         owned_trait,
         core_module_has_type,
         diagnostic_with_source_path,
@@ -2465,6 +2466,30 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
     if bindings.len() == 0 -> return
     loop declaration in program.imports -> bindings.push(declaration.copy())
     program.imports = bindings
+}
+
+// `policy: { lints: { deny: [auto_derive] } }` turns the package default off
+// for every struct and enum its own files declare: only a
+// signed marker (`#Debug`) or a handwritten implementation then supplies a
+// structural trait. A dependency keeps its own package's default.
+jet_driver_apply_auto_derive_policy: fn(program: &Program, unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) {
+    package_index: jet_driver_find_package_by_root(packages, unit.root_index) ?? return
+    if !packages[package_index].policy_lints_deny.contains(lint_auto_derive_name()) -> return
+    loop index in 0..<program.items.len() {
+        if program.items[index] == {
+            .Struct(definition) -> {
+                updated := definition
+                updated.auto_derive_default = false
+                program.items[index] = Item.Struct{value: updated}
+            }
+            .Enum(definition) -> {
+                updated := definition
+                updated.auto_derive_default = false
+                program.items[index] = Item.Enum{value: updated}
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
 }
 
 // The top-level names one package file contributes to its
@@ -4913,6 +4938,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         policy_ok: if importer_core || jet_driver_has_errors(parse_result.diagnostics) -> true else -> jet_driver_load_policy(program, package_policy, unit.path, diagnostics)
         if !policy_ok -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         jet_driver_bind_dependency_imports(program, unit, catalog.packages)
+        jet_driver_apply_auto_derive_policy(program, unit, catalog.packages)
         module_identity: jet_driver_unit_module_identity(unit)
         if jet_driver_has_errors(parse_result.diagnostics) {
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))

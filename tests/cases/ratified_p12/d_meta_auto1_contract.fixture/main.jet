@@ -1,0 +1,76 @@
+// D-META-AUTO1: every structurally derivable capability is generated when the
+// type qualifies; nothing is written for it.
+use json: core.encoding.json
+
+// All six structural traits, with no marker: Printable, Debug, Equatable,
+// Comparable, Encode and Decode.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+// Nominal recursion: a type that holds itself still qualifies.
+Tree: enum {
+    Leaf
+    Node(value: Int, kids: [Tree])
+}
+
+// A hand-written implementation wins over the package default...
+Celsius: struct {
+    degrees: Int
+}
+
+// Readings within five degrees count as equal.
+impl Celsius.Equatable {
+    equal: fn(self, rhs: Celsius) -> Bool {
+        gap: self.degrees - rhs.degrees
+        gap * gap <= 25
+    }
+}
+
+// ...and over a positive marker.
+#Debug
+Token: struct {
+    key: String
+}
+
+impl Token.Debug {
+    debug: fn(self) -> String {
+        "Token(hidden)"
+    }
+}
+
+// ...and over a refusal.
+#!Debug
+Sealed: struct {
+    key: String
+}
+
+impl Sealed.Debug {
+    debug: fn(self) -> String {
+        "Sealed(hidden)"
+    }
+}
+
+run: fn() {
+    a: Point{x: 1, y: 2}
+    b: Point{x: 1, y: 3}
+    c: Point{x: 1, y: 2}
+    print("printable {a}")
+    print("debug {a:Debug}")
+    print("equatable {a == c} {a == b}")
+    print("comparable {a < b} {b < a}")
+    wire: json.to_string(a) ?? panic("encode")
+    print("encode {wire}")
+    back: json.decode<Point>(wire) ?? panic("decode")
+    print("decode {back.x} {back.y} {back == a}")
+    tree: Tree.Node{value: 1, kids: [Tree.Leaf, Tree.Node{value: 2, kids: []}]}
+    same: Tree.Node{value: 1, kids: [Tree.Leaf, Tree.Node{value: 2, kids: []}]}
+    leaf: Tree.Leaf
+    print("recursive {tree == same} {tree == leaf}")
+    warm: Celsius{degrees: 21}
+    warmer: Celsius{degrees: 25}
+    print("handwritten equal {warm == warmer}")
+    print("handwritten debug {Token{key: "k"}:Debug}")
+    print("refused debug {Sealed{key: "k"}:Debug}")
+}

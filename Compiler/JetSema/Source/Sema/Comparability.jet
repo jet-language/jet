@@ -274,10 +274,34 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
 // field is; the query's visited set makes the walk coinductive and linear.
 sema_comparability_named_fields: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String, query: &SemaComparabilityQuery) -> Bool Never! {
     definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
+    if !sema_comparability_ordering_selected(program, module_identity, name) -> return false
     key := sema_comparability_definition_key(definition)
     if query.visited.get(key) != None -> return true
     query.visited[key] = true
     sema_comparability_definition_incomparable_field(environment, program, definition, query) == None
+}
+
+// A declared struct or enum orders structurally only while it selects
+// `Comparable`: `#!Comparable`, or a package that denies
+// `auto_derive` without a `#Comparable` marker, refuses it, and a handwritten
+// implementation still wins.
+sema_comparability_ordering_selected: fn(program: SemaProgramTables, module_identity: String, name: String) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return true
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return true
+        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return true
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(item) {
+            declared: graph.modules[row.module_index].declared_trait_impls
+            if item == {
+                .Struct(value) -> return sema_type_metadata_trait_requested(value.type_markers, "Comparable", value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+                .Enum(value) -> return sema_type_metadata_trait_requested(value.type_markers, "Comparable", value.auto_derive_default) || sema_type_metadata_has_trait_block(value.trait_impls, "Comparable") || sema_type_metadata_has_explicit_impl(declared, value.name, "Comparable")
+                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return true
+            }
+        }
+    }
+    true
 }
 
 // Distinct and alias declarations wrap a comparable base only
