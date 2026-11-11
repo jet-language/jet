@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99647,
+    "rev": 99648,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71321,11 +71321,11 @@
         {
           "n": 64,
           "text": "A function with an empty effect row cannot write module state through a parameter, an alias, a separately checked lambda or a trait dispatch: the write is refused or charged to the caller. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R3, high; c48 was closed on the direct-name path only): Scopes.jet:2225-2230 records a module write only when the syntactic root is a Constant, and c962b0554e disclosed the parameter, alias, lambda and trait limits. Proof: probes/alias.jet (fn(c: Shared<Count>) -[]> Int { c.value += 1; ... } called with module HITS) is refused or accounted, plus one case per path at O0/O1/O2.",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "ccf64a54ef (G8Scope-25) with fixture fix 67ee98aa9c (G8Scope-25f): a pure fn cannot write held cells (E3401); the case passes on batch compiler b3.",
-          "at": "2026-11-11T19:40:29.228Z"
+          "evidence": "",
+          "at": "2026-11-11T23:39:29.054Z"
         },
         {
           "n": 65,
@@ -71399,7 +71399,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-11T21:49:48.758Z",
+      "updated": "2026-11-11T23:39:29.054Z",
       "updatedBy": "Main",
       "criteriaLastN": 71
     },
@@ -198777,6 +198777,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T23:39:29.054Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c09kjhit",
+      "note": "#64: Regressed on seed-b7 (426b24e3e4), found by the audit of merged deferred credits. tests/cases/effects/pure_fn_cannot_write_held_state_on_every_tier.case fails with \"stream predicate count failed\": jet check held.jet reports 3 of 5 E3401s (alias, leased, hidden), and bump and relay are no longer reported. The UI snapshot pure_fn_writing_through_parameter_is_e3401 still passes. Routed to G8Scope-3."
+    },
     {
       "at": "2026-11-11T23:31:42.366Z",
       "by": "Main",
