@@ -491,7 +491,7 @@ signal_hub_dispatch: fn(hub: I64) {
     }
 }
 
-// core.process.__signal_open(cancels_root): a subscription holding no signal
+// jet.runtime.process.signal_open(cancels_root): a subscription holding no signal
 // yet, with its own unbounded channel; its id. An on_signal subscription
 // (cancels_root) looks up the root task control here, on the subscriber.
 #Export(c) jet_process_signal_open_raw: fn(cancels_root: I64) -> I64 {
@@ -566,7 +566,7 @@ signal_hub_dispatch: fn(hub: I64) {
     channel
 }
 
-// core.process.__signal_close(id): the subscription holds nothing; each signal
+// jet.runtime.process.signal_close(id): the subscription holds nothing; each signal
 // it was the last holder of gets its saved action back. Its endpoints drop,
 // so its receivers take what is queued and then end.
 #Export(c) jet_process_signal_close_raw: fn(id: I64) {
@@ -612,7 +612,7 @@ signal_hub_dispatch: fn(hub: I64) {
     jet_rt_free(sub, I64{40}, I64{8})
 }
 
-// core.process.__signal_disposition(number, ignore): SIG_IGN or SIG_DFL for
+// jet.runtime.process.signal_disposition(number, ignore): SIG_IGN or SIG_DFL for
 // a signal no subscription holds; EBUSY while one does, whose last close
 // restores the action saved at its subscribe.
 #Export(c) jet_process_signal_disposition_raw: fn(number: I64, ignore: I64, available: I64, value: I64, errno: I64) {
