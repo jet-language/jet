@@ -7,7 +7,7 @@ Perm: enum {
 
 // A `#Specified` enum whose values are single bits crosses as those bits,
 // the way C flags do.
-#Specified
+#[Specified, Layout(U8)]
 Mode: enum {
     Owner = 1
     Group = 8
@@ -17,6 +17,9 @@ Mode: enum {
 Holder: struct {
     perms: Set<Perm>
 }
+
+// The Set field is one word, so the struct holding it is 8 bytes.
+HOLDER_LAYOUT: comptime { Holder.reflect().layout }
 
 run: fn() {
     perms: Set.from([Perm.Read, Perm.Write])
@@ -31,5 +34,5 @@ run: fn() {
     print(modes.bits())
     both: Set<Mode>.from_bits(72) ?? Set<Mode>.new()
     print(both.has(.Group) && both.has(.Other) && !both.has(.Owner))
-    print(Holder.reflect().layout.size)
+    print(HOLDER_LAYOUT.size)
 }

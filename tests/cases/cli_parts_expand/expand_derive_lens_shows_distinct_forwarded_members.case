@@ -3,14 +3,14 @@
 step: jet inspect expand --facts derive {root}/Examples/Types/DistinctForwarding.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "Score: Comparable, Printable, Encode, Decode"
-stdout: ~ "impl Score.Equatable {"
-stdout: ~ "self.raw() == rhs.raw()"
-stdout: ~ "impl Score.Comparable {"
-stdout: ~ "self.raw() < rhs.raw()"
-stdout: ~ "// Printable, Encode, Decode: forwarded natively to `Int`; no generated members"
+stdout: ~ "Score: Comparable, Printable, Encode, Decode" # the distinct's derive row
+stdout: ~ "impl Score.Equatable {" # the generated equality impl as source
+stdout: ~ "self.raw() == rhs.raw()" # equality forwards to the base
+stdout: ~ "impl Score.Comparable {" # the generated order impl as source
+stdout: ~ "self.raw() < rhs.raw()" # order forwards to the base
+stdout: ~ "// Printable, Encode, Decode: forwarded natively to `Int`; no generated members" # the native forwards are named, not invented
 step: jet inspect expand --facts derive --json {root}/Examples/Types/DistinctForwarding.jet
 env: NO_COLOR=1
 exit: 0
-json: stdout doc $ valid
-stdout: ~ "\"forwarded_source\":\"impl Score.Equatable {"
+json: stdout doc $ : object # the JSON output is one object
+stdout: ~ "\"forwarded_source\":\"impl Score.Equatable {" # the JSON row carries the same source
