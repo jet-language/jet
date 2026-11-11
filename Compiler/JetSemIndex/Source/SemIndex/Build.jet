@@ -1645,6 +1645,10 @@ semindex_witness: fn(function: String, effect_name: String, summaries: [SemSumma
         if summary.maximal_span == .Val(span) -> spans.push(span)
         return Val(SemWitness{path: [String]{function}, spans: spans})
     }
+    // A panic in the function's own body (`panic`, a checked index, a
+    // `require` stop) is the checker's `__jet_panic__` edge, not a call into
+    // an indexed callee: the function itself reaches Panic.
+    if effect_name == "Panic" && summary.edges.contains("__jet_panic__") -> return Val(SemWitness{path: [String]{function}, spans: [Span]{}})
     loop callee in summary.edges {
         callee_summary: semindex_summary(summaries, callee) ?? next
         if !callee_summary.solved.contains(effect_name) -> next
