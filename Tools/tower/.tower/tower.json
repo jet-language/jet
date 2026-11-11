@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99307,
+    "rev": 99310,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60090,6 +60090,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "OWNER ORDER 2026-11-11: lay the architectural groundwork now and hold to it, but do no small optimizations yet; they'd be wiped out by the major language work still coming. Allowed now: c1 (the throughput cell), c4 (one guard walk), c5 (the train speed gate and fixing regressions at their root, which isn't a small optimization: a regression is a defect), and the architectural steps c6 (a streaming parallel pipeline with no barriers, wait-free queues, per-thread arenas), c7 (data-oriented core: u32 ids, columnar AST/types/IR, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline, direct image writer). Each is a structural change that later language work builds on, not a hot-loop tweak. Held until the language is mostly stable: c9 (codegen tuning to the asm ceiling, the SIMD lexer) and any patch whose gain comes from tuning one function, loop or constant. Each speed SUB states which step it serves, and Lander2 refuses a G11 speed SUB that names no step from c5-c8."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "Owner 2026-11-11: an executable stepped plan to 30M lines/s, now c5-c9. Arithmetic: 30M lines/s on about 1M lines is 33 ms wall. At 32 threads that's about 1.07 CPU-s in total, about 1 µs of CPU per line. Today (seed-t22) it's 749 CPU-s for 925K lines, about 810 µs per line at parallelism 5.4, so the target needs about 800x less CPU per line and about 6x more parallelism. Steps, each with a numeric gate measured by the c1 cell: 0 stop the bleeding (55K lines/s), 1 parallelism to 24/32 (400K), 2 data-oriented core (5M), 3 fused per-function pipeline and direct image writer (20M), 4 codegen to the hand-written ceiling (30M). G11Speed owns all of it and runs continuously. No step's patch is accepted without its before and after numbers from the cell."
         },
         {
@@ -60284,21 +60289,21 @@
         },
         {
           "n": 8,
-          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. The lexer is SIMD at 1 GB/s or more against an asm-parity reference. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executable image writer replaces the object-then-link path. Gate: at most 1.5 µs of CPU per line and at least 20M lines/s. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:18:45.839Z"
+          "at": "2026-11-11T12:23:19.753Z"
         },
         {
           "n": 9,
-          "text": "Plan step 4, the compiler compiled well: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) closes the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/perf/asm-parity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
+          "text": "Plan step 4, the compiler compiled well. Starts only once the language is mostly stable (the major syntax, semantics and Core churn is done), so tuning isn't wiped out by later cutovers: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) and a SIMD lexer at 1 GB/s or more close the gap to hand-written machine code on the compiler's five hottest loops, each with an asm-parity ceiling cell (Tools/perf/asm-parity). Every gain is general, applies to all generated code (owner, 2026-10-23), and is proven on a second program. Gate: at most 1 µs of CPU per line and at least 30M lines/s end to end, which is c3. Measured by the c1 cell: cold and uncached, `jet build` of Compiler plus Core on the reference machine (32 hardware threads), n=3 median, recording wall, user+sys CPU-s, CPU-ns per line, average parallelism (CPU-s / wall) and peak RSS. Output is identical to the previous stage's build (chain fixed point plus goldens).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T12:18:47.404Z"
+          "at": "2026-11-11T12:23:22.092Z"
         }
       ],
       "refs": [],
@@ -60308,7 +60313,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-11T12:18:48.967Z",
+      "updated": "2026-11-11T12:23:24.355Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -197754,6 +197759,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T12:23:24.355Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T12:23:22.092Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#9: Owner 2026-11-11: small optimizations wait until the language is mostly stable; was: Plan step 4, the compiler compiled well: Jet's own release code generation (register allocation, inlining, bounds-check hoisting, SIMD selection) closes the gap to hand-written machine code on the com"
+    },
+    {
+      "at": "2026-11-11T12:23:19.753Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c031o59x",
+      "note": "#8: Owner 2026-11-11: no small optimizations during language churn; the SIMD lexer moves to step 4; was: Plan step 3, fused per-function pipeline: each function goes parse -> check -> lower -> select -> encode while its data is still in cache, with no whole-program intermediate copy, and a direct executa"
+    },
     {
       "at": "2026-11-11T12:21:22.027Z",
       "by": "Main",
