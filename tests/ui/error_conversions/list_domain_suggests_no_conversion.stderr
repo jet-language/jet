@@ -1,0 +1,8 @@
+Error [jet.ErrorNotPropagatable]: `label` fails with `Err`, which can't propagate into `[FieldError]` here
+  --> tests/ui/error_conversions/list_domain_suggests_no_conversion.jet:12:5
+    |
+ 12 |     label(code)
+    |     ^^^^^
+ Why: `label` is defined at `list_domain_suggests_no_conversion.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit [FieldError]!` contract has no route from `Err` to `[FieldError]`
+ Fix: Declare the caller with `Err` as its failure domain; otherwise handle `label` locally with `??`
+More: jet-lang.dev/e/E2404

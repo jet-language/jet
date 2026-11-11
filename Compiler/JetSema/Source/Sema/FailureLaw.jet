@@ -50,8 +50,9 @@ use {
 // The standard library's own error family, exactly the
 // `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
 // Rust reference's `is_core_error_family_type`). Adds the
-// payload-free `CryptoError` and `FileCryptoError`. `TaskFailure`,
-// `[FieldError]` and component types stay outside on purpose.
+// payload-free `CryptoError` and `FileCryptoError`. `TaskFailure` and
+// component types stay outside on purpose. The typed decode's `[FieldError]`
+// list is the one member that is not a named type (sema_core_error_family_source).
 JET_CORE_ERROR_FAMILY: comptime { [String]{
     "AppError", "ArchiveError", "Base32Error", "Base64Error", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
     "EncodingError", "EnvError", "FileCryptoError", "HTTPError", "HexError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
@@ -83,6 +84,23 @@ sema_core_error_family_member: fn(name: String) -> Bool Never! {
         if member == leaf -> return true
     }
     false
+}
+
+// Whether `source` reaches the default `Err` by the standard library's own
+// conversion: a family member, or the `[FieldError]` list every Core typed
+// decode fails with, so `run: fn()` passes a failed decode up as it passes a
+// failed read.
+sema_core_error_family_source: fn(source: Type) -> Bool Never! {
+    if source == .List(.Named(name)) -> return sema_error_conversion_leaf(name) == "FieldError"
+    sema_core_error_family_member(type_name(source))
+}
+
+// The source a Prelude conversion parses under: the member's leaf, or for the
+// `[FieldError]` list its element's, since a written conversion source is one
+// named type. The routine binds the exercised source type either way.
+sema_prelude_conversion_spelling: fn(source: Type) -> String Never! {
+    if source == .List(element) -> return sema_error_conversion_leaf(type_name(element))
+    sema_error_conversion_leaf(type_name(source))
 }
 
 sema_core_error_type: fn(name: String) -> Bool Never! {
@@ -288,7 +306,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, local_types: [String
 // is declared before every use in its body, so span-ordered name resolution
 // finds it.
 sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> Func? {
-    leaf: sema_error_conversion_leaf(type_name(source))
+    leaf: sema_prelude_conversion_spelling(source)
     parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 {
         loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
@@ -314,7 +332,7 @@ sema_module_no_prelude: fn(environment: SemaScopeEnvironment, program: SemaProgr
 // `sema_inject_prelude_error_conversions` checks after the module's bodies.
 sema_prelude_error_conversion_key: fn(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
-    if !sema_core_error_family_member(type_name(error)) || sema_module_no_prelude(environment, program) -> return None
+    if !sema_core_error_family_source(error) || sema_module_no_prelude(environment, program) -> return None
     Val(symbol_id(SymbolKind.Function, environment.module_identity, "", sema_failure_conversion_function_name(error, target)).key)
 }
 
@@ -352,7 +370,7 @@ sema_prelude_conversion_demands_enter: fn(state: Shared<SemaPreludeDemandWalk>, 
 sema_prelude_conversion_demand_add: fn(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
     permit: state.guard_edit()
     expected: symbol_id(SymbolKind.Function, permit.value.module_identity, "", sema_failure_conversion_function_name(source, target)).key
-    if key != expected || target != (Type.Named{name: "Err"}) || !sema_core_error_family_member(type_name(source)) -> return
+    if key != expected || target != (Type.Named{name: "Err"}) || !sema_core_error_family_source(source) -> return
     loop demand in permit.value.demands {
         if demand.key == key -> return
     }

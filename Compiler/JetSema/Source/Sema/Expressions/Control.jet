@@ -899,20 +899,31 @@ sema_failure_domain_mismatch: fn(expr: Expr?, span: Span, source: Type, target: 
     source_name: sema_failure_conversion_leaf(source)
     target_name: sema_failure_conversion_leaf(target)
     caller: context.failure_contract_source
+    // A written conversion names one type on each side, so a list domain
+    // (`[FieldError]`) on either side has no conversion `impl` to suggest.
+    convertible: !sema_failure_list_domain(source) && !sema_failure_list_domain(target)
+    conversion_fix: if convertible -> ", or add `impl {source_name} -> {target_name} {{ … }}`" else -> ""
     diagnostic: sema_error(
         "E2404",
         span,
         "`{callee}` fails with `{source_name}`, which can't propagate into `{target_name}` here",
         "`{callee}` is defined at `{provenance.definition}` with effective failure contract `{provenance.contract}`; the caller's `{caller}` contract has no route from `{source_name}` to `{target_name}`",
-        "Declare the caller with `{source_name}` as its failure domain, or add `impl {source_name} -> {target_name} {{ … }}`; otherwise handle `{callee}` locally with `??`",
+        "Declare the caller with `{source_name}` as its failure domain{conversion_fix}; otherwise handle `{callee}` locally with `??`",
     )
     detailed: diagnostic_with_detail(diagnostic, "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {provenance.definition}\neffective contract: {provenance.contract}\ncaller contract: {caller}")
     // The repair, for review: the caller takes the callee's domain, or a
     // conversion `impl` (its body left to write) routes one into the other.
     repair: context.failure_repair ?? return detailed
     retyped: diagnostic_with_edit_grade(detailed, TextEdit{span: repair.return_span, new_text: "{type_name(repair.success)} {source_name}!"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+    if !convertible -> return retyped
     conversion: "\n\nimpl {source_name} -> {target_name} {{\n    convert: fn(error: {source_name}) -> {target_name} {{\n    }}\n}}"
     diagnostic_with_alternative_edit(retyped, TextEdit{span: Span{start: repair.declaration_end, end: repair.declaration_end}, new_text: conversion})
+}
+
+// Whether a failure domain is a list of errors (the `[FieldError]` of a typed
+// decode), which no written conversion can name.
+sema_failure_list_domain: fn(domain: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(domain) == .List(_) -> true else -> false
 }
 
 sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
@@ -922,8 +933,14 @@ sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnost
 
 sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
     name: type_name(error)
-    if implicit -> return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; `{name}` can reach `Err` only through `impl {name} -> Err`", "handle this call locally with `??`, add `impl {name} -> Err {{ … }}`, or change the return type")
-    sema_error("E2402", span, "`?` can't convert `{name}` into `Err` — no declared conversion exists", "`?` uses the declared conversion rail; `{name}` can reach `Err` only through `impl {name} -> Err`", "add `impl {name} -> Err {{ … }}` before this function, or change the return type")
+    // A written conversion source is one named type, so a list of errors has
+    // no `impl … -> Err` to suggest.
+    listed: sema_failure_list_domain(error)
+    route: if listed -> "a conversion source is one named type, so `{name}` has no `impl … -> Err`" else -> "`{name}` can reach `Err` only through `impl {name} -> Err`"
+    conversion: if listed -> "" else -> ", add `impl {name} -> Err {{ … }}`"
+    if implicit -> return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; {route}", "handle this call locally with `??`{conversion}, or change the return type")
+    fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl {name} -> Err {{ … }}` before this function, or change the return type"
+    sema_error("E2402", span, "`?` can't convert `{name}` into `Err` — no declared conversion exists", "`?` uses the declared conversion rail; {route}", fix)
 }
 
 // The error domain receiving an early return. An open callback adopts the

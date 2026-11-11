@@ -503,8 +503,9 @@ annotated: fs.read("data.txt")?("reading the input for out.txt")
 ```
 
 A function without an explicit error type uses the default `Err`. Core's
-standard error family, including `IOError` and `EncodingError`, converts into
-that default carrier. For an application-owned target, declare one conversion
+standard error family, including `IOError`, `EncodingError` and the
+`[FieldError]` list a typed decode fails with, converts into that default
+carrier. For an application-owned target, declare one conversion
 and name it in the function contract:
 
 ```jet
@@ -2566,8 +2567,12 @@ follows the launch's OS error the way a file operation's does (`NotFound`
 for a missing program, `PermissionDenied` for one that may not be run,
 `Other` for the rest), with operation `.Resolve`, the program as its
 resource and the OS error code. An empty command (`process.cmd([])`) or an
-empty `process.pipeline([])` is `InvalidInput` naming that empty call. A
-program that starts and then exits nonzero, 127 included, is a receipt.
+empty `process.pipeline([])` is `InvalidInput` naming that empty call. A NUL
+byte in a command word, the `cwd` or an environment name or value would cut
+that text short at exec, so the launch refuses it before exec as
+`InvalidInput` (`nul byte found in provided data`, or `invalid environment
+variable name`/`value`). A program that starts and then exits nonzero, 127
+included, is a receipt.
 
 `process.run_all(specs, jobs)` is the bounded worker pool. It runs the specs
 in one task group with at most `jobs` children alive at once and returns the

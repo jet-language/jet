@@ -169,11 +169,14 @@ SEMA_PRELUDE_ERROR_SOURCE: comptime { ```// (ratified 2026-08-17, card #2018): t
 // case carries no secret. The secret-bearing types (`Secret`, `SigningKey`,
 // `X25519SecretKey`, `SharedSecret`) keep their E0915 print ban.
 //
+// `[FieldError]`, the list every Core typed decode fails with, is a member
+// with no declaration here: a written conversion source is one named type, so
+// sema injects its routine (`return Err("{self}")`) under the element's name
+// and binds the list as `self` (FailureLaw.jet sema_core_error_family_source).
+//
 // Deliberately outside the family:
 // * `TaskFailure` — gives cancellation and deadline their own
 //     carrier and report; it is not a library error family member.
-//   * `[FieldError]` — the Core decode surface returns a list, and a conversion
-//     source is one named type.
 //   * component types (`DataErrorKind`, `EncodingCause`, `IOContext`,
 //     `NetErrorDetail`, `NetDNSError`, …) — no Core call fails with one.
 

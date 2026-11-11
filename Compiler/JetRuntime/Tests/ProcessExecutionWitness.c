@@ -422,14 +422,14 @@ int main(int argc, char **argv, char **envp) {
         expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "process.pipeline needs at least one command");
     }
 
-    // 11. NUL byte inside a command word: Other/Resolve.
+    // 11. NUL byte inside a command word: InvalidInput/Resolve.
     {
         Text *words[2] = { txt("/bin/sh"), jet_rt_string_from_static("a\0b", 3) };
         Spec *s = spec_texts(words, 2);
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
-        expect_error(ok, e, KIND_OTHER, OP_RESOLVE, "nul byte found in provided data");
+        expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "nul byte found in provided data");
         jet_rt_handle_drop_process_spec(s);
     }
 

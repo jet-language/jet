@@ -1,0 +1,17 @@
+// A typed decode fails with a `[FieldError]` list, a failure domain no written
+// conversion can name: E2404 suggests the domain or `??`, never an `impl`.
+use json: core.encoding.json
+
+label: fn(code: Int) -> String {
+    if code < 0 -> return Err("negative code")
+    Ok("code {code}")
+}
+
+load: fn(text: String) -> String [FieldError]! {
+    code: json.decode<Int>(text)
+    label(code)
+}
+
+run: fn() {
+    print(load("7") ?? "?")
+}

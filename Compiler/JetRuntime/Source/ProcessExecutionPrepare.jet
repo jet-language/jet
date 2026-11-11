@@ -343,17 +343,19 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         _ := process_execution_invalid(spec, rt_static_text("process command needs at least one word"), err)
         return I64{0}
     }
+    // A NUL byte would end the word or directory at exec, so it is refused
+    // first, as invalid input (Rust's InvalidInput, Python's ValueError).
     at := I64{0}
     loop at < fd_word(cmd, I64{0}) {
         if process_execution_has(fd_word(fd_word(cmd, I64{16}), at * I64{8}), I64{0}) {
-            _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("nul byte found in provided data")), err)
+            _ := process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
             return I64{0}
         }
         at += I64{1}
     }
     cwd: fd_word(spec, PROCESS_SPEC_CWD)
     if (cwd != I64{0} && !process_execution_held_cwd(spec) && process_execution_has(cwd, I64{0})) {
-        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("nul byte found in provided data")), err)
+        _ := process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
         return I64{0}
     }
     if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {

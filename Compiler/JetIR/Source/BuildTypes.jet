@@ -3195,10 +3195,11 @@ ir_union_rewiden: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, sour
 
 // The spelling an error conversion reports for `ty`: a nominal type's
 // declared name (`StoreErr`, `IOError`), never the owner-qualified key
-// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it; any
-// other type's own spelling.
+// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it, and a
+// list of them (`[FieldError]`) by that name; any other type's own spelling.
 ir_error_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
     plain: ir_untag(ty)
+    if plain == .List(element) -> return "[{ir_error_spelling(p, element)}]"
     if plain == .Named(name) {
         if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
         parts: name.split("::").to_list()

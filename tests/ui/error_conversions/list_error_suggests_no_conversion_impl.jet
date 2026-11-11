@@ -1,0 +1,15 @@
+// A conversion source is one named type, so E2402 on a list of errors
+// suggests `??` or another return type, never `impl [Bad] -> Err`.
+#Error
+Bad: struct {
+    why: String
+}
+
+check: fn(x: Int) -> Int [Bad]! {
+    if x < 0 -> return Err([Bad]{Bad{why: "negative"}})
+    Ok(x)
+}
+
+run: fn() {
+    _: check(1)
+}

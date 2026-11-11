@@ -1,0 +1,17 @@
+Error [jet.FailureDomainNotErrorType]: Explicit failure domain `[Bad]` is not an Error type
+  --> tests/ui/error_conversions/list_error_suggests_no_conversion_impl.jet:8:22
+    |
+  8 | check: fn(x: Int) -> Int [Bad]! {
+    |                      ^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `[Bad]` into `Err` — no declared conversion exists
+  --> tests/ui/error_conversions/list_error_suggests_no_conversion_impl.jet:14:8
+    |
+ 14 |     _: check(1)
+    |        ^^^^^
+ Why: Ordinary fallible calls propagate automatically; a conversion source is one named type, so `[Bad]` has no `impl … -> Err`
+ Fix: Handle this call locally with `??`, or change the return type
+More: jet-lang.dev/e/E2402

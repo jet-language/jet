@@ -676,6 +676,24 @@ default_fields: fn(argv: [String]) -> ProcessFields Never! {
     assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
 }
 
+#Test("a NUL byte in a command word, the directory or the environment is refused before exec as invalid input") {
+    nul: String.from_bytes_lossy([U8]{97, 0, 98})
+    specs: [ProcessSpec]{
+        cmd([String]{nul.copy()}),
+        cmd([String]{"true", nul.copy()}),
+        cmd([String]{"true"}).cwd(nul.copy()),
+        cmd([String]{"true"}).env("X", nul.copy()),
+        cmd([String]{"true"}).env(nul.copy(), "x"),
+    }
+    loop spec in specs {
+        refused: if spec.run() == {
+            .Ok(_) -> false
+            .Err(error) -> if error == .InvalidInput(_) -> true else -> false
+        }
+        assert(refused)
+    }
+}
+
 // Process stdout/stderr readers wait on the child execution boundary, not FS.
 __stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
