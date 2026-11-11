@@ -1,9 +1,10 @@
 // `jet.runtime.process` (#6615): the runtime's public signal subscription
-// functions and the program's argv, in Jet types with their declared effect
-// rows. Each member is a runtime binding (Guest.jet
+// functions, the program's argv and its exit, in Jet types with their declared
+// effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (ProcessSignal.jet, HostStartup.jet). A tuple result's items cross in the
-// checked tuple's label-sorted order, which is the export's slot order.
+// (ProcessSignal.jet, HostStartup.jet, HostProcess.jet). A tuple result's
+// items cross in the checked tuple's label-sorted order, which is the
+// export's slot order.
 process: module {
     // A subscription holding no signal yet, with its own channel; its id. An
     // on_signal subscription (`cancels_root`) cancels the root task.
@@ -23,4 +24,9 @@ process: module {
     // only Core reads it (`process.args()` drops the program name), and a
     // user call is E0605.
     #Import(c) priv argv: fn() -[Exec.Args]> [String] = "jet_std_io_args"
+
+    // Ends the process with exactly `code`, after the exit handlers. `priv`:
+    // only Core calls it (`process.exit` maps a program's 101 to 1 first, and
+    // `process.exit_unmapped` is the audited unmapped exit).
+    #Import(c) priv exit: fn(code: Int) -[Exec.Exit]> = "jet_std_process_exit"
 }

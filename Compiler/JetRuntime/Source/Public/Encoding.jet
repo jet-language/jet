@@ -1,7 +1,8 @@
 // `jet.runtime.encoding` (#6615): the runtime's public codec scope functions
-// the encoding modules are built on, in Jet types. Each member is a runtime
-// binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
-// its one body. A member with no row is pure.
+// the encoding modules are built on, in Jet types, and the `priv` text and
+// JSON-coercion audit calls only Core makes. Each member is a runtime binding
+// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its one
+// body. A member with no row is pure.
 encoding: module {
     // Enters the thread's text-cells scope, answering the previous one,
     // which leaving restores.
@@ -12,4 +13,18 @@ encoding: module {
     // which leaving restores.
     #Import(c) etf_strings_enter: fn(mode: Int) -> Int = "jet_rt_codec_etf_strings_enter"
     #Import(c) etf_strings_leave: fn(previous: Int) = "jet_rt_codec_etf_strings_leave"
+
+    // The byte at `index` of `text`, read without a bound, and `bytes` as
+    // text, copied without UTF-8 validation. `priv`: Core's audited
+    // `core.encoding.__string_byte` and `__bytes_into_text` call them after
+    // checking the bound or the encoding.
+    #Import(c) priv string_byte: fn(text: String, index: U64) -> U8 = "jet_raw_string_byte"
+    #Import(c) priv bytes_into_text: fn(bytes: [U8]) -> String = "jet_raw_bytes_into_text"
+
+    // The untyped JSON decoder's coercion audit: the wall clock in ms since
+    // the epoch, and one line on stderr. `priv`: only core.encoding.json calls
+    // them, inside its audited `#Unsafe` regions, which keep this hidden
+    // clock read and stderr write out of `decode`'s effect row.
+    #Import(c) priv coerce_now: fn() -> Int = "jet_raw_json_coerce_now"
+    #Import(c) priv coerce_emit: fn(line: String) = "jet_raw_json_coerce_emit"
 }
