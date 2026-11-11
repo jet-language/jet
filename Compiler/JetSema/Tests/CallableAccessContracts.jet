@@ -1,0 +1,84 @@
+// Production parser + registration graph + checker coverage for function
+// types that mark a parameter's access: a named function, a marked or unmarked
+// lambda, a generic forwarder and a struct-field wrapper all fill a
+// `fn(buf: &[Int])` slot, and a value whose access differs from its slot's is
+// rejected with a registered code.
+use {
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph,
+    ]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, jet_target_machine_hosted]
+}
+
+callable_access_diagnostics: fn(failures: &[String], source: String) -> [Diagnostic]? {
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 {
+        failures.push("fixture does not parse ({parsed.diagnostics[0].what}): {source}")
+        return None
+    }
+    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n") ?? {
+        failures.push("canonical effect source did not parse")
+        return None
+    }
+    facts: SemaBuildFacts{package_name: "callable-access", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "callable-access", module_identity: "callable-access::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "callable-access", "callable-access::main", effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+        failures.push("registration failed {err}: {source}")
+        return None
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? {
+        failures.push("declaration checking failed {err}: {source}")
+        return None
+    }
+    declared := stage.graph.move()
+    stage.graph = None
+    registration := declared.move() ?? {
+        failures.push("the declaration pass lost its registration graph: {source}")
+        return None
+    }
+    checked := sema_finalize_registration_graph(registration, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None) ?? {
+        failures.push("finalization failed {err}: {source}")
+        return None
+    }
+    Val(checked.diagnostics.move())
+}
+
+// The error codes the checker reports for `source`, in report order, against
+// `wanted`.
+callable_access_expect: fn(failures: &[String], name: String, source: String, wanted: [String]) {
+    diagnostics: callable_access_diagnostics(failures, source) ?? return
+    found := [String]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        found.push("{diagnostic.code} {diagnostic.what}")
+    }
+    codes: loop entry in found -> entry.partition(" ").head
+    if codes != wanted -> failures.push("{name}: found [{found.join("; ")}], wanted [{wanted.join(", ")}]")
+}
+
+CALLABLE_ACCESS_DECLS: "push_one: fn(buf: &[Int]) {{\n    buf.push(1)\n}}\nthrough: fn(f: fn(buf: &[Int]), buf: &[Int]) {{\n    f(buf)\n}}\nthrough_generic: fn<T>(f: fn(&[T]), buf: &[T]) {{\n    f(buf)\n}}\nWrapper: struct {{\n    edit: fn(buf: &[Int])\n}}\nread_only: fn(f: fn([Int]), buf: [Int]) {{\n    f(buf)\n}}\n"
+
+#Test("callable_access_contracts") {
+    failures := [String]{}
+    // Every callable category fills a write-marked slot and writes the caller's list.
+    callable_access_expect(failures, "named", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through(push_one, values)\n}}\n", [String]{})
+    callable_access_expect(failures, "marked lambda", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through((buf: &[Int]) -> buf.push(2), values)\n}}\n", [String]{})
+    callable_access_expect(failures, "unmarked lambda inherits the slot's write", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    step: 3\n    values := [Int]{{}}\n    through(buf -> buf.push(step), values)\n}}\n", [String]{})
+    callable_access_expect(failures, "generic", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through_generic(push_one, values)\n}}\n", [String]{})
+    callable_access_expect(failures, "wrapper", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    wrapper: Wrapper{{edit: push_one}}\n    wrapper.edit(values)\n}}\n", [String]{})
+    callable_access_expect(failures, "held value", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    wrapper: Wrapper{{edit: (buf: &[Int]) -> buf.push(4)}}\n    through(wrapper.edit, values)\n}}\n", [String]{})
+    // A value whose access differs from its slot's is rejected.
+    callable_access_expect(failures, "marked lambda in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only((buf: &[Int]) -> buf.push(5), [Int]{{}})\n}}\n", [String]{"E0113"})
+    callable_access_expect(failures, "written function in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only(push_one, [Int]{{}})\n}}\n", [String]{"E0227"})
+    callable_access_expect(failures, "written value in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    wrapper: Wrapper{{edit: push_one}}\n    read_only(wrapper.edit, [Int]{{}})\n}}\n", [String]{"E0227"})
+    if failures.len() > 0 -> panic("CallableAccessContracts collected {failures.len()} failures:\n{failures.join("\n")}")
+    print("callable access contracts: passed")
+}

@@ -503,13 +503,19 @@ rule for two bindings within one function.
 See the executable [lambda interface example](../../Examples/Basics/Functions/LambdaInterface.jet).
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
-parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
-values only when every parameter also has plain read access. Declaration-local
-parameter names are documentation, not function-value identity; explicit
-public labels and parameter zones remain callable obligations. A named function
-with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
-has no function-type spelling that could preserve that requirement; a callback
-that must change a value takes it read-only and returns the updated value. Captures follow M2: shared read for read-only
+parameter has plain read access (D-MEM-PARAM1). A parameter type marks a
+written input `&` or a taken input `&&`, as a declaration does: `fn(&[Int])`
+writes its argument in place and `fn(&&Map)` takes it. A lambda parameter
+marks its access the same way (`(buf: &[Int]) -> buf.push(1)`); an unmarked
+lambda parameter takes the access of the function type it fills, and a marked
+one must match it (E0113). Named `fn`s coerce to function values only where
+the function type marks every parameter as the declaration does (E0227), and a
+function value crosses only into a function type that writes the same
+parameters (E0227). Declaration-local parameter names are documentation, not
+function-value identity; explicit public labels and parameter zones remain
+callable obligations. A call through a write-marked function type lends the
+argument's place, so named, lambda, generic and struct-field calls all write the
+caller's value. Captures follow M2: shared read for read-only
 names, mutable borrow for written names. Escaping closures own captures.
 Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.

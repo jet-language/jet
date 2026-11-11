@@ -549,7 +549,7 @@ sema_call_compute_tape: fn(member: String, alias: String, function: Expr, params
     body.push(Stmt.Expr{expr: sema_call_compute_tape_member(alias, "__ad_exit", [Expr]{}, span)})
     body.push(Stmt.Expr{expr: result})
     lambda_params := [LambdaParam]{}
-    loop (index, ty) in params -> lambda_params.push(LambdaParam{name: "__ad_p{index}", name_span: span, ty: Val(ty), ty_span: None})
+    loop (index, ty) in params -> lambda_params.push(LambdaParam{name: "__ad_p{index}", name_span: span, ty: Val(ty), ty_span: None, convention: AccessConvention.Read})
     transform: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: lambda_params, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     if values.len() == 0 -> return transform
     Expr.CallValue{callee: Expr.Paren{value: transform, span: span, id: AST_NODE_GENERATED}, args: values, span: span, id: AST_NODE_GENERATED}

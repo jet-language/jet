@@ -1339,7 +1339,7 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
         decoded: Expr.OrFallback{value: input, fallback: OrFallback.Return{value: Val(Expr.Ok{value: rejected, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
         body.push(Stmt.Val{binding: ast_binding(parameter.name, span, false, decoded, None)})
     }
-    request_param: LambdaParam{name: request, name_span: span, ty: Val(request_ty), ty_span: None}
+    request_param: LambdaParam{name: request, name_span: span, ty: Val(request_ty), ty_span: None, convention: AccessConvention.Read}
     if sema_http_mux_lambda(handler) == .Val(lambda) {
         if lambda.body == {
             .Expr(value) -> { body.push(Stmt.Expr{expr: value}) }

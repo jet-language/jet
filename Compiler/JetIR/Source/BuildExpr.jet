@@ -5,7 +5,7 @@
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
-    jet_foundation.[AutoVectorizationFacts, number_argument_value]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, number_argument_value]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
@@ -6949,14 +6949,18 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
 }
 
 // A call through a closure box: its code with the box as the hidden first
-// argument.
+// argument. A written parameter (`fn(&[Int])`) gets its place's address, as
+// a direct call's does (ir_call_row); a taken one is lent as a read one is,
+// and the code behind the box owns its own copy (ir_function_value).
 ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args: [BodyCallArg], signature: Type, span: Span) -> Int Never! {
     params := [Type]{}
     returned := Type?{None}
+    metadata := FunctionCallMetadata?{None}
     fact: ir_untag(ir_fact(p, b, signature, span))
-    if fact == .Fn(fn_params, fn_ret, _, _, _, _) {
+    if fact == .Fn(fn_params, fn_ret, _, _, fn_metadata, _) {
         params = fn_params
         returned = fn_ret
+        metadata = fn_metadata
     } else {
         return ir_fail_slot(b, span, "indirect call through {ir_type_name(signature)}")
     }
@@ -6964,9 +6968,25 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
     boxed: ir_expr(m, p, b, callee)
     if ir_failed(b) || boxed < 0 -> return -1
     slots := [Int]{boxed}
+    backs := [IRWriteBack]{}
+    bridges := [IRWriteBack]{}
     loop (index, arg) in args {
-        if arg.mut_borrow || arg.spread -> return ir_fail_slot(b, span, "write or spread argument of an indirect call")
+        if arg.spread -> return ir_fail_slot(b, span, "spread argument of an indirect call")
         row: ir_value_type(m, p, params[index]) ?? return ir_fail_slot(b, span, "argument type {params[index]}")
+        if function_param_writes(metadata, index) || arg.mut_borrow {
+            address: ir_place_address(m, p, b, arg.value, backs, span)
+            if ir_failed(b) -> return -1
+            // An inline `[T#N]` written as a `[T]` goes through a List copy
+            // of it, whose elements are put back after the call.
+            if ir_fixed_count(m, b.f.slot_type[address]) != None && ir_fixed_count(m, row) == None && ir_list_element_of(m, p, row) != None {
+                bridge: ir_fixed_bridge(m, p, b, address, row, span)
+                bridges.push(IRWriteBack{cell: bridge, slot: address})
+                slots.push(bridge)
+                next
+            }
+            slots.push(address)
+            next
+        }
         slot: ir_value_as(m, p, b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if slot < 0 -> return ir_fail_slot(b, span, "Unit argument of an indirect call")
@@ -6984,6 +7004,8 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
     }
     start: ir_args(b.f, slots)
     ir_emit(b.f, IROp.CallIndirect, dst, code, start, slots.len(), b.line)
+    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)
     // The call only lends its box and its arguments.
     loop slot in slots -> ir_release(m, b, slot)
     ir_stop_check(m, b)
@@ -7036,14 +7058,17 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         if function.params.len() != params.len() -> return ir_fail_slot(b, span, "named function {function.name} as a value of {params.len()} parameters")
         // Every row is known before the adapter is registered, so a value
         // the builder cannot make leaves no half-built function behind.
+        // A written parameter's value slot is what the caller passes for it
+        // (ir_indirect_call): the address of a non-aggregate, as the callee's
+        // own parameter slot is (ir_param_slot).
         value_rows := [Int]{}
-        loop param in params {
+        loop (index, param) in params {
             value_row: ir_value_type(m, p, param) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param)}")
-            value_rows.push(value_row)
+            writes: function.params[index].convention == .Write
+            value_rows.push(if writes && m.types[value_row].kind != .Aggregate -> ir_pointer_row(m) else -> value_row)
         }
         param_rows := [Int]{}
         loop param in function.params {
-            if param.convention == .Write -> return ir_fail_slot(b, span, "named function {function.name} with a write parameter as a value")
             param_row: ir_value_type(m, p, param.ty) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param.ty)}")
             param_rows.push(param_row)
         }
@@ -7071,9 +7096,14 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         loop (index, value_row) in value_rows -> values.push(ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, function.params[index].local.name)))
         a.f.result = result_row
         // The value's caller keeps its arguments: a move parameter of the
-        // function gets its own copy.
+        // function gets its own copy, and a written one passes the address
+        // (or aggregate) the caller lent straight through.
         arguments := [Int]{}
         loop (index, param) in function.params {
+            if param.convention == .Write {
+                arguments.push(values[index])
+                next
+            }
             value: ir_adapt(m, p, a, values[index], param_rows[index], span)
             arguments.push(if param.convention == .Move -> ir_own(m, p, a, value) else -> value)
         }

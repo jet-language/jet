@@ -1,0 +1,50 @@
+// A write-marked function type (`fn(&[Int])`) and a lambda whose parameter is
+// marked the same way keep Write access through every call form: a named
+// function value, a non-capturing and a capturing lambda, a generic forwarder
+// and a struct-field wrapper each push into the caller's own list, so every
+// row prints the same list. A take-marked `fn(&&[Int]) -> Int` keeps Take: the
+// callee owns the list it is given and grows its own copy.
+push_one: fn(buf: &[Int]) { buf.push(1) }
+
+through: fn(f: fn(&[Int]), buf: &[Int]) { f(buf) }
+
+through_generic: fn<T>(f: fn(&[T]), buf: &[T]) { f(buf) }
+
+Wrapper: struct {
+    edit: fn(&[Int])
+}
+
+grow: fn(values: &&[Int]) -> Int {
+    kept := values
+    kept.push(0)
+    kept.len()
+}
+
+take_through: fn(f: fn(&&[Int]) -> Int, values: &&[Int]) -> Int { f(values) }
+
+run: fn() {
+    named := [Int]{}
+    through(push_one, named)
+    print("named {named}")
+    plain := [Int]{}
+    through((buf: &[Int]) -> buf.push(1), plain)
+    print("lambda {plain}")
+    one: 1
+    captured := [Int]{}
+    through(buf -> buf.push(one), captured)
+    print("capturing {captured}")
+    generic := [Int]{}
+    through_generic(push_one, generic)
+    print("generic {generic}")
+    wrapper: Wrapper{edit: push_one}
+    wrapped := [Int]{}
+    wrapper.edit(wrapped)
+    print("wrapper {wrapped}")
+    held: Wrapper{edit: (buf: &[Int]) -> buf.push(1)}
+    twice := [Int]{}
+    held.edit(twice)
+    through(held.edit, twice)
+    print("held {twice}")
+    print("take {take_through(grow, [7, 8])}")
+    print("take lambda {take_through((values: &&[Int]) -> values.len() * 10, [7, 8, 9])}")
+}

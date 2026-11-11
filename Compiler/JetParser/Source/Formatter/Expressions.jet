@@ -4,7 +4,6 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
-        AccessConvention,
         BinMatchPart,
         BinOp,
         ByteTextPart,
@@ -31,6 +30,7 @@ use {
         Type,
         TypedLitBody,
         LIST_TYPE_OWNER,
+        access_sigil,
         dimension_display_name,
         expr_source_start,
         expr_span,
@@ -854,7 +854,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                         jfmt_write(f, contract[entry.index].label)
                         jfmt_write(f, ": ")
                     }
-                    if call_metadata == .Val(metadata) && entry.index < metadata.conventions.len() && metadata.conventions[entry.index] == AccessConvention.Move -> jfmt_write(f, "&&")
+                    if call_metadata == .Val(metadata) && entry.index < metadata.conventions.len() -> jfmt_write(f, access_sigil(metadata.conventions[entry.index]))
                     jfmt_fmt_type(f, params[entry.index])
                 }
                 jfmt_comma_after(f, multiline, span.end)
@@ -2009,7 +2009,7 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
         if index > 0 -> jfmt_write(f, ", ")
         jfmt_write(f, param.name)
         if param.ty == .Val(ty) {
-            jfmt_write(f, ": ")
+            jfmt_write(f, ": {access_sigil(param.convention)}")
             jfmt_fmt_type(f, ty)
         }
     }

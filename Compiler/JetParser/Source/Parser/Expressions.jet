@@ -1449,13 +1449,21 @@ parser_parse_lambda: fn(state: &JetParserState, depth: Int, take_names: [NamedSp
             name: parser_expect_name(state, "as a lambda parameter")
             ty := Type?{None}
             ty_span := Span?{None}
+            convention := AccessConvention.Read
             if parser_current_kind(state) == TOKEN_COLON {
                 parser_bump(state)
+                // A written type may mark a written `&` or taken `&&` input, as a
+                // function type's parameter does: `(buf: &[Int]) -> …`.
+                mark_kind: parser_current_kind(state)
+                if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+                    parser_bump(state)
+                    convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
+                }
                 parsed: parser_parse_type(state, depth + 1)
                 ty = Val(parsed.ty)
                 ty_span = Val(parsed.span)
             }
-            params.push(LambdaParam{name: parser_value(state, name), name_span: name.span, ty: ty, ty_span: ty_span})
+            params.push(LambdaParam{name: parser_value(state, name), name_span: name.span, ty: ty, ty_span: ty_span, convention: convention})
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             parser_expect(state, TOKEN_COMMA, "`,` between lambda parameters")
             if parser_current_kind(state) == TOKEN_RPAREN -> break

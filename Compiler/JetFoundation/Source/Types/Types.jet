@@ -1062,6 +1062,13 @@ call_variadic_identity_equal: fn(left: FunctionCallMetadata?, right: FunctionCal
     function_variadic_obligation(left) == function_variadic_obligation(right)
 }
 
+// Whether a function type's call metadata marks parameter `index` written
+// (`fn(&[Int])`); a type with no metadata reads every parameter.
+function_param_writes: fn(metadata: FunctionCallMetadata?, index: Int) -> Bool Never! {
+    row: metadata ?? return false
+    index >= 0 && index < row.conventions.len() && row.conventions[index] == AccessConvention.Write
+}
+
 string_array_identity_equal: fn(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop (i, value) in left {

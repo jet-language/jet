@@ -25,6 +25,7 @@ use {
         foundation_named_type,
     ]
     jet_lexer.[
+        TOKEN_AMP,
         TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_COLON,
@@ -496,12 +497,14 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
                         parser_bump(state)
                         name = parser_value(state, token)
                     }
-                    // A parameter type marks a taken input `&&`, as a declared
-                    // parameter does: `fn(&&Map)` takes its argument.
+                    // A parameter type marks a written input `&` or a taken input
+                    // `&&`, as a declared parameter does: `fn(&[Int])` writes its
+                    // argument and `fn(&&Map)` takes it.
                     convention := AccessConvention.Read
-                    if parser_current_kind(state) == TOKEN_AND_AND {
+                    mark_kind: parser_current_kind(state)
+                    if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
                         parser_bump(state)
-                        convention = AccessConvention.Move
+                        convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
                         marked = true
                     }
                     params.push(parser_parse_type(state, depth + 1).ty)

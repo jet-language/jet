@@ -102,7 +102,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     call_args := [CallArg]{}
                     loop index in 1..<method.params.len() {
                         parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
-                        params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
+                        params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
                         argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
                         argument.convention = method.params[index].convention
                         call_args.push(argument)

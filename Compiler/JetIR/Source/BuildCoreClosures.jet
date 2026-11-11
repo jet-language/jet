@@ -2,7 +2,7 @@
 // every function value is, `task` spawns and `core.mem.scope.guard`, with the
 // owned runtime Task handle and the ScopeGuard carrier they produce.
 
-use jet_foundation.[Span, BodyCallArg, BodyCoreClosureKind, BodyHandleOp, BodyLambda, TAllocCtor, Type, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, BodyCallArg, BodyCoreClosureKind, BodyHandleOp, BodyLambda, TAllocCtor, Type, function_param_writes, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The element of a `Task<T>`.
 ir_task_element: fn(ty: Type) -> Type? Never! {
@@ -103,12 +103,18 @@ ir_closure_row: fn(m: &IRModule, ty: Type) -> Int Never! {
 
 // The row of the code word a function value of type `ty` holds at 8: a
 // Pointer whose checked type is IR_CODE_TYPE over `ty`, so IR Lint checks a
-// CallIndirect through it against the signature. A box of any other type
-// (a scope guard's, a hook's) holds a plain pointer.
+// CallIndirect through it against the signature. A written parameter is
+// passed by its address, so the row keys its mark (`fn(&[Int])` code is not
+// `fn([Int])` code). A box of any other type (a scope guard's, a hook's)
+// holds a plain pointer.
 ir_code_row: fn(m: &IRModule, ty: Type) -> Int Never! {
-    if ir_untag(ty) == .Fn(_, _, _, _, _, _) {
+    if ir_untag(ty) == .Fn(params, _, _, _, metadata, _) {
         code_ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{ir_untag(ty)}}
-        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}", ir_layout(IRTypeKind.Pointer, code_ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        written := ""
+        loop index in 0..<params.len() {
+            if function_param_writes(metadata, index) -> written = "{written}&{index}"
+        }
+        return ir_intern_type(m, "{IR_CODE_TYPE}:{type_carrier_identity(ty)}{written}", ir_layout(IRTypeKind.Pointer, code_ty, 8, 8, IRClass.Pointer, false, 64, ""))
     }
     ir_pointer_row(m)
 }

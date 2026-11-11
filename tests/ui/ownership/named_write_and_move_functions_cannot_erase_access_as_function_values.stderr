@@ -3,6 +3,6 @@ Error [jet.MarkedFunctionValue]: `edit` can't be used as a function value becaus
     |
   3 | run: fn() { callback: edit }
     |                       ^^^^
- Why: A function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of `edit` would drop the `&` its parameter declares
- Fix: Call `edit` directly, or pass a lambda that makes that call
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `edit` would drop the `&` its parameter declares
+ Fix: Call `edit` directly, mark the parameter in the function type (`fn(&T)`), or pass a lambda that makes that call
 More: jet-lang.dev/e/E0227

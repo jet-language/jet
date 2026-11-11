@@ -1184,6 +1184,14 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
         diagnostics.push(sema_error("E0771", owned.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
         return None
     }
+    if sema_expr_write_access_erased(required, offered) == .Val(param_index) {
+        slot_writes := false
+        if required == .Fn(_, _, _, _, required_metadata, _) -> slot_writes = sema_call_fn_param_convention(required_metadata, param_index) == AccessConvention.Write
+        slot_access: if slot_writes -> "writes" else -> "reads"
+        value_access: if slot_writes -> "reads" else -> "writes"
+        diagnostics.push(sema_error("E0227", owned.span, "this function type {slot_access} parameter {param_index + 1}, but the function value {value_access} it", "a call through a function type passes a `&` parameter's place and any other parameter's value, so a value whose parameter access differs would get the wrong one", "mark parameter {param_index + 1} `&` in both function types or in neither, or pass a lambda that adapts the call"))
+        return None
+    }
     if sema_expr_unit_coherent_value(owned, required, environment, program) == .Val(coherent) -> return Val(coherent.move())
     compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
     if !compatible {
@@ -1243,6 +1251,21 @@ sema_expr_strict_zone_erased: fn(required: Type, offered: Type, environment: Sem
         return sema_expr_expected_assignable(erased, offered, environment, program) == (Val(true))
     }
     false
+}
+
+// The first parameter whose write access differs between the function types
+// `required` and `offered`: a function value can't cross into a slot that
+// reads (or writes) a parameter it writes (or reads), since the call through
+// the slot passes that argument differently (E0227).
+sema_expr_write_access_erased: fn(required: Type, offered: Type) -> Int? Never! {
+    if required == .Fn(params, _, _, _, required_metadata, _) && offered == .Fn(_, _, _, _, offered_metadata, _) {
+        loop index in 0..<params.len() {
+            wants: sema_call_fn_param_convention(required_metadata, index) == AccessConvention.Write
+            has: sema_call_fn_param_convention(offered_metadata, index) == AccessConvention.Write
+            if wants != has -> return Val(index)
+        }
+    }
+    None
 }
 
 sema_expr_contract_has_strict_zone: fn(rows: [CallContractRow]) -> Bool Never! {
@@ -4481,9 +4504,9 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
 }
 
 // E0227: a named function with a `&` or `&&` parameter is a value only where
-// the expected function type marks the same parameters (`fn(&&Map)`). A plain
-// function type gives every parameter read access, so its value would drop
-// the write or take its parameter declares.
+// the expected function type marks the same parameters (`fn(&[Int])`,
+// `fn(&&Map)`). A plain function type gives every parameter read access, so
+// its value would drop the write or take its parameter declares.
 sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     params: sema_scope_declaration_function_params(environment, program, id) ?? return false
     param: sema_scope_first_marked_param(params) ?? return false
@@ -4493,9 +4516,8 @@ sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expe
         } ?? true
         if same -> return false
     }
-    mark: if param.convention == AccessConvention.Write -> "&" else -> "&&"
-    fix: if mark == "&&" -> "call `{name}` directly, take the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call" else -> "call `{name}` directly, or pass a lambda that makes that call"
-    diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of `{name}` would drop the `{mark}` its parameter declares", fix))
+    mark: access_sigil(param.convention)
+    diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `{name}` would drop the `{mark}` its parameter declares", "call `{name}` directly, mark the parameter in the function type (`fn({mark}T)`), or pass a lambda that makes that call"))
     true
 }
 
@@ -6333,7 +6355,7 @@ sema_expr_subject_shorthand: fn(expr: Expr, expected: Type?, context: SemaCheckC
         // and a name resolves only at or after its declaration, so the
         // parameter starts at the chain's first byte.
         param_span: Span{start: expr_source_start(expr), end: span.end}
-        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: param_span, ty: Val(params[0]), ty_span: None}}, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
+        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: param_span, ty: Val(params[0]), ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
     }
     None
 }

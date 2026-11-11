@@ -2409,12 +2409,12 @@ UnusedPlaceMark: struct {
 MarkedFunctionValue: struct {
     impl Diagnostic {
         code: "E0227"
-        meaning: "A named function with a `&` or `&&` parameter is used as a function value where the function type doesn't mark that parameter"
+        meaning: "A function value's `&` or `&&` parameter access doesn't match the parameter access the expected function type marks"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value where the expected function type gives that parameter plain read access." }
-        why: fn(self) -> String { "A function type gives each parameter plain read access unless it marks a take (`fn(&&T)`), so a value of this function in an unmarked slot would lose the write or take its parameter declares." }
-        fix: fn(self) -> String { "Call the function directly, take the parameter in the function type (`fn(&&T)`) when the function takes it, or pass a lambda that makes that call." }
+        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value where the expected function type doesn't mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes)." }
+        why: fn(self) -> String { "A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), and a call through it passes each argument that way, so a value whose parameter access differs would lose or invent the write or take its parameter declares." }
+        fix: fn(self) -> String { "Call the function directly, mark the parameter in the function type the way the function does (`fn(&T)`, `fn(&&T)`), or pass a lambda that makes that call." }
     }
 }
 
