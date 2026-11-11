@@ -45,6 +45,11 @@ cond_of_int: fn(x: Int) -> CtCond Never! { cond_of(U64{x}) }
 #Scrub(Secret)
 cond_is_true: fn(mask: #Secret U64) -> Bool Never! { mask != U64{0} }
 
+/// The public 0 or 1 of a condition's mask, computed without a branch: for
+/// a verdict a caller reads as a number.
+#Scrub(Secret)
+cond_bit: fn(mask: #Secret U64) -> U8 Never! { low_byte(mask).bit_and(U8{1}) }
+
 /// x != y.
 uint_ne: fn(x: #Secret U64, y: #Secret U64) -> CtCond Never! { cond_of(x.bit_xor(y)) }
 
@@ -196,7 +201,7 @@ mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Ct
 /// is read and only the outcome is published (mbedtls_ct_memcmp).
 #Scrub(Secret)
 memcmp: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Int Never! {
-    if cond_is_true(mem_ne(a, aoff, b, boff, n).mask) -> 1 else -> 0
+    Int.from_u8(cond_bit(mem_ne(a, aoff, b, boff, n).mask))
 }
 
 /// mbedtls_ct_memcmp over a[0..<n] and b[0..<n], ignoring the first
@@ -211,7 +216,7 @@ memcmp_partial: fn(a: [#Secret U8], b: [#Secret U8], n: Int, skip_head: Int, ski
         valid: bool_and(size_ge(i, skip_head), size_lt(i, valid_end))
         diff = diff.bit_or(if_else_0(valid, d))
     }
-    if cond_is_true(diff) -> 1 else -> 0
+    Int.from_u8(cond_bit(cond_of(diff).mask))
 }
 
 /// Entry x of a table packed 1 << per_log entries to a word (entry i in
