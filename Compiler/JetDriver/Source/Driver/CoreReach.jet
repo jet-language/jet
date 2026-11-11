@@ -5,9 +5,11 @@
 // import (`collation_table: __core_text_collation_table`) is followed only
 // once reached code spells its alias as a path head (`collation_table.X`), so
 // a program that never reaches collation or segmentation never reads, lexes
-// or parses their tables. Every other declaration (types, impls, traits,
-// marked or compiler-routed `__` functions, and the whole of a runtime unit
-// or of a module the compiler demands) is reached with its module.
+// or parses their tables. Runtime units (`core.text.runtime.…`) follow the
+// same rule, so a program that only measures UTF-8 never loads the case
+// tables. Every other declaration (types, impls, traits, marked or
+// compiler-routed `__` functions, and the whole of a module the compiler
+// demands) is reached with its module.
 //
 // Spellings are read from the source bytes outside comments, strings
 // included, so reach is a superset of what the code names. When the load is

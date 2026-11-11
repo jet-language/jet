@@ -3969,10 +3969,10 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
         }
         kept.push(item)
     }
-    // A lazy declaration of a public module or private part counts once the
-    // program reaches it; a runtime unit or an entry is reached whole
-    // (CoreReach.jet).
-    words: jet_driver_unit_words(source, comments, kept, !runtime && !entry, if module_name.starts_with("__") -> owned_members else -> [String]{})
+    // A lazy declaration of a Core module (public module, private part or
+    // runtime unit) counts once the program reaches it; an entry is reached
+    // whole (CoreReach.jet).
+    words: jet_driver_unit_words(source, comments, kept, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{})
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
@@ -4944,10 +4944,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         is_core: jet_driver_unit_is_core(unit)
         is_runtime_entry: entry_module != "" && source_unit_index == (entry_index ?? 0)
         importer_core: is_core || is_runtime_entry
-        // A public Core module or private part (not a runtime unit) defers its
-        // private imports until reached code spells their aliases.
-        core_runtime: is_core && unit.file_index >= 0 && unit.file_index < request.core_sources.len() && request.core_sources[unit.file_index].runtime
-        defers: reach.enabled && is_core && !is_runtime_entry && !core_runtime
+        // A Core module (public module, private part or runtime unit) defers
+        // its private imports until reached code spells their aliases.
+        defers: reach.enabled && is_core && !is_runtime_entry
         deferred := [JetDriverScopedImport]{}
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,

@@ -81,3 +81,40 @@ reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     codes: loop diagnostic in load.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
     assert_eq(codes, [String]{"E1001: There is no core module `__core_devtools_probe`"})
 }
+
+// The load of `source` beside `core.devtools`, which uses the runtime unit
+// `core.devtools.runtime.kernel`; the kernel's `lookup` alone reads the
+// runtime unit `core.devtools.runtime.table`.
+reach_test_load_runtime: fn(source: String) -> JetDriverLoadResult {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/reach-fixture",
+            identity: "reach-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/reach-fixture/main.jet", relative_path: "main.jet", identity: "reach-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "reach-root",
+        entry_path: "/reach-fixture/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    owner: "use {{\n    kernel: core.devtools.runtime.kernel\n}}\n\nplain: fn() -> Int Never! {{ kernel.plain() }}\n\nlookup: fn() -> Int Never! {{ kernel.lookup() }}\n"
+    kernel: "use {{\n    table: core.devtools.runtime.table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
+    request.core_sources = [JetDriverCoreSource]{
+        {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
+        {module_name: "core.devtools.runtime.kernel", alias: "__core_devtools_runtime_kernel", path: "Core/Devtools/Runtime/Kernel.jet", owner: "", owned_members: [String]{}, runtime: true, text: jet_driver_core_text(kernel)},
+        {module_name: "core.devtools.runtime.table", alias: "__core_devtools_runtime_table", path: "Core/Devtools/Runtime/Table.jet", owner: "", owned_members: [String]{}, runtime: true, text: jet_driver_core_text("value: fn() -> Int Never! {{ 7 }}\n")},
+    }
+    load: jet_driver_load(request)
+    assert(load.complete && !jet_driver_has_errors(load.diagnostics))
+    load
+}
+
+#Test("a runtime unit's functions and imports load by use like any Core module's") {
+    plain: reach_test_load_runtime("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n")
+    assert(!reach_test_has_module(plain, "core.devtools.runtime.table"))
+    assert_eq(reach_test_functions(plain, "core.devtools.runtime.kernel"), [String]{"plain"})
+    lookup: reach_test_load_runtime("use tools: core.devtools\nrun: fn() {{ print(tools.lookup()) }}\n")
+    assert(reach_test_has_module(lookup, "core.devtools.runtime.table"))
+    assert_eq(reach_test_functions(lookup, "core.devtools.runtime.kernel"), [String]{"plain", "lookup"})
+}
