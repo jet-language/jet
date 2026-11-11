@@ -1,0 +1,12 @@
+# A copy of an aggregate holding a Clock forks that Clock in user code on
+# every tier (moved from Core/Time/Time.jet, whose tests run as Core).
+fixture: clock_nested_aggregate_copy_forks_the_timeline/input
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "forked\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "forked\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "forked\n"

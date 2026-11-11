@@ -282,17 +282,6 @@ __duration_whole_ms: fn(duration: Duration) -> Int Never! {
     assert_eq(original.__show(), "Clock {{ now: -9223372036854775808 }}")
 }
 
-#Test("Clock ordinary and nested aggregate copies fork the timeline") {
-    original: Clock.new(0)
-    duplicate := original.copy()
-    assert_eq(duplicate.tick(1), 1)
-    assert_eq(original.now(), 0)
-    clocks: [Clock]{original}
-    copied := clocks.copy()
-    assert_eq(copied[0].advance(2), 2)
-    assert_eq(clocks[0].now(), 0)
-}
-
 #Test("Clock Show and Debug keep the existing nominal rendering") {
     value: Clock.new(5)
     assert_eq("{value}", "Clock {{ now: 5 }}")
@@ -2408,18 +2397,6 @@ __civil_footer_test_stamp: fn(text: String) -> Int Never! {
     if date.format_checked("QQ") == {
         .Err(_) -> assert(true)
         .Ok(_) -> assert(false)
-    }
-}
-
-#Test("Nonpositive sleeps and elapsed deadlines still check the task deadline") {
-    .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep(duration_ns(0)) }
-    }
-    .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep(duration_ns(-1)) }
-    }
-    .expect_fail(E3003) {
-        #Context(deadline: 0) { sleep_until(Instant{start_ns: time_int_min()}) }
     }
 }
 

@@ -1,0 +1,8 @@
+use time: core.time
+
+// A sleep until an instant long past, inside an elapsed deadline, still
+// checks the task deadline.
+run: fn() {
+    #Context(deadline: 0) { time.sleep_until(time.Instant{start_ns: -9223372036854775807 - 1}) }
+    print("unreachable")
+}
