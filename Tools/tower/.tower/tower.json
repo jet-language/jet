@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99179,
+    "rev": 99182,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34151,7 +34151,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-11T03:28:22.656Z",
+      "updated": "2026-11-11T05:11:05.845Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -55251,7 +55251,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-11T03:28:41.153Z",
+      "updated": "2026-11-11T05:11:07.052Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -67162,7 +67162,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-10T16:27:58.590Z",
+      "updated": "2026-11-11T05:11:08.263Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -195438,6 +195438,490 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T02:58:28.132Z"
+    },
+    {
+      "id": "D-COMPUTED-ALIAS1",
+      "cardId": "c0tsbf3w",
+      "group": "syntax",
+      "title": "Choose a type while building, without creating another type identity",
+      "situation": "A reusable type name can save callers from choosing a storage layout by hand. Ordinary generic aliases already name one existing shape, but they do not spell a checked choice between two shapes. A library might want a small fixed array for two items and a growing list for a hundred. Beginners should use the result like any type, while experts need its exact identity and requirements preserved. Choose a bounded computed alias, a type-returning function, or removal of this requirement. We recommend the alias, using the existing compile-time evaluator and trait checker.",
+      "gist": "How should one reusable name select an existing type during a build?",
+      "lesson": "An alias is another name for the same type, not a wrapper. A bound is a requirement such as implementing a trait. A computed alias selects its type while building. Both possible types must satisfy the bound before a library can publish the alias.",
+      "explainer": "",
+      "story": "Mia stores two numbers inline and three in a growing list. Each option's intended output is 2 then 3. A and B hide the choice behind a recipe; C names each type. The current compiler also rejects the generic trait impl in this shared example, independently of the missing computed alias.",
+      "inWild": "Zig permits a function returning type, such as fn Buffer(comptime n: usize) type. Its result can be used as a type. Jet option B takes that general approach; A keeps this capability on aliases. This comparison is conceptual, not a claim of compiling a Zig program here.",
+      "detail": "D-GENERIC-TYPEFN1 was retired, as #3505's corrected log records. D-ALIAS-GENERIC1=A and D-META-SPELL1=A remain live. Neither authorizes a computed bounded alias. This vote defines it, rather than reviving prep or treating the retired decision as law.\n\nA and B use the existing native compile-time evaluator and canonical type identities, never an alias-only interpreter. Both check every return branch against Store at definition, including unused branches. Conditions may depend on parameters and pure build constants, not host state. Recursive alias cycles are diagnosed with their path. Invalid capacities are errors at instantiation. A chosen type keeps its layout, methods and identity. There is no runtime branch or wrapper. Ordinary aliases remain unchanged; unparameterized alias defects are independent of this vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A bounded computed alias",
+          "detail": "Keep parameters on the alias name. Store is the required trait; the #run body yields an existing type. Beginners write Storage<2>. Experts can pass it where Inline<2> is required, without conversion.",
+          "technical": "The new grammar is Name<parameters>: Bound #run { type-expression }. A non-type branch or unmet trait is a registered definition-site error naming that branch and the bound. An unused bad branch still fails. Reuse ordinary generic instantiation, type-bound checking and compile-time execution.",
+          "code": "// Proposed; intended output: 2 then 3.\nStore: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\nStorage<N: Int>: Store #run {\n    if N <= 16 -> Inline<N> else -> Heap\n}\nrun: fn() {\n    small: Storage<2>{items: [1, 2]}\n    big: Storage<100>{items: [1, 2, 3]}\n    print(small.count())\n    print(big.count())\n}"
+        },
+        {
+          "key": "B",
+          "name": "An ordinary compile-time type function",
+          "detail": "Use a lowercase function and normal arguments. Type<Store> means a compile-time type value constrained to implement Store, not a runtime Store instance. This also supports reusable type computations beyond aliases.",
+          "technical": "Add Type<Bound>, type-valued returns, and constant calls in type position, including before a constructor body. The bound is checked on every return branch at definition. Runtime arguments are refused. No PascalCase function exception is needed. This explicitly authorizes a new type-value surface, not a revival of the retired decision.",
+          "code": "// Proposed; intended output: 2 then 3.\nStore: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\n#run storage: fn(n: Int) -> Type<Store> {\n    if n <= 16 -> Inline<n> else -> Heap\n}\nrun: fn() {\n    small: storage(2){items: [1, 2]}\n    big: storage(100){items: [1, 2, 3]}\n    print(small.count())\n    print(big.count())\n}"
+        },
+        {
+          "key": "C",
+          "name": "Require callers to choose the type",
+          "detail": "Retire #3505 c18 rather than pretending it is implemented. Name the intended storage job with concrete types. Beginners learn two constructors; experts keep full layout control. The existing generic-impl defect still needs repair under any option. No automatic choice or computed-alias bound remains.",
+          "technical": "No new syntax or type evaluation is added. Ordinary generic aliases stay ratified. This option changes the requirement and must be recorded as retirement, not as a passing computed-alias golden.",
+          "code": "// Ordinary forms; intended output after generic-impl repair: 2 then 3.\nStore: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } }\n}\nrun: fn() {\n    small: Inline<2>{items: [1, 2]}\n    big: Heap{items: [1, 2, 3]}\n    print(small.count())\n    print(big.count())\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A solves the bounded-alias job without adding a second evaluator or a public type-value API. It keeps the ordinary alias identity rule.",
+        "gains": [
+          "Callers use an ordinary type name",
+          "Every branch is checked before use",
+          "No runtime wrapper or selection"
+        ],
+        "losses": [
+          {
+            "loss": "The alias grammar gains a checked-body form.",
+            "mitigation": "Restrict it to aliases and reuse the existing evaluator, generic identity and trait checker."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is stronger for general type recipes, but exposes Type<Bound> and function calls in type position for this narrower requirement."
+          },
+          {
+            "key": "C",
+            "reason": "C has the smallest language surface, but loses the requested reusable choice and must explicitly retire c18."
+          }
+        ],
+        "tradeoff": "A adds one alias form; B adds general type-valued functions; C asks callers to make every choice. No performance superiority is claimed."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review1. Corrected the retired authority, distinguished a type value from a trait instance, and removed the unnecessary PascalCase function exception; no proposed form is described as implemented."
+      },
+      "checkInstructions": "Seed-t19: Grid<T>: [[T]] ran and printed 6.0; A's alias body failed E0003 at #. C's ordinary generic impl also failed E0102 at small.count; using N directly additionally gave E0107. This independent defect must be repaired under any option, not hidden by an easier example.\n\nImplementation must run the chosen program on O0/O1/O2 and pass small to an Inline<2> parameter without conversion. A Plain branch lacking Store must fail at definition even when unused. Cover non-types, runtime conditions, invalid capacities, imports, generic bounds and cycles, with diagnostic snapshots.",
+      "surface": {
+        "gist": "How should one name choose a storage type while building?",
+        "lesson": "An alias names an existing type. A bound requires a trait. Check both possible types before anyone uses the alias, then keep the chosen type's exact identity.",
+        "trio": {
+          "current": {
+            "note": "An ordinary alias names one shape; a checked build-time choice is proposed.",
+            "code": "Grid<T>: [[T]]\n// Probe: total(Grid<Float>) printed 6.0."
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "A type-returning function is the broader model considered in B.",
+            "code": "fn Buffer(comptime n: usize) type {\n    return [n]u8;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Computed alias",
+            "gist": "Keep the choice on the alias declaration.",
+            "gains": [
+              "Ordinary type use",
+              "Both branches checked"
+            ],
+            "losses": [
+              "One new alias form"
+            ],
+            "proposed": {
+              "code": "// Shared Inline and Heap implement Store.\nStorage<N: Int>: Store #run {\n    if N <= 16 -> Inline<N> else -> Heap\n}\n// Storage<2> is Inline<2>; Storage<100> is Heap."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Type function",
+            "gist": "Make type values and bounded type returns public.",
+            "gains": [
+              "General reusable type computations"
+            ],
+            "losses": [
+              "More concepts than an alias needs"
+            ],
+            "proposed": {
+              "code": "#run storage: fn(n: Int) -> Type<Store> {\n    if n <= 16 -> Inline<n> else -> Heap\n}\n// storage(2) is Inline<2>; storage(100) is Heap."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Explicit choice",
+            "gist": "Drop the requirement and choose each concrete type.",
+            "gains": [
+              "No new language form"
+            ],
+            "losses": [
+              "No reusable automatic choice"
+            ],
+            "proposed": {
+              "code": "small: Inline<2>{items: [1, 2]}\nbig: Heap{items: [1, 2, 3]}\n// Same counts: 2 then 3; no computed alias."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep the requested choice local to aliases, with one evaluator and the existing type identity rules.",
+          "gains": [
+            "No runtime wrapper",
+            "Mistakes found before use"
+          ],
+          "losses": [
+            {
+              "loss": "A new alias form must be learned.",
+              "mitigation": "Ordinary aliases stay unchanged; only libraries needing a choice write it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Broader type functions are useful, but introduce more than this job requires."
+            },
+            {
+              "key": "C",
+              "reason": "Explicit types work but abandon the requested reusable choice."
+            }
+          ],
+          "tradeoff": "A small alias extension instead of a general type-value API."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T05:11:05.845Z"
+    },
+    {
+      "id": "D-PRINTSTYLE1",
+      "cardId": "c0dhc7rh",
+      "group": "core",
+      "title": "Choose the defaults that context.print supplies to print",
+      "situation": "Printing defaults let a library show numbers consistently without a format at every call. Jet has approved a typed context field for those defaults, but has not chosen its members. A debugging block might want 255 shown as 00ff, including inside a list, without changing ordinary string interpolation. Beginners need unchanged default output, while experts need a visible way to choose another format. Choose simple fields, typed formatter callbacks, or explicit formatting without a print context field. We recommend simple fields that reuse the existing formatting rules.",
+      "gist": "Should print defaults be simple data, typed callbacks, or explicit formatting only?",
+      "lesson": "The context carries settings for a block and restores them when it ends. PrintStyle would describe how print displays a value when no text was prepared explicitly. Interpolation makes text independently, so printing that text cannot quietly reformat it.",
+      "explainer": "",
+      "story": "Mia prints 255, then enters a hexadecimal block, prints 255 and a list, and prints an interpolated string. Outside the block she prints 255 again. Every option below produces 255, 00ff, [0001, 0002, 0003], x = 255, then 255.",
+      "inWild": "Jai motivates a current print-style setting; this ballot does not reproduce unverified Jai member names. Explicit formatting is also a strong model: Jet already has core.text.fmt.hex and decimal. B uses typed scalar callbacks rather than an undefined Any or a second reflection-value API.",
+      "detail": "D-CONTEXT1=A names print: term.PrintStyle and excludes interpolation from context. D-JAI-CONTEXT1=A supplies task-owned propagation and the Context effect. No PrintStyle declaration exists under Core/Term at frozen t18b. A seed-t19 probe of #Context(print: ...) reports E0761; direct fmt.hex(255, 4) runs as 00ff.\n\nA and B install through the existing #Context carrier, restore on every exit, and copy the style into spawned tasks. Explicit context.print reads add Context. Print itself reads this field, so carries Context with IO; no grant is needed for a context read. Interpolation, Debug and to_string keep their fixed defaults. One recursive formatter accepts an explicit style value; it is not a second print engine. Already formatted String arguments stay byte-for-byte text. eprint is not changed by this field.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Five typed defaults",
+          "detail": "Add int_base, int_min_digits, float_digits, list_separator and field_names. A new PrintBase enum permits Binary, Octal, Decimal or Hex. Beginners omit the whole style. Experts change selected fields or print explicitly formatted text for a one-off exception.",
+          "technical": "PrintStyle defaults are .Decimal, 0, None, comma-space and true. Integers use lowercase digits with sign before zero padding. Negative widths and precisions normalize to zero, following existing fmt rules. Val(p) uses fmt.decimal rounding; None retains current float text. No new precision limit is added. The same formatter applies recursively, with explicit custom Debug text opaque.",
+          "code": "// Proposed Core API:\nPrintBase: enum { Binary Octal Decimal Hex }\nPrintStyle: struct {\n    int_base: PrintBase{.Decimal}\n    int_min_digits: Int{0}\n    float_digits: Int?{None}\n    list_separator: String{\", \"}\n    field_names: Bool{true}\n}\n// app.jet, proposed:\nuse term: core.term\nrun: fn() {\n    print(255)\n    #Context(print: term.PrintStyle{int_base: .Hex, int_min_digits: 4}) {\n        print(255)\n        print([1, 2, 3])\n        print(\"x = {255}\")\n    }\n    print(255)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Typed numeric formatter callbacks",
+          "detail": "Replace the three numeric settings with integer and floating callbacks. Keep list_separator and field_names. The same formatter walks containers and invokes the appropriate pure callback for each number. This supports application-specific numeric text without Any or runtime reflection.",
+          "technical": "PrintStyle.integer is fn(Int) -[]> String; floating is fn(Float) -[]> String. Defaults use context-free interpolation. Fixed-width integers widen exactly to Int; Float32 widens to Float. Callback results are final text, never formatted again. Effects are checked at assignment. Recursive print calls cannot satisfy the pure callback row. Costs include indirect calls and callback-produced strings.",
+          "code": "// Proposed Core API:\ndefault_integer: fn(n: Int) -[]> String { \"{n}\" }\ndefault_float: fn(n: Float) -[]> String { \"{n}\" }\nPrintStyle: struct {\n    integer: fn(Int) -[]> String{default_integer}\n    floating: fn(Float) -[]> String{default_float}\n    list_separator: String{\", \"}\n    field_names: Bool{true}\n}\n// app.jet, proposed:\nuse { term: core.term, fmt: core.text.fmt }\nhex4: fn(n: Int) -[]> String { fmt.hex(n, 4) }\nrun: fn() {\n    print(255)\n    #Context(print: term.PrintStyle{integer: hex4}) {\n        print(255)\n        print([1, 2, 3])\n        print(\"x = {255}\")\n    }\n    print(255)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Explicit formatting only",
+          "detail": "Remove context.print from the approved context design and use existing fmt functions at each changed output. The same program produces the same lines, with no hidden formatting input. Library calls cannot inherit a style automatically; an expert must pass formatting choices explicitly where needed.",
+          "technical": "Amend D-CONTEXT1 and D-JAI-CONTEXT1 to remove this field and term.PrintStyle. Other context fields are untouched. No new print API or second formatter is introduced. Interpolation and existing formatting calls retain their current semantics.",
+          "code": "use fmt: core.text.fmt\nrun: fn() {\n    print(255)\n    print(fmt.hex(255, 4))\n    digits: loop n in [1, 2, 3] -> fmt.hex(n, 4)\n    print(\"[{digits.join(\", \")}]\")\n    print(\"x = {255}\")\n    print(255)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Simple fields make the common choices inspectable data. Reusing existing numeric formatting avoids new rounding rules, callbacks, and a general printable-value interface.",
+        "gains": [
+          "Unchanged default output",
+          "One shared formatting policy",
+          "Visible block-level customization"
+        ],
+        "losses": [
+          {
+            "loss": "Implicit defaults can affect distant print calls.",
+            "mitigation": "Keep one task-owned carrier, expose context.print, and leave explicitly prepared String values unchanged."
+          },
+          {
+            "loss": "Five fields cannot express every custom numeric rendering.",
+            "mitigation": "Use the existing explicit formatting functions for exceptions; do not add a second callback mechanism alongside A."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Typed callbacks are a complete, stronger alternative for custom numeric output, but add indirect calls and make the policy code rather than simple data."
+          },
+          {
+            "key": "C",
+            "reason": "Explicit formatting is easiest to trace locally, but cannot provide the already requested inherited print defaults to library calls."
+          }
+        ],
+        "tradeoff": "A favors inspectable common defaults, not arbitrary formatting code. Output expansion still costs memory; no speed or zero-allocation claim is made."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review1. Replaced invalid integer bases with an enum, reused existing rounding, replaced the undefined Any callback with typed hooks, and added the explicit-formatting alternative."
+      },
+      "checkInstructions": "Seed-t19: explicit option C ran with all five shared lines exactly as shown. fmt.decimal(0.125, 2) printed 0.13. The proposed Context print field gives E0761; neither context option is claimed to run.\n\nTest the shared lines on O0/O1/O2, default output identity, restoration on every exit, task inheritance and Context denial. Cover signed/fixed-width extremes, zero, non-finite floats, normalized precision, nested containers and custom Debug text. list_separator affects lists and tuples only; field_names removes generated struct labels, not custom text or type names. Interpolation stays context-free. Invalid enum cases need type errors and snapshots.",
+      "surface": {
+        "gist": "How should a block choose its default print formatting?",
+        "lesson": "A print style is a block's default display policy. Ordinary print output stays unchanged unless the block installs another style. Prepared strings and interpolation never consult it.",
+        "trio": {
+          "current": {
+            "note": "Explicit formatting works; the proposed print context field is refused by the probed compiler.",
+            "code": "print(fmt.hex(255, 4)) // 00ff\n#Context(print: ...) {} // probe: E0761"
+          },
+          "wild": {
+            "lang": "Design comparison",
+            "note": "Jai motivates inherited print defaults; explicit formatting keeps each choice at the call.",
+            "code": "// Inherited default: one block controls library print calls.\n// Explicit format: each call chooses its numeric text."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Simple fields",
+            "gist": "Five typed defaults, with existing numeric formatting rules.",
+            "gains": [
+              "Policy is inspectable data",
+              "No formatter callback"
+            ],
+            "losses": [
+              "Custom rendering still needs explicit formatting"
+            ],
+            "proposed": {
+              "code": "#Context(print: term.PrintStyle{\n    int_base: .Hex, int_min_digits: 4\n}) {\n    print(255) // 00ff\n    print([1, 2, 3]) // [0001, 0002, 0003]\n    print(\"x = {255}\") // x = 255\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Typed callbacks",
+            "gist": "Pure integer and float functions choose numeric text.",
+            "gains": [
+              "Custom numeric policies"
+            ],
+            "losses": [
+              "Indirect calls and returned strings"
+            ],
+            "proposed": {
+              "code": "hex4: fn(n: Int) -[]> String { fmt.hex(n, 4) }\n#Context(print: term.PrintStyle{integer: hex4}) {\n    print(255) // 00ff\n    print([1, 2, 3]) // [0001, 0002, 0003]\n    print(\"x = {255}\") // x = 255\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Explicit calls only",
+            "gist": "Remove the print context field; format each changed output.",
+            "gains": [
+              "Every format choice is local"
+            ],
+            "losses": [
+              "No inherited style for library print calls"
+            ],
+            "proposed": {
+              "code": "print(fmt.hex(255, 4))\ndigits: loop n in [1, 2, 3] -> fmt.hex(n, 4)\nprint(\"[{digits.join(\", \")}]\")\nprint(\"x = {255}\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use simple defaults for common needs and keep explicit formatting as the expert escape, without a second callback mechanism.",
+          "gains": [
+            "Default output preserved",
+            "Existing rounding rules reused"
+          ],
+          "losses": [
+            {
+              "loss": "A block affects library print calls.",
+              "mitigation": "Make the style readable and task-owned; prepared strings remain unchanged."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Callbacks offer more control but hide the formatting policy inside functions."
+            },
+            {
+              "key": "C",
+              "reason": "Local formatting is clear but cannot carry inherited defaults."
+            }
+          ],
+          "tradeoff": "Common defaults as data; unusual output uses explicit formatting."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T05:11:07.052Z"
+    },
+    {
+      "id": "D-PACKAGE-MARKER1",
+      "cardId": "c03pi177",
+      "group": "syntax",
+      "title": "Give package markers one real place to be written",
+      "situation": "A package marker is a library rule that checks or generates code for a whole package. Jet has approved that target, but has not provided a place to attach the rule. A library can therefore advertise a package rule without an application being able to use it as intended. Beginners need one obvious home, and experts need the same checked package facts used by other compiler tools. Choose ordinary markers at the package record, a new inner-source spelling, or removal of the package target. We recommend ordinary markers at the existing package settings record.",
+      "gist": "Where should a marker that applies to an entire package be written?",
+      "lesson": "A marker's target is the thing it describes. A package target must be the whole package, not whichever field or source file happens to follow it. Its body receives package facts and adds normal code through the existing marker mechanism.",
+      "explainer": "",
+      "story": "Mia's audit library defines Stamp, a package marker that adds stamp_package. An application named shop applies it with the label package. Every option below prints package saw shop. C writes that answer manually and explicitly gives up the automatic package check.",
+      "inWild": "A source-file inner attribute is a familiar alternative to a settings-file header; B considers that organization. A keeps whole-package settings together. These are design comparisons, not claims that another language offers Jet's typed PackageInfo contract.",
+      "detail": "D-MARKER-TARGETS1=A authorizes a Package target; it does not choose its placement. Core/Compiler/Lang.jet declares Site.Package, and Prelude/Markers.jet lists it for Policy. Neither proves package applications are produced. RuleSite.Package in MarkerRules.jet:108 is only a display case.\n\nPackageInfo's existing fields are name, identity, types and functions. The producer in JetEval CompilerServices.jet:692 currently emits a PackageInfo-shaped record per registration module, using that module's name. Reusing that loop unchanged would mislabel a module as a package. All options retaining package markers require one correct package-identity grouping shared by reflection, build code and marker expansion. Facts are the checked package's written declarations; generated items are excluded. No new package-only reflection representation or evaluator is authorized.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ordinary markers at the package record",
+          "detail": "Place normal #audit.Stamp lines above package.jet's fields. For an inline package record, put the same marker above package: { ... }. Beginners keep package settings in one place. Experts use qualified dependency markers; manifest dependency aliases resolve before the marker body is checked.",
+          "technical": "Header markers attach to Package, not the first field. Unknown names, lower misplaced headers and wrong sites are registered refusals. Resolve manifest literals first, then ordinary marker arguments and expansion after checked package facts exist. Expansion cannot change dependencies or manifest settings. Existing repeatability, collision and policy-combination rules apply. Both placements feed one Package application.",
+          "code": "// shop/Audit/package.jet\nname: \"audit\"\nversion: \"0.1.0\"\n// shop/Audit/audit.jet\nStamp: struct {\n    label: String\n    impl Marker {\n        sites: [.Package]\n        expand: fn(self, target: Target) {\n            seen: \"{self.label} saw {target.name}\"\n            stamp_package: fn() -> String { #{seen} }\n        }\n    }\n}\n// shop/package.jet: proposed header\n#audit.Stamp(\"package\")\nname: \"shop\"\nversion: \"0.1.0\"\ndeps: { audit: ./Audit }\n// shop/run.jet\nrun: fn() { print(stamp_package()) }\n// Proposed result: package saw shop"
+        },
+        {
+          "key": "B",
+          "name": "A file-level inner package marker",
+          "detail": "Write #!audit.Stamp at the top of run.jet. Source imports resolve its name as usual. The application still targets the whole package. This keeps library rules near application code and avoids extending the flat package.jet reader, but adds a new sigil and a source search for package policy.",
+          "technical": "#! followed by a marker path is new syntax, distinct from an operating-system shebang. Allow it before the first source item; collect applications by package identity, not file identity. Repeated non-repeatable markers across files use the existing duplicate rule. Repeatable markers keep existing behavior. Use the same PackageInfo and expansion path as A; no file-local approximation.",
+          "code": "// shop/Audit/package.jet\nname: \"audit\"\nversion: \"0.1.0\"\n// shop/Audit/audit.jet\nStamp: struct {\n    label: String\n    impl Marker {\n        sites: [.Package]\n        expand: fn(self, target: Target) {\n            seen: \"{self.label} saw {target.name}\"\n            stamp_package: fn() -> String { #{seen} }\n        }\n    }\n}\n// shop/package.jet\nname: \"shop\"\nversion: \"0.1.0\"\ndeps: { audit: ./Audit }\n// shop/run.jet: proposed inner marker\n#!audit.Stamp(\"package\")\nuse audit\nrun: fn() { print(stamp_package()) }\n// Proposed result: package saw shop"
+        },
+        {
+          "key": "C",
+          "name": "Remove package as a marker target",
+          "detail": "Amend D-MARKER-TARGETS1 and the package-marker contract to remove Package support for every marker, including Prelude markers. Keep package settings as ordinary manifest fields. The same visible answer is written explicitly; automatic package checking and generation are lost. This is a requirement change, not completion of the ninth site.",
+          "technical": "Remove Package from site declarations, applied-site checks and affected documentation without a compiler-only exception. Migrate Prelude policy metadata to the existing manifest configuration path. PackageInfo reflection remains available. A user declaring sites: [.Package] receives an ordinary registered error, never an accepted no-op.",
+          "code": "// shop/package.jet\nname: \"shop\"\nversion: \"0.1.0\"\n// shop/run.jet: explicit same result, no marker dependency\nstamp_package: fn() -> String { \"package saw shop\" }\nrun: fn() { print(stamp_package()) }\n// Prints package saw shop; no package rule ran."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A adds a missing attachment point to the existing marker mechanism. The package settings record supplies an obvious scope without a new sigil or a compiler-only target exception.",
+        "gains": [
+          "Whole-package settings stay together",
+          "Ordinary marker syntax and name resolution",
+          "One package fact producer"
+        ],
+        "losses": [
+          {
+            "loss": "Manifest loading must preserve marker applications for later checking.",
+            "mitigation": "Keep dependency loading literal; pass source-located applications into the existing sema and expansion pipeline."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is a real source-centric alternative, but introduces #!, must distinguish shebangs, and distributes package settings across files."
+          },
+          {
+            "key": "C",
+            "reason": "C is coherent only if Package is removed for built-ins too; it reverses the ratified ninth site and loses library package rules."
+          }
+        ],
+        "tradeoff": "A extends manifest loading, not the marker language. Correct package grouping is a shared implementation prerequisite, not a second reflection model."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review1. Added dependency-alias resolution, inline-package placement and cross-file repeatability; removed C's built-in-only exception and identified the module-as-package producer defect."
+      },
+      "checkInstructions": "Seed-t19: a #Policy package.jet header gave E1215 only in optional-receipt staging; jet check run.jet returned 0 and jet run run.jet printed 42. This is not package-marker support. C's explicit function ran and printed package saw shop; proposed expansions were not executed.\n\nFix shared package-identity grouping, then test genuine package fixtures on O0/O1/O2 and identical facts across marker, reflection and build. Cover aliases, inline packages, multiple modules/outputs, same-named dependencies, repeatability, collisions, missing facts and misplaced headers. Errors must be primary diagnostics. Update registries, formatting, editor syntax, docs and goldens. C must explicitly retire the ninth-site requirement.",
+      "surface": {
+        "gist": "Where should a whole-package marker be written?",
+        "lesson": "A package marker receives facts about the package and adds ordinary code. It must not silently describe one module or attach to the next settings field.",
+        "trio": {
+          "current": {
+            "note": "Package is listed as a target, but listing a target does not provide a usable attachment point.",
+            "code": "sites: [.Package]\n// A declaration of permission, not an application."
+          },
+          "wild": {
+            "lang": "Design comparison",
+            "note": "The main alternatives place package rules with settings or at the top of source.",
+            "code": "// Settings header: #audit.Stamp(\"package\")\n// Source inner form: #!audit.Stamp(\"package\")"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Package-record header",
+            "gist": "Use ordinary markers above package settings.",
+            "gains": [
+              "One obvious package-policy home",
+              "No new marker sigil"
+            ],
+            "losses": [
+              "Manifest reader must carry marker syntax"
+            ],
+            "proposed": {
+              "code": "// shop/package.jet\n#audit.Stamp(\"package\")\nname: \"shop\"\nversion: \"0.1.0\"\ndeps: { audit: ./Audit }\n// run.jet\nrun: fn() { print(stamp_package()) }\n// package saw shop"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Inner source marker",
+            "gist": "Add a new whole-package marker spelling in source.",
+            "gains": [
+              "Rules sit beside application code"
+            ],
+            "losses": [
+              "New sigil and cross-file collection"
+            ],
+            "proposed": {
+              "code": "// run.jet; same dependency and Stamp definition as A\n#!audit.Stamp(\"package\")\nuse audit\nrun: fn() { print(stamp_package()) }\n// package saw shop"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Remove the target",
+            "gist": "Drop Package for user and built-in markers alike.",
+            "gains": [
+              "No unused marker target"
+            ],
+            "losses": [
+              "Ratified whole-package rules are lost"
+            ],
+            "proposed": {
+              "code": "// No marker: write the same answer directly.\nstamp_package: fn() -> String { \"package saw shop\" }\nrun: fn() { print(stamp_package()) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Put whole-package rules beside whole-package settings and reuse ordinary markers, with one correct package fact producer.",
+          "gains": [
+            "No compiler-only exception",
+            "No new sigil"
+          ],
+          "losses": [
+            {
+              "loss": "Manifest syntax must reach the ordinary checker.",
+              "mitigation": "Preserve source locations and delay expansion until package facts are checked."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Source placement is valid, but needs a new sigil and package-wide file collection."
+            },
+            {
+              "key": "C",
+              "reason": "Removing the target abandons the approved package-marker capability."
+            }
+          ],
+          "tradeoff": "A loader change instead of another marker language."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T05:11:08.263Z"
     }
   ],
   "questions": [
@@ -198614,6 +199098,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T05:11:08.263Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PACKAGE-MARKER1",
+      "note": "Give package markers one real place to be written"
+    },
+    {
+      "at": "2026-11-11T05:11:07.052Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRINTSTYLE1",
+      "note": "Choose the defaults that context.print supplies to print"
+    },
+    {
+      "at": "2026-11-11T05:11:05.845Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMPUTED-ALIAS1",
+      "note": "Choose a type while building, without creating another type identity"
+    },
     {
       "at": "2026-11-11T04:54:39.970Z",
       "by": "Main",
