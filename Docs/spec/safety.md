@@ -6476,182 +6476,182 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 426,
+      "line": 440,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 594,
+      "line": 608,
       "column": 1,
       "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 644,
+      "line": 658,
       "column": 1,
       "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 718,
+      "line": 732,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 724,
+      "line": 738,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 729,
+      "line": 743,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 736,
+      "line": 750,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 740,
+      "line": 754,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 747,
+      "line": 761,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 757,
+      "line": 771,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 763,
+      "line": 777,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 932,
+      "line": 946,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 946,
+      "line": 960,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 960,
+      "line": 974,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 964,
+      "line": 978,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 968,
+      "line": 982,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 974,
+      "line": 988,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 980,
+      "line": 994,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 984,
+      "line": 998,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1009,
+      "line": 1023,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1016,
+      "line": 1030,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1194,
+      "line": 1208,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1198,
+      "line": 1212,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1202,
+      "line": 1216,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1209,
+      "line": 1223,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1213,
+      "line": 1227,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -7113,7 +7113,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/orchestrator/LaneCommit.jet",
-      "line": 204,
+      "line": 202,
       "column": 5,
       "reason": "signal 0 delivers nothing: it only asks whether a queued job's caller still runs"
     },
@@ -11104,32 +11104,32 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Process/Process.jet | 192:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 234:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 426:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 594:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
-| Core | Core/Sys/Sys.jet | 644:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
-| Core | Core/Sys/Sys.jet | 718:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 724:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 729:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 736:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 740:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 747:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 757:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 763:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 932:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 946:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 960:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 964:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 968:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 974:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 980:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 984:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1009:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1016:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1194:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1198:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1202:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 1209:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 1213:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 440:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 608:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 658:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 732:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 738:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 743:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 750:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 754:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 761:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 771:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 777:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 946:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 960:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 974:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 978:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 982:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 988:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 994:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 998:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1023:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1030:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1208:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1212:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1216:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1223:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1227:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1390:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1411:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
@@ -11195,7 +11195,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
 | Tools | Tools/agent/cache/Lanes.jet | 335:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
-| Tools | Tools/agent/orchestrator/LaneCommit.jet | 204:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
+| Tools | Tools/agent/orchestrator/LaneCommit.jet | 202:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
