@@ -22,12 +22,12 @@ run: fn() (XMLError | [FieldError])! {
     root: xml.root(document) ?? return
     name: xml.expanded_name(root) ?? return
     print(name.local)
-    print((xml.attribute(root, "id")) ?? "missing")
+    print(xml.attribute(root, "id") ?? "missing")
     children: xml.content(root) ?? return
     loop child in children {
         child_name: xml.expanded_name(child) ?? return
         print(child_name.local)
-        print((xml.attribute(child, "id")) ?? "missing")
+        print(xml.attribute(child, "id") ?? "missing")
     }
     catalog: xml.decode<Catalog>(source) ?? return
     print(catalog.book.len())

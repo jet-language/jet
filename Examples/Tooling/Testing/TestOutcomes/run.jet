@@ -39,13 +39,13 @@ run: fn() {
 
     // The drifting callback reads a random stream, so a replay of the same case gives a new answer.
     stream := random.rng(7)
-    drifting_model: (commands: [Push]) -> Dyn.Int((stream).int(0, 1000000))
+    drifting_model: (commands: [Push]) -> Dyn.Int(stream.int(0, 1000000))
     if testing.histories<Push>(seed: 1, cases: 3, model: drifting_model, actual: total, observe: observe) == {
         .Ok(comparison) -> show("drifting model", comparison)
         .Err(error) -> print("drifting model: {error.message}")
     }
     other := random.rng(7)
-    drifting_candidate: (commands: [Push]) -> Dyn.Int((other).int(0, 1000000))
+    drifting_candidate: (commands: [Push]) -> Dyn.Int(other.int(0, 1000000))
     if testing.histories<Push>(seed: 1, cases: 3, model: total, actual: drifting_candidate, observe: observe) == {
         .Ok(comparison) -> show("drifting candidate", comparison)
         .Err(error) -> print("drifting candidate: {error.message}")

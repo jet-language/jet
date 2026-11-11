@@ -8,7 +8,7 @@ add: fn(a: Int, b: Int) -> Int {
     """int64_t add(int64_t a, int64_t b) { return a + b; }"""
 }
 
-jet_add: fn(a: Int, b: Int) -> Int { (a + b) }
+jet_add: fn(a: Int, b: Int) -> Int { a + b }
 
 #[Unsafe("the scalar ABI contract deliberately returns a mismatched result"), FFI(c)]
 wrong_add: fn(a: Int, b: Int) -> Int {
@@ -25,7 +25,7 @@ run: fn() {
     loop n in -100..100 {
         #Unsafe("call the audited inline C contract with bounded Int values") {
             assert_eq(add(n, 22), jet_add(n, 22))
-            assert((add(n, 22) == jet_add(n, 22)))
+            assert(add(n, 22) == jet_add(n, 22))
         }
     }
     .expect_fail {

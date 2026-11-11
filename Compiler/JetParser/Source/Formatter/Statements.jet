@@ -1494,11 +1494,7 @@ jfmt_fmt_switch_cond: fn(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr,
 }
 
 jfmt_switch_cond_slot: fn(op: BinOp, child: Expr, base: Int) -> Int Never! {
-    if op == BinOp.Or {
-        if child == .Binary(child_op, _, _, _, _) {
-            if child_op == BinOp.And -> return jfmt_prec_add_rhs(jfmt_prec_of_bin(BinOp.And))
-        }
-    }
+    if op == BinOp.Or && jfmt_is_and_operand(child) -> return jfmt_prec_add_rhs(jfmt_prec_of_bin(BinOp.And))
     base
 }
 

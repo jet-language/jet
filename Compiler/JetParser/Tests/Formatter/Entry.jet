@@ -1,6 +1,6 @@
 // Composed formatter proofs require the complete formatter SCC, not mocks.
 use {
-    jet_parser.[jet_format_source, jfmt_format_program_with_tokens, parse_source]
+    jet_parser.[jet_format_redundant_grouping, jet_format_source, jfmt_format_program_with_tokens, parse_source]
     jet_lexer.[Token, lex]
     jet_foundation.[AST_NODE_GENERATED, Expr, Item, Stmt, TryConvert, expr_span]
 }
@@ -105,4 +105,35 @@ run: fn() {
         "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
         "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
     ] -> assert_eq(fmt_core_stable(source), source)
+}
+
+// The grouping census reports exactly the parens precedence does not need:
+// a comparison under a comparison, `&&` under `||`, a prefix operator under
+// another, a literal receiver and a pair that spans lines all stay. So do a
+// fallback left of `??`, a typed literal that would meet an `if` body, and an
+// interpolated string that would become a string pattern.
+#Test("redundant_grouping_reports_only_parens_precedence_does_not_need") {
+    source: `run: fn(a: Int, b: Int, c: Int, xs: [Int], ok: Bool, o: Int?) {
+    p: (a * b) + c
+    q: (a + b) * c
+    r: a - (b - c)
+    s: (a - b) - c
+    t: (a < b) == ok
+    u: (ok && ok) || ok
+    v: -(-a)
+    w: (xs.len())
+    x: (0..a).len()
+    y: (a
+        + b)
+    z: ((c))
+    m: (o ?? a) ?? b
+    n: "{a}" == ("{b}x")
+    if (I32{1} == b) -> print("one")
+    if (ok) { print("{(a + b)}") }
+}
+`
+    spans: jet_format_redundant_grouping(source) ?? panic("census parses its source")
+    found: (loop span in spans -> source.slice(span.start..<span.end))
+    assert_eq(found, [String]{"(a * b)", "(a - b)", "(xs.len())", "((c))", "(c)", "(ok)", "(a + b)"})
+    assert(jet_format_redundant_grouping("run: fn() {{ x: ( }}\n") == None)
 }

@@ -3,7 +3,7 @@
 use {
     jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
     jet_foundation.[CORE_MODULE_EXPORTS]
-    jet_parser.[parse_source, jfmt_stmt_span]
+    jet_parser.[parse_source, jfmt_stmt_span, jet_format_redundant_grouping]
     jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_pkg_model.[PackageFacts]
     policy_ast_files: core.files
@@ -161,9 +161,10 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
                         stack.push(PolicyWalkNode.Expression{value: condition})
                         stack.push(PolicyWalkNode.Expression{value: init.init})
                     }
-                    .TaskGroup(_, _, limit, body, _) -> {
+                    .TaskGroup(_, _, args, body, _) -> {
                         policy_push_body(stack, body)
-                        if limit == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
+                        if args.limit == .Val(limit) -> stack.push(PolicyWalkNode.Expression{value: limit})
+                        if args.stack == .Val(size) -> stack.push(PolicyWalkNode.Expression{value: size})
                     }
                     .ContextBlock(fields, body, _) -> {
                         policy_push_body(stack, body)
@@ -2188,4 +2189,35 @@ policy_ast_test_declared_config_exclusion: fn() PolicyError! {
 #Test("declared_package_config_dirs_leave_the_corpus") {
     guards_enter_root()
     policy_ast_test_declared_config_exclusion() ?? panic("{err.message}")
+}
+// #3173: Examples teach without grouping parentheses that precedence already
+// implies. The formatter's precedence table decides redundancy, so this guard
+// and `jet fmt` cannot disagree. Sources the formatter does not accept are
+// left to the corpus parse gates.
+policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
+    sites := [String]{}
+    loop item in policy_ast_files.walk_files(root) {
+        entry: item ?? return Err(PolicyError{message: "walk {root}: {err}"})
+        if !entry.path.ends_with(".jet") -> next
+        source: policy_ast_files.read(entry.path) ?? return Err(PolicyError{message: "read {entry.path}: {err}"})
+        spans: jet_format_redundant_grouping(source) ?? next
+        if spans.len() == 0 -> next
+        bytes: source.bytes()
+        line := 1
+        at := 0
+        loop span in spans {
+            loop at < span.start {
+                if bytes[at] == 10 -> line += 1
+                at += 1
+            }
+            text: String.from_bytes(bytes[span.start..<span.end]) ?? "?"
+            sites.push("{entry.path}:{line}: {text}")
+        }
+    }
+    Ok(sites)
+}
+#Test("examples_have_no_redundant_grouping_parentheses") {
+    guards_enter_root()
+    sites: policy_redundant_grouping_sites("Examples") ?? panic("{err.message}")
+    assert(sites.len() == 0, "redundant grouping parentheses in Examples:\n{sites.join("\n")}")
 }

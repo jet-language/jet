@@ -62,7 +62,7 @@ run: fn() {
     loop row in rows {
         start: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
         size := 1
-        loop _ in 0..<(32 - row.prefix) -> size = size * 2
+        loop _ in 0..<32 - row.prefix -> size = size * 2
         end: start + size - 1
         check_address(start, row.global)
         check_address(end, row.global)

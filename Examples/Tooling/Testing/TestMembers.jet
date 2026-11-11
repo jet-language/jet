@@ -1,7 +1,7 @@
 // Contextual scope members inside a `#Test` block.
 // `.setup` / `.expect_fail` / `.timeout` / `.skip` are the vocabulary a
 // `#Test` block declares; each is a `.name { … }` region, run by `jet test`.
-double: fn(n: Int) -> Int { (n * 2) }
+double: fn(n: Int) -> Int { n * 2 }
 
 run: fn() { print("{double(3)}") }
 
@@ -17,7 +17,7 @@ run: fn() { print("{double(3)}") }
 // execution continues after the region.
 #Test("expect_fail region must fail") {
     .expect_fail {
-        assert((1 == 2), "one is not two")
+        assert(1 == 2, "one is not two")
     }
     assert_eq(double(2), 4)
 }

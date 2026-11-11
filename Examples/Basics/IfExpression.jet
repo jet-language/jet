@@ -1,4 +1,5 @@
-// `if` as a value, and optional condition parens.
+// `if` as a value: ordered arm tables, distributed comparison markers and
+// one-line branches.
 classify: fn(n: Int) -> String {
     // An ordered arm table produces one value; `else` makes it exhaustive.
     if {
@@ -43,16 +44,16 @@ run: fn() {
     // A branch may run statements before its trailing value.
     note: if {
         a > b -> {
-            diff: (a - b)
+            diff: a - b
             "a leads by {diff}"
         }
         else -> "b leads"
     }
     print(note)
     print(classify(7))
-    print(classify((-4)))
+    print(classify(-4))
     print(classify(0))
-    // Optional parens around a condition are accepted (jet fmt removes them).
+    // A one-line effect branch needs no braces.
     if a > b -> print("a is bigger")
     print("{hi_band(20)}")
     print(hex_nibble(10))
@@ -62,8 +63,8 @@ run: fn() {
         else -> "big"
     }
     print(band)
-    // A parenthesized branch value is the same value as the bare one.
-    span: if a > b -> (a - b) else -> (b - a)
+    // A branch value is a whole expression: `->` binds looser than `-`.
+    span: if a > b -> a - b else -> b - a
     print("span is {span}")
 }
 

@@ -26,7 +26,6 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [MixedTypes](MixedTypes.jet)
 - [Modulo](Modulo.jet) — Two remainders.
 - [MoreMath](MoreMath.jet)
-- [NegatedDecimalLiteral](NegatedDecimalLiteral.jet) — Parentheses preserve exact Decimal literal negation.
 - [NumericFloor](NumericFloor.jet) — Numeric floor flagship for Examples/Math/.
 - [NumericMethods](NumericMethods.jet) — One numeric meaning on AOT, run, and compile time.
 - [PowerOperator](PowerOperator.jet) — Power is a numeric method; ^ only hands over ownership.

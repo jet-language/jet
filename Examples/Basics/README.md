@@ -18,7 +18,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [FirstHourExpert](FirstHourExpert.jet) — Expert variant of FirstHour.jet.
 - [FizzBuzz](FizzBuzz.jet)
 - [Hello](Hello.jet) — Your first program: `run: fn` is the explicit entry.
-- [IfExpression](IfExpression.jet) — `if` as a value, and optional condition parens.
+- [IfExpression](IfExpression.jet) — `if` as a value: ordered arm tables, distributed comparison markers and one-line branches.
 - [IfUniversal](IfUniversal.jet) — `if` is the one branching keyword.
 - [InterpDebugLabel](InterpDebugLabel.jet) — Trailing `=` reprints the expression text, then " = ", then the value.
 - [LabeledLoops](LabeledLoops.jet) — a loop can carry a compile-time name, `break(name)` and `next(name)` target it from inside a nested loop.

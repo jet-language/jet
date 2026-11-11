@@ -126,6 +126,10 @@ JetFmt: struct {
     // How many interpolation holes (`"…{value}…"`) the writer is inside; a
     // hole's value never breaks across lines.
     interp_depth: Int{0}
+    // Census mode (`jet_format_redundant_grouping`): author grouping parens
+    // the printed precedence does not need are left out, their spans kept.
+    drop_grouping: Bool{false}
+    dropped_grouping: [Span]{[Span]{}}
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
@@ -1659,6 +1663,10 @@ jfmt_fmt_expression_rule: fn(f: &JetFmt, span: Span) -> Bool {
 // Rust `format_program_with_tokens`; comments come from the source tokens.
 jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> String {
     f := jfmt_new(prog, src, source_toks, simplify)
+    jfmt_format_program_with(f, prog)
+}
+
+jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
     first := true
     ordered_file_rules := [Marker]{}
     loop application in prog.applied_rules {
@@ -1883,6 +1891,30 @@ jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult 
     // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
     JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
+}
+
+// The source spans of author grouping parentheses that the printed
+// precedence does not need, in source order: `(a * b) + c` reports
+// `(a * b)`, `(a + b) * c` reports nothing. Parens that span lines stay.
+// None when the source does not lex or parse.
+jet_format_redundant_grouping: fn(src: String) -> [Span]? {
+    source: src.bytes()
+    lexed: lex(source)
+    if lexed.diagnostics.len() > 0 -> return None
+    parsed: parse_source(source)
+    if !jfmt_fmt_parse_accepts(parsed.diagnostics) -> return None
+    f := jfmt_new(parsed.program, src, lexed.tokens, false)
+    f.drop_grouping = true
+    _ := jfmt_format_program_with(f, parsed.program)
+    // A layout tried and rolled back visits the same parens again.
+    spans := [Span]{}
+    loop span in f.dropped_grouping {
+        at := 0
+        loop at < spans.len() && spans[at].start < span.start -> at += 1
+        if at < spans.len() && spans[at].start == span.start -> next
+        spans.insert(at, span.copy())
+    }
+    Val(spans)
 }
 
 jfmt_lines: fn(text: String) -> [String] Never! {

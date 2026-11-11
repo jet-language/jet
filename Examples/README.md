@@ -147,18 +147,18 @@ kept only as evidence that a card closed belong in `tests/run` or
 
 ## Current-law teaching manifest
 
-This finite manifest ties selected teaching sources to the rule they show, the
-checked-in UI or golden snapshot, and a command that exercises the same source.
-The [syntax decisions](../Docs/spec/syntax-decisions.md) page supplies the
-normative language contract.
+This finite manifest ties five teaching sources to the rule each shows, the
+[syntax decisions](../Docs/spec/syntax-decisions.md) entries that make that
+rule normative, the checked-in UI or golden snapshot, and a command that runs
+the same source.
 
-| Source | Rule it demonstrates | UI/snapshot check | Command |
-| --- | --- | --- | --- |
-| [`Basics/LoopForms.jet`](Basics/LoopForms.jet) | One `loop` keyword covers infinite, conditional, source, mixed list/map iterables, and inclusive or exclusive ranges; `next` advances the source. | [`Basics/LoopForms.out`](Basics/LoopForms.out) | `target/debug/jet run Examples/Basics/LoopForms.jet` |
-| [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | An immutable loop binding cannot mutate the collection it reads; E0507 keeps the traversal domain and repair intent explicit. | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `target/debug/jet check tests/ui/list_loop_mutate.jet` |
-| [`ErrorsAndEffects/Errors/Errors.jet`](ErrorsAndEffects/Errors/Errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are distinct routes. | [`ErrorsAndEffects/Errors/Errors.out`](ErrorsAndEffects/Errors/Errors.out) | `target/debug/jet run Examples/ErrorsAndEffects/Errors/Errors.jet` |
-| [`ErrorsAndEffects/Errors/TypedErrorFamilies.jet`](ErrorsAndEffects/Errors/TypedErrorFamilies.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | [`ErrorsAndEffects/Errors/TypedErrorFamilies.out`](ErrorsAndEffects/Errors/TypedErrorFamilies.out) | `target/debug/jet run Examples/ErrorsAndEffects/Errors/TypedErrorFamilies.jet` |
-| [`Memory/ScopeGuard.jet`](Memory/ScopeGuard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | [`Memory/ScopeGuard.out`](Memory/ScopeGuard.out) | `target/debug/jet run Examples/Memory/ScopeGuard.jet` |
+| Source | Rule it demonstrates | Normative decisions | UI/snapshot check | Command |
+| --- | --- | --- | --- | --- |
+| [`Basics/LoopForms.jet`](Basics/LoopForms.jet) | One `loop` keyword covers infinite, conditional, source, list-pair, map-pair and index-only loops, inclusive and exclusive ranges, strides and countdowns, and eager value-position collection; `next` advances the source and `break` leaves. | S19 loops (D-LOOP-HEADER2, D-LOOP-ADVANCE2, D-LOOPEVAL1, D-COMPREHENSION1, D-LOOP-COMMA1, D-LOOP-IN1), D-LOOP-SUBJECT1, S22/S72 ranges with D-RANGE-EXCL1 and D-RANGE-BACKWARD1, S23 loop control | [`Basics/LoopForms.out`](Basics/LoopForms.out) | `jet run Examples/Basics/LoopForms.jet` |
+| [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | While a loop reads `nums`, its body may not change `nums`; E0507 asks for one intent: a separate result, a fixed snapshot, or an explicit work queue. The recorded repair [`list_loop_mutate.fixed.jet`](../tests/ui/list_loop_mutate.fixed.jet) is the legal form: a fixed index domain computed once. | S19 (the source is evaluated once and read for the whole body, D-LOOPEVAL1); E0507 `jet.CollectionChangedWhileRead` | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `jet check tests/ui/list_loop_mutate.jet` |
+| [`ErrorsAndEffects/Errors/Errors.jet`](ErrorsAndEffects/Errors/Errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern table are distinct routes. | S7 propagation, S34 failure-returning return, S71 `??` fallback, D-FAIL-MODEL1, D-FAIL-CARRIER1, S68 `if` arm tables | [`ErrorsAndEffects/Errors/Errors.out`](ErrorsAndEffects/Errors/Errors.out) | `jet run Examples/ErrorsAndEffects/Errors/Errors.jet` |
+| [`ErrorsAndEffects/Errors/TypedErrorFamilies.jet`](ErrorsAndEffects/Errors/TypedErrorFamilies.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | D-FAIL-CONV1, S7 propagation, S71 `??` fallback | [`ErrorsAndEffects/Errors/TypedErrorFamilies.out`](ErrorsAndEffects/Errors/TypedErrorFamilies.out) | `jet run Examples/ErrorsAndEffects/Errors/TypedErrorFamilies.jet` |
+| [`Memory/ScopeGuard.jet`](Memory/ScopeGuard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | S63 / D-SHAPE-RESOURCE1 / D-SHAPE-RESOURCE2 resource cleanup, S7 propagation, S71 `??` fallback | [`Memory/ScopeGuard.out`](Memory/ScopeGuard.out) | `jet run Examples/Memory/ScopeGuard.jet` |
 
 [`Basics/StructCallWord.jet`](Basics/StructCallWord.jet) demonstrates
 fixed-width FNV results in record fields, direct and wrapper calls, and record
