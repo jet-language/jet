@@ -875,7 +875,7 @@ io_err: fn(operation: String, path: String, message: String) -> IOError Never! {
 
 // Public checkpoints precede OS work exactly once, not once per raw leaf.
 file_fault: fn(operation_path: String, operation: IOOperation, path: String) IOError! {
-    if core.testing.__fault_should_fail(operation_path) {
+    if rt.fault_should_fail(operation_path) {
         return Err(IOError.Other(IOContext{
             operation: operation.copy(), resource: Val(path), os_code: None,
             cause: Val("fault injected: {operation_path}"),
@@ -886,7 +886,7 @@ file_fault: fn(operation_path: String, operation: IOOperation, path: String) IOE
 
 // Boolean metadata probes answer `false` for any failed probe, so an injected
 // FS.Read fault (the same checkpoint `stat` takes) answers `false` too.
-read_probe_fault: fn() -> Bool Never! { core.testing.__fault_should_fail("FS.Read") }
+read_probe_fault: fn() -> Bool Never! { rt.fault_should_fail("FS.Read") }
 
 file_writer_refusal: fn(path: String) IOError! -[FS.Write]> {
     if core.files.__writer_refusal(path) == {
@@ -3006,7 +3006,7 @@ file_utf8_error: fn(bytes: [U8]) -> String Never! {
 // refill/position and retries Interrupted reads; the source owns the public
 // fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
 __reader_read_line: fn(reader: &FileReader) -[FS.Read]> String? IOError! {
-    if core.testing.__fault_should_fail("FS.Read") {
+    if rt.fault_should_fail("FS.Read") {
         return Err(IOError.Other(IOContext{
             operation: .Read, resource: Val(core.files.__reader_path(reader)),
             os_code: None, cause: Val("fault injected: FS.Read"),
