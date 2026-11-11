@@ -18,7 +18,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 CORE_PRELUDE_PATH: "Compiler/Prelude/Core.jet"
@@ -671,12 +670,4 @@ census_main: fn(args: [String]) -[FS]> String CensusError! {
     assert_eq(problems.join("\n"), "")
 }
 
-run: fn() {
-    if census_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(census_main(process.args()) ?? process.fail(1, err.message)) }
