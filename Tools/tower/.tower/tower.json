@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99475,
+    "rev": 99483,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39528,11 +39528,11 @@
         {
           "n": 200,
           "text": "The Jetpack areas pass can't delete the source tree. On 2026-11-11, train t22's integ tree vanished mid-run while Jetpack/Bootstrap/Check.jet --each ran EnvModel and PackageModel with cwd and JET_TOOLCHAIN_ROOT set to the tree, and with an empty-scratch cwd the same pass kept it. The root cause is named, every recursive remove reached by bootstrap checks, area tests and comptime bodies refuses a path it didn't create (the tree, cwd, an empty or relative join), the pass never uses the source tree as cwd, and a #Test proves the guard.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T10:07:00.157Z"
+          "evidence": "G8Scope-8 f1db6cb696: no Jetpack bootstrap child runs in the source tree, and project remove refuses what it didn't create (PROJECT_NAMES is a kernel.tsv soundness row). Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:08.542Z"
         }
       ],
       "refs": [
@@ -39554,7 +39554,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-11T10:51:44.260Z",
+      "updated": "2026-11-11T14:10:08.543Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -46643,20 +46643,20 @@
         {
           "n": 24,
           "text": "(was #3143) [retarget] Capability-bearing function types and fully annotated lambda parameters keep Read/Write/Take through every call form; write and take are observable in a golden",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:23.843Z"
+          "evidence": "G1Lead-4-callable-r 49c50ee2dc: a function type marks a written & or taken && parameter, and lambda parameters carry or inherit the marks. Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:01.956Z"
         },
         {
           "n": 25,
           "text": "(was #3143) A fixture proves that a fully annotated `fn(buf: &[Int])` function type and a matching lambda keep Write access through a named, closure, generic and wrapper call: `jet test Compiler --profile golden callable/callable_access_contracts` passes on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:58:08.375Z"
+          "evidence": "G1Lead-4-callable-r 49c50ee2dc: tests/run/callable/callable_access_contracts covers the named, marked, capturing, generic-forwarder and struct-field cases. Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:03.291Z"
         },
         {
           "n": 26,
@@ -46769,7 +46769,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:26:03.045Z",
-      "updated": "2026-11-11T05:21:35.480Z",
+      "updated": "2026-11-11T14:10:03.291Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -71107,11 +71107,11 @@
         {
           "n": 60,
           "text": "D-EFFECT-ARGS1=A is built. An effect argument names a scope from the Core scope types: a folder (FS.Read(\"templates/\")), a host (Net(\"api.example.com\")) or a device. One covers rule from those types decides coverage for effect rows, run grants (--allow) and denials. A mediated call checks its scope at run time. The rule works on every tier (O0, O1, O2), with an executable golden example and UI snapshots for each refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T04:52:20.082Z"
+          "evidence": "G8Scope-1b 3c190cd44e (review finding, part 2 of 2): the compiler's covers is the runtime's one covers rule over the Core scope types. The interim CI_ALLOWED row is removed by the follow-up on #6615 c11 (G8Scope-1c/1d). Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:07.238Z"
         },
         {
           "n": 61,
@@ -71131,7 +71131,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-11T04:52:45.181Z",
+      "updated": "2026-11-11T14:10:07.238Z",
       "updatedBy": "Main",
       "criteriaLastN": 61
     },
@@ -74535,11 +74535,11 @@
         {
           "n": 130,
           "text": "Owner ruling 2026-11-09 (language review): `shared` is a type, not a keyword. A shared holder is built like every other typed value, `Shared{value}` (T inferred from the value), in a binding, a field initializer or a module-level declaration; the `shared value` keyword form is removed from the parser and the syntax registry with no teaching diagnostic and no jet fix rule for the old spelling (the old form gets only the parser's ordinary error, as for any unknown word), and every use in Core, Compiler, Jetpack, Tools, Examples and tests is migrated in the same cutover. Behavior (locking, handle copies, task crossing, the cycle rule) is unchanged by this criterion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T00:15:43.748Z"
+          "evidence": "eacf498cb2 (1/2: Shared{value} builds a shared cell) plus G1Lead-4-c130b-r 69b53aeb82 (2/2: Shared{value} is the only spelling; shared leaves the parser and the syntax registries). Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:00.727Z"
         },
         {
           "n": 131,
@@ -74923,20 +74923,20 @@
         {
           "n": 173,
           "text": "A lambda passed to filter, map or sort_by that calls an infallible user function (score, row_key, adapter_descriptor in Tools/agent-eval/RunColdContext.jet) no longer makes the enclosing function fallible. Effect inference uses the callee's inferred effect, as it already does for Core calls like `str`. Found by G8Scope, 2026-11-11, on seed-t21. Proven by a case with a user helper called in each of filter/map/sort_by lambdas whose enclosing function is declared without `!`, checked on O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T09:03:07.925Z"
+          "evidence": "G8Scope-4 0bf2b6a459: a callback that calls an unannotated function takes that function's inferred effects. Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:04.650Z"
         },
         {
           "n": 174,
           "text": "Inside a lambda, a call to a file-level function named `text` resolves to that function and takes its inferred (infallible) effect. Today the name binds to something else and is typed as fallible, while the identical body under another name checks clean. Found by G8Scope, 2026-11-11. Proven by a case with the repro plus a UI snapshot if any shadowing diagnostic applies.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T09:03:09.867Z"
+          "evidence": "G8Scope-4 0bf2b6a459 (same SUB as c173). Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:10:05.964Z"
         },
         {
           "n": 175,
@@ -75019,7 +75019,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T12:41:34.775Z",
+      "updated": "2026-11-11T14:10:05.964Z",
       "updatedBy": "Main",
       "criteriaLastN": 182
     },
@@ -96586,11 +96586,11 @@
         {
           "n": 4,
           "text": "I1 use-after-free in safe Jet, found by G1Lead4 on seed-t21, 2026-11-11 ($JET_SCRATCH_ROOT/lanes/G1Lead-4/out/miscompile-push-break.jet). Inside `loop item in items { path: \"dir/{item}\"; loop _ in 0..<2 { out.push(path); break } }`, `out` ends up holding freed text (it prints `got  ,got  ,got  ` instead of `dir/c,dir/b,dir/a`): the break path frees `path` after push has moved or shared it into `out`. Same class as c-branch moves, a move on one control path carried onto another. The fix is in the shared lowering of moves and drops across break and continue edges, not in this loop shape. The repro becomes a case printing the right list on O0/O1/O2, plus variants with continue, a labeled outer break, `?? return` and a `match` arm exit, all under the leak and sanitizer checks.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T08:37:51.280Z"
+          "evidence": "G3Ctx-15 a32aeb5757: a break edge carries its own ownership to the loop's exit, so the push-then-break pattern no longer frees a held value. Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:09:59.324Z"
         }
       ],
       "refs": [],
@@ -96599,7 +96599,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:13:43.430Z",
-      "updated": "2026-11-11T08:37:51.280Z",
+      "updated": "2026-11-11T14:09:59.324Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -197462,6 +197462,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T14:10:08.543Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uwol3w",
+      "note": "#200"
+    },
+    {
+      "at": "2026-11-11T14:10:07.238Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-11T14:10:05.965Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#174"
+    },
+    {
+      "at": "2026-11-11T14:10:04.650Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#173"
+    },
+    {
+      "at": "2026-11-11T14:10:03.291Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lr0kz",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-11T14:10:01.956Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lr0kz",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-11T14:10:00.727Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#130"
+    },
+    {
+      "at": "2026-11-11T14:09:59.324Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pxauid",
+      "note": "#4"
+    },
     {
       "at": "2026-11-11T14:08:07.326Z",
       "by": "Main",
