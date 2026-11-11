@@ -23,6 +23,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `use { … } / use alias: path` | import block (#6542): one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
+| `Name: enum { A, B(T) } / .A / Name.A` | enum declaration: its cases are written bare and separated as struct fields are; a value or pattern names a case with its leading dot where the type is known (`.A`) or with the enum's name (`Name.A`); a dotted declaration is not Jet syntax |
 | `#` | attached marker; #[A, B] stacks |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
@@ -1036,6 +1037,13 @@ Dispatch-arm and nested leading-dot patterns retain their own pattern grammar.
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
 Value position too when the expected type is known (`.Red`; E0330 fallback).
 `Color.Red` always valid.
+
+**D-ENUM-DOT1=B — Declared cases stay bare** *(ratified 2026-11-06, card
+#6251)*: an enum declaration writes its cases without the dot, as a struct
+writes its fields (`Shape: enum { Circle(Float), Empty }`); only values and
+patterns take the leading dot. A dotted declaration (`Light: enum { .Red }`)
+is not Jet syntax: it gets the parser's ordinary missing-name error and no
+diagnostic that teaches it.
 
 **D-TAG1 — Nested variant groups** *(ratified 2026-07-03, card #181)*: a
 variant may enclose sub-variants in `{ }` to any depth (`Damage: enum {

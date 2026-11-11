@@ -1,0 +1,52 @@
+// #6251 c9: an enum declaration writes its cases bare, as a struct writes
+// its fields; values and patterns name a case with its leading dot (`.Red`)
+// or with the enum's name (`Light.Red`). A dotted declaration is not Jet: it
+// gets the parser's ordinary missing-name error and nothing that teaches it.
+use jet_foundation.[Program]
+
+enum_case_test_names: fn(program: Program) -> String {
+    names := [String]{}
+    loop item in program.items {
+        if item == .Enum(value) {
+            loop variant in value.variants -> names.push(variant.name)
+        }
+    }
+    names.join(" ")
+}
+
+#Test("enum cases, payload cases and grouped cases are declared bare") {
+    program: parser_test_program(`Signal: enum {
+    Stop
+    Go(speed: Int)
+    Warn { Soft Loud(level: Int) }
+}
+Shape: enum { Circle(Float), Empty }
+`)
+    assert_eq(enum_case_test_names(program), "Stop Go Warn.Soft Warn.Loud Circle Empty")
+}
+
+#Test("a dotted case declaration is not Jet syntax") {
+    sources: [String]{
+        `Light: enum {
+    .Red
+}
+`,
+        `Shape: enum { Circle(Float), .Empty }
+`,
+    }
+    loop source in sources {
+        diagnostics: parser_test_errors(source)
+        loop diagnostic in diagnostics {
+            if diagnostic.severity != 1 -> next
+            text: "{diagnostic.what} {diagnostic.why} {diagnostic.fix}"
+            assert(!text.contains("dot"), "no teaching diagnostic for a dotted case: {text}")
+        }
+    }
+}
+
+#Test("the formatter writes declared cases bare") {
+    formatted: parser_test_stable(`Shape: enum { Circle(Float), Empty }
+`)
+    assert(formatted.contains("Circle(Float)"), formatted)
+    assert(!formatted.contains(".Circle") && !formatted.contains(".Empty"), formatted)
+}
