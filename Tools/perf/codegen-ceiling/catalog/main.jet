@@ -1,0 +1,103 @@
+// The codegen catalog of Tools/perf/CodegenCeiling.jet (#6414 c15): small
+// kernels, one hot loop each, whose release machine code the gate counts.
+// `run` calls each one through a function value, so no kernel is inlined and
+// each keeps its own symbol (main_<kernel>, or a specialization of it).
+#CLI
+Args: struct {
+    n: Int
+}
+
+Point: struct {
+    x: Int
+    y: Int
+    z: Int
+}
+
+Data: struct {
+    xs: [Int]
+    at: [Int]
+    flags: [U8]
+    points: [Point]
+    text: String
+    start: Int
+}
+
+// A counted loop over a list by index: the bounds check is provably dead.
+list_sum: fn(data: Data) -> Int {
+    total := 0
+    loop i := 0, i < data.xs.len() {
+        total += data.xs[i]
+        i += 1
+    }
+    total
+}
+
+// An indexed gather: the inner index needs its bounds check.
+gather_sum: fn(data: Data) -> Int {
+    total := 0
+    loop i := 0, i < data.at.len() {
+        total += data.xs[data.at[i]]
+        i += 1
+    }
+    total
+}
+
+// A strided range over bytes.
+stride_sum: fn(data: Data) -> Int {
+    total := 0
+    loop m in 9..<data.flags.len(), 3 -> total += Int.from_u8(data.flags[m])
+    total
+}
+
+// Data-dependent branches with no closed form.
+collatz_steps: fn(data: Data) -> Int {
+    n := data.start
+    steps := 0
+    loop n != 1 {
+        if n % 2 == 0 -> n = n /% 2 else -> n = 3 * n + 1
+        steps += 1
+    }
+    steps
+}
+
+// A loop over structs read by field.
+point_sum: fn(data: Data) -> Int {
+    total := 0
+    loop p in data.points -> total += p.x + p.y + p.z
+    total
+}
+
+// A byte scan of a text.
+byte_count: fn(data: Data) -> Int {
+    count := 0
+    loop byte in data.text.bytes() {
+        if byte == 111 -> count += 1
+    }
+    count
+}
+
+// Allocator fast paths: every piece is a small box (jet_rt_alloc_8) freed
+// at the end of its pass (jet_rt_free_8).
+box_churn: fn(data: Data) -> Int {
+    total := 0
+    loop word in data.text.split(" ") {
+        piece: "<{word}>"
+        total += piece.len()
+    }
+    total
+}
+
+KERNELS: [String]{"list_sum", "gather_sum", "stride_sum", "collatz_steps", "point_sum", "byte_count", "box_churn"}
+
+run: fn(args: Args) {
+    data: Data{
+        xs: [Int]{3, 1, 4, 1, 5, 9, 2, 6}.cycle(args.n).to_list()
+        at: [Int]{7, 0, 5, 2, 6, 1, 3, 4}.cycle(args.n).to_list()
+        flags: [U8]{1}.cycle(args.n * 8).to_list()
+        points: [Point]{Point{x: 1, y: 2, z: 3}, Point{x: 4, y: 5, z: 6}}.cycle(args.n).to_list()
+        text: "the quick brown fox jumps over the lazy dog ".repeat(args.n)
+        start: args.n * 7 + 27
+    }
+    kernels: [fn(Data) -> Int]{list_sum, gather_sum, stride_sum, collatz_steps, point_sum, byte_count, box_churn}
+    loop index in 0..<kernels.len() -> print("{KERNELS[index]} {kernels[index](data)}")
+}

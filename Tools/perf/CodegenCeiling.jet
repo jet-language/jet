@@ -1,0 +1,351 @@
+#!/usr/bin/env jet
+// The codegen gate (#6414 c15): a golden machine-code catalog of small
+// kernels, counted from the release build. Tools/perf/codegen-ceiling/
+// catalog/main.jet holds the kernels. golden.tsv holds, per function, the
+// counts of the last accepted compiler and the hand-written ceiling of its
+// hot loop. The gate builds the catalog with `--release --debug-info=true`,
+// runs it against expected.out, and disassembles each function with
+// objdump. A row's symbol names the function exactly or as the prefix of a
+// specialized name (`main_list_sum` matches `main_list_sum__value_<hash>`).
+// It counts:
+// - insns: instructions in the function;
+// - pushes and pops: saves and restores of callee-saved registers;
+// - frame_slots: instructions that address a frame slot below rbp (spills,
+//   reloads, frame storage);
+// - loops: innermost loops (a loop is a backward jump and its target; an
+//   innermost one holds no other), so a kernel the backend versions into
+//   several copies counts each copy;
+// - loop_insns: instructions in those loops.
+// A count above its golden value is a regression and fails the gate. A
+// count below it is a gain: `--update` lowers golden.tsv to the new counts,
+// and only when nothing regressed. loop_insns against the ceiling (the
+// instructions of one hand-written loop, 0 for none) is the codegen gap,
+// which the gate reports per row.
+// Usage (from the repository root; needs objdump and nm):
+//   jet Tools/perf/CodegenCeiling.jet [--jet PATH] [--update]
+// The default compiler is Tools/agent/JetEnv.jet's `jet`.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+DIR: "Tools/perf/codegen-ceiling"
+GOLDEN: "Tools/perf/codegen-ceiling/golden.tsv"
+JET_ENV: "Tools/agent/JetEnv.jet"
+HEADER: "symbol\tinsns\tpushes\tpops\tframe_slots\tloops\tloop_insns\tceiling_loop_insns"
+FIELDS: 8
+// The catalog's argument: big enough to run every loop, small enough to
+// finish at once.
+CATALOG_N: "1000"
+
+Counts: struct {
+    insns: Int
+    pushes: Int
+    pops: Int
+    frame_slots: Int
+    loops: Int
+    loop_insns: Int
+}
+
+Row: struct {
+    symbol: String
+    golden: Counts
+    ceiling: Int
+}
+
+fail: fn(message: String) -[IO]> Int Never! {
+    term.eprint("codegen gate: {message}")
+    1
+}
+
+number: fn(text: String) -> Int Never! {
+    if Int.parse(text) == {
+        .Ok(value) -> value
+        .Err(_) -> -1
+    }
+}
+
+hex_digit: fn(code: Int) -> Int Never! {
+    if code >= 48 && code <= 57 -> return code - 48
+    if code >= 97 && code <= 102 -> return code - 87
+    return -1
+}
+
+// A lowercase hexadecimal number, -1 when it is not one.
+hex: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return -1
+    value := 0
+    loop byte in bytes {
+        digit: hex_digit(Int.from_u8(byte))
+        if digit < 0 -> return -1
+        value = value * 16 + digit
+    }
+    value
+}
+
+// The rows of golden.tsv after its header, or why it is unreadable.
+parse_golden: fn(text: String) -> [Row] Err! {
+    lines: text.split("\n").to_list()
+    if lines.len() == 0 || lines[0] != HEADER -> return Err("{GOLDEN}: the header is not `{HEADER}`")
+    rows := [Row]{}
+    loop index in 1..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != FIELDS -> return Err("{GOLDEN}:{index + 1}: {FIELDS} fields expected")
+        values: loop at in 1..<FIELDS -> number(fields[at])
+        loop value in values {
+            if value < 0 -> return Err("{GOLDEN}:{index + 1}: a count is not a number")
+        }
+        golden: Counts{insns: values[0], pushes: values[1], pops: values[2], frame_slots: values[3], loops: values[4], loop_insns: values[5]}
+        rows.push(Row{symbol: fields[0].copy(), golden, ceiling: values[6]})
+    }
+    if rows.len() == 0 -> return Err("{GOLDEN}: no rows")
+    Ok(rows)
+}
+
+// The counts of one function's `objdump -d --no-show-raw-insn` listing.
+count_listing: fn(listing: String) -> Counts Never! {
+    addresses := [Int]{}
+    texts := [String]{}
+    loop line in listing.split("\n") {
+        // `  401000:\tpush   %rbp`: the address, then the instruction.
+        parts: line.split("\t").to_list()
+        if parts.len() < 2 -> next
+        head: parts[0].trim()
+        if !head.ends_with(":") -> next
+        address: hex(head.removesuffix(":"))
+        if address < 0 -> next
+        addresses.push(address)
+        texts.push(parts[1].trim())
+    }
+    pushes := 0
+    pops := 0
+    frame_slots := 0
+    starts := [Int]{}
+    ends := [Int]{}
+    loop index in 0..<texts.len() {
+        text: texts[index]
+        if text.starts_with("push") -> pushes += 1
+        if text.starts_with("pop") -> pops += 1
+        if text.contains("(%rbp)") && text.contains("-0x") -> frame_slots += 1
+        if !text.starts_with("j") -> next
+        // `jne    401040 <main_list_sum+0x10>`: the target is the word
+        // before the symbolic name.
+        words := [String]{}
+        loop word in text.split(" ") {
+            if word != "" -> words.push(word.copy())
+        }
+        if words.len() < 3 || !words[2].starts_with("<") -> next
+        target: hex(words[1])
+        if target >= 0 && target <= addresses[index] {
+            starts.push(target)
+            ends.push(addresses[index])
+        }
+    }
+    loops := 0
+    // An instruction in two overlapping innermost loops counts once.
+    inside := [Bool]{}
+    loop _ in addresses -> inside.push(false)
+    loop loop_index in 0..<starts.len() {
+        inner := true
+        loop other in 0..<starts.len() {
+            if other == loop_index -> next
+            nested: starts[other] >= starts[loop_index] && ends[other] <= ends[loop_index]
+            same: starts[other] == starts[loop_index] && ends[other] == ends[loop_index]
+            if nested && !same -> inner = false
+        }
+        if !inner -> next
+        loops += 1
+        loop index in 0..<addresses.len() {
+            if addresses[index] >= starts[loop_index] && addresses[index] <= ends[loop_index] -> inside[index] = true
+        }
+    }
+    loop_insns := 0
+    loop flag in inside {
+        if flag -> loop_insns += 1
+    }
+    Counts{insns: texts.len(), pushes, pops, frame_slots, loops, loop_insns}
+}
+
+counts_line: fn(counts: Counts) -> String Never! {
+    "{counts.insns}\t{counts.pushes}\t{counts.pops}\t{counts.frame_slots}\t{counts.loops}\t{counts.loop_insns}"
+}
+
+// Each count above its golden value, as `name golden -> current`.
+regressions: fn(golden: Counts, current: Counts) -> [String] Never! {
+    names: [String]{"insns", "pushes", "pops", "frame_slots", "loops", "loop_insns"}
+    was: [Int]{golden.insns, golden.pushes, golden.pops, golden.frame_slots, golden.loops, golden.loop_insns}
+    now: [Int]{current.insns, current.pushes, current.pops, current.frame_slots, current.loops, current.loop_insns}
+    found := [String]{}
+    loop index in 0..<names.len() {
+        if now[index] > was[index] -> found.push("{names[index]} {was[index]} -> {now[index]}")
+    }
+    found
+}
+
+// The gap of a row's hot loops against the hand-written ceiling, in
+// hundredths (100: at the ceiling).
+gap: fn(loop_insns: Int, ceiling: Int) -> String Never! {
+    if ceiling <= 0 -> return "-"
+    hundredths: (loop_insns * 100 + ceiling /% 2) /% ceiling
+    cents: hundredths % 100
+    pad: if cents < 10 -> "0" else -> ""
+    "{hundredths /% 100}.{pad}{cents}"
+}
+
+run_command: fn(command: [String], cwd: String, scratch: String) -[Exec, Env, IO, Time.Wait]> String Err! {
+    receipt: process.cmd(command).cwd(cwd).env("TMPDIR", scratch).output_limit(67108864).run() ?? return Err("{command[0]} could not start: {err}")
+    if receipt.code != 0 || receipt.signal != None -> return Err("`{command.join(" ")}` exited {receipt.code}:\n{receipt.output}{receipt.errors}")
+    Ok(receipt.output)
+}
+
+// The one function of `nm` output that a row's symbol names: the symbol
+// itself, or a specialization of it. Err when none or several match.
+resolve: fn(symbols: String, symbol: String) -> String Err! {
+    found := [String]{}
+    loop line in symbols.split("\n") {
+        words: line.split(" ").to_list()
+        if words.len() != 3 -> next
+        name: words[2]
+        if name == symbol || name.starts_with("{symbol}__") -> found.push(name.copy())
+    }
+    if found.len() == 0 -> return Err("no function {symbol} in the release build")
+    if found.len() > 1 -> return Err("{symbol} names {found.len()} functions: {found.join(", ")}")
+    Ok(found[0].copy())
+}
+
+gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    text: files.read("{root}/{GOLDEN}") ?? return fail("missing {GOLDEN}: {err}")
+    rows: parse_golden(text) ?? return fail("{err}")
+    source: files.read("{root}/{DIR}/catalog/main.jet") ?? return fail("missing {DIR}/catalog/main.jet: {err}")
+    expected: files.read("{root}/{DIR}/catalog/expected.out") ?? return fail("missing {DIR}/catalog/expected.out: {err}")
+    files.write("{run_dir}/main.jet", source) ?? return fail("cannot copy the catalog: {err}")
+    build := jet.copy()
+    build.extend([String]{"build", "--release", "--debug-info=true", "main.jet"})
+    run_command(build, run_dir, scratch) ?? return fail("the catalog does not build: {err}")
+    binary: "{run_dir}/.jet/build/main"
+    output: run_command([String]{binary, "--n", CATALOG_N}, run_dir, scratch) ?? return fail("the catalog does not run: {err}")
+    if output != expected -> return fail("the catalog prints other output than {DIR}/catalog/expected.out:\n{output}")
+    symbols: run_command([String]{"nm", binary}, run_dir, scratch) ?? return fail("{err}")
+    failures := 0
+    lines := [String]{HEADER}
+    loop row in rows {
+        name := ""
+        if resolve(symbols, row.symbol) == {
+            .Ok(found) -> name = found
+            .Err(error) -> term.eprint("MISSING {error}")
+        }
+        if name == "" {
+            failures += 1
+            next
+        }
+        listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary}, run_dir, scratch) ?? return fail("{err}")
+        current: count_listing(listing)
+        print("{row.symbol}\t{counts_line(current)}\tgolden {counts_line(row.golden)}\tceiling {row.ceiling}\tgap {gap(current.loop_insns, row.ceiling)}")
+        worse: regressions(row.golden, current)
+        loop item in worse -> term.eprint("REGRESSION {row.symbol}: {item}")
+        failures += worse.len()
+        lines.push("{row.symbol}\t{counts_line(current)}\t{row.ceiling}")
+    }
+    if failures != 0 -> return fail("{failures} regression(s)")
+    if update {
+        files.write("{root}/{GOLDEN}", "{lines.join("\n")}\n") ?? return fail("cannot write {GOLDEN}: {err}")
+        print("codegen gate: {GOLDEN} updated")
+    }
+    print("codegen gate: pass functions={rows.len()}")
+    0
+}
+
+codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    args: process.args()
+    jet := [String]{}
+    update := false
+    index := 0
+    loop index < args.len() {
+        if args[index] == "--update" {
+            update = true
+            index += 1
+            next
+        }
+        if args[index] == "--jet" && index + 1 < args.len() {
+            jet = [String]{args[index + 1].copy()}
+            index += 2
+            next
+        }
+        return fail("usage: jet Tools/perf/CodegenCeiling.jet [--jet PATH] [--update]")
+    }
+    root: files.cwd() ?? return fail("cannot read the working directory: {err}")
+    if jet.len() == 0 -> jet = [String]{"{root}/{JET_ENV}", "jet"}
+    home: process.env_get_or("HOME", "")
+    cache: process.env_get_or("XDG_CACHE_HOME", "{home}/.cache")
+    state: process.env_get_or("JET_STATE_ROOT", "{cache}/jet-dev")
+    scratch_env: process.env_get_or("TMPDIR", "")
+    scratch: if scratch_env == "" -> process.env_get_or("JET_SCRATCH_ROOT", state) else -> scratch_env
+    files.create_dir_all(scratch) ?? return fail("cannot create {scratch}: {err}")
+    made: run_command([String]{"mktemp", "-d", "{scratch}/codegen-ceiling.XXXXXX"}, root, scratch) ?? return fail("{err}")
+    run_dir: made.trim()
+    code: gate(root, jet, update, run_dir, scratch)
+    files.rmtree(run_dir).drop("codegen gate run directory")
+    code
+}
+
+run: fn() {
+    code: codegen_gate()
+    if code != 0 -> process.exit(code)
+}
+
+#Test("a listing counts saves, frame slots and its innermost loop") {
+    listing: "0000000000401000 <main_k>:\n  401000:\tpush   %rbp\n  401001:\tmov    %rsp,%rbp\n  401004:\tmov    %rdi,-0x8(%rbp)\n  401008:\tadd    (%rax),%rcx\n  40100b:\tadd    $0x8,%rax\n  40100f:\tcmp    %rdx,%rax\n  401012:\tjne    401008 <main_k+0x8>\n  401014:\tpop    %rbp\n  401015:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.insns, 9)
+    assert_eq(counts.pushes, 1)
+    assert_eq(counts.pops, 1)
+    assert_eq(counts.frame_slots, 1)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 4)
+}
+
+#Test("only the innermost of nested loops counts, and a forward jump is no loop") {
+    listing: "  10:\tnop\n  11:\tnop\n  12:\tjmp    11 <k+0x1>\n  13:\tje     20 <k+0x10>\n  14:\tjne    10 <k>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 2)
+}
+
+#Test("an instruction in two overlapping innermost loops counts once") {
+    listing: "  10:\tnop\n  11:\tnop\n  12:\tjne    10 <k>\n  13:\tjne    11 <k+0x1>\n  14:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 2)
+    assert_eq(counts.loop_insns, 4)
+}
+
+#Test("a count above golden is a regression, below it a gain") {
+    golden: Counts{insns: 10, pushes: 2, pops: 2, frame_slots: 0, loops: 1, loop_insns: 4}
+    assert_eq(regressions(golden, Counts{insns: 9, pushes: 2, pops: 2, frame_slots: 0, loops: 1, loop_insns: 3}).len(), 0)
+    worse: regressions(golden, Counts{insns: 10, pushes: 3, pops: 2, frame_slots: 1, loops: 2, loop_insns: 4})
+    assert_eq(worse.join(", "), "pushes 2 -> 3, frame_slots 0 -> 1, loops 1 -> 2")
+    assert_eq(gap(6, 4), "1.50")
+    assert_eq(gap(4, 4), "1.00")
+    assert_eq(gap(5, 0), "-")
+}
+
+#Test("golden rows need the header and eight numeric fields") {
+    assert(parse_golden("kernel\tinsns\n") == .Err(_))
+    assert(parse_golden("{HEADER}\nmain_k\t1\t2\t3\n") == .Err(_))
+    rows: parse_golden("{HEADER}\n# a note\nmain_k\t9\t1\t1\t0\t1\t4\t3\n") ?? panic("{err}")
+    assert_eq(rows.len(), 1)
+    assert_eq(rows[0].golden.loops, 1)
+    assert_eq(rows[0].ceiling, 3)
+}
+
+#Test("a row's symbol names its function or one specialization of it") {
+    symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main_list_sum__value_dac2\n000000000040e720 t main_list_sum_wide__value_ba4a\n"
+    assert_eq(resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}"), "jet_rt_alloc_8")
+    assert_eq(resolve(symbols, "main_list_sum") ?? panic("{err}"), "main_list_sum__value_dac2")
+    assert(resolve(symbols, "main_point_sum") == .Err(_))
+    twice: "1 t main_k__a\n2 t main_k__b\n"
+    assert(resolve(twice, "main_k") == .Err(_))
+}
