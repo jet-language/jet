@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99203,
+    "rev": 99204,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76110,7 +76110,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T07:52:26.287Z",
+      "updated": "2026-11-11T09:14:58.581Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -195305,6 +195305,249 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T05:11:08.263Z"
+    },
+    {
+      "id": "NEW-D-ALLOC-MIGRATE1",
+      "cardId": "c0ct4a0i",
+      "group": "tooling",
+      "title": "Migrate allocation failures without silently choosing stopping",
+      "situation": "Allocation failure already has a ratified ordinary error route. This vote chooses how existing typed domains and Never! helpers adopt it. Wider error types preserve recovery but change callers. Conversion preserves some signatures but changes domain values and must itself work without memory. Keeping Never! can preserve an ABI only by proving success or explicitly handling failure. Choose these two policies independently; no performance claim decides them.",
+      "gist": "How should typed domains and Never! helpers adopt allocation errors?",
+      "lesson": "An error contract is public behavior. A panic handles failure by stopping; it does not prove success. Choose typed-domain policy and helper policy separately.",
+      "explainer": "",
+      "story": "Rin loads one row and counts it. Every option prints 1 on success; an exhausted allocation either reaches her handler or an explicit stopping helper.",
+      "inWild": "An ordinary conversion preserves a domain contract where that conversion is legal.",
+      "detail": "D-ALLOC-FAIL1=C remains binding, including implicit allocations. Q1: A/D admit, B/E convert where legal, C/F convert structs only. Q2: A/B/C propagate, D/E/F keep and handle. The mixed rule uses type shape, not profiles. \n\nBaseline probes/alloc.jet checks and runs on seed-t21, printing three ones, using try_push. Proposed push refusal is unverified. Census counts are syntactic candidates, not a sound upper bound: implicit allocations and indirect calls are missed, names collide, and nearby Err arms need not consume widened payloads. No ABI, branch-count or timing conclusion follows from that scan. Test implicit allocation, nonallocating conversion, unchanged failed mutation, move-only arguments, cleanup, exhaustive matches and foreign ABI boundaries.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Admit; propagate",
+          "gist": "Remove allocating Never! contracts and propagate failures.",
+          "detail": "Widen every affected E! to (E | mem.AllocError)!. Update propagation and exhaustive handlers; do not claim every syntactically nearby Err arm needs changing. Drop Never! only where allocation can fail. Inferred failures propagate to a recoverable application boundary. Proved nonallocating functions retain Never!. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+        },
+        {
+          "key": "B",
+          "name": "Convert; propagate",
+          "gist": "Remove allocating Never! contracts and propagate failures.",
+          "detail": "Convert AllocError once per editable error type; enum domains gain OutOfMemory. Unimplementable builtin domains must admit the union, not pretend a conversion exists. Drop Never! only where allocation can fail. Inferred failures propagate to a recoverable application boundary. Proved nonallocating functions retain Never!. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nimpl mem.AllocError -> StoreError { .OutOfMemory }\nload: fn() -> Int StoreError! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+        },
+        {
+          "key": "C",
+          "name": "Domain rule; propagate",
+          "gist": "Remove allocating Never! contracts and propagate failures.",
+          "detail": "Convert struct domains; admit AllocError in enum and builtin domains. Conversions must use bounded, nonallocating error storage. Drop Never! only where allocation can fail. Inferred failures propagate to a recoverable application boundary. Proved nonallocating functions retain Never!. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+        },
+        {
+          "key": "D",
+          "name": "Admit; stop in helpers",
+          "gist": "Keep Never! and explicitly handle its failures.",
+          "detail": "Widen every affected E! to (E | mem.AllocError)!. Update propagation and exhaustive handlers; do not claim every syntactically nearby Err arm needs changing. Keep Never! only by handling each fallible operation with ?? panic, or one extracted fallible helper. This is explicit termination, not proof allocation cannot fail. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+        },
+        {
+          "key": "E",
+          "name": "Convert; stop in helpers",
+          "gist": "Keep Never! and explicitly handle its failures.",
+          "detail": "Convert AllocError once per editable error type; enum domains gain OutOfMemory. Unimplementable builtin domains must admit the union, not pretend a conversion exists. Keep Never! only by handling each fallible operation with ?? panic, or one extracted fallible helper. This is explicit termination, not proof allocation cannot fail. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nimpl mem.AllocError -> StoreError { .OutOfMemory }\nload: fn() -> Int StoreError! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+        },
+        {
+          "key": "F",
+          "name": "Domain rule; stop in helpers",
+          "gist": "Keep Never! and explicitly handle its failures.",
+          "detail": "Convert struct domains; admit AllocError in enum and builtin domains. Conversions must use bounded, nonallocating error storage. Keep Never! only by handling each fallible operation with ?? panic, or one extracted fallible helper. This is explicit termination, not proof allocation cannot fail. Common success prints 1; refusal is reported or explicitly stops.",
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Prefer recovery and one visible allocation-error type; choose explicit stopping only at a boundary that requires it.",
+        "gains": [
+          "Allocation stays identifiable outside domain errors"
+        ],
+        "losses": [
+          {
+            "loss": "Signatures and exhaustive handlers change.",
+            "mitigation": "Migrate every caller together and preserve Never! only where success is proved."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeps signatures where conversions exist, but changes domain cases and cannot cover every builtin domain."
+          },
+          {
+            "key": "C",
+            "reason": "An arbitrary type-shape rule gives similar functions different public failure contracts."
+          },
+          {
+            "key": "D",
+            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+          },
+          {
+            "key": "E",
+            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+          },
+          {
+            "key": "F",
+            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+          }
+        ],
+        "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked the cited decisions and exercised baseline syntax; separated proposals from observed behavior and repaired unfair alternatives."
+      },
+      "checkInstructions": "Proposal examples marked UNCHECKED are not implementation proof. Run the acceptance cases described in detail after implementation, on every applicable execution tier.",
+      "surface": {
+        "gist": "How should typed domains and Never! helpers adopt allocation errors?",
+        "lesson": "An error contract is public behavior. A panic handles failure by stopping; it does not prove success. Choose typed-domain policy and helper policy separately.",
+        "trio": {
+          "current": {
+            "note": "Seed-t21 checked and ran the try_push baseline; refusal was not forced.",
+            "code": "// probes/alloc.jet: checked and run\n// admit, convert and keep each printed 1."
+          },
+          "wild": {
+            "lang": "Jet alternative",
+            "note": "An ordinary conversion preserves a domain contract where that conversion is legal.",
+            "code": "// Checked in probes/alloc.jet\nimpl mem.AllocError -> StoreError { return .OutOfMemory }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Admit; propagate",
+            "gist": "Remove allocating Never! contracts and propagate failures.",
+            "gains": [
+              "Allocation stays identifiable outside domain errors"
+            ],
+            "losses": [
+              "Callers must accept wider failure contracts."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Convert; propagate",
+            "gist": "Remove allocating Never! contracts and propagate failures.",
+            "gains": [
+              "Stable signatures for convertible domains"
+            ],
+            "losses": [
+              "Callers must accept wider failure contracts."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nimpl mem.AllocError -> StoreError { .OutOfMemory }\nload: fn() -> Int StoreError! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Domain rule; propagate",
+            "gist": "Remove allocating Never! contracts and propagate failures.",
+            "gains": [
+              "Allocation stays identifiable outside domain errors"
+            ],
+            "losses": [
+              "Callers must accept wider failure contracts."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Admit; stop in helpers",
+            "gist": "Keep Never! and explicitly handle its failures.",
+            "gains": [
+              "Allocation stays identifiable outside domain errors"
+            ],
+            "losses": [
+              "Helpers can stop the whole process."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Convert; stop in helpers",
+            "gist": "Keep Never! and explicitly handle its failures.",
+            "gains": [
+              "Stable signatures for convertible domains"
+            ],
+            "losses": [
+              "Helpers can stop the whole process."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nimpl mem.AllocError -> StoreError { .OutOfMemory }\nload: fn() -> Int StoreError! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Domain rule; stop in helpers",
+            "gist": "Keep Never! and explicitly handle its failures.",
+            "gains": [
+              "Allocation stays identifiable outside domain errors"
+            ],
+            "losses": [
+              "Helpers can stop the whole process."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Prefer recovery and one visible allocation-error type; choose explicit stopping only at a boundary that requires it.",
+          "gains": [
+            "Allocation stays identifiable outside domain errors"
+          ],
+          "losses": [
+            {
+              "loss": "Signatures and exhaustive handlers change.",
+              "mitigation": "Migrate every caller together and preserve Never! only where success is proved."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps signatures where conversions exist, but changes domain cases and cannot cover every builtin domain."
+            },
+            {
+              "key": "C",
+              "reason": "An arbitrary type-shape rule gives similar functions different public failure contracts."
+            },
+            {
+              "key": "D",
+              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            },
+            {
+              "key": "E",
+              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            },
+            {
+              "key": "F",
+              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            }
+          ],
+          "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T09:14:58.581Z"
     }
   ],
   "questions": [
@@ -198455,6 +198698,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T09:14:58.581Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "NEW-D-ALLOC-MIGRATE1",
+      "note": "Migrate allocation failures without silently choosing stopping"
+    },
     {
       "at": "2026-11-11T09:03:09.867Z",
       "by": "Main",
