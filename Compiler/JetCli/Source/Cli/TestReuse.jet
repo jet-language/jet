@@ -1,6 +1,8 @@
 // `jet test`'s persisted test-result store: a passing run's
 // outcomes, kept with the reads its harness made, are reused while every
-// recorded read is unchanged. The harness runtime records each path it opens
+// recorded read is unchanged. The store is off: jet_cli_test_result reaches
+// it only while saved work is reused (BUILD_REUSE_SAVED_WORK), so every run
+// runs its tests live. The harness runtime records each path it opens
 // or stats and each environment name it reads (JetRuntime TestReads.jet) into
 // the file JET_TEST_READS_PATH names; after the run each read is
 // fingerprinted (a file's content hash, a directory's listing, a stat's kind,
@@ -8,9 +10,9 @@
 // under a key of the harness executable's bytes, the run's selection and
 // every JET_* variable. The next run with that key fingerprints the reads
 // again: all equal reuses the outcomes without starting the harness; any
-// difference runs the tests again and stores the new reads. `--fresh` skips
-// the lookup. A run whose reads can't all be named (a relative path under a
-// directory the runtime can't resolve) is not stored. Reads under /proc,
+// difference runs the tests again and stores the new reads. A run whose
+// reads can't all be named (a relative path under a directory the runtime
+// can't resolve) is not stored. Reads under /proc,
 // /sys and /dev are the host's own and key nothing, except /dev/shm: a
 // shared-memory tmpfs holds ordinary files a project (or a test runner's
 // staging) keeps there, so they key by content like any other file.
@@ -52,16 +54,13 @@ jet_cli_test_reuse_at: fn(root: String, binary: String, settings: String, record
 JetCLITestReuseHow: enum { Plain Reused Logged }
 
 // `jet_cli_native_test_run` through the store: the stored outcomes when
-// `reuse` has them and its reads are unchanged (unless `fresh`), else a run
-// whose reads are logged for jet_cli_test_reuse_keep. No `reuse` runs the
-// tests plainly.
-jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, fresh: Bool, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
+// `reuse` has them and its reads are unchanged, else a run whose reads are
+// logged for jet_cli_test_reuse_keep. No `reuse` runs the tests plainly.
+jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
     if reuse == .Val(store) {
-        if !fresh {
-            if jet_cli_test_reuse_lookup(store) == .Val(kept) {
-                how = .Reused
-                return Ok(kept)
-            }
+        if jet_cli_test_reuse_lookup(store) == .Val(kept) {
+            how = .Reused
+            return Ok(kept)
         }
         if test_reuse_files.write(store.reads, "") == .Ok(_) {
             run: jet_cli_native_test_run(spec.env(JET_CLI_TEST_READS_ENV, store.reads), tests, check_names, unrun_check_report, serial, records_path, time_limit) ?? {

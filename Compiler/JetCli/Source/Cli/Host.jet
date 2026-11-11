@@ -2,7 +2,7 @@
 // door, carry out its plan, and write the bytes. The process entry passes
 // argv without the program name and exits with the returned status.
 use {
-    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, JET_BUILD_DEFAULT_PROFILE]
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
@@ -2018,9 +2018,12 @@ jet_cli_run_result: fn(file: String, source: String, color: Bool, options: Build
 jet_cli_compile_run: fn(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
     // A loose script's first run fetches and locks its inline dependencies.
     if jet_cli_script_dependency_fetch(file, source, color, json) == .Val(refused) -> return JetCLIRunStep.Output{output: refused}
-    // A traced or verbose run reports its compile, so only a plain run may
-    // reuse a kept program; one starting at a command function is never kept.
-    if !verbose && trace_sink == None && entry == None -> return jet_cli_compile_kept(file, source, color, json, options, threads, program_args, invocation)
+    // Only a plain run may reuse a kept program, and only while saved work is
+    // reused (BUILD_REUSE_SAVED_WORK, off): a traced or verbose run reports
+    // its compile, and one starting at a command function is never kept.
+    if BUILD_REUSE_SAVED_WORK && !verbose && trace_sink == .None && entry == .None {
+        return jet_cli_compile_kept(file, source, color, json, options, threads, program_args, invocation)
+    }
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
     if compiled.move() == {
@@ -2238,17 +2241,18 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if limit_setting == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
     // The children's outcome records stay in memory: no test writes the disk.
     records_path: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
-    // A plain run goes through the test-result store (TestReuse.jet): a
-    // snapshot update, a measured, coverage or code-suite run, a recorded
-    // one, or one `jet prove` captures always runs.
+    // A plain run goes through the test-result store (TestReuse.jet) only
+    // while saved work is reused (BUILD_REUSE_SAVED_WORK, off): a snapshot
+    // update, a measured, coverage or code-suite run, a recorded one, or one
+    // `jet prove` captures always runs.
     reuse := JetCLITestReuse?{None}
-    if !options.update_snapshots && measure == None && !coverage && !code_suite && replay_record == None && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
+    if BUILD_REUSE_SAVED_WORK && !options.update_snapshots && measure == .None && !coverage && !code_suite && replay_record == .None && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == .None {
         names: (loop test in native_tests -> test.key).join(",")
         settings: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{iterations ?? "-"}\n{generated_seed ?? "-"}\n{names}\n{check_names.join(",")}"
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
     }
     how := JetCLITestReuseHow.Plain
-    run: jet_cli_test_reuse_run(reuse, options.fresh, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
+    run: jet_cli_test_reuse_run(reuse, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         if coverage -> cli_files.remove(coverage_path).drop("the native run already failed")
         return jet_cli_ice(err.message)
@@ -2318,7 +2322,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             if written == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "name a writable `results` file", color)
         }
         plural: if wires.len() == 1 -> "" else -> "s"
-        notice: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged; --fresh runs them)\n{persisted}" else -> "{persisted}{recorded}"
+        notice: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged)\n{persisted}" else -> "{persisted}{recorded}"
         below := ""
         if outcome.below == .Val(diagnostic) -> below = diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)
         floor_exit: if outcome.below != None && exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> exit_code

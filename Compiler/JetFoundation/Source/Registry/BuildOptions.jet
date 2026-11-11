@@ -611,3 +611,17 @@ build_options_with_code: fn(options: BuildOptions, code: [BuildOptionChoice]) ->
     }
     build_options_resolve(options.command, options.profile, written)
 }
+
+/// Whether a command may reuse work an earlier run saved instead of doing it
+/// live. The reuse covers `jet run`'s kept programs, `jet build`'s stored
+/// executables, core.build action records, the foreign C archive,
+/// provisioning and Rust bridge caches, `jet check` receipts and `jet test`'s
+/// stored results. It is off: every run compiles, checks and tests live, and
+/// reads and writes none of those stores. The reuse code stays in place, but
+/// no flag, variable or setting reaches it until a ballot ratifies how a run
+/// opts in.
+BUILD_REUSE_SAVED_WORK: false
+
+#Test("no command reuses work an earlier run saved") {
+    assert(!BUILD_REUSE_SAVED_WORK)
+}

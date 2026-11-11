@@ -8,7 +8,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
-    jet_foundation.[BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_foundation.[foundation_find_folder, foundation_library_folders]
 }
@@ -267,8 +267,11 @@ jet_cli_native_c_identity: fn(identity: &[U8], schema: String, tools: JetCLINati
     Ok()
 }
 
-// A cached archive is reused only when its digest sidecar matches its bytes.
+// A cached archive is reused only while saved work is reused
+// (BUILD_REUSE_SAVED_WORK, off) and its digest sidecar matches its bytes;
+// otherwise every link compiles its C again, publishing over the archive.
 jet_cli_native_c_cached: fn(archive: String) -[FS]> Bool Never! {
+    if !BUILD_REUSE_SAVED_WORK -> return false
     bytes: cli_files.read_bytes(archive) ?? return false
     digest: cli_files.read("{archive}.sha256") ?? ""
     digest.trim() == sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
@@ -700,14 +703,18 @@ jet_cli_native_c_linked: fn(facts: JetDriverForeignLinkFacts) -> Bool Never! {
 
 // The same declared nixpkgs provisioning as the seed C resolver. A native
 // link still selects static archive bytes, never a dynamic loader fallback.
+// The provisioned directory is recorded under `.jet/clinks` and reused only
+// while saved work is reused (BUILD_REUSE_SAVED_WORK, off); otherwise every
+// link asks nix again and records nothing.
 jet_cli_foreign_nix_directory: fn(lib: String, attr: String, root: String) -[FS, Env, Exec, Time.Wait]> String JetCLIForeignLinkError! {
     cache: "{root}/.jet/clinks/{lib}"
-    stored: (cli_files.read(cache) ?? "").trim()
+    stored: if BUILD_REUSE_SAVED_WORK -> (cli_files.read(cache) ?? "").trim() else -> ""
     if stored.len() > 0 && cli_files.is_dir(stored) -> return Ok("{stored}/lib")
     receipt: cli_process.cmd([String]{"nix", "build", "--no-link", "--print-out-paths", "nixpkgs#{attr}"}).run() ?? return Err(jet_cli_foreign_link_error("couldn't provision C dependency `{lib}`: {err}"))
     if !receipt.success -> return Err(jet_cli_foreign_link_error("couldn't provision C dependency `{lib}`: {receipt.errors}"))
     lines: receipt.output.trim().split("\n").to_list()
     if lines.len() != 1 || !cli_files.is_dir(lines[0]) -> return Err(jet_cli_foreign_link_error("C dependency `{lib}` provisioning returned no single store directory"))
+    if !BUILD_REUSE_SAVED_WORK -> return Ok("{lines[0]}/lib")
     cli_files.create_dir_all("{root}/.jet/clinks") ?? return Err(jet_cli_foreign_link_error("couldn't create C dependency cache: {err}"))
     cli_files.write(cache, lines[0]) ?? return Err(jet_cli_foreign_link_error("couldn't write C dependency cache: {err}"))
     Ok("{lines[0]}/lib")

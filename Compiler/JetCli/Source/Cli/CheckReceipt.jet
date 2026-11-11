@@ -3,11 +3,14 @@
 // and input closure match its last receipt replays the receipt's output and
 // status without compiling; otherwise the check runs and its outcome is
 // published as an immutable receipt, and the invocation's context pointer
-// (`.jet/receipts/contexts/<context key>`) moves to it. JET_RECEIPT_BYPASS
+// (`.jet/receipts/contexts/<context key>`) moves to it. Receipts are off: a
+// check replays or publishes one only while saved work is reused
+// (BUILD_REUSE_SAVED_WORK), so every check compiles. JET_RECEIPT_BYPASS also
 // turns both off. Replay and invalidation notices show only under `--verbose`
 // (#3721: a clean check prints one line).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverVerbOutput]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
     cli_files: core.files
     cli_sys: core.sys
@@ -261,7 +264,9 @@ jet_cli_check_receipt_current: fn(receipt: JetCLIReceipt, identity: [U8], paths:
 // receipt, or runs with the claim its outcome publishes. Store failures are
 // optional-history notices; the check then runs unrecorded.
 jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheckReceiptStep {
-    if cli_sys.get("JET_RECEIPT_BYPASS") != None -> return JetCLICheckReceiptStep.Run{recording: None}
+    if !BUILD_REUSE_SAVED_WORK || cli_sys.get("JET_RECEIPT_BYPASS") != None {
+        return JetCLICheckReceiptStep.Run{recording: None}
+    }
     file := ""
     notice := ""
     if plan == {

@@ -362,9 +362,6 @@ JetCLITestOptions: struct {
     // The decided `jet test` settings (TestSettingLayers.jet), for those
     // the harness run reads itself: shard, list, results, time_limit.
     settings: [TestSetting]{[TestSetting]{}}
-    // `--fresh`: run the tests even when the test-result store (TestReuse.jet)
-    // holds their outcomes.
-    fresh: Bool{false}
     // `--show-default`: the stock harness, never the package's `test: fn`.
     stock: Bool{false}
     // `--quiet`: no status lines on stderr.
@@ -2075,8 +2072,9 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
     if jet_cli_test_settings_refusal(settings, false, color) == .Val(refusal) -> return refusal
     if jet_cli_test_settings_fan_out(jet_argv, settings, quiet) == .Val(plan) -> return plan
     jet_cli_test_settings_apply(options, settings)
-    if !inherited && !quiet -> options.status = "{options.status}{jet_cli_test_settings_notice(settings)}"
-    if options.fresh && !quiet -> options.status = "{options.status}jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"
+    if !inherited && !quiet {
+        options.status = "{options.status}{jet_cli_test_settings_notice(settings)}"
+    }
     source: cli_files.read(file) ?? {
         return jet_cli_report_done(options.status, "E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }

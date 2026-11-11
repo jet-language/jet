@@ -8,7 +8,7 @@
 // in action order, as the Rust join does.
 
 use {
-    jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
     jet_pkg_model.[pkg_json_text]
     jetpack_foundation.[
         BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxCommand, NativeSandboxError, NativeSandboxMount,
@@ -320,8 +320,10 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     }
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, program_digests, effective_probe_facts)
     restore_failure := CacheMissReason?{None}
-    // Only an action with no ambient effect is reused (build_effects_reusable).
-    if action.reusable() {
+    // Only an action with no ambient effect is reused (build_effects_reusable),
+    // and only while saved work is reused (BUILD_REUSE_SAVED_WORK, off): its
+    // record is neither read here nor written by build_finish_action.
+    if BUILD_REUSE_SAVED_WORK && action.reusable() {
         if build_read_action_record(artifact_store, key) == {
             .Val(record) -> {
                 if record.failure_report == .Val(report) {
@@ -457,7 +459,7 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
     if !ran.receipt.success {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
         report: build_action_failure_report(action.name, code, ran.receipt.errors.trim())
-        if action.reusable() {
+        if BUILD_REUSE_SAVED_WORK && action.reusable() {
             record: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(run.rebuild_status))}
             build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
             build_record_cache_event(action.name, key, run.rebuild_status, "terminal", Val(ActionOutcome.Failed{exit_code: code}))
@@ -473,7 +475,7 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
         return Err(BuildExecutionError.HandEdited{action: action.name, path})
     }
     outcome: ActionOutcome.Succeeded{exit_code: code}
-    if action.reusable() {
+    if BUILD_REUSE_SAVED_WORK && action.reusable() {
         record: build_capture_declared_outputs(artifact_store, project_root, action, key, outcome, ActionCacheStatus.Miss(.NoLocalActionRecord)) ?? return Err(build_io_action(action, err))
         build_write_action_record(artifact_store, key, record) ?? return Err(build_io_action(action, err))
         build_record_cache_event(action.name, key, ActionCacheStatus.Miss(.NoLocalActionRecord), "publish", Val(outcome))

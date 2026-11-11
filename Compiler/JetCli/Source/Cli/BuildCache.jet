@@ -2,13 +2,14 @@
 // the store `jet cache` manages): an unchanged build restores its binary, with
 // the runtime it links, instead of building it again. A stored binary whose
 // bytes no longer match its digest is removed by the restore, reported in one
-// note line, and rebuilt.
+// note line, and rebuilt. The store is off: a build reads and writes it only
+// while saved work is reused (BUILD_REUSE_SAVED_WORK), so every build compiles.
 use {
     cli_files: core.files
     cli_sys: core.sys
     jet_backend.[X64Executable]
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverComptimeInputRecord, JetDriverLoweringInputs, JetDriverVerbOutput]
-    jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
 }
@@ -24,23 +25,35 @@ JetCLIStoredBuild: enum {
 // `jet build`'s executable `name`, restored from the store when a build of
 // the same key stored it (jet_cli_build_cache_key), else built through
 // jet_cli_build_binary and stored. `verbose` reports the runtime pack and the
-// cache decision as `[build]` lines. A store that can't be opened or written
-// leaves the build uncached.
+// cache decision as `[build]` lines. A store that can't be opened or written,
+// or saved work that isn't reused, leaves the build uncached.
 jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand]> JetCLIStoredBuild Never! {
     log := ""
     if verbose -> log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"
     store := ArtifactStore?{None}
     key := ""
-    if result.internal_problem == None && result.complete {
-        if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
-        key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
-        if key == "" {
-            if verbose -> log = "{log}[build] cache off -> this compiler, its runtime or its Core sources can't be identified\n"
-        } else {
-            if ArtifactStore.from_env() == {
-                .Ok(opened) -> store = Val(opened)
-                .Err(error) -> {
-                    if verbose -> log = "{log}[build] cache off -> {error.message()}\n"
+    if result.internal_problem == .None && result.complete {
+        if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) {
+            return JetCLIStoredBuild.Failed{output: refused}
+        }
+        if BUILD_REUSE_SAVED_WORK {
+            key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
+        }
+        if {
+            !BUILD_REUSE_SAVED_WORK -> {
+                if verbose -> log = "{log}[build] cache off -> every build compiles live\n"
+            }
+            key == "" -> {
+                if verbose {
+                    log = "{log}[build] cache off -> this compiler, its runtime or its Core sources can't be identified\n"
+                }
+            }
+            else -> {
+                if ArtifactStore.from_env() == {
+                    .Ok(opened) -> { store = Val(opened) }
+                    .Err(error) -> {
+                        if verbose -> log = "{log}[build] cache off -> {error.message()}\n"
+                    }
                 }
             }
         }

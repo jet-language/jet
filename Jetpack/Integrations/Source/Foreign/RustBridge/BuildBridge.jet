@@ -1,13 +1,14 @@
 // Build or reuse the hidden cargo FFI bridge, ported from jet_pkg_model::FFI.
 //
-// A verified cache hit returns the blessed artifacts. A miss takes the
+// A verified cache hit returns the blessed artifacts while saved work is
+// reused (BUILD_REUSE_SAVED_WORK, off). A miss takes the
 // per-key cross-process lock, rewrites the generated crate, runs Cargo in
 // the native build sandboxs (Cargo may execute build scripts and procedural
 // macros, so an unsandboxed build is refused), then publishes the artifact
 // manifest and provenance and records the resolved crates in the project
 // lock.
 use {
-    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_with_detail]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, Diagnostic, diagnostic_from_registry, diagnostic_with_detail]
     jetpack_foundation.[
         NATIVE_SANDBOX_FIX, NativeSandboxMount, NativeSandboxOutput, foundation_native_sandbox_status,
         foundation_run_native_sandboxed_with_mounts,
@@ -94,8 +95,11 @@ pkg_ffi_link_for: fn(request: RustBridgeBuild, key: String, paths: BridgePaths, 
 }
 
 // A verified cache hit for this key, or `None` for a miss. Tampered bytes
-// under a present manifest are an integrity error, not a miss.
+// under a present manifest are an integrity error, not a miss. Every lookup
+// misses while saved work isn't reused (BUILD_REUSE_SAVED_WORK, off): each
+// build runs Cargo again.
 pkg_ffi_verified_cache_hit: fn(request: RustBridgeBuild, key: String, deps: [String: String], paths: BridgePaths) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
+    if !BUILD_REUSE_SAVED_WORK -> return Ok(None)
     artifacts: pkg_ffi_bridge_artifact_paths(paths.rlib, paths.target, paths.crate_name) ?? return Ok(None)
     if pkg_ffi_bridge_artifact_integrity_diagnostic(paths.target, paths.crate_name, deps, artifacts) == .Val(diagnostic) -> return Err(pkg_ffi_single_error(diagnostic))
     if !pkg_ffi_bridge_cache_verified(paths.target, paths.crate_name, key, request.selected_target, request.entries, artifacts) -> return Ok(None)
