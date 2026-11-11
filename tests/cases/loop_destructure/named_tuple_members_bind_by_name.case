@@ -1,0 +1,25 @@
+# #6281 c185: `loop (a, b) in rows` over named tuples binds each name to the
+# member it names (in either order), never the first name to the index and
+# the second to the whole tuple, at every optimization level and in a built
+# binary. Names that name no member keep the index-and-item form, and a map
+# keeps its key-value pair.
+fixture: named_tuple_members_bind_by_name.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = named_tuple_members_bind_by_name.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = named_tuple_members_bind_by_name.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = named_tuple_members_bind_by_name.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = named_tuple_members_bind_by_name.out

@@ -515,6 +515,14 @@ loop i := init, i < limit {
 }
 ```
 
+The two-name form over a list or other indexed source yields the index and
+the item, as in `loop (i, row) in rows`. When either name is a member of the
+source's named-tuple items, the form destructures each item by name instead:
+`loop (package, name) in [(package: "a", name: "b")]` binds `name` to `"b"`,
+in either order. It is the tuple destructure a binding writes, so a name that
+is no member is E0313 and a count that differs from the tuple's is E0315. A
+map keeps its key-value pair.
+
 A source loop may use `-> expression` or a braced value body. Each accepted
 iteration yields one non-unit value. The eager result is a `List` in iteration
 order; a guard or `next` omits an item. Multiple source clauses produce one flat

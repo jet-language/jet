@@ -1,0 +1,24 @@
+rows: fn() -> [(package: String, name: String)] {
+    [(package: "Compiler/JetCli", name: "selfcheck"), (package: "Core", name: "selfcheck-core")]
+}
+
+run: fn() {
+    loop (package, name) in [(package: "a", name: "b")] {
+        print("{package} {name}")
+    }
+    loop (name, package) in rows() {
+        print("{name} checks {package}")
+    }
+    loop (index, row) in rows() {
+        print("{index} {row.name}")
+    }
+    sizes := 0
+    loop (package, name) in rows() {
+        sizes += package.len() + name.len()
+    }
+    print(sizes)
+    table: ["k": 1]
+    loop (key, value) in table {
+        print("{key}={value}")
+    }
+}

@@ -1,0 +1,57 @@
+// #6281 c185: a two-name loop over named tuples binds each name to the
+// member it names, never the first name to the index and the second to the
+// whole tuple. A wrong count or an unknown name is the tuple destructure's
+// own diagnostic; names that name no member keep the index-and-item form.
+loop_tuple_errors: fn(source: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> codes.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    codes
+}
+
+#Test("a_two_name_loop_binds_named_tuple_members_by_name") {
+    accepted: `want_int: fn(value: Int) -> Int { value }
+text_size: fn(value: String) -> Int { value.len() }
+
+run: fn() {
+    total := 0
+    loop (package, name) in [(package: "a", name: "bc")] {
+        total += text_size(name) + text_size(package)
+    }
+    rows: [(package: "x", name: "y")]
+    loop (name, package) in rows {
+        total += text_size("{package}{name}")
+    }
+    loop (index, row) in rows {
+        total += want_int(index) + text_size(row.name)
+    }
+    table: ["k": 1]
+    loop (key, value) in table {
+        total += want_int(value) + text_size(key)
+    }
+    print(total)
+}
+`
+    assert_eq(loop_tuple_errors(accepted).join("; "), "")
+}
+
+#Test("a_loop_tuple_pattern_with_an_unknown_name_is_e0313") {
+    errors: loop_tuple_errors(`run: fn() {
+    loop (package, nme) in [(package: "a", name: "b")] {
+        print(package)
+    }
+}
+`)
+    assert(errors.len() == 1 && errors[0].starts_with("E0313: `nme` isn't a member of"), errors.join("; "))
+}
+
+#Test("a_loop_tuple_pattern_with_the_wrong_count_is_e0315") {
+    errors: loop_tuple_errors(`run: fn() {
+    loop (package, name) in [(package: "a", name: "b", version: 1)] {
+        print("{package}{name}")
+    }
+}
+`)
+    assert(errors.len() == 1 && errors[0].starts_with("E0315: This pattern binds 2 members, but the tuple has 3"), errors.join("; "))
+}

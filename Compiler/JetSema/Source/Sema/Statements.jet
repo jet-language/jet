@@ -2954,6 +2954,38 @@ sema_stmt_for_in_pair_types: fn(collection_type: Type, item_type: Type) -> SemaF
     None
 }
 
+// A two-name loop over named tuples destructures each one when either name
+// is a member of the tuple; otherwise the names are the index and the item.
+// A map's entries keep their key-value pair.
+sema_stmt_for_in_destructures: fn(collection_type: Type, item_type: Type, first: String, second: NamedSpan?) -> Bool Never! {
+    if collection_type == .Map(_, _, _) -> return false
+    if second == .Val(named) && item_type == .Tuple(fields) {
+        loop field in fields {
+            if field.name == first || field.name == named.name -> return true
+        }
+    }
+    false
+}
+
+// The destructuring loop's checked body: the binding `(first, second): row`
+// over the hidden row name, then the written body.
+sema_stmt_for_in_destructure_body: fn(first: String, first_span: Span, second: NamedSpan?, row_name: String, body: [Stmt]) -> [Stmt] {
+    elems := [BindName]{BindName{name: first, span: first_span, rename: None}}
+    end := first_span.end
+    if second == .Val(named) {
+        elems.push(BindName{name: named.name, span: named.span, rename: None})
+        end = named.span.end
+    }
+    pattern_span: Span{start: first_span.start, end: end}
+    binding := ast_binding("", pattern_span, false, Expr.Ident{name: row_name, span: pattern_span, id: AST_NODE_GENERATED}, None)
+    binding.pattern = Val(BindPattern.Tuple{elems: elems, span: pattern_span})
+    statements := [Stmt]{Stmt.Val{binding: binding}}
+    // copy: the written body stays on the loop statement; the checked body
+    // is the destructure followed by it.
+    loop statement in body -> statements.push(statement.copy())
+    statements
+}
+
 sema_stmt_for_in_method_pair_is_supported: fn(method_kind: TForInMethod?) -> Bool Never! {
     method_kind == None
 }
@@ -8549,12 +8581,21 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                         item_type_option := sema_stmt_for_in_item_type(collection.ty, method_kind, iterable_item_type)
                         item_type := item_type_option ?? Type.Named{name: "Unit"}
+                        // `loop (a, b) in rows` over named tuples binds each name to
+                        // the member it names, never the first to the index: the
+                        // loop walks a hidden row, and its body opens with the tuple
+                        // destructure `(a, b): row`, whose check reports a wrong
+                        // count (E0315) or an unknown name (E0313).
+                        destructure: collection_value != None && !range_source && sema_stmt_for_in_destructures(collection.ty, item_type, var, var2)
+                        row_name: if destructure -> "__loop_row{span.start}" else -> var
+                        pair_name: if destructure -> NamedSpan?{None} else -> var2
+                        loop_body: if destructure -> sema_stmt_for_in_destructure_body(var, var_span, var2, row_name, body) else -> body
                         // A bindingless `loop xs -> .member` binds the implicit `it`,
                         // which bare member chains in the body read. Its source must
                         // be a collection of items: a scalar source (a range, or a
                         // value that is no loop source) and a nested bindingless loop
                         // are E0380, and the rejected loop declares no second `it`.
-                        bindingless: var == "it" && var2 == None
+                        bindingless: row_name == "it" && pair_name == None
                         nested_bindingless: bindingless && context.implicit_loop_subject_depth > 0
                         scalar_bindingless: bindingless && !nested_bindingless && collection_value != None && (range_source || item_type_option == None)
                         if nested_bindingless || scalar_bindingless {
@@ -8571,7 +8612,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // #4604: a rejected two-name form already reported why; both
                         // names stay in scope untyped so body reads add no E0107.
                         pair_rejected := false
-                        if var2 != None && collection_value != None {
+                        if pair_name != None && collection_value != None {
                             if {
                                 range_source -> {
                                     diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "a Range loop has one value per step", "Range values yield whole numbers, not key-value pairs", "use one loop name"))
@@ -8617,7 +8658,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                         first_type := item_type
                         second_type := Type?{None}
-                        if var2 != None && pair_types != None {
+                        if pair_name != None && pair_types != None {
                             pair: pair_types ?? SemaForInPairTypes{first: item_type, second: item_type}
                             first_type = pair.first
                             second_type = Val(pair.second)
@@ -8636,17 +8677,17 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if nested_bindingless {
                             valid = false
                         } else {
-                            first_local = sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, scopes, state, diagnostics)
+                            first_local = sema_stmt_for_in_decl_loop_local(row_name, var_span, first_local_type, element_owes_duty, environment, program, scopes, state, diagnostics)
                             if first_local == None -> valid = false
                         }
                         variable_two := TLocal?{None}
-                        if var2 != None && (second_type != None || !source_checked || pair_rejected) {
-                            variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, element_owes_duty, environment, program, scopes, state, diagnostics)
+                        if pair_name == .Val(second) && (second_type != None || !source_checked || pair_rejected) {
+                            variable_two = sema_stmt_for_in_decl_loop_local(second.name, second.span, second_local_type, element_owes_duty, environment, program, scopes, state, diagnostics)
                             if variable_two == None -> valid = false
                         }
                         if borrowed_elements && !nested_bindingless {
-                            sema_scope_mark_place_alias(scopes, var)
-                            if var2 != None -> sema_scope_mark_place_alias(scopes, var2.name)
+                            sema_scope_mark_place_alias(scopes, row_name)
+                            if pair_name == .Val(second) -> sema_scope_mark_place_alias(scopes, second.name)
                         }
                         lending_depth: context.lending_view_parameter_keys.len()
                         sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, scopes, state, context)
@@ -8659,7 +8700,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if sema_stmt_for_in_driven_root(collection_expr) == .Val(driven) -> context.iter_borrowed.push(driven)
                         references_before := state.references.len()
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1
-                        nested := sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth + 1)
+                        nested := sema_check_statements(loop_body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth + 1)
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
                         loop context.lending_view_parameter_keys.len() > lending_depth -> _ := context.lending_view_parameter_keys.pop()
                         source_stable := stable_root_key != None && sema_stmt_for_in_body_keeps(state, references_before, stable_root_key ?? "", nested.value, context.arena.tree)
@@ -8689,7 +8730,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                                     }
                                     else -> {
                                         source_value := sema_stmt_for_in_source(collection_expr, collection, method_kind)
-                                        columnar := var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(environment, program, item_type)
+                                        columnar := pair_name == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(environment, program, item_type)
                                         // `loop (k, v) in table.move()` takes the map, so its walk takes the entries.
                                         by_value := (consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)
                                         stable := source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
