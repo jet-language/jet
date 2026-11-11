@@ -1,0 +1,34 @@
+# D-MEMO1 (#4276 c5): one `#Memo` marker above a pure function keeps one store
+# for that function and answers repeat calls from it. Recursion fills the
+# store once per argument; the default store keeps 128 entries and evicts the
+# least recently used; `#Memo(bound: none)` keeps every entry; `name.cache()`
+# reads hits, misses, size and the written bound; each function has its own
+# store. An impure function and a lazy `Iter` result are refused.
+fixture: d_memo1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_memo1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_memo1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_memo1_contract.stdout.expected
+stderr: empty
+step impure: jet check impure/main.jet
+exit: 1
+stderr: ~ "`#Memo` requires a pure function" # an effectful body has no store
+stderr: ~ "but `shout` uses `IO`" # the effect that refuses it is named
+stderr: ~ "--> main.jet:1:1" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0938" # one registered code
+step lazy: jet check lazy/main.jet
+exit: 1
+stderr: ~ "`#Memo` cannot cache a lazy `Iter` result" # live iterator state is not a completed result
+stderr: ~ "--> main.jet:1:1" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0940" # one registered code
