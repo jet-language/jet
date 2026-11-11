@@ -3717,7 +3717,10 @@ sema_effect_walk_region_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tre
 
 // (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
 // its own sites, everything its callees reach, and every effect when it makes
-// an unknown call. The region's node is appended to `nodes` for the walk
+// an unknown call. A call to a Core scope publisher inside the region reaches
+// it as the scoped effect its constant argument names, as a function's own
+// calls do (sema_effect_solve_scoped), so `files.read("data/{name}")` needs
+// `FS.Read("data/")`. The region's node is appended to `nodes` for the walk
 // (which writes only that node) and removed again before returning.
 sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_index: Int) -> [String] {
     // copy: the region node starts from its owner's declared row and spans;
@@ -3731,6 +3734,8 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
     region_node.maximal_span = None
     region_node.dispatches = [TEffectSpan]{}
     region_node.memory_events = [SemaMemoryEvent]{}
+    region_node.scoped_calls = [SemaEffectScopedCall]{}
+    region_node.bare_scope_callees = [String]{}
     nodes.push(region_node)
     region_index: nodes.len() - 1
     ignored := [Diagnostic]{}
@@ -3747,9 +3752,23 @@ sema_effect_region_inferred: fn(nodes: &[SemaEffectNode], solved: [[String]], ow
             next
         }
         target: sema_effect_node_index(facts.node_by_key, edge) ?? next
-        sema_effect_set_union(inferred, solved[target])
+        loop name in solved[target] -> sema_effect_region_add_scoped(inferred, walked.scoped_calls, walked.bare_scope_callees, edge, name)
     }
     inferred
+}
+
+// Adds callee `callee_key`'s effect `name` to a region's `inferred` row:
+// scoped as each of the region's constant-argument calls to that publisher
+// names it, and bare too when the region also calls it with a run-time
+// argument or names no scope for it.
+sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffectScopedCall], bare_scope_callees: [String], callee_key: String, name: String) Never! {
+    renamed := false
+    loop call in scoped_calls {
+        if call.callee != callee_key || call.published != name -> next
+        renamed = true
+        sema_effect_set_add(inferred, call.scoped)
+    }
+    if !renamed || bare_scope_callees.contains(callee_key) -> sema_effect_set_add(inferred, name)
 }
 
 // `modules` are the checked modules; each input names its module, whose

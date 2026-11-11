@@ -39,9 +39,11 @@ parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: 
         // A one-word call (`Net("api.example.com")`) has no `Effect.` prefix.
         if call.type_args.len() == 0 -> return parser_authority_scoped_entry(state, call.name, call.args, expr_span(expr), prefix)
     }
-    if expr == .MethodCall(receiver, method, _, owner_type_args, type_args, args, _) {
+    if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
         if owner_type_args.len() == 0 && type_args.len() == 0 {
-            if parser_authority_effect_path(receiver) == .Val(path) -> return parser_authority_scoped_entry(state, parser_authority_effect_unprefixed("{path}.{method}"), args, expr_span(expr), prefix)
+            // A method call's own span is its method name; the entry is
+            // reported over its whole written path (`Mem.Alloc`).
+            if parser_authority_effect_path(receiver) == .Val(path) -> return parser_authority_scoped_entry(state, parser_authority_effect_unprefixed("{path}.{method}"), args, Span{start: parser_authority_path_span(receiver).start, end: method_span.end}, prefix)
         }
     }
     parser_marker_shape_error(state, marker)
