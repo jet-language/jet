@@ -3,17 +3,17 @@
 // the import and every unreached declaration that spells its alias leave the
 // module, so every tier sees the same closed program.
 use {
+    fs: core.files
     jet_driver.[
-        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JET_DRIVER_ROUTED_MODULES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult,
-        jet_driver_core_text, jet_driver_has_errors, jet_driver_load,
+        jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load,
     ]
     jet_cli.[jet_cli_driver_request]
 }
 
-// The load of `source` beside the Core module `core.devtools`, whose text is
-// `owner`, and its cataloged part `__core_devtools_table`.
-reach_test_load_owner: fn(source: String, owner: String) -> JetDriverLoadResult {
+// A check request for the one user file `source`, with no Core sources yet.
+reach_test_request: fn(source: String) -> JetDriverCompileRequest {
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
             canonical_path: "/reach-fixture",
@@ -25,7 +25,13 @@ reach_test_load_owner: fn(source: String, owner: String) -> JetDriverLoadResult 
         entry_root_identity: "reach-root",
         entry_path: "/reach-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+}
+
+// The load of `source` beside the Core module `core.devtools`, whose text is
+// `owner`, and its cataloged part `__core_devtools_table`.
+reach_test_load_owner: fn(source: String, owner: String) -> JetDriverLoadResult {
+    request := reach_test_request(source)
     request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
         {module_name: "__core_devtools_table", alias: "__core_devtools_table", path: "Core/devtools-reach-table.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("value: fn() -> Int Never! {{ 7 }}\n")},
@@ -86,18 +92,7 @@ reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [Str
 // `core.devtools.runtime.kernel`; the kernel's `lookup` alone reads the
 // runtime unit `core.devtools.runtime.table`.
 reach_test_load_runtime: fn(source: String) -> JetDriverLoadResult {
-    snapshot: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
-            canonical_path: "/reach-fixture",
-            identity: "reach-root",
-            allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/reach-fixture/main.jet", relative_path: "main.jet", identity: "reach-file", source: source}},
-            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
-        }},
-        entry_root_identity: "reach-root",
-        entry_path: "/reach-fixture/main.jet",
-    }
-    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    request := reach_test_request(source)
     owner: "use {{\n    kernel: core.devtools.runtime.kernel\n}}\n\nplain: fn() -> Int Never! {{ kernel.plain() }}\n\nlookup: fn() -> Int Never! {{ kernel.lookup() }}\n"
     kernel: "use {{\n    table: core.devtools.runtime.table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
     request.core_sources = [JetDriverCoreSource]{
@@ -139,4 +134,79 @@ reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     limited: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.limited()) }}\n", owner)
     assert_eq(reach_test_constants(limited, "core.devtools"), [String]{"LIMIT"})
     assert_eq(reach_test_functions(limited, "core.devtools"), [String]{"plain", "limited"})
+}
+
+// The load of `source` beside the one Core module `module_name`, whose text
+// is `text` and whose cutover members are `owned`.
+reach_test_load_module: fn(source: String, module_name: String, owned: [String], text: String) -> JetDriverLoadResult {
+    request := reach_test_request(source)
+    request.core_sources = [JetDriverCoreSource]{
+        {module_name: module_name, alias: module_name.replace(".", "_"), path: "Core/reach-module.jet", owner: "", owned_members: owned, runtime: false, text: jet_driver_core_text(text)},
+    }
+    load: jet_driver_load(request)
+    assert(load.complete && !jet_driver_has_errors(load.diagnostics))
+    load
+}
+
+#Test("a routed Core module's `__` helpers load by use, and its compiler routes always load") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n__sin_f32: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\nfabs: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
+    routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"__sin_f32", "fabs"}, text)
+    assert_eq(reach_test_constants(routed, "core.math"), [String]{"__WIDTH", "__RATIO"})
+    assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "__sin_f32", "fabs"})
+    // Any other module's `__` names stay routes as a group.
+    grouped: reach_test_load_module("use m: core.devtools\nrun: fn() {{ print(m.plain()) }}\n", "core.devtools", [String]{}, text)
+    assert_eq(reach_test_constants(grouped, "core.devtools"), [String]{"__TABLE", "__WIDTH", "__RATIO"})
+}
+
+// Each `.jet` file under `dir`, skipping test caches.
+reach_test_sources: fn(dir: String, out: &[String]) {
+    // copy: list_dir takes its path, and the panic text still names `dir`.
+    entries: fs.list_dir(dir.copy()) ?? panic("cannot list {dir}: {err}")
+    loop entry in entries {
+        if entry.is_dir && entry.name == ".jet" -> next
+        path: "{dir}/{entry.name}"
+        if entry.is_dir {
+            reach_test_sources(path, out)
+        } else if entry.name.ends_with(".jet") {
+            out.push(path)
+        }
+    }
+}
+
+// A route the compiler spells as a `"__…"` literal right after a routed
+// module's name (`sema_call_core_source("core.math", "__x", …)`,
+// `module_name: "core.math", member: "__x"`) must be one of that module's
+// routes, or its helper would leave the module unreached. A template
+// (`"__{member}_f32"`) can't be read as a route, so a routed module's
+// computed routes are spelled through functions jet_driver_core_route calls.
+#Test("each `__` literal the compiler spells after a routed module's name is one of its routes") {
+    files := [String]{}
+    reach_test_sources("Compiler", files)
+    failures := [String]{}
+    checked := 0
+    loop module_name in JET_DRIVER_ROUTED_MODULES {
+        routes: jet_driver_core_routes(module_name)
+        loop path in files {
+            if !path.contains("/Source/") -> next
+            // copy: read takes its path, and the failure rows still name `path`.
+            text: fs.read(path.copy()) ?? panic("cannot read {path}: {err}")
+            loop line in text.split("\n") {
+                if !line.contains("\"{module_name}\"") -> next
+                parts: line.split("\"").to_list()
+                loop index in 1..<parts.len() {
+                    if index % 2 == 0 || parts[index] != module_name || index + 2 >= parts.len() -> next
+                    between: parts[index + 1].replace(" ", "")
+                    if between != "," && between != ",name:" && between != ",member:" -> next
+                    route: parts[index + 2]
+                    if !route.starts_with("__") -> next
+                    checked += 1
+                    if !jet_driver_core_route(routes, route) -> failures.push("{path}: {route}")
+                }
+            }
+        }
+    }
+    assert_eq(failures, [String]{})
+    // The rows and calls that route into core.math: `__numeric_stop`, the
+    // bit casts and the exact types' crossing to Float.
+    assert(checked >= 7, "the scan found {checked} routes")
 }

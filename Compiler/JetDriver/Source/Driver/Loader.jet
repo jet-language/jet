@@ -3824,7 +3824,7 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
     // A typed `run: fn(args: T)` or typed Output entry gets its generated argv entry.
     if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(parsed.program)
-    words: jet_driver_unit_words(source, comments, [Item]{}, false, [String]{})
+    words: jet_driver_unit_words(source, comments, [Item]{}, false, [String]{}, jet_driver_core_routes(""))
     JetDriverParsedUnit{parsed: parsed.move(), demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move())}
 }
 
@@ -3972,7 +3972,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     // A lazy declaration of a Core module (public module, private part or
     // runtime unit) counts once the program reaches it; an entry is reached
     // whole (CoreReach.jet).
-    words: jet_driver_unit_words(source, comments, kept, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{})
+    words: jet_driver_unit_words(source, comments, kept, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{}, jet_driver_core_routes(module_name))
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
@@ -5014,7 +5014,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         if demand.math_receiver || demand.unit_family {
             if !bare_modules.contains("core.math") -> bare_modules.push("core.math")
-            jet_driver_reach_math_receiver(reach)
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if owner_index == .Val(index) {
                 if !queued[index] {

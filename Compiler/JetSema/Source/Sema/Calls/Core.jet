@@ -863,11 +863,11 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
         values.push(if keep -> value else -> sema_expr_numeric_conversion(value, Type.Float, span, 0) ?? return failed)
     }
     if to_bits {
-        bits: sema_call_core_source("core.math", "__to_bits_f32", values, Type.Int, true, span, environment, program, diagnostics) ?? return failed
+        bits: sema_call_core_source("core.math", sema_call_core_f32_source(module_name, member) ?? return failed, values, Type.Int, true, span, environment, program, diagnostics) ?? return failed
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(bits, expected, environment, program, diagnostics)}
     }
     own: sema_call_core_math_f32_own(member)
-    source: if own -> "__{member}_f32" else -> member
+    source: if own -> sema_call_core_f32_source(module_name, member) ?? member else -> member
     wide: sema_call_core_source("core.math", source, values, Type.Float, own, span, environment, program, diagnostics) ?? return failed
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_call_core_math_round_f32(wide, span), expected, environment, program, diagnostics)}
 }
@@ -889,12 +889,23 @@ sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     }
 }
 
-// The F32-width members with their own `__<member>_f32` source.
+// The F32-width members with their own `__<member>_f32` source
+// (sema_call_core_f32_source).
 sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
     if member == {
         "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" | "erf" | "erfc" | "gamma" | "lgamma" -> true
         else -> false
     }
+}
+
+// The F32-width source `__<member>_f32` of core.math `member` (`to_bits`,
+// the F32 `cmp` and `is_finite`, and each member with its own F32 source),
+// or None. No program spells one, so CoreReach keeps each loaded with
+// core.math.
+sema_call_core_f32_source: fn(module_name: String, member: String) -> String? Never! {
+    if module_name != "core.math" -> return None
+    if member == "to_bits" || member == "cmp" || member == "is_finite" || sema_call_core_math_f32_own(member) -> return Val("__{member}_f32")
+    None
 }
 
 // Whether argument `index` of an F32-width `member` call is its whole-number
@@ -952,7 +963,7 @@ sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr
     }
     if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
         normalized.symbol = CoreCallSymbol.SourceOwned
-        normalized.source_target = Val("__{record.member}_f32")
+        normalized.source_target = sema_call_core_f32_source(record.module_name, record.member)
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
         normalized.source_target = Val(if args.len() == 1 -> "__unix_connect_entry" else -> "__unix_connect_deadline_entry")

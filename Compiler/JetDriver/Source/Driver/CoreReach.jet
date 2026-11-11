@@ -7,10 +7,9 @@
 // a program that never reaches collation or segmentation never reads, lexes
 // or parses their tables. Runtime units (`core.text.runtime.…`) follow the
 // same rule, so a program that only measures UTF-8 never loads the case
-// tables. Every other declaration (types, impls, traits, marked or
-// compiler-routed `__` functions, and the whole of a module the compiler
-// demands) is reached with its module; core.math, demanded by a receiver's
-// `abs` or `pow`, reaches only the functions those lower to.
+// tables. Every other declaration (types, impls, traits, marked functions,
+// the functions the compiler calls by a name no program spells, and the
+// whole of a module the compiler demands) is reached with its module.
 //
 // Spellings are read from the source bytes outside comments, strings
 // included, so reach is a superset of what the code names. When the load is
@@ -20,10 +19,10 @@
 // only what stays, so every tier checks the same closed program, and
 // comptime evaluates only constants the program can name.
 use {
-    jet_foundation.[ImportDecl, Item, NameTable, Span, name_intern, name_intern_bytes, name_table]
-    jet_ir.[ir_precise_source_helper]
+    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, ImportDecl, Item, NameTable, Span, core_call_source_member, name_intern, name_intern_bytes, name_table]
+    jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name]
     jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, Token]
-    jet_sema.[sema_source_word_byte]
+    jet_sema.[sema_call_core_f32_source, sema_source_word_byte]
 }
 
 // What one parsed unit's source spells (jet_driver_unit_words). `words`
@@ -39,24 +38,80 @@ JetDriverUnitWords: struct {
 }
 
 // The span of a top-level function or constant that a program may leave
-// unreached: one with no marker, metadata or compiler role. A `__` name is a
-// compiler route (`__unix_connect_entry`, `__measurement_sqrt`) and a
-// private part's owned member is reached through its owner's name, so both
-// are always reached.
-jet_driver_reach_lazy_span: fn(item: Item, part_members: [String]) -> Span? Never! {
+// unreached: one with no marker, metadata or compiler role. A compiler route
+// (jet_driver_core_route) and a private part's owned member, reached through
+// its owner's name, are always reached.
+jet_driver_reach_lazy_span: fn(item: Item, part_members: [String], routes: JetDriverCoreRoutes) -> Span? Never! {
     if item == {
         .Func(value) -> {
             if value.markers.len() > 0 || value.meta != None || value.external_type != None || value.head_pattern != None || value.is_job || value.every != None || value.kernel != None || value.web_marker != None || value.inline_foreign != None || value.compiler_generated -> return None
-            if value.name.starts_with("__") || part_members.contains(value.name) -> return None
+            if jet_driver_core_route(routes, value.name) || part_members.contains(value.name) -> return None
             Val(value.span)
         }
         .Const(value) -> {
             if value.markers.len() > 0 || value.meta != None || value.is_persist || value.mutable || value.resolved_output != None -> return None
-            if value.name.starts_with("__") || part_members.contains(value.name) -> return None
+            if jet_driver_core_route(routes, value.name) || part_members.contains(value.name) -> return None
             Val(value.span)
         }
         .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
+}
+
+// The Core modules whose compiler routes are all rows or rules
+// jet_driver_core_route reads from the compiler's route tables. Any other
+// module's `__` names stay routes as a group (`__unix_connect_entry`,
+// `__measurement_sqrt`). The CoreReach tests hold each `"__…"` literal the
+// compiler spells right after one of these module names to a route.
+JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
+
+// What the compiler calls in one Core module without the program spelling it.
+// For a routed module, `names` holds its CORE_CALLS `__` members and the
+// source targets a row names in place of its member, its BUILTIN_METHOD_ROWS
+// CoreSource helpers and its IR_CORE_INTRINSICS rows; jet_driver_core_route
+// adds the functions lowering keeps by name and the F32-width sources. A
+// row's own public member is called by its spelling.
+JetDriverCoreRoutes: struct {
+    module_name: String
+    routed: Bool
+    path: String
+    names: [String:Bool]
+}
+
+jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
+    routes := JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), path: "", names: [String:Bool]{}}
+    if !routes.routed -> return routes
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name == module_name -> routes.path = row.path
+    }
+    loop row in CORE_CALLS {
+        if row.module_name == module_name && row.member.starts_with("__") -> routes.names[row.member] = true
+        target: core_call_source_member(row) ?? next
+        parts := target.split(".").to_list()
+        member: parts.pop() ?? next
+        owner: if parts.len() > 0 -> parts.join(".") else -> row.module_name
+        if owner == module_name && (member != row.member || owner != row.module_name) -> routes.names[member] = true
+    }
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.lowering == .CoreSource(owner, member) {
+            if owner == module_name -> routes.names[member] = true
+        }
+    }
+    loop row in IR_CORE_INTRINSICS {
+        if row.module_name == module_name -> routes.names[row.name] = true
+    }
+    routes
+}
+
+// Whether the compiler calls `name` of the routes' module by a name no
+// program need spell: in a routed module a route row, a function lowering
+// keeps by name (ir_core_lowered_by_name: `x.abs()` on a Float runs `fabs`)
+// or an F32-width source (sema_call_core_f32_source); in any other module
+// every `__` name.
+jet_driver_core_route: fn(routes: JetDriverCoreRoutes, name: String) -> Bool Never! {
+    if !routes.routed -> return name.starts_with("__")
+    if routes.names.get(name) != None || ir_core_lowered_by_name("<corelib>/{routes.module_name}", routes.path, name) -> return true
+    if !name.starts_with("__") || !name.ends_with("_f32") -> return false
+    sema_call_core_f32_source(routes.module_name, name.slice(2, name.len() - 4)) == Val((name))
 }
 
 jet_driver_reach_item_name: fn(item: Item) -> String Never! {
@@ -71,12 +126,12 @@ jet_driver_reach_item_name: fn(item: Item) -> String Never! {
 // (jet_driver_comment_spans). With `lazy`, each lazy declaration of `items`
 // gets its own row, in source order; a unit whose lazy spans overlap keeps
 // every word in the rest row, so all of it is reached.
-jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: Bool, part_members: [String]) -> JetDriverUnitWords Never! {
+jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: Bool, part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverUnitWords Never! {
     positions := [Int]{}
     spans := [Span]{}
     if lazy {
         loop (position, item) in items {
-            span: jet_driver_reach_lazy_span(item, part_members) ?? next
+            span: jet_driver_reach_lazy_span(item, part_members, routes) ?? next
             // Insertion by start: program.items is nearly in source order.
             at := spans.len()
             positions.push(position)
@@ -289,24 +344,6 @@ jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
         reach.units[unit].open = true
         loop index in 0..<reach.items.len() {
             if reach.items[index].unit == unit -> reach.stack.push(index)
-        }
-    }
-    jet_driver_reach_drain(reach)
-}
-
-// A receiver's `abs` or `pow` lowers to the core.math function
-// ir_precise_source_helper names, which the source need not spell
-// (`x.abs()` on a Float runs `fabs`): each is reached, now and when
-// core.math loads. The rest of core.math loads by use.
-jet_driver_reach_math_receiver: fn(reach: &JetDriverReach) {
-    if !reach.enabled -> return
-    owners: [String]{"Int", "Float", "F32", "I64"}
-    operations: [String]{"abs", "pow"}
-    loop owner in owners {
-        loop operation in operations {
-            name: ir_precise_source_helper(owner, operation) ?? next
-            id: Int.from_u32(name_intern(reach.names, name).id)
-            jet_driver_reach_global(reach, id)
         }
     }
     jet_driver_reach_drain(reach)
