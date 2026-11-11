@@ -2026,8 +2026,8 @@ type carry the row in the arrow: `-[FS.Read]> String`, `-[]>` for pure,
 `fn(T) -[Net]> U`, and `-[via f]>` to pass a function parameter's row
 through. Every other rung writes `#FX(...)`: above a module, a struct, an
 enum, a trait or a file's `use` lines, as an `#FX: (...)` line in a body, or
-around a block as `#FX(...) { ... }`. Inside the list, `!E` denies,
-`Mem.Alloc(above: N)` bounds a denial, and `#FX()` is pure. The package
+around a block as `#FX(...) { ... }`. Inside the list, `!E` denies and
+`Mem.Alloc(above: N)` bounds a denial; a bare `#FX` is pure. The package
 writes `authority: { allow, deny, grants }`, and the run takes `--allow`,
 `--deny` and `-A`.
 
