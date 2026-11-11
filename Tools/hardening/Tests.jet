@@ -182,8 +182,8 @@ verdict: fn(body: String, key: String, class: String) -> String Never! {
         // The observer runs after the invoked lambda body.
         verdict("print((() -> {{\n    api.call(\"value\") ?? panic(\"call\")\n    true\n}})())", call, "unit"),
         verdict("api.call(\"value\")", call, "never"),
-        // One call reached through both arms of a desugared match is one call.
-        verdict("print(api.call(\"value\") ? ok -> true ! error -> false)", call, "value"),
+        // One call reached through both arms of a pattern table is one call.
+        verdict("print(if api.call(\"value\") == {{ .Ok(ok) -> true, .Err(error) -> false }})", call, "value"),
         // A helper's returned result is judged at its single call site.
         verdict_of(helper, call, "value"),
         // The inline package carrier is masked the way the driver masks it.

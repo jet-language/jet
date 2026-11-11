@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("probe setgid with an invalid identifier") {
-        print(os.setgid(-1) ? ok -> true ! error -> false)
+        print(if os.setgid(-1) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

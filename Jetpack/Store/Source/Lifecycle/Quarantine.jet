@@ -28,7 +28,10 @@ store_malformed_object_reason: fn(path: String) -[FS, Env]> String? StoreError! 
     if meta.receipt != "" && !store_valid_receipt_digest(meta.receipt) -> return Ok(Val("invalid-receipt"))
     // Probe through the output link so a dangling symlink is recognized.
     if meta.out != "" {
-        missing: files.canonicalize(meta.out) ? _resolved -> false ! error -> store_io_is_not_found(error)
+        missing: if files.canonicalize(meta.out) == {
+            .Ok(_resolved) -> false
+            .Err(error) -> store_io_is_not_found(error)
+        }
         if missing -> return Ok(Val("missing-output"))
     }
     Ok(None)

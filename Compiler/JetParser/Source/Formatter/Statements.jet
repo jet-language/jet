@@ -45,6 +45,7 @@ use {
         TOKEN_NOT_EQ,
         TOKEN_RAW_STRING,
         TOKEN_RBRACKET,
+        TOKEN_RBRACE,
         TOKEN_RPAREN,
         TOKEN_STRING,
     ]
@@ -799,15 +800,15 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             if parser_is_subjectless_guard(subject, span) {
                 if jfmt_switch_was_classic_if(f, arms, span) {
                     if f.simplify && arms.len() > 1 {
-                        jfmt_fmt_guard_dispatch(f, arms, else_body)
+                        jfmt_fmt_guard_dispatch(f, arms, else_body, span)
                     } else {
                         jfmt_fmt_classic_switch(f, arms, else_body)
                     }
                 } else {
-                    jfmt_fmt_guard_dispatch(f, arms, else_body)
+                    jfmt_fmt_guard_dispatch(f, arms, else_body, span)
                 }
             } else {
-                jfmt_fmt_dispatch(f, subject, arms, else_body, false)
+                jfmt_fmt_dispatch(f, subject, arms, else_body, false, span)
             }
         }
         .Break(_) -> jfmt_write(f, "break")
@@ -965,9 +966,9 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
         // `comptime if #build.target.os == { … }` — the OS-dispatch
         // switch. Formats exactly like a `Stmt::Switch` (arm grammar)
         // with a `comptime if` lead.
-        .ComptimeSwitch(subject, arms, else_body, _) -> {
+        .ComptimeSwitch(subject, arms, else_body, span) -> {
             jfmt_write(f, "comptime if ")
-            jfmt_fmt_dispatch(f, subject, arms, else_body, true)
+            jfmt_fmt_dispatch(f, subject, arms, else_body, true, span)
         }
         // `#Context(field: value, …) { … }`.
         .ContextBlock(_, body, _) -> jfmt_fmt_body(f, body)
@@ -1154,39 +1155,82 @@ jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_b
 // Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
 // `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
-jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
+// A table written on one line stays on one line when it fits, as
+// `jfmt_fmt_guard_expr` keeps a value table.
+jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, span: Span) {
+    if jfmt_switch_written_on_one_line(f, span.start, arms) {
+        mark: jfmt_mark(f)
+        jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, true)
+        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+        jfmt_rollback(f, mark)
+    }
+    jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
+}
+
+// A statement table's span is its `if`: find the table's `{` (the last one
+// before the first arm or `else`) and its closing `}` in the source tokens.
+jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) -> Bool Never! {
+    body_start: if arms.len() > 0 -> arms[0].span.start else -> jfmt_dispatch_else_start(f, start) ?? return false
+    open := -1
+    loop (index, token) in f.source_toks {
+        if token.span.start >= body_start -> break
+        if token.span.start >= start && token.kind == TOKEN_LBRACE -> open = index
+    }
+    if open < 0 -> return false
+    depth := 0
+    loop index in open..<f.source_toks.len() {
+        token: f.source_toks[index]
+        if token.kind == TOKEN_LBRACE -> depth += 1
+        if token.kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 -> return jfmt_written_on_one_line(f, Span{start: start, end: token.span.end})
+        }
+    }
+    false
+}
+
+jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, compact: Bool) {
     table_op: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     jfmt_fmt_expr(f, subject, JFMT_PREC_OR_FALLBACK)
     jfmt_write(f, " ")
     jfmt_write(f, jfmt_bin_op_spell(table_op))
-    jfmt_write(f, " {{")
-    jfmt_newline(f)
-    f.indent += 1
+    jfmt_write(f, " ")
+    jfmt_table_open(f, compact)
     loop index in 0..<arms.len() {
         arm: arms[index]
+        if compact {
+            if index > 0 -> jfmt_write(f, ", ")
+            jfmt_fmt_switch_arm(f, subject, table_op, arm, force_arm_blocks)
+            next
+        }
         if index > 0 {
             jfmt_newline(f)
             jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
         } else {
             jfmt_emit_leading(f, arm.span.start)
         }
+        // One arm per line: braces keep a leading-dot next arm from reading
+        // as a chain on this arm's expression.
         next_starts_with_dot: index + 1 < arms.len() && jfmt_arm_head_starts_with_dot(arms[index + 1].cond)
         jfmt_fmt_switch_arm(f, subject, table_op, arm, force_arm_blocks || next_starts_with_dot)
         jfmt_emit_trailing(f, arm.span.end)
     }
     if else_body == .Val(else_b) {
-        jfmt_fmt_dispatch_else_lead(f, arms)
+        jfmt_fmt_dispatch_else_lead(f, arms, compact)
         jfmt_write(f, "else")
         jfmt_write(f, " ")
         jfmt_write(f, "->")
         jfmt_fmt_arm_body(f, else_b, force_arm_blocks)
     }
-    f.indent -= 1
-    jfmt_end_block(f)
+    jfmt_table_close(f, compact)
 }
 
 // The trivia before an `else ->` arm, shared by both dispatch shapes.
-jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm]) {
+jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
+    if compact {
+        if arms.len() > 0 -> jfmt_write(f, ", ")
+        return
+    }
     if arms.len() > 0 {
         jfmt_newline(f)
         last: arms[arms.len() - 1]
@@ -1196,13 +1240,23 @@ jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm]) {
     }
 }
 
-jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
-    jfmt_write(f, "{{")
-    jfmt_newline(f)
-    f.indent += 1
+jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
+    if jfmt_switch_written_on_one_line(f, span.start, arms) {
+        mark: jfmt_mark(f)
+        jfmt_fmt_guard_dispatch_table(f, arms, else_body, true)
+        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+        jfmt_rollback(f, mark)
+    }
+    jfmt_fmt_guard_dispatch_table(f, arms, else_body, false)
+}
+
+jfmt_fmt_guard_dispatch_table: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
+    jfmt_table_open(f, compact)
     loop index in 0..<arms.len() {
         arm: arms[index]
-        if index > 0 {
+        if compact {
+            if index > 0 -> jfmt_write(f, ", ")
+        } else if index > 0 {
             jfmt_newline(f)
             jfmt_emit_leading_statement_gap(f, arms[index - 1].span.end, arm.span.start)
         } else {
@@ -1212,17 +1266,16 @@ jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
         jfmt_write(f, " ")
         jfmt_write(f, "->")
         jfmt_fmt_arm_body(f, arm.body, false)
-        jfmt_emit_trailing(f, arm.span.end)
+        if !compact -> jfmt_emit_trailing(f, arm.span.end)
     }
     if else_body == .Val(body) {
-        jfmt_fmt_dispatch_else_lead(f, arms)
+        jfmt_fmt_dispatch_else_lead(f, arms, compact)
         jfmt_write(f, "else")
         jfmt_write(f, " ")
         jfmt_write(f, "->")
         jfmt_fmt_arm_body(f, body, false)
     }
-    f.indent -= 1
-    jfmt_end_block(f)
+    jfmt_table_close(f, compact)
 }
 
 // The parser stores a readiness head in a private one-field

@@ -422,10 +422,6 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
     return arrow(kind_at(facts, cursor))
 }
 
-result_handler_failure_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
-    return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
-}
-
 // `&name` / `&&name` / `name.move()` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
 // bitwise-and, logical-and or power line keeps a space after its operator.
@@ -515,7 +511,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                                     events.push(start)
                                 }
                                 else -> {
-                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && !result_handler_failure_starts_at(facts, index) && kind != K_RPAREN && kind != K_RBRACKET {
+                                    if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && kind != K_RPAREN && kind != K_RBRACKET {
                                         events.push(1)
                                         events.push(index)
                                         events.push(end)

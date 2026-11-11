@@ -86,9 +86,12 @@ store_recover_repair_quarantine_unlocked: fn(verification: &StoreVerification, r
     objects: files.join(hangar, "objects")
     store_ensure_real_directory(objects, "Hangar object pool")
     permissions := MovePathPermissions.default()
-    recovered: store_archive_recover_quarantine_entries(verification, roots, quarantine, objects, permissions) ? count -> count ! error -> {
-        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
-        return Err(error)
+    recovered: if store_archive_recover_quarantine_entries(verification, roots, quarantine, objects, permissions) == {
+        .Ok(count) -> count
+        .Err(error) -> {
+            permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+            return Err(error)
+        }
     }
     permissions.restore()
     Ok(recovered)
@@ -278,9 +281,12 @@ store_archive_repair_unlocked: fn(verification: &StoreVerification, roots: Hanga
     backup: files.join(quarantine, "repair-{entry.envelope.output_hash}-{store_archive_unique_suffix()}")
     had_object: store_archive_lstat(object_path) != None
     permissions := MovePathPermissions.default()
-    report: store_archive_repair_swap(verification, roots, archive, object_path, backup, quarantine, had_object, permissions) ? value -> value ! error -> {
-        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
-        return Err(error)
+    report: if store_archive_repair_swap(verification, roots, archive, object_path, backup, quarantine, had_object, permissions) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+            return Err(error)
+        }
     }
     permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
     Ok(report)
@@ -456,14 +462,17 @@ store_archive_import_unlocked: fn(verification: &StoreVerification, roots: Hanga
     files.create_dir_all(stage)
     files.create_dir_all(stage_objects)
     moved := [HangarArchiveMove]{}
-    count: store_archive_import_staged(verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, moved) ? value -> value ! error -> {
-        failure := error
-        if store_archive_rollback_import_moves(verification, moved, hangar) == {
-            .Err(rollback) -> failure = StoreError.Other("{error.message()}; archive import rollback failed: {rollback.message()}")
-            .Ok(_) -> {}
+    count: if store_archive_import_staged(verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, moved) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            failure := error
+            if store_archive_rollback_import_moves(verification, moved, hangar) == {
+                .Err(rollback) -> failure = StoreError.Other("{error.message()}; archive import rollback failed: {rollback.message()}")
+                .Ok(_) -> {}
+            }
+            store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
+            return Err(failure)
         }
-        store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
-        return Err(failure)
     }
     store_archive_remove_tree(stage).drop("an abandoned archive stage is swept by Hangar recovery")
     Ok(count)

@@ -8,35 +8,59 @@ use {
 Severity: distinct Int(0..10)
 
 invalid_i8_rejected: fn() -[]> Bool {
-    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
+    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
+        .Ok(_value) -> return false
+        .Err(_error) -> return true
+    }
 }
 
 invalid_u32_rejected: fn() -[]> Bool {
-    cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
+    if cbor.decode<U32>([U8]{ 0x20 }) == {
+        .Ok(_value) -> return false
+        .Err(_error) -> return true
+    }
 }
 
 invalid_f32_rejected: fn() -[]> Bool {
-    cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
+    if cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) == {
+        .Ok(_value) -> return false
+        .Err(_error) -> return true
+    }
 }
 
 invalid_fixed_rejected: fn() -[]> Bool {
-    cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
+    if cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) == {
+        .Ok(_value) -> return false
+        .Err(_error) -> return true
+    }
 }
 
 invalid_range_rejected: fn() -[]> Bool {
-    cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
+    if cbor.decode<Severity>([U8]{ 0x0b }) == {
+        .Ok(_value) -> return false
+        .Err(_error) -> return true
+    }
 }
 
 invalid_i8_error: fn() -[]> String {
-    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
+    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return error[0].reason
+    }
 }
 
 invalid_u8_error: fn() -[]> String {
-    cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
+    if cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return error[0].reason
+    }
 }
 
 invalid_fixed_bytes_error: fn() -[]> String {
-    cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
+    if cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return error[0].reason
+    }
 }
 
 forced_deopt: fn() -[]> String {

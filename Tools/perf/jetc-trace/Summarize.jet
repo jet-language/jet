@@ -158,7 +158,10 @@ run: fn() {
     every: watch.map(w -> Float.parse(w.split_once("=")?.after ?? "") ?? 2.0) ?? 0.0
     if every > 0 {
         loop {
-            text: render(path) ? out -> out ! e -> "cannot read {path}: {e}"
+            text: if render(path) == {
+                .Ok(out) -> out
+                .Err(e) -> "cannot read {path}: {e}"
+            }
             esc: String.from_bytes_lossy([U8]{27})
             print("{esc}[2J{esc}[H{local_clock()}  {path}\n\n{text}")
             time.sleep(time.duration_ns(math.round(every * 1e9)))

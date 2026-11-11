@@ -276,7 +276,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     action: build_test_output_action([String]{"a.o", "b.o"})
     files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
     files.write(files.join(sandbox, "b.o"), "second") ?? panic("second output")
-    published: build_publish_sandbox_outputs(sandbox, root, action) ? edited -> edited ! error -> panic("regular outputs publish: {error.message}")
+    published: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("regular outputs publish: {error.message}")
+    }
     assert_eq(published, String?{None})
     assert_eq(files.read(files.join(root, "b.o")) ?? panic("published output"), "second")
     files.remove(files.join(root, "a.o")) ?? panic("reset first output")
@@ -334,30 +337,45 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.write(files.join(sandbox, "a.o"), "object") ?? panic("first output")
     files.write(files.join(sandbox, "table.txt"), "new") ?? panic("kept output")
     table: files.join(root, "table.txt")
-    first: build_publish_sandbox_outputs(sandbox, root, action) ? edited -> edited ! error -> panic("a missing kept output is written: {error.message}")
+    first: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("a missing kept output is written: {error.message}")
+    }
     assert_eq(first, String?{None})
     assert_eq(files.read(table) ?? panic("written kept output"), "new")
     // Already holding the made bytes: the same file stays.
     before: (files.stat(table) ?? panic("kept stat")).id
-    unchanged: build_publish_sandbox_outputs(sandbox, root, action) ? edited -> edited ! error -> panic("an unchanged kept output publishes: {error.message}")
+    unchanged: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("an unchanged kept output publishes: {error.message}")
+    }
     assert_eq(unchanged, String?{None})
     assert((files.stat(table) ?? panic("kept stat")).id == before)
     // Holding the last build's bytes: rewritten.
     files.write(table, "old") ?? panic("last build's bytes")
-    rewritten: build_publish_sandbox_outputs(sandbox, root, action) ? edited -> edited ! error -> panic("the last build's bytes are rewritten: {error.message}")
+    rewritten: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("the last build's bytes are rewritten: {error.message}")
+    }
     assert_eq(rewritten, String?{None})
     assert_eq(files.read(table) ?? panic("rewritten kept output"), "new")
     // Holding bytes no build wrote: nothing is published, from the work
     // tree or from a cache record.
     files.write(table, "edited") ?? panic("hand edit")
     files.remove(files.join(root, "a.o")) ?? panic("reset first output")
-    refused: build_publish_sandbox_outputs(sandbox, root, action) ? edited -> edited ! error -> panic("a hand edit is reported: {error.message}")
+    refused: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("a hand edit is reported: {error.message}")
+    }
     assert_eq(refused, String?{Val("table.txt")})
     assert(!files.exists(files.join(root, "a.o")))
     object: store.put_blob("object".bytes()) ?? panic("object blob")
     made: store.put_blob("new".bytes()) ?? panic("kept blob")
     record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{{path: "a.o", digest: object, byte_len: 6}, {path: "table.txt", digest: made, byte_len: 3}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
-    unrestored: build_restore_action_outputs(store, root, action, record) ? edited -> edited ! error -> panic("a hand edit is reported: {error.message}")
+    unrestored: if build_restore_action_outputs(store, root, action, record) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("a hand edit is reported: {error.message}")
+    }
     assert_eq(unrestored, String?{Val("table.txt")})
     assert(!files.exists(files.join(root, "a.o")))
     assert_eq(files.read(table) ?? panic("hand-edited kept output"), "edited")
@@ -679,9 +697,15 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     digest: store.put_blob("object".bytes()) ?? panic("blob")
     record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
     build_write_action_record(store, "act-sha256:k", record) ?? panic("write record")
-    read: build_read_action_record(store, "act-sha256:k") ? found -> found ! error -> panic("read record")
+    read: if build_read_action_record(store, "act-sha256:k") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("read record")
+    }
     found: read ?? panic("record present")
-    restored: build_restore_action_outputs(store, root, action, found) ? edited -> edited ! error -> panic("restore matching record: {error.message}")
+    restored: if build_restore_action_outputs(store, root, action, found) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("restore matching record: {error.message}")
+    }
     assert_eq(restored, String?{None})
     assert_eq(files.read(files.join(root, "a.o")) ?? panic("restored output"), "object")
     store.put_record("act-sha256:other", "act-sha256:k\noutcome=succeeded:0\n".bytes()) ?? panic("forged record")

@@ -12,11 +12,13 @@ Tracked: struct {
 // drops when the arena resets, latest allocation first, and never again.
 arms: fn() {
     arena := mem.Arena.new()
-    arena.try_alloc(Tracked{label: "t1"}) ? value -> {
-        print("got {value.label}")
-    }
-    ! error -> {
-        print("refused {error.requested_bytes}")
+    if arena.try_alloc(Tracked{label: "t1"}) == {
+        .Ok(value) -> {
+            print("got {value.label}")
+        }
+        .Err(error) -> {
+            print("refused {error.requested_bytes}")
+        }
     }
     if arena.try_alloc(Tracked{label: "t2"}) == .Ok(value) {
         print("got {value.label}")
@@ -43,11 +45,13 @@ tried: fn() AllocError! {
 // A Fixed allocator closes what it accepted when it is closed.
 fixed_case: fn() {
     fixed: mem.Fixed.new(size: 64)
-    fixed.try_alloc(Tracked{label: "f1"}) ? value -> {
-        print("got {value.label}")
-    }
-    ! error -> {
-        print("refused {error.requested_bytes}")
+    if fixed.try_alloc(Tracked{label: "f1"}) == {
+        .Ok(value) -> {
+            print("got {value.label}")
+        }
+        .Err(error) -> {
+            print("refused {error.requested_bytes}")
+        }
     }
     print("close fixed")
     close(fixed)

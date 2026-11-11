@@ -342,9 +342,12 @@ store_read_nar_stream_with_mode: fn(source: &&NarByteSource, destination: String
     store_nar_validate_destination_parent(parent)
     files.create_dir_all(parent)
     reader := NarStreamReader{source: source.move(), limit: expected_nar_size + 1, bytes: 0, hasher: crypto.new(), allow_nix_store_symlinks: allow_nix_store_symlinks, nodes: 0}
-    stats: store_nar_stream_decode(reader, destination, expected_nar_size) ? value -> value ! error -> {
-        store_nar_remove_tree(destination).drop("a failed stream destination is removed best-effort")
-        return Err(error)
+    stats: if store_nar_stream_decode(reader, destination, expected_nar_size) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            store_nar_remove_tree(destination).drop("a failed stream destination is removed best-effort")
+            return Err(error)
+        }
     }
     Ok(stats)
 }

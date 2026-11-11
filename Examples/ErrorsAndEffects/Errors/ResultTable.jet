@@ -1,0 +1,56 @@
+// A result's outcomes are handled by the ordinary pattern table,
+// `if value == { … }`, with one arm per case. A table written on one line
+// separates its arms with commas; a longer one puts each arm on its own line.
+#Error
+Problem: enum { Bad }
+
+// No match is a case of its own: `.None` gets a different answer from `.Err`.
+lookup: fn(k: Int) -> Int? Problem! {
+    if k < 0 -> return Err(Problem.Bad)
+    if k == 0 -> return None
+    Val(k)
+}
+
+classify: fn(ok: Bool) -> Int { if ok -> Ok(7) else -> Err("bad") }
+
+choose: fn<T>(value: &&T, ok: Bool) -> T { if ok -> Ok(value) else -> Err("bad") }
+
+choose_text: fn(value: &&String, ok: Bool) -> String { if ok -> Ok(value) else -> Err("bad") }
+
+owned: fn(ok: Bool) -> String {
+    return if choose_text("owned", ok) == { .Ok(text) -> text, .Err(_) -> "bad" }
+}
+
+generic: fn<T>(value: &&T, ok: Bool) -> T {
+    return if choose<T>(value, ok) == { .Ok(chosen) -> chosen, .Err(_) -> return Err("bad") }
+}
+
+nested: fn(value: Int, ok: Bool) -> Int {
+    return if choose<Int>(value, ok) == {
+        .Ok(first) -> if choose<Int>(first, ok) == { .Ok(second) -> second + 1, .Err(_) -> 0 }
+        .Err(_) -> 0
+    }
+}
+
+run: fn() {
+    #FX(authority: IO) {
+        authority.with("IO")
+        loop k in [-1, 0, 7] -> print(if lookup(k) == { .Val(n) -> n, .None -> 0, .Err(_) -> -1 })
+        if classify(true) == {
+            .Ok(ok) -> {
+                print("ok")
+                print(ok)
+            }
+            .Err(_) -> print("error")
+        }
+        if classify(false) == { .Ok(ok) -> print(ok), .Err(_) -> print("error") }
+        value: if classify(true) == { .Ok(ok) -> ok + 1, .Err(_) -> 0 }
+        print("value")
+        print(value)
+        print(owned(true))
+        print(owned(false))
+        print(if generic(4, true) == { .Ok(chosen) -> chosen, .Err(_) -> 0 })
+        print(nested(4, true))
+        print(nested(4, false))
+    }
+}

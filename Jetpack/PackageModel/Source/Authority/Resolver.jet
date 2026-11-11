@@ -539,9 +539,12 @@ pkg_authority_effective_root: fn(root: String) -> String Never! {
 }
 
 pkg_authority_inspect_root: fn(root: String) -[FS]> files.Stat AuthorityError! {
-    info: files.stat(root) ? found -> found ! error -> {
-        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
-        return Err(AuthorityError.IO{path: root, operation: "inspect", detail: "{error}"})
+    info: if files.stat(root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            return Err(AuthorityError.IO{path: root, operation: "inspect", detail: "{error}"})
+        }
     }
     if info.is_symlink -> return Err(AuthorityError.Symlink(root))
     if !info.is_dir {
@@ -551,9 +554,12 @@ pkg_authority_inspect_root: fn(root: String) -[FS]> files.Stat AuthorityError! {
 }
 
 pkg_authority_canonicalize_root: fn(root: String) -[FS, Env]> String AuthorityError! {
-    canonical: files.canonicalize(root) ? resolved -> resolved ! error -> {
-        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
-        return Err(AuthorityError.IO{path: root, operation: "resolve", detail: "{error}"})
+    canonical: if files.canonicalize(root) == {
+        .Ok(resolved) -> resolved
+        .Err(error) -> {
+            if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
+            return Err(AuthorityError.IO{path: root, operation: "resolve", detail: "{error}"})
+        }
     }
     Ok(canonical)
 }

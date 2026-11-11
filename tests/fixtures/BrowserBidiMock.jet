@@ -195,9 +195,12 @@ Peer: struct {
 
 // Read what the client has sent so far; an end of stream or a socket error ends the peer.
 receive: fn(peer: &Peer) {
-    chunk: peer.stream.read(65536, deadline: remaining(peer.started)) ? got -> got ! failure -> {
-        _: remaining(peer.started)
-        [U8]{}
+    chunk: if peer.stream.read(65536, deadline: remaining(peer.started)) == {
+        .Ok(got) -> got
+        .Err(failure) -> {
+            _: remaining(peer.started)
+            [U8]{}
+        }
     }
     if chunk.len() == 0 {
         peer.ended = true
@@ -291,7 +294,10 @@ write: fn(peer: &Peer, message: String) {
 pending: fn(peer: &Peer, ms: Int) -> Bool {
     if peer.buffer.len() > 0 -> return true
     if peer.ended -> return false
-    readable: net.tcp_ready(peer.stream, NetReadyInterest.Read, ms) ? ready -> net.ready_readable(ready) ! failure -> false
+    readable: if net.tcp_ready(peer.stream, NetReadyInterest.Read, ms) == {
+        .Ok(ready) -> net.ready_readable(ready)
+        .Err(failure) -> false
+    }
     if readable -> receive(peer)
     peer.buffer.len() > 0
 }

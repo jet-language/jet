@@ -295,7 +295,7 @@ s6_retirement_reviewed_hits: fn(source: String) -> [S6RetirementReviewedHit] {
 
 s6_retirement_reviewed_detector_law: fn() {
     // `value: !IOError` left the current list: the parser rejects it (E0003).
-    current: "maybe: fn() -> Int? {{ None }}\ntyped: fn() -> Int IOError! {{ 1 }}\nunion: fn() -> Int (DbError | TimeoutError)! {{ 1 }}\nunit: fn() IOError! {{}}\ncontext: fn() -> Int IOError! {{ read()?(\"loading\") }}\nhandled: fn() -> Int IOError! {{ value ? ok -> ok ! failure -> 0 }}\nif !ready -> print(\"ready\")\n"
+    current: "maybe: fn() -> Int? {{ None }}\ntyped: fn() -> Int IOError! {{ 1 }}\nunion: fn() -> Int (DbError | TimeoutError)! {{ 1 }}\nunit: fn() IOError! {{}}\ncontext: fn() -> Int IOError! {{ read()?(\"loading\") }}\nhandled: fn() -> Int IOError! {{ if value == {{ .Ok(ok) -> ok, .Err(failure) -> 0 }} }}\nif !ready -> print(\"ready\")\n"
     assert_eq(s6_retirement_reviewed_hits(current).len(), 0)
     snippets: [String]{"Int?", "[String]?", "-> Int IOError!", "Int (DbError | TimeoutError)!", "first: fn(flag: Bool) -> Int?", "empty: Int?{{None}}", "Apply? [y/N]", "/reconnect?cursor=<sequence>", "{{2,5}}?", "exact: fn() -> Decimal Never! {{ math.decimal(\\\"1.20\\\") }}"}
     loop snippet in snippets -> assert(s6_retirement_reviewed_hits(snippet).len() == 0, "current failure syntax misread: {snippet}")

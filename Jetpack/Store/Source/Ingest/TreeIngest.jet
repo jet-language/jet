@@ -68,9 +68,12 @@ store_try_entry_output_hash_with_options: fn(verification: &StoreVerification, r
     hangar: roots.hangar_dir()
     canonical_hangar: files.canonicalize(hangar) ?? hangar
     hangar_root: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
-    verified: store_verified_output_hash_with_options(verification, entry.out, hangar_root, entry.platform_artifact_kind != "", force_full, !force_full) ? value -> value ! error -> {
-        if error.is_not_found() -> return Err(StoreError.Other("output `{entry.out}` does not exist"))
-        return Err(StoreError.Other(error.message()))
+    verified: if store_verified_output_hash_with_options(verification, entry.out, hangar_root, entry.platform_artifact_kind != "", force_full, !force_full) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.is_not_found() -> return Err(StoreError.Other("output `{entry.out}` does not exist"))
+            return Err(StoreError.Other(error.message()))
+        }
     }
     Ok(verified.digest)
 }
@@ -614,12 +617,15 @@ store_recover_hangar_staging: fn(roots: HangarRoots) -[FS, Env, Time]> Int Store
 }
 
 store_ensure_real_directory: fn(path: String, label: String) StoreError! -[FS]> {
-    info: files.stat(path) ? found -> found ! error -> {
-        if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
-        files.create_dir_all(path)
-        created: files.stat(path)
-        if created.is_symlink || !created.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
-        return
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
+            files.create_dir_all(path)
+            created: files.stat(path)
+            if created.is_symlink || !created.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
+            return
+        }
     }
     if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("{label} is not a real directory; repair the path before writing"))
 }
@@ -661,9 +667,12 @@ store_ingest_tree_unlocked: fn(verification: &StoreVerification, roots: HangarRo
     files.create_dir_all(stage)
 
     // Always scrub this stage dir (success moved trees out; failure quarantines).
-    ingested: store_ingest_stage_and_commit(verification, roots, request, output_names, stage, after_child_copy) ? value -> value ! error -> {
-        store_ingest_scrub_failed_stage(hangar, stage, stamp, error)
-        return Err(error)
+    ingested: if store_ingest_stage_and_commit(verification, roots, request, output_names, stage, after_child_copy) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            store_ingest_scrub_failed_stage(hangar, stage, stamp, error)
+            return Err(error)
+        }
     }
     if files.lexists(stage) -> files.remove_all(stage).drop("the committed stage is scratch")
     Ok(ingested)
@@ -784,9 +793,12 @@ store_ingest_hash_error: fn(destination: String, message: String) -> IngestError
 }
 
 store_source_metadata: fn(path: String) -[FS]> files.Stat IngestError! {
-    info: files.stat(path) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return Err(IngestError.IO("output `{path}` does not exist"))
-        return Err(IngestError.IO("cannot inspect output `{path}`: {error}"))
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Err(IngestError.IO("output `{path}` does not exist"))
+            return Err(IngestError.IO("cannot inspect output `{path}`: {error}"))
+        }
     }
     Ok(info)
 }
@@ -873,9 +885,12 @@ store_copy_nofollow_tree_observed: fn(source: String, destination: String, after
         info.is_file -> store_copy_nofollow_file(source, destination, info)
         else -> return Err(IngestError.Invalid("unsupported special file: `{source}`"))
     }
-    after: files.stat(source) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return Err(IngestError.Mutated("`{source}` disappeared during ingest"))
-        return Err(IngestError.IO("cannot re-inspect output `{source}`: {error}"))
+    after: if files.stat(source) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Err(IngestError.Mutated("`{source}` disappeared during ingest"))
+            return Err(IngestError.IO("cannot re-inspect output `{source}`: {error}"))
+        }
     }
     if before != store_stable_meta_identity(after) -> return Err(IngestError.Mutated("`{source}` changed during ingest"))
 }

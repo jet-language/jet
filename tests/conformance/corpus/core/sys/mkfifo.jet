@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("probe FIFO creation with an empty path") {
-        print(os.mkfifo(Path.from(""), 420) ? ok -> true ! error -> false)
+        print(if os.mkfifo(Path.from(""), 420) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     // Locked or refused by the locked-memory limit: both are a typed answer.
-    answered: os.lock_memory() ? ok -> true ! error -> true
+    answered: if os.lock_memory() == {
+        .Ok(ok) -> true
+        .Err(error) -> true
+    }
     print(answered)
 }

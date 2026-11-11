@@ -18,11 +18,13 @@ run: fn() {
     three: pool.alloc(3)
     print(three)
     fixed: mem.Fixed.new(size: 40)
-    fixed.try_alloc(5) ? value -> {
-        print("fixed {value}")
-    }
-    ! error -> {
-        print("fixed failed {error.allocator}")
+    if fixed.try_alloc(5) == {
+        .Ok(value) -> {
+            print("fixed {value}")
+        }
+        .Err(error) -> {
+            print("fixed failed {error.allocator}")
+        }
     }
     close(arena)
     close(bump)

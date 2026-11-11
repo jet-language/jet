@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("check the process group without sending a signal") {
-        print(os.kill(0, 0) ? ok -> true ! error -> false)
+        print(if os.kill(0, 0) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

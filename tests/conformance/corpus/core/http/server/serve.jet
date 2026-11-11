@@ -3,5 +3,8 @@ use server: core.http.server
 
 run: fn() {
     mux: server.mux()
-    print(server.serve("127.0.0.1:65536", mux) ? ok -> false ! error -> true)
+    print(if server.serve("127.0.0.1:65536", mux) == {
+        .Ok(ok) -> false
+        .Err(error) -> true
+    })
 }

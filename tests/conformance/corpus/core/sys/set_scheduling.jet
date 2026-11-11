@@ -5,16 +5,22 @@ run: fn() {
     #Unsafe("move this short-lived witness to batch time sharing and back; neither needs privilege") {
         before: os.scheduling() ?? panic("scheduling")
         os.set_scheduling(.Batch) ?? panic("set_scheduling(.Batch)")
-        batch: os.scheduling() ? policy -> (if policy == {
-            .Batch -> true
-            .Normal | .Idle | .Fifo(_) | .RoundRobin(_) -> false
-        }) ! error -> false
+        batch: if os.scheduling() == {
+            .Ok(policy) -> (if policy == {
+                .Batch -> true
+                .Normal | .Idle | .Fifo(_) | .RoundRobin(_) -> false
+            })
+            .Err(error) -> false
+        }
         os.set_scheduling(before) ?? panic("set_scheduling(before)")
         // The priority check runs before the kernel sees the call.
-        refused: os.set_scheduling(.RoundRobin{priority: 100}) ? ok -> false ! error -> (if error == {
-            .InvalidInput(_) -> true
-            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
-        })
+        refused: if os.set_scheduling(.RoundRobin{priority: 100}) == {
+            .Ok(ok) -> false
+            .Err(error) -> (if error == {
+                .InvalidInput(_) -> true
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
+            })
+        }
         print(batch && refused)
     }
 }

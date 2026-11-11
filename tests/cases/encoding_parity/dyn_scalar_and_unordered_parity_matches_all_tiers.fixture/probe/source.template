@@ -2,8 +2,14 @@
 use json: core.encoding.json
 
 run: fn() {
-    Dyn.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
-    Dyn.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
+    if Dyn.Text("strict").text() == {
+        .Ok(value) -> print(value)
+        .Err(_error) -> print("strict-error")
+    }
+    if Dyn.Int(7).text() == {
+        .Ok(_value) -> print("strict-bad")
+        .Err(_error) -> print("strict-error")
+    }
 
     print(Dyn.Text("text").to_text() ?? "none")
     print(Dyn.Int(-42).to_text() ?? "none")

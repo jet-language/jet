@@ -18,9 +18,12 @@ STORE_REPRO_CERTIFICATION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]> Int StoreError! {
     parent: files.join(roots.hangar_dir(), STORE_REPRO_CERTIFICATION_STAGE_DIR)
-    info: files.stat(parent) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return Ok(0)
-        return Err(StoreError.IO(error))
+    info: if files.stat(parent) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(0)
+            return Err(StoreError.IO(error))
+        }
     }
     if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility staging is not a real directory"))
     swept := 0
@@ -78,9 +81,12 @@ store_repro_copy_nix_cache_configuration: fn(target: HangarRoots, source: Hangar
     relatives: [String]{STORE_NIX_ENDPOINT_CONFIG, STORE_NIX_TRUST_KEY_CONFIG}
     loop relative in relatives {
         source_path: files.join(source.root, relative)
-        info: files.stat(source_path) ? found -> found ! error -> {
-            if store_io_is_not_found(error) -> next
-            return Err(StoreError.IO(error))
+        info: if files.stat(source_path) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if store_io_is_not_found(error) -> next
+                return Err(StoreError.IO(error))
+            }
         }
         if info.is_symlink || !info.is_file {
             return Err(store_repro_invalid("Nix cache configuration `{source_path}` is not a regular file"))
@@ -140,11 +146,14 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
         final_attempt: attempt + 1 >= attempts
         store_repro_check_cancelled(options)
         left_workspace: RootWorkspace.new(roots, "left", attempt) ?? return Err(RealizeError.Store(err))
-        left: store_realize_uncached(verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
-            if final_attempt -> recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
-            left_workspace.remove()
-            if !final_attempt -> next
-            return Err(error)
+        left: if store_realize_uncached(verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                if final_attempt -> recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                left_workspace.remove()
+                if !final_attempt -> next
+                return Err(error)
+            }
         }
         if left.source_state != SourceState.Built {
             if require_built {
@@ -160,17 +169,23 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
             left_workspace.remove()
             return Err(RealizeError.Store(failure))
         }
-        right: store_realize_uncached(verification, right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
-            if final_attempt -> recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
-            left_workspace.remove()
-            right_workspace.remove()
-            if !final_attempt -> next
-            return Err(error)
+        right: if store_realize_uncached(verification, right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                if final_attempt -> recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
+                left_workspace.remove()
+                right_workspace.remove()
+                if !final_attempt -> next
+                return Err(error)
+            }
         }
-        comparison: store_repro_compare_independent(verification, left_workspace, left, right_workspace, right) ? value -> value ! error -> {
-            left_workspace.remove()
-            right_workspace.remove()
-            return Err(RealizeError.Store(error))
+        comparison: if store_repro_compare_independent(verification, left_workspace, left, right_workspace, right) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                left_workspace.remove()
+                right_workspace.remove()
+                return Err(RealizeError.Store(error))
+            }
         }
         if comparison.difference == .Val(difference) {
             if !final_attempt {
@@ -212,7 +227,10 @@ store_repro_compare_independent: fn(verification: &StoreVerification, left_works
 // Persist the durable evidence for a final disagreement and return the
 // unreproducible-action failure that names it (or the failure to persist it).
 store_repro_report_independent_difference: fn(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError Never! {
-    store_repro_independent_report(roots, comparison, difference) ? reported -> reported ! failed -> failed
+    if store_repro_independent_report(roots, comparison, difference) == {
+        .Ok(reported) -> reported
+        .Err(failed) -> failed
+    }
 }
 
 store_repro_independent_report: fn(roots: HangarRoots, comparison: IndependentComparison, difference: FirstDifference) -[FS, Env]> StoreError StoreError! {
@@ -447,9 +465,12 @@ store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) 
 // independently agreeing certification has replaced the action explicitly.
 store_reproducibility_blocked: fn(roots: HangarRoots, action_key: String) -[FS]> Bool StoreError! {
     directory: store_repro_report_directory(roots, false) ?? return Ok(false)
-    info: files.stat(store_repro_report_path(directory, action_key)) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return Ok(false)
-        return Err(StoreError.IO(error))
+    info: if files.stat(store_repro_report_path(directory, action_key)) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(false)
+            return Err(StoreError.IO(error))
+        }
     }
     if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
     Ok(true)
@@ -465,9 +486,12 @@ store_clear_reproducibility_report: fn(roots: HangarRoots, action_key: String) S
 store_repro_remove_report: fn(roots: HangarRoots, action_key: String) StoreError! -[FS]> {
     directory: store_repro_report_directory(roots, false) ?? return
     path: store_repro_report_path(directory, action_key)
-    info: files.stat(path) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return
-        return Err(StoreError.IO(error))
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return
+            return Err(StoreError.IO(error))
+        }
     }
     if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence is not a regular file"))
     files.remove(path)
@@ -556,9 +580,12 @@ store_repro_publish_report: fn(directory: String, partial: String, destination: 
 // `<root>/private/unreproducible`, created (mode 0700) only when `create`.
 store_repro_report_directory: fn(roots: HangarRoots, create: Bool) -[FS]> String? StoreError! {
     root: roots.root
-    root_info: files.stat(root) ? found -> found ! error -> {
-        if store_io_is_not_found(error) && !create -> return Ok(None)
-        return Err(StoreError.IO(error))
+    root_info: if files.stat(root) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) && !create -> return Ok(None)
+            return Err(StoreError.IO(error))
+        }
     }
     if root_info.is_symlink || !root_info.is_dir -> return Err(store_repro_invalid("Jetpack root is not a real directory"))
     private_dir: files.join(root, "private")
@@ -572,18 +599,24 @@ store_repro_report_directory: fn(roots: HangarRoots, create: Bool) -[FS]> String
 }
 
 store_repro_ensure_directory: fn(path: String, create: Bool) StoreError! -[FS]> {
-    info: files.stat(path) ? found -> found ! error -> {
-        if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
-        if create -> files.create_dir_all(path)
-        return
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
+            if create -> files.create_dir_all(path)
+            return
+        }
     }
     if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
 }
 
 store_repro_private_present: fn(path: String, create: Bool) -[FS]> Bool StoreError! {
-    info: files.stat(path) ? found -> found ! error -> {
-        if store_io_is_not_found(error) && !create -> return Ok(false)
-        return Err(StoreError.IO(error))
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) && !create -> return Ok(false)
+            return Err(StoreError.IO(error))
+        }
     }
     if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))
     Ok(true)

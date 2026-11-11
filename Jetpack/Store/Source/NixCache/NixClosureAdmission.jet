@@ -232,7 +232,10 @@ NixAdmission: struct {
             return Err(NixCacheError.new(.Transport, "Nix cache object returned a non-success status"))
         }
         content_length := Int?{None}
-        if response.header("content-length") == .Val(text) -> content_length = Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
+        if response.header("content-length") == .Val(text) -> content_length = if Int.parse(text.trim()) == {
+            .Ok(value) -> Val(value)
+            .Err(failed) -> None
+        }
         signed_size: info.info.file_size
         if signed_size == .Val(expected) && content_length == .Val(actual) && actual != expected {
             return Err(NixCacheError.new(.CompressedCorruption, "Nix cache Content-Length disagrees with signed FileSize"))
@@ -366,7 +369,10 @@ NixAdmission: struct {
             producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
             // File-root and symlink-root NARs have no executable `bin` projection.
             candidate: files.join(object.hangar_path, "bin")
-            root_is_dir: files.stat(object.hangar_path) ? info -> info.is_dir && !info.is_symlink ! failed -> false
+            root_is_dir: if files.stat(object.hangar_path) == {
+                .Ok(info) -> info.is_dir && !info.is_symlink
+                .Err(failed) -> false
+            }
             bin: if root_is_dir && files.is_dir(candidate) -> candidate else -> ""
             entries.push(StoreEntry{
                 id: store_content_addressed_entry_id(name, "", reference, object.hangar_digest),
@@ -470,7 +476,10 @@ store_nix_existing_object: fn(verification: &StoreVerification, roots: HangarRoo
     proof: producer.facts.get("nix.proof") ?? ""
     if proof == "" || references.len() != entry.references.len() -> return Ok(None)
     loop reference in references {
-        valid: store_nix_validate_store_path(reference, store_dir) ? _ok -> true ! failed -> false
+        valid: if store_nix_validate_store_path(reference, store_dir) == {
+            .Ok(_ok) -> true
+            .Err(failed) -> false
+        }
         if !valid -> return Ok(None)
     }
     Ok(Val(FetchedObject{
@@ -573,19 +582,25 @@ store_nix_push_u64: fn(output: &[U8], value: Int) Never! {
 }
 
 store_nix_ensure_dir: fn(path: String, kind: NixCacheErrorKind) NixCacheError! -[FS]> {
-    info: files.stat(path) ? found -> found ! error -> {
-        if !store_io_is_not_found(error) -> return Err(store_nix_io_error(kind, error))
-        files.create_dir_all(path) ?? return Err(store_nix_io_error(kind, err))
-        return
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(store_nix_io_error(kind, error))
+            files.create_dir_all(path) ?? return Err(store_nix_io_error(kind, err))
+            return
+        }
     }
     if info.is_symlink || !info.is_dir -> return Err(NixCacheError.new(kind, "Nix cache directory is not a real directory"))
 }
 
 // Remove a staged file, symlink, or (read-only) directory tree.
 store_nix_remove_tree: fn(path: String) StoreError! -[FS]> {
-    info: files.stat(path) ? found -> found ! error -> {
-        if store_io_is_not_found(error) -> return
-        return Err(StoreError.IO(error))
+    info: if files.stat(path) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return
+            return Err(StoreError.IO(error))
+        }
     }
     if info.is_symlink || info.is_file {
         files.remove(path)

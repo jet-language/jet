@@ -2,5 +2,8 @@
 use server: core.http.server
 
 run: fn() {
-    print(server.static_file("/__jet_conformance_missing_static_file__", "text/plain") ? ok -> false ! error -> true)
+    print(if server.static_file("/__jet_conformance_missing_static_file__", "text/plain") == {
+        .Ok(ok) -> false
+        .Err(error) -> true
+    })
 }

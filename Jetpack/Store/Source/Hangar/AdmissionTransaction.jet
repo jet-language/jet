@@ -366,9 +366,12 @@ AdmissionTransaction: struct {
         }
         sequence: process_sequence_take(STORE_TRANSACTION_SEQUENCE)
         partial: files.join(receipts, ".{receipt.digest}-{process.current_pid()}-{sequence}.partial")
-        published: store_transaction_publish_receipt(partial, path, receipts, receipt) ? value -> value ! error -> {
-            files.remove(partial).drop("the receipt partial may never have been created")
-            return Err(error)
+        published: if store_transaction_publish_receipt(partial, path, receipts, receipt) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                files.remove(partial).drop("the receipt partial may never have been created")
+                return Err(error)
+            }
         }
         Ok(published)
     }

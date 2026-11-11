@@ -14,7 +14,10 @@ open_fds: fn() -> Int {
 }
 
 maybe_reader: fn(path: String) -> FileReader? {
-    files.open(path) ? reader -> Val(reader) ! error -> None
+    if files.open(path) == {
+        .Ok(reader) -> Val(reader)
+        .Err(error) -> None
+    }
 }
 
 // The arm closes the writer and falls through to the match's end.

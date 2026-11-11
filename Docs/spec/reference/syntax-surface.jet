@@ -291,9 +291,9 @@ use_errors: fn(raw: String) -> Int ParseError! {
     return Ok(n * 2)
 }
 
-// Exhaustive Result handling binds both payloads with the existing `?`, `!`,
-// and `->` tokens: `value ? ok -> success ! error -> failure` (D-RESULT-DECON2=B).
-handle_result: fn(value: Int ParseError!) -> String { value ? ok -> "ok" ! error -> } "error"
+// A Result's outcomes go through the ordinary pattern table; on one line its
+// arms are separated by commas.
+handle_result: fn(value: Int ParseError!) -> String { if value == { .Ok(_) -> "ok", .Err(_) -> "error" } }
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
 optionals: fn(user: User?) -> String {

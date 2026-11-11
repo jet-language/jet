@@ -424,9 +424,12 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
     prepared: store_build_for_cache(verification, roots, ctx, request, IndependentRootOptions.default(), false)
     // The private build roots go on every exit once registration is decided
     // (Rust drops the workspace guards).
-    registered: store_register_prepared(verification, roots, ctx, prepared) ? value -> value ! error -> {
-        prepared.release()
-        return Err(error)
+    registered: if store_register_prepared(verification, roots, ctx, prepared) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            prepared.release()
+            return Err(error)
+        }
     }
     prepared.release()
     Ok(registered)
@@ -516,9 +519,12 @@ store_certify_independent_root_build: fn(verification: &StoreVerification, roots
     prepared: store_build_for_cache(verification, roots, ctx, request, options, true)
     // The private roots live until registration is decided, then go on every
     // exit (Rust drops the workspace guards).
-    certified: store_certify_prepared(verification, roots, ctx, options, prepared) ? value -> value ! error -> {
-        prepared.release()
-        return Err(error)
+    certified: if store_certify_prepared(verification, roots, ctx, options, prepared) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            prepared.release()
+            return Err(error)
+        }
     }
     prepared.release()
     Ok(certified)
@@ -731,9 +737,12 @@ store_restore_substituted_candidate: fn(verification: &StoreVerification, roots:
     store_pin_nix_gc_root(dir, entry.out)
     _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(verification, roots)
-    size: store_admission_size(stage) ? value -> value ! error -> {
-        transaction.rollback()
-        return Err(error)
+    size: if store_admission_size(stage) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            transaction.rollback()
+            return Err(error)
+        }
     }
     if transaction.stage_object(AdmissionObject{source: stage, digest: entry.envelope.output_hash, bytes: size, allow_semantic_xattrs: false, repair_corrupt: false}) == {
         .Ok(_) -> {}

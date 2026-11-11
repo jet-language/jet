@@ -4,9 +4,18 @@ use text: core.text
 gap: fn() {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    Dyn.Int(7).int() ? value -> print(value) ! error -> print(error)
-    Dyn.Float(7.0).int() ? value -> print(value) ! error -> print(error)
-    Dyn.Text("7").int() ? value -> print(value) ! error -> print(error)
+    if Dyn.Int(7).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if Dyn.Float(7.0).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if Dyn.Text("7").int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
 }
 
 run: fn() {

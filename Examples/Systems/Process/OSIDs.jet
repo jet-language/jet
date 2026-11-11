@@ -16,10 +16,13 @@ run: fn() {
     print("user_ids agrees with getuid and geteuid: {ids.real == os.getuid() && ids.effective == os.geteuid()}")
     #Unsafe("posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel") {
         os.set_user_ids(effective: ids.effective) ?? panic("set_user_ids(effective:)")
-        refused: os.set_user_ids(real: 4294967295) ? ok -> "accepted" ! error -> (if error == {
-            .InvalidInput(_) -> "InvalidInput"
-            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
-        })
+        refused: if os.set_user_ids(real: 4294967295) == {
+            .Ok(ok) -> "accepted"
+            .Err(error) -> (if error == {
+                .InvalidInput(_) -> "InvalidInput"
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
+            })
+        }
         print("set_user_ids(real: 4294967295): {refused}")
     }
     gids: os.group_ids() ?? panic("group_ids")

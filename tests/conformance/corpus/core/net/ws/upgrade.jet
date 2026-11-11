@@ -6,5 +6,8 @@ use {
 
 run: fn() {
     request: http_client.request("GET", "http://127.0.0.1/")
-    print(ws.upgrade(request) ? ok -> false ! error -> true)
+    print(if ws.upgrade(request) == {
+        .Ok(ok) -> false
+        .Err(error) -> true
+    })
 }

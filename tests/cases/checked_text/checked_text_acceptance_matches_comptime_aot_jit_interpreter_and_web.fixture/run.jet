@@ -18,7 +18,10 @@ impl Pattern.CheckedText {
 }
 
 accepts: fn(text: String) -[]> Bool {
-    return Pattern.from(text) ? _value -> true ! _error -> false
+    return if Pattern.from(text) == {
+        .Ok(_value) -> true
+        .Err(_error) -> false
+    }
 }
 
 COMPTIME_GOOD: comptime { accepts("ok") }
@@ -28,9 +31,15 @@ run: fn() {
     literal: Pattern{"hello {1}"}
     print(literal.raw())
 
-    Pattern.from("ok") ? value -> print(value.raw()) ! _error -> print("good rejected")
+    if Pattern.from("ok") == {
+        .Ok(value) -> print(value.raw())
+        .Err(_error) -> print("good rejected")
+    }
 
-    Pattern.from("") ? _value -> print("bad accepted") ! _error -> print("bad rejected")
+    if Pattern.from("") == {
+        .Ok(_value) -> print("bad accepted")
+        .Err(_error) -> print("bad rejected")
+    }
 
     runtime_good: accepts("ok")
     runtime_bad: accepts("")

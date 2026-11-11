@@ -1,0 +1,15 @@
+choose: fn<T>(value: &&T, ok: Bool) -> T { if ok -> Ok(value) else -> Err("bad") }
+
+generic: fn<T>(value: &&T, ok: Bool) -> T {
+    return if choose<T>(value, ok) == {
+        .Ok(success) -> success
+        .Err(_failure) -> return Err("bad")
+    }
+}
+
+run: fn() {
+    print(if generic(4, true) == {
+        .Ok(generic_value) -> generic_value
+        .Err(_generic_failure) -> 0
+    })
+}

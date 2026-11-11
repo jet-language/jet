@@ -2,5 +2,8 @@
 use os: core.sys
 
 run: fn() {
-    print(os.set_current_dir(Path.from(".")) ? ok -> true ! error -> false)
+    print(if os.set_current_dir(Path.from(".")) == {
+        .Ok(ok) -> true
+        .Err(error) -> false
+    })
 }

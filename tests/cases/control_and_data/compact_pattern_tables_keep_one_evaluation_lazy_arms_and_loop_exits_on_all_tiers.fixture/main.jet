@@ -1,0 +1,35 @@
+#Error
+Problem: enum { Bad }
+
+lookup: fn(k: Int) -> Int? Problem! {
+    print("lookup {k}")
+    if k < 0 -> return Err(Problem.Bad)
+    if k == 0 -> return None
+    Val(k)
+}
+
+noisy: fn(label: String, value: Int) -> Int {
+    print("arm {label}")
+    value
+}
+
+name: fn(ok: Bool) -> String { if ok -> Ok("owned") else -> Err("bad") }
+
+run: fn() {
+    // Three outcomes, one lookup each.
+    loop k in [-1, 0, 7] -> print(if lookup(k) == { .Val(n) -> n, .None -> 0, .Err(_) -> -1 })
+    // Only the chosen arm runs; a trailing comma is allowed.
+    picked: if lookup(3) == { .Val(n) -> noisy("val", n), .None -> noisy("none", 0), .Err(_) -> noisy("err", -1), }
+    print(picked)
+    // `next` and `break` in a compact arm leave the loop around the table.
+    total := 0
+    loop k in [1, 0, 2, -1, 5] {
+        if lookup(k) == { .Val(n) -> total += n, .None -> next, .Err(_) -> break }
+        print("after {k}")
+    }
+    print("total {total}")
+    // A moved payload and a nested compact table.
+    text: if name(true) == { .Ok(owned) -> owned, .Err(_) -> "bad" }
+    print(text)
+    print(if name(false) == { .Ok(_) -> 1, .Err(_) -> if lookup(0) == { .Val(_) -> 2, .None -> 3, .Err(_) -> 4 } })
+}

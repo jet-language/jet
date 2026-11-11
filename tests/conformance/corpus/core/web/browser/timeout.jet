@@ -2,5 +2,8 @@
 use browser: core.web.browser
 
 run: fn() {
-    print(browser.timeout(1000) ? timeout -> true ! error -> false)
+    print(if browser.timeout(1000) == {
+        .Ok(timeout) -> true
+        .Err(error) -> false
+    })
 }

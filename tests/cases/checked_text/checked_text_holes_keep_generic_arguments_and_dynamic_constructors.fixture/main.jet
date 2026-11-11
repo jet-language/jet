@@ -14,6 +14,9 @@ impl Token.CheckedText {
 }
 run: fn() {
     literal: Token{"accepted {7} {true}"}
-    Token.from("accepted") ? value -> print(value.raw()) ! error -> print("rejected")
+    if Token.from("accepted") == {
+        .Ok(value) -> print(value.raw())
+        .Err(error) -> print("rejected")
+    }
     print(literal.raw())
 }

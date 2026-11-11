@@ -50,8 +50,14 @@ consume_fail: fn() VisitError! {
     return
 }
 run: fn() {
-    consume_ok() ? ok -> { print("callback-ok") } ! error -> { print("callback-ok-failed") }
-    consume_fail() ? ok -> { print("callback-failed-missed") } ! error -> { print("callback-failed") }
+    if consume_ok() == {
+        .Ok(ok) -> { print("callback-ok") }
+        .Err(error) -> { print("callback-ok-failed") }
+    }
+    if consume_fail() == {
+        .Ok(ok) -> { print("callback-failed-missed") }
+        .Err(error) -> { print("callback-failed") }
+    }
     consume_plain()
     print("plain-ok")
 }

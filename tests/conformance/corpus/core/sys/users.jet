@@ -8,6 +8,9 @@ run: fn() {
     if rows.len() == 0 -> panic("/etc/passwd lists no account")
     named: os.user(rows[0].name) ?? panic("user")
     by_id: os.user_by_id(rows[0].uid) ?? panic("user_by_id")
-    missing: os.user("no such account: a colon never names one") ? row -> row == None ! error -> false
+    missing: if os.user("no such account: a colon never names one") == {
+        .Ok(row) -> row == None
+        .Err(error) -> false
+    }
     print(named.uid == rows[0].uid && by_id.uid == rows[0].uid && missing)
 }

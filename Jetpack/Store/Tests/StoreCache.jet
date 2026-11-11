@@ -209,7 +209,10 @@
     store_quarantine_invalid_entry(verification, roots, stale.entry, mismatch) ?? panic("quarantine")
     assert(files.exists(survivor.entry.out))
     assert(store_find_by_reference(verification, roots, stale.entry.reference) == None)
-    hit: store_find_verified_by_reference(verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) ? found -> found ! error -> panic("lookup")
+    hit: if store_find_verified_by_reference(verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }
     verified: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
     verified.lease.release()
@@ -238,7 +241,10 @@
     graph: store_closure_graph(verification, roots) ?? panic("graph")
     assert(!graph.records.has_key(stale.entry.id))
     assert(graph.deleted_records.contains(stale.entry.id))
-    hit: store_find_verified_by_reference(verification, roots, survivor.entry.reference, store_test_expectation(object)) ? found -> found ! error -> panic("lookup")
+    hit: if store_find_verified_by_reference(verification, roots, survivor.entry.reference, store_test_expectation(object)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }
     verified: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
     verified.lease.release()
@@ -315,7 +321,10 @@
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
     envelope: Envelope.for_output(out, "leased@mine", "core-source")
     store_record_verified(verification, roots, "leased", "1.0", "leased@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
-    hit: store_find_verified_by_reference(verification, roots, "leased@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    hit: if store_find_verified_by_reference(verification, roots, "leased@mine", store_test_expectation(out)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }
     verified: hit ?? panic("record must verify")
     lease_root: files.dirname(verified.lease.snapshot_root)
     files.write(files.join(out, "payload"), "mutated outside cooperative lock") ?? panic("mutate")
@@ -403,7 +412,10 @@ store_test_spawn_leased_detached: fn(lease: &CacheLease, argv: [String]) -[FS, E
 // scope keeps its own reference to a lease consumed out of it, and with it
 // the live lock, until that scope ends.
 store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease Never! {
-    hit := (store_find_verified_by_reference(verification, roots, entry.reference, store_test_expectation(entry.out)) ? found -> found ! error -> panic("lookup")) ?? panic("record must verify")
+    hit := (if store_find_verified_by_reference(verification, roots, entry.reference, store_test_expectation(entry.out)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }) ?? panic("record must verify")
     hit.lease.move()
 }
 
@@ -432,7 +444,10 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
         .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("missing member produced a profile copy")
     }
-    hit: store_find_verified_by_reference(verification, roots, "typed@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    hit: if store_find_verified_by_reference(verification, roots, "typed@mine", store_test_expectation(out)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }
     verified: hit ?? panic("record must verify")
     cached: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease.move()}
     assert(cached.consumption_status() == ConsumptionStatus.Consumable)
@@ -503,7 +518,10 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
     files.symlink("tool-real", tool) ?? panic("symlink")
     envelope: Envelope.for_output(out, "fd-view@mine", "core-source")
     store_record_verified(verification, roots, "fd-view", "1", "fd-view@mine", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
-    hit: store_find_verified_by_reference(verification, roots, "fd-view@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
+    hit: if store_find_verified_by_reference(verification, roots, "fd-view@mine", store_test_expectation(out)) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("lookup")
+    }
     verified := hit ?? panic("record must verify")
     bin: verified.lease.child_bin_dir() ?? panic("leased bin")
     // The leased bin is named by a descriptor, so only a child it was passed

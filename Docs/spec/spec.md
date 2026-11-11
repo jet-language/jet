@@ -463,12 +463,15 @@ inverted or empty band is E0316. Range heads are literals. A `distinct Int`
 constraint likewise requires literal bounds because a runtime `Range` cannot
 define a type (D-PATR, D-RANGE1, D-RANGE-VALUE1=A).
 
-A fallible result can use the fixed exhaustive handler
-`result ? ok -> success ! error -> failure`. `ok` and `error` are branch-local
-payload bindings. The parser lowers this form to the ordinary `.Ok` and `.Err`
-pattern tests, so normal typing, effects, divergence, ownership, and execution
-tiers apply. The `?` here is contextual; postfix propagation, `?.`, unary `!`,
-and `??` keep their ordinary meanings (D-RESULT-DECON2=B).
+An arm table may be written on one line, with its arms separated by commas and
+an optional trailing comma: `if lookup(k) == { .Val(n) -> n, .None -> 0,
+.Err(e) -> -1 }`. The comma is layout only: compact and expanded tables share
+heads, patterns, exhaustiveness, ownership checks and control flow, and the
+subject is evaluated once. The formatter keeps a table on one line when it was
+written on one line, holds no comment and fits the width; otherwise each arm
+takes its own line and the commas go. A fallible result is handled by the same
+table over its `.Ok` and `.Err` cases (`.Val`, `.None` and `.Err` for an
+optional result); there is no result-only handler form (D-RESULT-BRANCH1=C).
 
 When the subject of `if subject == { … }` is not a plain name — a call or a
 field access, for example — the arms refer to it as `it`, as in

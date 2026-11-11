@@ -71,7 +71,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [PropagationJourney](Errors/PropagationJourney.jet) — A failure that propagates automatically reports where it started (`failed here`) and every call it passed through on the way out, origin first.
 - [QqControl](Errors/QqControl.jet) — `??
 - [RadixParse](Errors/RadixParse.jet) — `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`: both return `Int ParseError!`, so bad digits or a base outside 2..=36 reach the…
-- [ResultHandler](Errors/ResultHandler.jet) — One fixed exhaustive Result handler handles both payloads.
+- [ResultTable](Errors/ResultTable.jet) — A result's outcomes are handled by the ordinary pattern table, `if value == { … }`, with one arm per case; a one-line table separates its arms with commas.
 - [RollbackTrait](Errors/RollbackTrait.jet)
 - [Transact](Errors/Transact.jet)
 - [TypedErrorFamilies](Errors/TypedErrorFamilies.jet)

@@ -6,10 +6,13 @@ use {
 
 run: fn() {
     #Unsafe("a time before 1970 is refused before it reaches the kernel, so the clock never changes") {
-        refused: os.set_wall_clock(time.from_unix_seconds(-1)) ? ok -> false ! error -> (if error == {
-            .InvalidInput(_) -> true
-            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
-        })
+        refused: if os.set_wall_clock(time.from_unix_seconds(-1)) == {
+            .Ok(ok) -> false
+            .Err(error) -> (if error == {
+                .InvalidInput(_) -> true
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
+            })
+        }
         print(refused)
     }
 }

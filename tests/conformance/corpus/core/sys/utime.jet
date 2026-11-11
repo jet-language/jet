@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("probe timestamp update with an empty path") {
-        print(os.utime(Path.from(""), 0, 0) ? ok -> true ! error -> false)
+        print(if os.utime(Path.from(""), 0, 0) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

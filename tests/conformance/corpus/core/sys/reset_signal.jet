@@ -3,7 +3,13 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("restore the default disposition of SIGUSR1, which this program never handles, then refuse signal 0") {
-        print(os.reset_signal(10) ? ok -> true ! error -> false)
-        print(os.reset_signal(0) ? ok -> false ! error -> true)
+        print(if os.reset_signal(10) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
+        print(if os.reset_signal(0) == {
+            .Ok(ok) -> false
+            .Err(error) -> true
+        })
     }
 }

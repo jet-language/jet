@@ -45,7 +45,10 @@ store_test_ingest_fixture: fn(verification: &StoreVerification, roots: HangarRoo
 }
 
 store_test_verified: fn(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> Bool Never! {
-    hit: store_find_verified_by_reference(verification, roots, reference, expectation) ? found -> found ! error -> panic("verified lookup")
+    hit: if store_find_verified_by_reference(verification, roots, reference, expectation) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("verified lookup")
+    }
     hit == .Val(_)
 }
 

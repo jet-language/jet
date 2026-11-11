@@ -15,7 +15,10 @@ STORE_NIX_TEST_STANDARD_NARINFO: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz
 STORE_NIX_TEST_KEY_ID: "test-cache-1"
 
 store_nix_test_parse_fails: fn(text: String) -> Bool Never! {
-    NixNarInfo.parse(text) ? parsed -> false ! failed -> true
+    if NixNarInfo.parse(text) == {
+        .Ok(parsed) -> false
+        .Err(failed) -> true
+    }
 }
 
 // One NAR string field: little-endian length, bytes, zero padding to 8.
@@ -195,14 +198,20 @@ store_nix_test_single_failure: fn(verification: &StoreVerification, label: Strin
         "/nix-cache-info": store_nix_test_cache_info(),
         "/{store_nix_test_hash_key(store_path)}.narinfo": narinfo,
     }
-    parsed_info: NixNarInfo.parse(narinfo_text) ? info -> Val(info) ! failed -> None
+    parsed_info: if NixNarInfo.parse(narinfo_text) == {
+        .Ok(info) -> Val(info)
+        .Err(failed) -> None
+    }
     if parsed_info == .Val(parsed) {
         url_path: parsed.url.split_once("?")?.before ?? parsed.url
         routes["/{url_path}"] = object
     }
     server: NixTestCacheServer.start(files.join(root, "site"), routes)
     roots: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, STORE_NIX_TEST_KEY_ID, trusted_seed)
-    error: store_admit_nix_closure(verification, roots, store_nix_test_request("out", store_path), false) ? admitted -> panic("{label}: admission must fail") ! failure -> failure
+    error: if store_admit_nix_closure(verification, roots, store_nix_test_request("out", store_path), false) == {
+        .Ok(admitted) -> panic("{label}: admission must fail")
+        .Err(failure) -> failure
+    }
     assert_eq(error.kind, expected)
     assert_eq(error.code(), "E1350")
     assert_eq(store_list(verification, roots).len(), 0)
@@ -260,7 +269,10 @@ NixTestProgress: struct {
     key: NixPublicKey.parse(STORE_NIX_DEFAULT_PUBLIC_KEY) ?? panic("upstream key")
     info.verify_signature("/nix/store", [NixPublicKey]{key}) ?? panic("upstream signature must verify")
     wrong_key: NixPublicKey.parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") ?? panic("wrong key")
-    assert(info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) ? verified -> false ! failed -> true)
+    assert(if info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == {
+        .Ok(verified) -> false
+        .Err(failed) -> true
+    })
     changes: [(needle: String, replacement: String)]{
         (needle: "ripgrep-15.2.0", replacement: "ripgrep-15.2.1"),
         (needle: "7088584", replacement: "7088585"),
@@ -269,7 +281,10 @@ NixTestProgress: struct {
     }
     loop change in changes {
         changed: NixNarInfo.parse(STORE_NIX_TEST_STANDARD_NARINFO.replace(change.needle, change.replacement)) ?? panic("changed narinfo parses")
-        assert(changed.verify_signature("/nix/store", [NixPublicKey]{key}) ? verified -> false ! failed -> true)
+        assert(if changed.verify_signature("/nix/store", [NixPublicKey]{key}) == {
+            .Ok(verified) -> false
+            .Err(failed) -> true
+        })
     }
 }
 
@@ -326,7 +341,10 @@ NixTestProgress: struct {
     roots: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, STORE_NIX_TEST_KEY_ID, seed)
     request: store_nix_test_request("out", root_path)
 
-    error: store_admit_nix_closure(verification, roots, request, false) ? admitted -> panic("a missing leaf narinfo must fail") ! failure -> failure
+    error: if store_admit_nix_closure(verification, roots, request, false) == {
+        .Ok(admitted) -> panic("a missing leaf narinfo must fail")
+        .Err(failure) -> failure
+    }
     assert_eq(error.kind, NixCacheErrorKind.MissingReference)
     assert_eq(store_list(verification, roots).len(), 0)
 
@@ -452,7 +470,10 @@ NixTestProgress: struct {
     assert(damaged.deleted_records.contains(entries[0].id))
 
     cache.server.replace_routes(store_nix_test_single_object_routes(store_path, "pinned.nar", replacement_nar, seed))
-    error: store_admit_nix_closure_with_progress(verification, roots, request, false, Val(original.closure_receipt_sha256), None) ? admitted -> panic("a replacement proof must not repair") ! failure -> failure
+    error: if store_admit_nix_closure_with_progress(verification, roots, request, false, Val(original.closure_receipt_sha256), None) == {
+        .Ok(admitted) -> panic("a replacement proof must not repair")
+        .Err(failure) -> failure
+    }
     assert_eq(error.kind, NixCacheErrorKind.Admission)
     assert(!files.lexists(object.hangar_path))
     assert_eq((files.list_dir(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)) ?? panic("objects")).len(), 0)
@@ -516,9 +537,15 @@ NixTestProgress: struct {
     nar: store_nix_test_nar_with_directory_entries([[U8]]{name.bytes()})
     seed: store_nix_test_seed(17)
     cache: store_nix_test_single_object_cache("backslash-name", store_path, "backslash-name.nar", nar, seed)
-    assert(store_validate_nar(nar) ? stats -> false ! failed -> true)
+    assert(if store_validate_nar(nar) == {
+        .Ok(stats) -> false
+        .Err(failed) -> true
+    })
     strict_destination: files.join(cache.root, "strict")
-    assert(store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) ? stats -> false ! failed -> true)
+    assert(if store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) == {
+        .Ok(stats) -> false
+        .Err(failed) -> true
+    })
 
     first: store_nix_test_admit(verification, cache.roots, "out", store_path)
     object: store_nix_test_object(first, store_path)
@@ -738,7 +765,10 @@ NixTestProgress: struct {
         position.set(end)
         Ok(nar.slice(start, end))
     })
-    error: store_read_nar_stream(reader, destination, nar.len()) ? stats -> panic("trailing bytes must fail") ! failure -> failure
+    error: if store_read_nar_stream(reader, destination, nar.len()) == {
+        .Ok(stats) -> panic("trailing bytes must fail")
+        .Err(failure) -> failure
+    }
     assert(error.message().contains("trailing"))
     assert(!files.lexists(destination))
     _: store_read_nar_stream(store_nix_test_byte_source(valid_nar, 65536), destination, valid_nar.len()) ?? panic("valid stream")
@@ -774,7 +804,10 @@ NixTestProgress: struct {
         realized_at: 0,
         last_used_at: 0,
     }
-    error: store_register_admitted_nix_entries_unlocked(verification, roots, [StoreEntry]{entry}) ? registered -> panic("a non-canonical output must be refused") ! failure -> failure
+    error: if store_register_admitted_nix_entries_unlocked(verification, roots, [StoreEntry]{entry}) == {
+        .Ok(registered) -> panic("a non-canonical output must be refused")
+        .Err(failure) -> failure
+    }
     detail: error.message()
     assert(detail.contains(out))
     assert(detail.contains("output path"))

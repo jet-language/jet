@@ -477,7 +477,10 @@ nix_index_unconfigured_get: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> [
 
 nix_index_content_length: fn(response: HTTPResponse) -> Int? Never! {
     text: response.header("content-length") ?? return None
-    Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
+    if Int.parse(text.trim()) == {
+        .Ok(value) -> Val(value)
+        .Err(failed) -> None
+    }
 }
 
 // The scheme, host and port of an index URL.

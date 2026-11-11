@@ -25,7 +25,10 @@ load: fn(n: Int) -> Int AppErr! {
 }
 
 show: fn(n: Int) {
-    load(n) ? ok -> print("ok {ok}") ! failure -> print("failed {failure.code} {failure.origin}")
+    if load(n) == {
+        .Ok(ok) -> print("ok {ok}")
+        .Err(failure) -> print("failed {failure.code} {failure.origin}")
+    }
 }
 
 run: fn() {

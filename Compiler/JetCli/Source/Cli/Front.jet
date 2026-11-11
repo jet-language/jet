@@ -1407,7 +1407,10 @@ jet_cli_gate_flags: fn(jet_argv: [String], color: Bool) -> JetCLIGateFlags Never
         if argument.starts_with("--gate=") -> written = Val(argument.removeprefix("--gate="))
         if argument == "--gate" -> written = Val(if index + 1 < jet_argv.len() -> jet_argv[index + 1].copy() else -> "")
         spec: written ?? next
-        key: policy_gate_parse(spec) ? found -> found ! error -> return JetCLIGateFlags.Refused{plan: jet_cli_fail("E2104", "`--gate {spec}` doesn't open a gate: {error.message}", jet_cli_why("E2104"), "write `--gate name=allow` with an audited gate name, such as `--gate impure=allow`", color, JET_DRIVER_EXIT_USAGE)}
+        key: if policy_gate_parse(spec) == {
+            .Ok(found) -> found
+            .Err(error) -> return JetCLIGateFlags.Refused{plan: jet_cli_fail("E2104", "`--gate {spec}` doesn't open a gate: {error.message}", jet_cli_why("E2104"), "write `--gate name=allow` with an audited gate name, such as `--gate impure=allow`", color, JET_DRIVER_EXIT_USAGE)}
+        }
         if !gates.contains(key) -> gates.push(key)
     }
     JetCLIGateFlags.Given{gates: gates}

@@ -42,23 +42,9 @@ use {
         TOKEN_KW_FN,
         TOKEN_LBRACE,
         TOKEN_LPAREN,
-        TOKEN_RBRACE,
         TOKEN_RPAREN,
         TOKEN_SEMI,
-        TOKEN_UNIFIED_ARROW,
     ]
-}
-
-// Rust `result_handler_parts`: the compact two-arm `subject ? ok -> … ! err
-// -> …` surface recovered from the nested `Expr::If`/`PatternTest` shape.
-JetFmtResultHandler: struct {
-    subject: Expr
-    ok_binding: String
-    ok_body: [Stmt]
-    ok_value: Expr
-    err_binding: String
-    err_body: [Stmt]
-    err_value: Expr
 }
 
 // Rust `dispatch_value_head`: `(subject, table_op)`.
@@ -87,12 +73,6 @@ JetFmtBinary: struct {
     op: BinOp
     left: Expr
     right: Expr
-    span: Span
-}
-
-JetFmtPatternTest: struct {
-    subject: Expr
-    pattern: Pattern
     span: Span
 }
 
@@ -215,199 +195,6 @@ jfmt_fmt_if_expr: fn(f: &JetFmt, expr: Expr, inline: Bool) {
             jfmt_fmt_value_block(f, parts.else_body, parts.else_value, inline)
         }
     }
-}
-
-jfmt_pattern_test_parts: fn(expr: Expr) -> JetFmtPatternTest? Never! {
-    // copy: `subject` and `pattern` are payloads of read parameter `expr`, which keeps the originals; the new JetFmtPatternTest's fields own `subject` and `pattern`
-    if expr == .PatternTest(subject, pattern, span, _) -> return Val(JetFmtPatternTest{subject: subject.copy(), pattern: pattern.copy(), span: span})
-    None
-}
-
-jfmt_payload_binding: fn(pattern: Pattern, want_ok: Bool) -> String? Never! {
-    if pattern == {
-        .Ok(binding, _, _, _) -> if want_ok -> Val(binding) else -> None
-        .Err(binding, _, _, _) -> if want_ok -> None else -> Val(binding)
-        .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> None
-    }
-}
-
-// Recover the compact two-arm surface.
-jfmt_result_handler_parts: fn(f: JetFmt, expr: Expr) -> JetFmtResultHandler? Never! {
-    outer: jfmt_if_parts(expr) ?? return None
-    ok_test: jfmt_pattern_test_parts(outer.cond) ?? return None
-    binding: jfmt_payload_binding(ok_test.pattern, true) ?? return None
-    inner: jfmt_if_parts(outer.else_value) ?? return None
-    err_test: jfmt_pattern_test_parts(inner.cond) ?? return None
-    err_binding: jfmt_payload_binding(err_test.pattern, false) ?? return None
-    if !jfmt_is_no_else(inner.else_value) -> return None
-    start: jfmt_expr_start(expr)
-    if !jfmt_src_valid(f, start, outer.span.end) -> return None
-    question: jfmt_bytes_find(f.src_bytes, start, "?")
-    if question < 0 || question >= outer.span.end -> return None
-    bang: jfmt_bytes_find(f.src_bytes, question + 1, "!")
-    if bang < 0 || bang >= outer.span.end -> return None
-    Val(JetFmtResultHandler{subject: ok_test.subject, ok_binding: binding.move(), ok_body: outer.then_body, ok_value: outer.then_value, err_binding: err_binding.move(), err_body: inner.then_body, err_value: inner.then_value})
-}
-
-jfmt_result_handler_branch_inlineable: fn(f: JetFmt, body: [Stmt], value: Expr) -> Bool Never! {
-    if body.len() > 0 || jfmt_is_if(value) || jfmt_is_no_else(value) || jfmt_value_was_braced(f, value) -> return false
-    start: jfmt_expr_start(value)
-    end: expr_span(value).end
-    jfmt_src_valid(f, start, end) && !jfmt_bytes_have_newline(f.src_bytes, start, end) && !jfmt_span_has_comment(f, start, end)
-}
-
-jfmt_result_handler_compact_source: fn(f: JetFmt, expr: Expr) -> Bool Never! {
-    start: jfmt_expr_start(expr)
-    end: jfmt_result_handler_source_end(f, expr)
-    jfmt_src_valid(f, start, end) && !jfmt_span_has_comment(f, start, end)
-}
-
-jfmt_is_result_handler_source: fn(f: JetFmt, expr: Expr) -> Bool Never! {
-    jfmt_result_handler_parts(f, expr) != None
-}
-
-jfmt_result_handler_branch_start: fn(f: JetFmt, pattern_end: Int) -> Int Never! {
-    loop token in f.source_toks {
-        if token.span.start >= pattern_end && (token.kind == TOKEN_UNIFIED_ARROW) -> return token.span.end
-    }
-    pattern_end
-}
-
-jfmt_result_handler_branch_end: fn(f: JetFmt, branch_start: Int, fallback: Int) -> Int Never! {
-    first := -1
-    loop (index, token) in f.source_toks {
-        if token.span.start >= branch_start && !jfmt_is_comment_kind(token.kind) {
-            first = index
-            break
-        }
-    }
-    if first < 0 || f.source_toks[first].kind != TOKEN_LBRACE -> return jfmt_result_handler_comments_end(f, fallback)
-    depth := 0
-    loop index in first..<f.source_toks.len() {
-        token: f.source_toks[index]
-        if {
-            token.kind == TOKEN_LBRACE -> depth += 1
-            token.kind == TOKEN_RBRACE && depth == 1 -> return jfmt_result_handler_comments_end(f, token.span.end)
-            token.kind == TOKEN_RBRACE -> depth -= 1
-            else -> {}
-        }
-    }
-    jfmt_result_handler_comments_end(f, fallback)
-}
-
-jfmt_result_handler_comments_end: fn(f: JetFmt, start: Int) -> Int Never! {
-    end := start
-    loop {
-        found := false
-        loop comment in f.comments {
-            if comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) {
-                end = comment.span.end
-                found = true
-                break
-            }
-        }
-        if !found -> break
-    }
-    end
-}
-
-jfmt_result_handler_source_end: fn(f: JetFmt, expr: Expr) -> Int Never! {
-    outer: jfmt_if_parts(expr) ?? return expr_span(expr).end
-    inner: jfmt_if_parts(outer.else_value) ?? return outer.span.end
-    branch_start: jfmt_result_handler_branch_start(f, expr_span(inner.cond).end)
-    jfmt_result_handler_branch_end(f, branch_start, outer.span.end)
-}
-
-jfmt_emit_result_handler_comments: fn(f: &JetFmt, start: Int, end: Int) Never! {
-    loop f.comment_i < f.comments.len() {
-        // copy: the pending comment (owner: f.comments) is emitted through `&f`; a view into
-        // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
-        // refcounted text.
-        comment: f.comments[f.comment_i].copy()
-        if comment.span.start < start || comment.span.start >= end -> break
-        jfmt_emit_comment_line(f, comment.text.copy())
-        f.comment_i += 1
-    }
-}
-
-jfmt_fmt_result_handler_branch: fn(f: &JetFmt, body: [Stmt], value: Expr, expanded: Bool, branch_start: Int, branch_end: Int) {
-    if !expanded && jfmt_result_handler_branch_inlineable(f, body, value) {
-        jfmt_write(f, " ")
-        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        return
-    }
-    jfmt_write(f, " {{")
-    jfmt_newline(f)
-    f.indent += 1
-    previous_limit: f.trailing_comment_limit
-    if branch_end < previous_limit -> f.trailing_comment_limit = branch_end
-    jfmt_fmt_block_stmts(f, body)
-    if body.len() > 0 -> jfmt_newline(f)
-    if jfmt_is_no_else(value) {
-        jfmt_emit_result_handler_comments(f, branch_start, branch_end)
-    } else {
-        value_start: jfmt_expr_start(value)
-        jfmt_emit_result_handler_comments(f, branch_start, value_start)
-        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        // Same-line branch comments stay beside their value.
-        jfmt_emit_trailing(f, expr_span(value).end)
-        jfmt_emit_result_handler_comments(f, expr_span(value).end, branch_end)
-    }
-    f.trailing_comment_limit = previous_limit
-    f.indent -= 1
-    if f.at_line_start {
-        jfmt_write(f, "}}")
-    } else {
-        jfmt_end_block(f)
-    }
-}
-
-jfmt_fmt_result_handler_expr: fn(f: &JetFmt, expr: Expr) {
-    parts: jfmt_result_handler_parts(f, expr) ?? return
-    outer: jfmt_if_parts(expr) ?? return
-    inner: jfmt_if_parts(outer.else_value) ?? return
-    span: outer.span
-    ok_pattern_end: expr_span(outer.cond).end
-    err_pattern_end: expr_span(inner.cond).end
-    err_branch_end: jfmt_result_handler_branch_end(f, jfmt_result_handler_branch_start(f, err_pattern_end), span.end)
-    ok_branch_start: jfmt_result_handler_branch_start(f, ok_pattern_end)
-    err_branch_start: jfmt_result_handler_branch_start(f, err_pattern_end)
-    ok_branch_end: expr_span(inner.cond).start
-    compact: jfmt_result_handler_compact_source(f, expr) && jfmt_result_handler_branch_inlineable(f, parts.ok_body, parts.ok_value) && jfmt_result_handler_branch_inlineable(f, parts.err_body, parts.err_value)
-    // In an interpolation hole the handler stays on one line, as written: a
-    // line break there would split the string.
-    if f.interp_depth > 0 && parts.ok_body.len() == 0 && parts.err_body.len() == 0 {
-        jfmt_fmt_expr(f, parts.subject, JFMT_PREC_OR_FALLBACK)
-        jfmt_write(f, " ? {parts.ok_binding} -> ")
-        jfmt_fmt_expr(f, parts.ok_value, JFMT_PREC_OR_FALLBACK)
-        jfmt_write(f, " ! {parts.err_binding} -> ")
-        jfmt_fmt_expr(f, parts.err_value, JFMT_PREC_OR_FALLBACK)
-        return
-    }
-    if compact {
-        mark: jfmt_mark(f)
-        jfmt_fmt_expr(f, parts.subject, JFMT_PREC_OR_FALLBACK)
-        jfmt_write(f, " ? ")
-        jfmt_write(f, parts.ok_binding)
-        jfmt_write(f, " ->")
-        jfmt_fmt_result_handler_branch(f, parts.ok_body, parts.ok_value, false, ok_branch_start, ok_branch_end)
-        jfmt_write(f, " ! ")
-        jfmt_write(f, parts.err_binding)
-        jfmt_write(f, " ->")
-        jfmt_fmt_result_handler_branch(f, parts.err_body, parts.err_value, false, err_branch_start, err_branch_end)
-        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
-        jfmt_rollback(f, mark)
-    }
-    jfmt_fmt_expr(f, parts.subject, JFMT_PREC_OR_FALLBACK)
-    jfmt_write(f, " ? ")
-    jfmt_write(f, parts.ok_binding)
-    jfmt_write(f, " ->")
-    jfmt_fmt_result_handler_branch(f, parts.ok_body, parts.ok_value, true, ok_branch_start, ok_branch_end)
-    jfmt_newline(f)
-    jfmt_write(f, "! ")
-    jfmt_write(f, parts.err_binding)
-    jfmt_write(f, " ->")
-    jfmt_fmt_result_handler_branch(f, parts.err_body, parts.err_value, true, err_branch_start, err_branch_end)
 }
 
 // The offset of an expression's first source byte. `expr_span` is a
@@ -576,16 +363,62 @@ jfmt_table_continues: fn(else_body: [Stmt], else_value: Expr, arm_span: Span, ta
     jfmt_same_span(next_span, arm_span) && jfmt_same_span(arm_span, table_span)
 }
 
+// A table the author wrote on one line without comments stays on one line,
+// arms split by `,`, when it fits: `if r == { .Val(n) -> n, .None -> 0 }`.
+// Any other table expands to one arm per line, without commas.
 jfmt_fmt_guard_expr: fn(f: &JetFmt, expr: Expr) {
     table_span: jfmt_if_span(expr) ?? return
+    // A line break in an interpolation hole would split the string.
+    if f.interp_depth > 0 {
+        jfmt_fmt_guard_table(f, expr, table_span, true)
+        return
+    }
+    if jfmt_written_on_one_line(f, table_span) {
+        mark: jfmt_mark(f)
+        jfmt_fmt_guard_table(f, expr, table_span, true)
+        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+        jfmt_rollback(f, mark)
+    }
+    jfmt_fmt_guard_table(f, expr, table_span, false)
+}
+
+// The source of `span` holds no line break and no comment.
+jfmt_written_on_one_line: fn(f: JetFmt, span: Span) -> Bool Never! {
+    jfmt_src_valid(f, span.start, span.end) && !jfmt_bytes_have_newline(f.src_bytes, span.start, span.end) && !jfmt_span_has_comment(f, span.start, span.end)
+}
+
+// Open, separate and close the arms of a table on one line or one per line.
+jfmt_table_open: fn(f: &JetFmt, compact: Bool) {
+    jfmt_write(f, "{{")
+    if compact {
+        jfmt_write(f, " ")
+    } else {
+        jfmt_newline(f)
+        f.indent += 1
+    }
+}
+
+jfmt_table_arm_break: fn(f: &JetFmt, compact: Bool) {
+    if compact -> jfmt_write(f, ", ") else -> jfmt_newline(f)
+}
+
+jfmt_table_close: fn(f: &JetFmt, compact: Bool) {
+    if compact {
+        jfmt_write(f, " }}")
+    } else {
+        f.indent -= 1
+        jfmt_end_block(f)
+    }
+}
+
+jfmt_fmt_guard_table: fn(f: &JetFmt, expr: Expr, table_span: Span, compact: Bool) {
     if jfmt_dispatch_value_head(f, expr) == .Val(head) {
         jfmt_write(f, "if ")
         jfmt_fmt_expr(f, head.subject, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, " ")
         jfmt_write(f, jfmt_bin_op_spell(head.op))
-        jfmt_write(f, " {{")
-        jfmt_newline(f)
-        f.indent += 1
+        jfmt_write(f, " ")
+        jfmt_table_open(f, compact)
         arm := expr
         loop {
             parts: jfmt_if_parts(arm) ?? break
@@ -594,7 +427,7 @@ jfmt_fmt_guard_expr: fn(f: &JetFmt, expr: Expr) {
             jfmt_fmt_guard_arm_value(f, parts.then_body, parts.then_value)
             // Card #1440: an exhaustive all-pattern table ends in NoElse.
             if parts.else_body.len() == 0 && jfmt_is_no_else(parts.else_value) -> break
-            jfmt_newline(f)
+            jfmt_table_arm_break(f, compact)
             if jfmt_table_continues(parts.else_body, parts.else_value, parts.span, table_span) {
                 arm = parts.else_value
                 next
@@ -603,20 +436,18 @@ jfmt_fmt_guard_expr: fn(f: &JetFmt, expr: Expr) {
             jfmt_fmt_guard_arm_value(f, parts.else_body, parts.else_value)
             break
         }
-        f.indent -= 1
-        jfmt_end_block(f)
+        jfmt_table_close(f, compact)
         return
     }
-    jfmt_write(f, "if {{")
-    jfmt_newline(f)
-    f.indent += 1
+    jfmt_write(f, "if ")
+    jfmt_table_open(f, compact)
     arm := expr
     loop {
         parts: jfmt_if_parts(arm) ?? break
         if !jfmt_fmt_readiness_head(f, parts.cond) -> jfmt_fmt_expr(f, parts.cond, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, " -> ")
         jfmt_fmt_guard_arm_value(f, parts.then_body, parts.then_value)
-        jfmt_newline(f)
+        jfmt_table_arm_break(f, compact)
         if jfmt_table_continues(parts.else_body, parts.else_value, parts.span, table_span) {
             arm = parts.else_value
             next
@@ -625,8 +456,7 @@ jfmt_fmt_guard_expr: fn(f: &JetFmt, expr: Expr) {
         jfmt_fmt_guard_arm_value(f, parts.else_body, parts.else_value)
         break
     }
-    f.indent -= 1
-    jfmt_end_block(f)
+    jfmt_table_close(f, compact)
 }
 
 // Print a value-dispatch arm head, stripping `subject table_op` atoms.
@@ -1321,10 +1151,6 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
     if expr == {
         // S68 `if` used as a value.
         .If(_, _, _, _, _, _, _) -> {
-            if jfmt_is_result_handler_source(f, expr) {
-                jfmt_fmt_result_handler_expr(f, expr)
-                return
-            }
             if jfmt_is_guard_expr(f, expr) {
                 jfmt_fmt_guard_expr(f, expr)
                 return

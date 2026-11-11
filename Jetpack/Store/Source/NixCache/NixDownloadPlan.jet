@@ -105,9 +105,12 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
         fetched := [String: FetchedInfo]{}
         first_error := NixCacheError?{None}
         loop store_path in pending {
-            lookup: endpoint.narinfo(store_path, store_dir) ? found -> found ! error -> {
-                if first_error == None -> first_error = Val(error)
-                next
+            lookup: if endpoint.narinfo(store_path, store_dir) == {
+                .Ok(found) -> found
+                .Err(error) -> {
+                    if first_error == None -> first_error = Val(error)
+                    next
+                }
             }
             if lookup == {
                 .Val(info) -> fetched[store_path] = info

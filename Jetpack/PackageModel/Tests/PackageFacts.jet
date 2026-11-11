@@ -125,7 +125,10 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     dir: pkg_facts_test_dir("configs")
     pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev: Config{{\n    version: \"1\"\n}}\n")
     pkg_facts_test_write(dir, "release.jet", "release: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
-    facts: (PackageFacts.load(dir) ? found -> found ! error -> panic("loads")) ?? panic("package root")
+    facts: (if PackageFacts.load(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("loads")
+    }) ?? panic("package root")
     assert_eq(facts.version, Val("1"))
     assert_eq(facts.inline_configs["dev"].name, Val("dev"))
     assert_eq(facts.defaults["run"], "app")
@@ -137,7 +140,10 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "_dev.jet", "dev: Config{{ version: \"ignored\" }}\n")
     pkg_facts_test_write(dir, "one.jet", "dev: Config{{ version: \"selected\" }}\n")
     pkg_facts_test_write(dir, "ordinary.jet", "run: fn() {{ }}\n")
-    facts: (PackageFacts.load(dir) ? found -> found ! error -> panic("loads")) ?? panic("package root")
+    facts: (if PackageFacts.load(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("loads")
+    }) ?? panic("package root")
     assert_eq(facts.version, Val("selected"))
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
@@ -190,7 +196,10 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     dir: pkg_facts_test_dir("entry")
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(1) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
-    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ? found -> found ! error -> panic("entry"), Val(files.join(dir, "run.jet")))
+    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("entry")
+    }, Val(files.join(dir, "run.jet")))
 }
 
 #Test("canonical run entry precedes typed output") {
@@ -198,14 +207,20 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(1) }}\n")
     pkg_facts_test_write(dir, "serve.jet", "serve: fn() {{ print(2) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: serve }} }}", "package.jet") ?? panic("parses")
-    assert_eq(facts.resolve_run_entry(dir) ? found -> found ! error -> panic("run entry"), Val(files.join(dir, "run.jet")))
+    assert_eq(if facts.resolve_run_entry(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("run entry")
+    }, Val(files.join(dir, "run.jet")))
 }
 
 #Test("output entry override resolves one package function") {
     dir: pkg_facts_test_dir("output-entry-override")
     pkg_facts_test_write(dir, "launch.jet", "launch: fn() {{ print(1) }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: launch }} }}", "package.jet") ?? panic("parses")
-    assert_eq(facts.resolve_run_entry(dir) ? found -> found ! error -> panic("run entry"), Val(files.join(dir, "launch.jet")))
+    assert_eq(if facts.resolve_run_entry(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("run entry")
+    }, Val(files.join(dir, "launch.jet")))
 }
 
 #Test("output entry resolves a nested main module") {
@@ -214,9 +229,15 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "src/cli/main.jet", "cli_run: fn() {{}}\nrun: fn() {{ cli_run() }}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     expected: files.join(dir, "src/cli/main.jet")
-    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ? found -> found ! error -> panic("entry"), Val(expected))
+    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("entry")
+    }, Val(expected))
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
-    checked: (facts.resolve_run_entry_checked(resolver) ? found -> found ! error -> panic("run entry")) ?? panic("entry exists")
+    checked: (if facts.resolve_run_entry_checked(resolver) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("run entry")
+    }) ?? panic("entry exists")
     assert_eq(checked.file.path, expected)
     assert_eq(checked.callable, "cli_run")
 }
@@ -228,7 +249,10 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     pkg_facts_test_write(dir, "bridge.jet", "use app: \"src/cli/main\"\n")
     pkg_facts_test_write(dir, "src/cli/main.jet", "cli_run: fn() {{}}\n")
     facts: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
-    assert_eq(facts.entry_path(dir, facts.outputs["app"]) ? found -> found ! error -> panic("entry"), Val(files.join(dir, "src/cli/main.jet")))
+    assert_eq(if facts.entry_path(dir, facts.outputs["app"]) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("entry")
+    }, Val(files.join(dir, "src/cli/main.jet")))
 }
 
 // One rejected nested-entry fixture: the run entry has no unique source.
@@ -269,11 +293,20 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     pkg_facts_test_write(dir, "run.jet", "run: fn() {{ print(2) }}\n")
     pkg_facts_test_write(dir, "other.jet", "run: fn() {{ print(3) }}\n")
     assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
-    assert_eq(facts.resolve_run_entry(dir) ? found -> found ! error -> panic("run entry"), Val(run_path))
-    assert_eq(facts.entry_path(dir, output) ? found -> found ! error -> panic("entry"), Val(run_path))
+    assert_eq(if facts.resolve_run_entry(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("run entry")
+    }, Val(run_path))
+    assert_eq(if facts.entry_path(dir, output) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("entry")
+    }, Val(run_path))
 
     assert_eq((facts.select_output("run", None, None) ?? panic("select")).name, "app")
-    assert_eq(facts.resolve_run_entry(dir) ? found -> found ! error -> panic("run entry"), Val(run_path))
+    assert_eq(if facts.resolve_run_entry(dir) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("run entry")
+    }, Val(run_path))
 }
 
 #Test("typed entry ambiguity reports package origin") {
@@ -292,7 +325,10 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
 
 #Test("inline package reuses canonical package fields") {
     source: "package: {{\nname: \"inline-demo\"\nversion: \"1.2.3\"\n}}\nrun: fn() {{}}\n"
-    inline: (PackageFacts.parse_inline(source, "run.jet") ? found -> found ! error -> panic("parses")) ?? panic("leading inline Package should be found")
+    inline: (if PackageFacts.parse_inline(source, "run.jet") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("parses")
+    }) ?? panic("leading inline Package should be found")
     file_facts: PackageFacts.parse("name: \"inline-demo\"\nversion: \"1.2.3\"\n", "package.jet") ?? panic("file facts")
     assert_eq(inline.facts.semantic_digest(), file_facts.semantic_digest())
     assert_eq(inline.facts.name, "inline-demo")

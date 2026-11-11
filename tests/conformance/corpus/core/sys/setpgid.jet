@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("set the current process into its existing process group") {
-        print(os.setpgid(0, 0) ? ok -> true ! error -> false)
+        print(if os.setpgid(0, 0) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

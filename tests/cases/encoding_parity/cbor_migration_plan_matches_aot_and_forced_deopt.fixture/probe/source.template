@@ -68,7 +68,10 @@ failed_change: fn() -[]> String {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+    if cbor.decode<Profile>(bytes.copy()) == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return "{error[0].path}:{error[0].reason}"
+    }
 }
 
 run: fn() {

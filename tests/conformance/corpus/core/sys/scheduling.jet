@@ -3,11 +3,14 @@ use os: core.sys
 
 run: fn() {
     // A program started from a shell runs under time sharing.
-    timeshare: os.scheduling() ? policy -> (if policy == {
-        .Normal -> true
-        .Batch -> true
-        .Idle -> true
-        .Fifo(_) | .RoundRobin(_) -> false
-    }) ! error -> false
+    timeshare: if os.scheduling() == {
+        .Ok(policy) -> (if policy == {
+            .Normal -> true
+            .Batch -> true
+            .Idle -> true
+            .Fifo(_) | .RoundRobin(_) -> false
+        })
+        .Err(error) -> false
+    }
     print(timeshare)
 }

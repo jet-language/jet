@@ -7,17 +7,21 @@ use core.mem
 run: fn() {
     fixed: mem.Fixed.new(size: 40)
 
-    fixed.try_alloc(7) ? value -> {
-        print("success {value}")
-    }
-    ! error -> {
-        print("unexpected failure {error.requested_bytes} {error.allocator}")
+    if fixed.try_alloc(7) == {
+        .Ok(value) -> {
+            print("success {value}")
+        }
+        .Err(error) -> {
+            print("unexpected failure {error.requested_bytes} {error.allocator}")
+        }
     }
 
-    fixed.try_alloc(9) ? value -> {
-        print("unexpected success {value}")
-    }
-    ! error -> {
-        print("failure {error.requested_bytes} {error.allocator}")
+    if fixed.try_alloc(9) == {
+        .Ok(value) -> {
+            print("unexpected success {value}")
+        }
+        .Err(error) -> {
+            print("failure {error.requested_bytes} {error.allocator}")
+        }
     }
 }

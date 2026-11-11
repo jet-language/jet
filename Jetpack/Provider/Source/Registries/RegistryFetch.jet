@@ -922,7 +922,10 @@ provider_registry_tar_zero: fn(header: [U8]) -> Bool Never! {
 
 // The ustar header checksum: the byte sum with the checksum field as spaces.
 provider_registry_tar_checksum_valid: fn(header: [U8]) -> Bool Never! {
-    recorded: provider_registry_tar_number(header[148..<156]) ? value -> value ! failed -> return false
+    recorded: if provider_registry_tar_number(header[148..<156]) == {
+        .Ok(value) -> value
+        .Err(failed) -> return false
+    }
     sum := 0
     loop index in 0..<PROVIDER_TAR_BLOCK {
         sum += if index >= 148 && index < 156 -> 32 else -> Int.from_u8(header[index])

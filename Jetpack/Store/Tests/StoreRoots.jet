@@ -322,11 +322,20 @@ store_test_register_locked: fn(verification: &StoreVerification, roots: HangarRo
     second_hash: second.entry.envelope.output_hash
     witness: "sha256-{store_test_repeat("1", 64)}"
     key: store_test_nul_join("host", "generation")
-    prepared: store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) ? found -> found ! error -> panic("prepare")
+    prepared: if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("prepare")
+    }
     assert(prepared != None)
-    resumed: store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) ? found -> found ! error -> panic("resume")
+    resumed: if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("resume")
+    }
     store_commit_external_consumer_root(verification, roots, resumed ?? panic("resumed prepare"), 10) ?? panic("commit")
-    assert((store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) ? found -> found ! error -> panic("retry")) == None)
+    assert((if store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("retry")
+    }) == None)
     assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
     assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
     assert(store_reconcile_external_consumer_root(verification, roots, "jetos-generation", key, witness, [String]{second_hash}, 12) == .Err(_))

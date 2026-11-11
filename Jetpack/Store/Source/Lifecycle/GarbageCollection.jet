@@ -177,8 +177,14 @@ store_current_project_root: fn() -[FS, Env]> String? StoreError! {
 store_lock_roots_from: fn(start: String) -[FS]> LiveRoots StoreError! {
     found: store_nearest_lock_path(start)
     lock_path: found ?? return Ok(LiveRoots.empty())
-    raw: files.read(lock_path) ? text -> text ! error -> return Err(store_gc_io_context(error, "could not read project lock `{lock_path}`: {error}"))
-    lock: pkg_lock_parse(raw) ? parsed -> parsed ! error -> return Err(StoreError.InvalidData("could not parse project lock `{lock_path}`: {error.message()}"))
+    raw: if files.read(lock_path) == {
+        .Ok(text) -> text
+        .Err(error) -> return Err(store_gc_io_context(error, "could not read project lock `{lock_path}`: {error}"))
+    }
+    lock: if pkg_lock_parse(raw) == {
+        .Ok(parsed) -> parsed
+        .Err(error) -> return Err(StoreError.InvalidData("could not parse project lock `{lock_path}`: {error.message()}"))
+    }
     roots := LiveRoots.empty()
     loop pkg in lock.packages {
         name_version: LockNameVersion{name: pkg.name, version: pkg.version}

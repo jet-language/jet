@@ -829,6 +829,7 @@ parser_parse_if_guard_arms: fn(state: &JetParserState, start: Span) -> Stmt {
             parser_bump(state)
             parser_expect_unified_arrow(state, "after `else` in a guard table")
             else_body = Val(parser_parse_guard_arm_body(state))
+            parser_table_arm_separator(state)
             parser_skip_semicolons(state)
             parser_expect(state, TOKEN_RBRACE, "`}}` after the final `else` guard arm")
             break
@@ -838,6 +839,7 @@ parser_parse_if_guard_arms: fn(state: &JetParserState, start: Span) -> Stmt {
         parser_expect_unified_arrow(state, "after a guard condition")
         body: parser_parse_guard_arm_body(state)
         arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
+        parser_table_arm_separator(state)
         // Malformed input that consumed nothing must not retry forever.
         if state.position == arm_position -> parser_bump(state)
     }
@@ -881,7 +883,7 @@ parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
     }
     // A one-statement arm body may end before the table's `else` arm.
     state.adjacent_if_body_depth += 1
-    statement: parser_parse_statement(state)
+    statement: parser_parse_table_arm_statement(state)
     state.adjacent_if_body_depth -= 1
     [Stmt]{statement}
 }
@@ -890,9 +892,25 @@ parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
 parser_parse_arm_body: fn(state: &JetParserState) -> [Stmt] {
     if parser_current_kind(state) == TOKEN_LBRACE -> return parser_parse_block(state).statements
     state.arm_body_depth += 1
-    statement: parser_parse_statement(state)
+    statement: parser_parse_table_arm_statement(state)
     state.arm_body_depth -= 1
     [Stmt]{statement}
+}
+
+// A braceless arm statement may end at the `,` before the next compact arm.
+parser_parse_table_arm_statement: fn(state: &JetParserState) -> Stmt {
+    saved: state.table_arm_block_depth
+    state.table_arm_block_depth = state.block_depth
+    statement: parser_parse_statement(state)
+    state.table_arm_block_depth = saved
+    statement
+}
+
+// One `,` may end an arm, so a whole table fits on one line:
+// `if r == { .Val(n) -> n, .None -> 0, .Err(e) -> -1 }`. Line breaks end
+// arms as well; a `,` before a line break or the closing `}` is optional.
+parser_table_arm_separator: fn(state: &JetParserState) {
+    if parser_current_kind(state) == TOKEN_COMMA -> parser_bump(state)
 }
 
 // With the cursor just past `{`, does the body open with an arm (an
@@ -974,6 +992,7 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
             // E0641: sema reports this arm when the table's subject is a
             // closed set; its edit names the cases the `else` stands for.
             state.else_arms.push(parser_else_arm_span(state, start, open_end, last_arm_end, token.span.start, parser_previous_end(state)))
+            parser_table_arm_separator(state)
             next
         }
         arm_position: state.position
@@ -983,6 +1002,7 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
         through: parser_parse_arm_through(state, token.span.start)
         arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}, through: through})
         last_arm_end = parser_previous_end(state)
+        parser_table_arm_separator(state)
         // Malformed input that consumed nothing must not retry forever.
         if state.position == arm_position -> parser_bump(state)
     }
@@ -1825,15 +1845,13 @@ parser_starts_expression: fn(kind: Int) -> Bool Never! {
 }
 
 // A line that starts with a name or `self` works when it calls, names a
-// field place, propagates or falls back (`?`, `??`), names a compile-time
-// value, or is the compact Result handler. `x?.m()` is Rust's `CallValue`
-// on an `OptField`.
+// field place, propagates or falls back (`?`, `??`) or names a compile-time
+// value. `x?.m()` is Rust's `CallValue` on an `OptField`.
 parser_named_line_does_work: fn(state: &JetParserState, expr: Expr) -> Bool Never! {
     works: if expr == {
         .Call(_, _) | .Field(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) -> true
         .CallValue(callee, _, _, _) -> callee == .OptField(_, _, _, _, _, _)
-        .If(_, _, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     works || parser_at_callable_tail(state)
 }
@@ -1851,19 +1869,6 @@ parser_at_body_close: fn(state: &JetParserState) -> Bool Never! {
     offset := if parser_current_kind(state) == TOKEN_SEMI -> 1 else -> 0
     if state.inbody_marker_depth == state.block_depth -> offset = parser_skip_inbody_marker_lines(state, offset)
     parser_kind_at(state, offset) == TOKEN_RBRACE
-}
-
-// Rust `is_result_handler_expr`: `value ? ok -> … ! err -> …` is the one
-// value `if` allowed as an effect line.
-parser_is_result_handler_expr: fn(expr: Expr) -> Bool Never! {
-    if expr == .If(cond, _, _, _, else_value, _, _) {
-        if cond == .PatternTest(_, ok_pattern, _, _) {
-            if else_value == .If(err_cond, _, _, _, terminal, _, _) {
-                if err_cond == .PatternTest(_, err_pattern, _, _) -> return ok_pattern == .Ok(_, _, _, _) && err_pattern == .Err(_, _, _, _) && terminal == .NoElse(_, _)
-            }
-        }
-    }
-    false
 }
 
 // Rust `try_refutable_test_binding` a pattern test with
@@ -1932,7 +1937,7 @@ parser_finish_statement: fn(state: &JetParserState) {
         parser_bump(state)
         return
     }
-    if token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF || (token.kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) -> return
+    if token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF || (token.kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) || (token.kind == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) -> return
     if state.arm_body_depth > 0 && parser_at_arm_through(state) -> return
     found: parser_describe_token(state, token)
     parser_add_error(state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")

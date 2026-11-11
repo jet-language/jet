@@ -1,0 +1,16 @@
+# A pattern table written on one line separates its arms with commas and
+# means what the expanded table means: the subject is evaluated once, only
+# the chosen arm runs, `next`/`break` in an arm leave the enclosing loop, a
+# payload moves out of its arm, and tables nest. Same on every tier.
+fixture: compact_pattern_tables_keep_one_evaluation_lazy_arms_and_loop_exits_on_all_tiers.fixture
+step default: jet run main.jet
+exit: 0
+stdout: = compact_pattern_tables_keep_one_evaluation_lazy_arms_and_loop_exits_on_all_tiers.stdout.expected
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: == default
+step: jet build main.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default

@@ -1,0 +1,8 @@
+# `if recv.method() == { .Ok(v) -> …, .Err(e) -> … }` on a `&self` method:
+# the write marks the receiver of the matched call, not the whole table (it
+# was E0213/E0224).
+fixture: result_table_marks_written_receiver.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "5\nfailed out of range\n0\n"

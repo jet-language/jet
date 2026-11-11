@@ -144,9 +144,12 @@ store_share_file: fn(path: String, info: files.Stat, digest_hex: String, shared:
 // hold neither; the file then stays unshared.
 store_ensure_shared_file: fn(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> String? StoreError! {
     destination: files.join(shared, key)
-    existing: files.stat(destination) ? found -> Val(found) ! error -> {
-        if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
-        None
+    existing: if files.stat(destination) == {
+        .Ok(found) -> Val(found)
+        .Err(error) -> {
+            if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
+            None
+        }
     }
     if existing == .Val(pooled) {
         if pooled.is_symlink || !pooled.is_file {

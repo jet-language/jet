@@ -559,11 +559,20 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: comptime { `{"schema":"jet.build-record/v0"
         BuildNodeRecord{kind: "compile", key: "checked-node", subject: "run.jet", duration_ms: 2.0, why_ran: "source changed", inputs: [String]{"run.jet"}},
     })
     _: store.publish_last_build_record(workspace, "checked-record", record) ?? panic("publish latest")
-    found: store.last_build_record(workspace, "run.jet") ? latest -> latest ! error -> panic("read latest")
+    found: if store.last_build_record(workspace, "run.jet") == {
+        .Ok(latest) -> latest
+        .Err(error) -> panic("read latest")
+    }
     assert(found == Val((record)))
-    missing: store.last_build_record(other, "run.jet") ? latest -> latest ! error -> panic("read other workspace")
+    missing: if store.last_build_record(other, "run.jet") == {
+        .Ok(latest) -> latest
+        .Err(error) -> panic("read other workspace")
+    }
     assert(missing == None)
-    different: store.last_build_record(workspace, "other.jet") ? latest -> latest ! error -> panic("read other program")
+    different: if store.last_build_record(workspace, "other.jet") == {
+        .Ok(latest) -> latest
+        .Err(error) -> panic("read other program")
+    }
     assert(different == None)
     store_artifact_test_cleanup(cache)
     store_artifact_test_cleanup(workspace)

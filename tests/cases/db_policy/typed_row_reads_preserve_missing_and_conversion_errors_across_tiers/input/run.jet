@@ -23,13 +23,40 @@ run: fn() {
     print(db.row_bool(row, "true") ?? false)
     print(db.row_bool(row, "zero") ?? true)
     print(db.row_bool(row, "one") ?? false)
-    db.row_value(row, "missing") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_int(row, "text") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_float(row, "null") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_text(row, "integer") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_bool(row, "two") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_int(row, "whole-float") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_int(row, "large-float") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_int(row, "small-float") ? _value -> print("unexpected") ! error -> print(error.message)
-    db.row_text(row, "blob") ? _value -> print("unexpected") ! error -> print(error.message)
+    if db.row_value(row, "missing") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_int(row, "text") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_float(row, "null") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_text(row, "integer") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_bool(row, "two") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_int(row, "whole-float") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_int(row, "large-float") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_int(row, "small-float") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
+    if db.row_text(row, "blob") == {
+        .Ok(_value) -> print("unexpected")
+        .Err(error) -> print(error.message)
+    }
 }

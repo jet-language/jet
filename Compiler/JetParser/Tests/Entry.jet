@@ -76,65 +76,82 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(!formatted.contains("run: fn"), "formatter must keep script syntax: {formatted}")
 }
 
-#Test("result_handler_desugars_to_ok_and_err_value_tests") {
-    result: parser_test_result("pick: fn(value: Int String!) -> String {{ value ? ok -> ok ! error -> error }}\n")
-    assert(result.diagnostics.is_empty(), "Result handler should parse: {result.diagnostics:Debug}")
-    result.program.items[0] == .Func(function) ?? panic("function")
-    function.body[0] == .Expr(handler) ?? panic("Result handler should lower as a value if")
-    handler == .If(ok_cond, _, ok_value, _, else_value, _, _) ?? panic("Result handler should lower as a value if")
-    ok_cond == .PatternTest(ok_subject, ok_pattern, _, _) ?? panic("Result handler needs one success pattern")
-    ok_pattern == .Ok(ok_binding, ok_binding_span, _, _) ?? panic("Result handler needs one success pattern")
-    assert(if ok_subject == { .Ident(name, _, _) -> name == "value"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    assert_eq(ok_binding, "ok")
-    assert(if ok_value == { .Ident(name, _, _) -> name == "ok"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    else_value == .If(err_cond, _, err_value, _, terminal, _, _) ?? panic("Result handler must retain its failure branch")
-    err_cond == .PatternTest(err_subject, err_pattern, _, _) ?? panic("Result handler needs one failure pattern")
-    err_pattern == .Err(err_binding, err_binding_span, _, _) ?? panic("Result handler needs one failure pattern")
-    assert(if err_subject == { .Ident(name, _, _) -> name == "value"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    assert_eq(err_binding, "error")
-    assert(if err_value == { .Ident(name, _, _) -> name == "error"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    assert(if terminal == { .NoElse(_, _) -> true
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    assert(ok_binding_span.end < err_binding_span.start)
-    assert(expr_span(ok_cond).end < expr_span(err_cond).start)
+// #6281: `,` separates the arms of a pattern table, so a two-way Result
+// split fits on one line; a trailing `,` is optional.
+#Test("compact_value_table_separates_arms_with_commas") {
+    sources: [
+        "pick: fn(value: Int String!) -> String {{ if value == {{ .Ok(ok) -> ok, .Err(error) -> error }} }}\n",
+        "pick: fn(value: Int String!) -> String {{ if value == {{ .Ok(ok) -> ok, .Err(error) -> error, }} }}\n",
+        "pick: fn(value: Int String!) -> String {{\n    if value == {{\n        .Ok(ok) -> ok,\n        .Err(error) -> error,\n    }}\n}}\n",
+    ]
+    loop source in sources {
+        result: parser_test_result(source)
+        assert(result.diagnostics.is_empty(), "compact table should parse: {result.diagnostics:Debug}")
+        result.program.items[0] == .Func(function) ?? panic("function")
+        function.body[0] == .Expr(table) ?? panic("the table is the body's value")
+        table == .If(ok_cond, _, _, _, else_value, _, _) ?? panic("value table")
+        assert(ok_cond == .PatternTest(_, _, _, _), "first arm tests a pattern")
+        else_value == .If(err_cond, _, _, _, terminal, _, _) ?? panic("second arm")
+        assert(err_cond == .PatternTest(_, _, _, _), "second arm tests a pattern")
+        assert(terminal == .NoElse(_, _), "an all-pattern table ends without a fallback")
+    }
 }
 
-#Test("result_handler_accepts_multiline_and_effectful_branches") {
-    result: parser_test_result("run: fn(value: Int String!) Err! {{\n    value ? ok -> print(ok) // success\n    ! error -> print(error)\n}}\n")
-    assert(result.diagnostics.is_empty(), "multiline Result handler should parse: {result.diagnostics:Debug}")
-    result.program.items[0] == .Func(function) ?? panic("function")
-    function.body[0] == .Expr(handler) ?? panic("Result handler")
-    handler == .If(cond, _, _, _, else_value, _, _) ?? panic("Result handler")
-    cond == .PatternTest(subject, pattern, _, _) ?? panic("success pattern")
-    assert(if subject == { .Ident(name, _, _) -> name == "value"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
-    assert(if pattern == { .Ok(binding, _, _, _) -> binding == "ok"
- .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
-    else_value == .If(err_cond, then_body, then_value, _, _, _, _) ?? panic("failure branch")
-    err_cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
-    assert(if err_pattern == { .Err(binding, _, _, _) -> binding == "error"
- .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
-    assert(then_body.is_empty())
-    assert(if then_value == { .Call(call, _) -> call.name == "print"
- .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
+#Test("compact_tables_end_statement_and_control_arms_at_commas") {
+    sources: [
+        "run: fn(value: Int String!) {{\n    if value == {{ .Ok(ok) -> print(ok), .Err(error) -> print(error) }}\n}}\n",
+        "run: fn(flag: Bool) {{\n    if {{ flag -> print(1), else -> print(2), }}\n}}\n",
+        "pick: fn(k: Int) -> Int {{\n    if k == {{ 0 -> return 1, else -> k }}\n}}\n",
+        "pick: fn(k: Int) -> Int {{\n    loop {{\n        if k == {{ 0 -> break, else -> print(k) }}\n    }}\n    k\n}}\n",
+        "pick: fn(value: Int String!) -> Int {{ if value == {{ .Ok(ok) -> if ok == {{ 0 -> 1, else -> ok }}, .Err(_) -> 0 }} }}\n",
+    ]
+    loop source in sources {
+        result: parser_test_result(source)
+        assert(result.diagnostics.is_empty(), "{source}: {result.diagnostics:Debug}")
+    }
+    statement: parser_test_result("run: fn(value: Int String!) {{\n    if value == {{ .Ok(ok) -> print(ok), .Err(error) -> print(error) }}\n}}\n")
+    statement.program.items[0] == .Func(function) ?? panic("function")
+    function.body[0] == .Switch(_, arms, _, _) ?? panic("statement table")
+    assert_eq(arms.len(), 2)
 }
 
-#Test("result_handler_allows_nested_value_handlers") {
-    result: parser_test_result("pick: fn(value: Int String!) -> String {{ value ? ok -> ok ? inner -> inner ! inner_error -> inner_error ! error -> error }}\n")
-    assert(result.diagnostics.is_empty(), "nested Result handlers should parse: {result.diagnostics:Debug}")
+#Test("compact_table_commas_stay_between_arms") {
+    sources: [
+        "pick: fn(k: Int) -> Int {{ if k == {{ 0 -> 1,, else -> k }} }}\n",
+        "pick: fn(k: Int) -> Int {{ if k == {{ , 0 -> 1, else -> k }} }}\n",
+    ]
+    loop source in sources {
+        result: parser_test_result(source)
+        assert(!result.diagnostics.is_empty(), "{source} must not parse")
+    }
 }
 
-#Test("result_handler_stays_distinct_from_neighboring_postfix_and_branch_forms") {
+#Test("compact_tables_keep_their_authored_line_shape_in_the_formatter") {
+    one_line: "pick: fn(value: Int String!) -> String {{\n    if value == {{ .Ok(ok) -> ok, .Err(error) -> error }}\n}}\n"
+    assert_eq(parser_test_format(one_line), one_line)
+    trailing: "pick: fn(value: Int String!) -> String {{\n    if value == {{ .Ok(ok) -> ok, .Err(error) -> error, }}\n}}\n"
+    assert_eq(parser_test_format(trailing), one_line)
+    statement: "run: fn(value: Int String!) {{\n    if value == {{ .Ok(ok) -> print(ok), .Err(error) -> print(error) }}\n}}\n"
+    assert_eq(parser_test_format(statement), statement)
+    guard: "run: fn(flag: Bool) {{\n    if {{ flag -> print(1), else -> print(2) }}\n}}\n"
+    assert_eq(parser_test_format(guard), guard)
+    expanded: "pick: fn(value: Int String!) -> String {{\n    if value == {{\n        .Ok(ok) -> ok\n        .Err(error) -> error\n    }}\n}}\n"
+    assert_eq(parser_test_format(expanded), expanded)
+    with_commas: "pick: fn(value: Int String!) -> String {{\n    if value == {{\n        .Ok(ok) -> ok,\n        .Err(error) -> error,\n    }}\n}}\n"
+    assert_eq(parser_test_format(with_commas), expanded)
+    commented: parser_test_format("pick: fn(value: Int String!) -> String {{\n    if value == {{ .Ok(ok) -> ok, /* failure */ .Err(error) -> error }}\n}}\n")
+    assert(!commented.contains("-> ok, "), commented)
+    wide: parser_test_format("pick: fn(value: Int String!) -> String {{\n    if value == {{ .Ok(ok) -> \"a long success text for this one table\", .Err(error) -> \"and a long failure text\" }}\n}}\n")
+    assert(wide.contains("\n        .Ok(ok) -> "), wide)
+}
+
+#Test("result_neighboring_postfix_and_branch_forms_keep_their_meanings") {
     source: "\noptional: fn() -> Success? {{ None }}\nfallible: fn() Err! {{ Err(\"bad\") }}\nresult: fn() -> Success? Err! {{ Ok(1) }}\nrun: fn(value: Int Err!, optional: String) {{\n    propagated: value\n    noted: value?(\"context\")\n    chained: optional?.len\n    negated: !true\n    if value == {{\n        .Ok(ok) -> print(ok)\n        .Err(error) -> print(error)\n    }}\n    fallback: value ?? 0\n}}\n"
     result: parser_test_result(source)
     assert(result.diagnostics.is_empty(), "neighboring Result syntax should keep its meanings: {result.diagnostics:Debug}")
 }
 
-#Test("result_handler_keeps_one_sided_pattern_checks_and_fallbacks") {
+#Test("result_one_sided_pattern_checks_and_fallbacks_parse") {
     source: "\nrun: fn(value: Int Err!, maybe: Int?) {{\n    if value == .Ok(ok) -> print(ok)\n    if value == .Err(error) -> print(error)\n    fallback: maybe ?? 0\n    value == .Ok(other) ?? return\n}}\n"
     result: parser_test_result(source)
     assert(result.diagnostics.is_empty(), "one-sided Result checks should parse: {result.diagnostics:Debug}")
@@ -177,31 +194,19 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
 }
 
-#Test("result_handler_reports_fixed_shape_errors_at_the_offending_token") {
-    cases: [
-        (source: "pick: fn(value: Int String!) -> String {{ value ? ok -> ok }}\n", expected: "A Result handler needs a `!` failure branch", code: "E0003"),
-        (source: "pick: fn(value: Int String!) -> String {{ value ? same -> same ! same -> same }}\n", expected: "A Result handler cannot bind both payloads to the same name", code: "E0003"),
-        (source: "pick: fn(value: Int String!) -> String {{ value ? _ -> value ! error -> error }}\n", expected: "A Result handler success branch needs a payload binding", code: "E0003"),
-        (source: "pick: fn(value: Int String!) -> String {{ value ? ok -> ok ! error -> error ! again -> again }}\n", expected: "A Result handler cannot have two failure branches", code: "E0003"),
+// #6281: the retired result-only `value ? ok -> … ! err -> …` spelling is
+// an ordinary parse error, with no teaching of its own.
+#Test("retired_result_handler_spelling_does_not_parse") {
+    sources: [
+        "pick: fn(value: Int String!) -> String {{ value ? ok -> ok ! error -> error }}\n",
+        "run: fn(value: Int String!) Err! {{\n    value ? ok -> print(ok)\n    ! error -> print(error)\n}}\n",
     ]
-    loop testcase in cases {
-        source: testcase.source
-        expected: testcase.expected
-        code: testcase.code
+    loop source in sources {
         result: parser_test_result(source)
-        assert(!result.diagnostics.is_empty(), "invalid handler should fail")
-        found := false
+        assert(!result.diagnostics.is_empty(), "{source} must not parse")
         loop diagnostic in result.diagnostics {
-            if diagnostic.what == expected {
-                assert_eq(diagnostic.code, code)
-                assert(diagnostic.span != None, "diagnostic needs an exact span")
-                assert(!diagnostic.why.is_empty())
-                assert(!diagnostic.fix.is_empty())
-                found = true
-                break
-            }
+            assert(!diagnostic.what.contains("Result handler"), "no handler teaching: {diagnostic.what}")
         }
-        assert(found, "missing {expected:Debug} in {result.diagnostics:Debug}")
     }
 }
 

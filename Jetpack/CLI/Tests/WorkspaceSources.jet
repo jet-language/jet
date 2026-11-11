@@ -48,7 +48,10 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     files.write(files.join(package, PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
     assert_eq(cli_project_root(cache, nested), package)
     assert_eq(cli_workspace_root(cache, nested), root)
-    assert((envmodel_workspace_load(cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
+    assert((if envmodel_workspace_load(cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("load the workspace")
+    }) == None)
     assert(cli_ws_test_load_workspace(cache, root) == None)
     files.remove_all(root).drop("scratch cleanup")
 }
@@ -67,7 +70,10 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     before: cache.lexes
     assert_eq(cli_workspace_root(cache, nested), root)
     assert_eq(cli_workspace_root(cache, nested), root)
-    assert((envmodel_workspace_load(cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
+    assert((if envmodel_workspace_load(cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("load the workspace")
+    }) == None)
     assert(cli_ws_test_load_workspace(cache, root) == None)
     assert_eq(cache.lexes - before, 3)
     files.remove_all(root).drop("scratch cleanup")

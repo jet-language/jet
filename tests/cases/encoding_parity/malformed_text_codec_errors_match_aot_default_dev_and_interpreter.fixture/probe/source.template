@@ -11,19 +11,31 @@ Row: struct {
 }
 
 json_parse_error: fn() -[]> String {
-    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.reason}"
+    if json.parse("\n{{oops") == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return "{error.line}|{error.reason}"
+    }
 }
 
 json_decode_error: fn() -[]> String {
-    json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
+    if json.decode<Row>("\n{{oops") == {
+        .Ok(_value) -> return "accepted"
+        .Err(errors) -> return "{errors[0].path}|{errors[0].reason}"
+    }
 }
 
 toml_parse_error: fn() -[]> String {
-    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.reason
+    if toml.parse("value = ") == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return error.reason
+    }
 }
 
 yaml_parse_error: fn() -[]> String {
-    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.reason
+    if yaml.parse("key: value\nbad") == {
+        .Ok(_value) -> return "accepted"
+        .Err(error) -> return error.reason
+    }
 }
 
 run: fn() {

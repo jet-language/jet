@@ -236,7 +236,10 @@ recipe_update_fetch_http: fn(http: ToolchainHTTPEndpoint, url: String, limit: In
         if status < 200 || status >= 300 -> return Err(RecipeError.Other("{url}: URL returned HTTP {status}"))
         declared := Int?{None}
         if response.header("content-length") == {
-            .Val(text) -> declared = Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
+            .Val(text) -> declared = if Int.parse(text.trim()) == {
+                .Ok(value) -> Val(value)
+                .Err(failed) -> None
+            }
             .None -> {}
         }
         if declared == {

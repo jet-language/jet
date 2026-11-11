@@ -18,7 +18,10 @@ run: fn() {
     sealed: Path.from(sealed_text)
     source.write_atomic([U8]{0x61, 0x62, 0x63}) ?? panic("source")
     recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    print(checked_seal([recipient.public_key()], source, sealed) ? ok -> true ! error -> false)
+    print(if checked_seal([recipient.public_key()], source, sealed) == {
+        .Ok(ok) -> true
+        .Err(error) -> false
+    })
     if fs.exists(source_text) -> fs.remove(source_text) ?? panic("cleanup")
     if fs.exists(sealed_text) -> fs.remove(sealed_text) ?? panic("cleanup")
 }

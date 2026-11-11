@@ -161,7 +161,3 @@
 (label name: (identifier) @property)
 (parameters (label name: (identifier) @variable.parameter))
 
-; Result handler payload names (`value ? ok -> … ! err -> …`)
-(result_handler_expr ok: (identifier) @variable.parameter)
-(result_handler_expr error: (identifier) @variable.parameter)
-

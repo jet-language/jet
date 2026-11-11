@@ -23,7 +23,10 @@ use {
 }
 #Test("native bundle signing requires successful verify and canonical tool identity") {
     absent: BundleSigningRun{requested: false, verified: false, programs: [String]{}, identities: [String]{}}
-    assert((pkg_bundle_native_signing(absent) ? found -> found ! error -> panic("unrequested signing failed: {error.message()}")) == None)
+    assert((if pkg_bundle_native_signing(absent) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("unrequested signing failed: {error.message()}")
+    }) == None)
     pending: BundleSigningRun{requested: true, verified: false, programs: [String]{"sign"}, identities: [String]{"id"}}
     assert(pkg_bundle_native_signing(pending) == .Err(_))
     one: BundleSigningRun{requested: true, verified: true, programs: [String]{"verify"}, identities: [String]{"id"}}

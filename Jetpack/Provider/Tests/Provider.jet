@@ -714,7 +714,10 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     provider_core_test_write(files.join(repo, "packages/hello/package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: {{ hello: .Executable{{ entry: run }} }}\ndefaults: {{ run: hello }}\n")
     provider_core_test_write(files.join(source, "main.jet"), "run: fn() {{ print(\"hello\") }}\n")
     provider_core_test_write(files.join(repo, "stray/package.jet"), "name: \"stray\"\nversion: \"0.1.0\"\n")
-    found: provider_find_canonical_package(repo, "hello") ? located -> located ! error -> panic("canonical lookup")
+    found: if provider_find_canonical_package(repo, "hello") == {
+        .Ok(located) -> located
+        .Err(error) -> panic("canonical lookup")
+    }
     package: found ?? panic("member Package must be discoverable")
     assert_eq(package.root, files.join(repo, "packages/hello"))
     assert_eq(package.facts.name, "hello")

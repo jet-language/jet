@@ -1733,7 +1733,10 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
             if core_sources[index].path == core_tests -> core_sources[index].text = jet_driver_core_text(text)
         }
     }
-    organization: pkg_load_organization_gate_policy() ? declarations -> declarations ! error -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    organization: if pkg_load_organization_gate_policy() == {
+        .Ok(declarations) -> declarations
+        .Err(error) -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    }
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
     request.organization_policy = organization
     request.core_tests = core_tests

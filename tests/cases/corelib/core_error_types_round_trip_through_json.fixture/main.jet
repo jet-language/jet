@@ -10,10 +10,13 @@ run: fn() [FieldError]! {
     conn := db.open_memory()
     policy: db.policy("tasks", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "attacker")
-    scoped.query(SQL{"SELECT nope FROM missing"}) ? _rows -> {
-        print("accepted")
-    } ! error -> {
-        print(json.to_string(error) ?? panic("db json"))
+    if scoped.query(SQL{"SELECT nope FROM missing"}) == {
+        .Ok(_rows) -> {
+            print("accepted")
+        }
+        .Err(error) -> {
+            print(json.to_string(error) ?? panic("db json"))
+        }
     }
 
     late: time.TimeError.new("late")

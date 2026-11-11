@@ -71,11 +71,11 @@ run: fn() {
     third: task spin(40000000)
     fourth: task spin(40000000)
     #Unsafe("the process is root of a disposable user namespace; it drops to a mapped user") {
-        print("setuid to an unmapped uid fails: {sys.setuid(70000) ? _ok -> false ! _error -> true}")
+        print("setuid to an unmapped uid fails: {if sys.setuid(70000) == { .Ok(_ok) -> false, .Err(_error) -> true }}")
         sys.initgroups("alice", 4321) ?? panic("initgroups alice 4321")
         sys.setgid(4321) ?? panic("setgid 4321")
         sys.setuid(1234) ?? panic("setuid 1234")
-        print("initgroups as uid 1234 fails: {sys.initgroups("alice", 4321) ? _ok -> false ! _error -> true}")
+        print("initgroups as uid 1234 fails: {if sys.initgroups("alice", 4321) == { .Ok(_ok) -> false, .Err(_error) -> true }}")
     }
     entries: files.list_dir("/proc/self/task") ?? panic("list /proc/self/task")
     threads := [String]{}

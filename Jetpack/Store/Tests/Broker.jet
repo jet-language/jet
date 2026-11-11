@@ -90,9 +90,15 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 #Test("store broker archive response round trips success and missing status") {
     encoded: store_broker_encode_archive_response("archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    assert_eq(store_broker_read_archive_response(reader) ? found -> found ! error -> panic("parse"), Val("archive".bytes()))
+    assert_eq(if store_broker_read_archive_response(reader) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("parse")
+    }, Val("archive".bytes()))
     missing := BrokerWireReader.memory("{STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
-    assert_eq(store_broker_read_archive_response(missing) ? found -> found ! error -> panic("parse missing"), [U8]?{None})
+    assert_eq(if store_broker_read_archive_response(missing) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("parse missing")
+    }, [U8]?{None})
 }
 
 #Test("store broker configured paths must stay inside the installed boundary") {

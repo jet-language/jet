@@ -27,10 +27,10 @@ s5_grammar_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
 
 #Test("grammar byte spans remain byte-indexed after Unicode") {
     guards_enter_root()
-    text: "é🙂 result_handler_expr: λ body paren_expr:"
-    start: s5_grammar_find(text, "result_handler_expr:", 0)
+    text: "é🙂 variant: λ body paren_expr:"
+    start: s5_grammar_find(text, "variant:", 0)
     end: s5_grammar_find(text, "paren_expr:", start)
-    assert(s5_grammar_slice_bytes(text, start, end) == "result_handler_expr: λ body ")
+    assert(s5_grammar_slice_bytes(text, start, end) == "variant: λ body ")
     assert(s5_grammar_slice_bytes(text, start, start) == "")
 }
 
@@ -53,17 +53,14 @@ s5_grammar_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
     assert(!grammar.contains("seq(\"[\", $._type, \": \", $._type, \"]\")"))
 }
 
-#Test("tree_sitter_result_handler_grammar_keeps_the_canonical_shape") {
+// #6281: a Result is handled by an ordinary `if value == { … }` table; the
+// retired `value ? ok -> … ! err -> …` handler has no editor rule either.
+#Test("tree_sitter_grammar_has_no_retired_result_handler_rule") {
     guards_enter_root()
     grammar: files.read("Tools/editors/tree-sitter/grammar.js") ?? panic("read tree-sitter grammar")
-    start: s5_grammar_find(grammar, "result_handler_expr:", 0)
-    assert(start >= 0, "result handler rule missing")
-    end: s5_grammar_find(grammar, "paren_expr:", start)
-    assert(end >= start, "paren expression rule missing after result handler")
-    rule: s5_grammar_slice_bytes(grammar, start, end)
-    assert(rule.contains("field(\"ok\", $.identifier)") && rule.contains("field(\"error\", $.identifier)") && rule.contains("field(\"success\"") && rule.contains("field(\"failure\""))
-    assert(!rule.contains("\":>\""))
-    assert(!rule.contains("\"=>\""))
+    assert(!grammar.contains("result_handler_expr"), "the retired result handler rule is back")
+    query: files.read("Tools/editors/zed/languages/jet/highlights.scm") ?? panic("read Zed highlights")
+    assert(!query.contains("result_handler_expr"), "Zed highlights name the retired result handler rule")
 }
 
 #Test("vscode_strings_do_not_relex_interpolations") {

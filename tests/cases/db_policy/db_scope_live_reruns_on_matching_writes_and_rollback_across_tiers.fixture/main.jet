@@ -42,7 +42,13 @@ run: fn() {
     print("bob {titles(web.state(theirs))}")
     again: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("again")
     print("same binding {again.id == mine.id}, per user {theirs.id != mine.id}")
-    alice.live(SQL{"DELETE FROM tasks"}) ? _ok -> print("write live: accepted") ! failure -> print("write live: {failure.message}")
-    alice.live(SQL{"SELECT title FROM tasks JOIN other"}) ? _ok -> print("join live: accepted") ! failure -> print("join live: rejected")
+    if alice.live(SQL{"DELETE FROM tasks"}) == {
+        .Ok(_ok) -> print("write live: accepted")
+        .Err(failure) -> print("write live: {failure.message}")
+    }
+    if alice.live(SQL{"SELECT title FROM tasks JOIN other"}) == {
+        .Ok(_ok) -> print("join live: accepted")
+        .Err(failure) -> print("join live: rejected")
+    }
     print(web.live_stats())
 }

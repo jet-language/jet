@@ -409,7 +409,10 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     fixture: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
     client: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
     _: client.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
-    state: client.load_highest_generation("nixpkgs-unstable") ? found -> found ! error -> panic("rollback state")
+    state: if client.load_highest_generation("nixpkgs-unstable") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("rollback state")
+    }
     highest: state ?? panic("recorded generation")
     assert_eq(highest.generation, 1)
     targets: files.join(files.join(files.join(files.join(fixture.root, NIX_INDEX_ROOT), "targets"), NIX_TEST_INDEX_REVISION), "x86_64-linux")

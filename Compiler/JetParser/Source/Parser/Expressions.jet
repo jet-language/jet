@@ -1142,7 +1142,6 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         block_spans: [Span]{},
         pending_type_gt: false,
         pending_type_gt_span: Span{start: 0, end: 0},
-        result_handler_depth: state.result_handler_depth,
         statement_start: -1,
         allow_environment_reads: state.allow_environment_reads,
         derive_template_depth: state.derive_template_depth,
@@ -2117,10 +2116,6 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             next
         }
         if kind == TOKEN_QUESTION {
-            if parser_expression_result_handler_ahead(state) {
-                expression = parser_parse_result_handler_form(state, expression, depth + 1)
-                next
-            }
             operator: parser_bump(state)
             // Bare `?` propagation is retired; only a value's
             // `x?)` and the context frame `x?(note)` remain. A call

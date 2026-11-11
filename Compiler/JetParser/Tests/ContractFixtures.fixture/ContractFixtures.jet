@@ -258,7 +258,7 @@ pc_current_kind_equivalence: fn() {
         prepared := parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
         pc_require(prepared.diagnostics.len() == 0, "current-kind fixture uses canonical prepared tokens")
         end: bytes.len()
-        state := JetParserState{tokens: prepared.tokens.move(), position: 0, diagnostics: lexed.diagnostics.move(), source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, result_handler_depth: 0, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{bytes.move()}, allow_environment_reads: false, tables: [TokenTables]{lexed.tables.move()}}
+        state := JetParserState{tokens: prepared.tokens.move(), position: 0, diagnostics: lexed.diagnostics.move(), source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{bytes.move()}, allow_environment_reads: false, tables: [TokenTables]{lexed.tables.move()}}
         pc_require(state.tokens.len() > 0 && state.tokens[state.tokens.len() - 1].kind == TOKEN_EOF, "fixture retains the actual lexical EOF token")
         split: source.starts_with(">>")
         if split {

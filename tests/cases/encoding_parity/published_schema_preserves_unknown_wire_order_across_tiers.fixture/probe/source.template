@@ -30,11 +30,17 @@ plain: fn() -[]> String {
 }
 
 strict: fn() -[]> String {
-    json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
+    if json.decode<Strict>("{{\"known\":7,\"extra\":1}}") == {
+        .Ok(_value) -> return "strict accepted"
+        .Err(errors) -> return errors[0].reason
+    }
 }
 
 malformed: fn() -[]> String {
-    json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
+    if json.decode<Published>("{{\"known\":7") == {
+        .Ok(_value) -> return "malformed accepted"
+        .Err(_error) -> return "malformed rejected"
+    }
 }
 
 forced_deopt: fn() -[]> String {

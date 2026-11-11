@@ -86,12 +86,21 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     assert(before.is_file)
     assert(!before.is_symlink)
     if !sys.is_windows() -> assert_eq(before.mode.bit_and(0o777), 0o600)
-    assert((env_try_acquire_lock(root, "hangar") ? found -> found ! error -> panic("same-scope try")) == None)
-    assert((env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("other-scope try")) == None)
+    assert((if env_try_acquire_lock(root, "hangar") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("same-scope try")
+    }) == None)
+    assert((if env_try_acquire_lock(root, "other") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("other-scope try")
+    }) == None)
     assert((env_lock_state(env_lock_path_for_scope(root, "other")) ?? panic("probe other")) == RuntimeLockState.Held)
     close(first)
     assert_eq((files.stat(owner_path) ?? panic("persistent owner")).id, before.id)
-    claimed: env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("idle try")
+    claimed: if env_try_acquire_lock(root, "other") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("idle try")
+    }
     next_owner: claimed ?? panic("idle try must acquire")
     assert_eq(next_owner.owner_path, owner_path)
     assert_eq((files.stat(owner_path) ?? panic("same owner")).id, before.id)
@@ -198,7 +207,10 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
 #Test("all scopes probe the SAME managed-root advisory domain") {
     root: env_rt_test_scratch("same-root-domain")
     first: env_acquire_lock(root, "first") ?? panic("first root claim")
-    second: env_try_acquire_lock(root, "second") ? found -> found ! error -> panic("nonblocking second scope")
+    second: if env_try_acquire_lock(root, "second") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("nonblocking second scope")
+    }
     assert(second == None)
     second_path: env_lock_path_for_scope(root, "second")
     assert_eq(env_lock_state(second_path) ?? panic("held second marker"), RuntimeLockState.Held)

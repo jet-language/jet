@@ -205,10 +205,16 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 #Test("publication metadata checked reader missing and validation") {
     root: publication_metadata_test_root("missing")
-    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("missing metadata")) == None)
+    assert((if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("missing metadata")
+    }) == None)
     publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("missing metadata permitted")
     files.write(files.join(root, "registry.json"), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}") ?? panic("metadata fixture")
-    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("read held metadata")) == .Val(_))
+    assert((if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("read held metadata")
+    }) == .Val(_))
     publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("publish validation")
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -218,7 +224,10 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
     valid: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}"
     exact_padding: " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES - valid.bytes().len())
     files.write(path, "{valid}{exact_padding}") ?? panic("exact byte limit")
-    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("boundary allowed")) == .Val(_))
+    assert((if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("boundary allowed")
+    }) == .Val(_))
     over_padding: " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1 - valid.bytes().len())
     files.write(path, "{valid}{over_padding}") ?? panic("over byte limit")
     if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {

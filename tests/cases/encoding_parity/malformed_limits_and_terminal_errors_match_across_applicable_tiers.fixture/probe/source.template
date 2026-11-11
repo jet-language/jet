@@ -12,8 +12,14 @@ terminal_limit_probe: fn() -[FS, IO]> String {
     fs_write := files.create(bad_path) ?? panic("create")
     writer := json.writer(fs_write, limits, false) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    writer.write(encoding.DataEvent.Text("abcd")) ? _value -> return "limit-missed" ! first -> {
-        writer.finish() ? _value -> return "terminal-missed" ! second -> return "{first.reason == second.reason}"
+    if writer.write(encoding.DataEvent.Text("abcd")) == {
+        .Ok(_value) -> return "limit-missed"
+        .Err(first) -> {
+            if writer.finish() == {
+                .Ok(_value) -> return "terminal-missed"
+                .Err(second) -> return "{first.reason == second.reason}"
+            }
+        }
     }
     return "unreachable"
 }
@@ -22,8 +28,14 @@ malformed_reader_probe: fn() -[FS, IO, Time.Wait]> String {
     files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
     input: files.open("@DIR@/malformed.json") ?? panic("open")
     reader := json.reader(input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    reader.next() ? _maybe -> return "malformed-missed" ! error -> {
-        reader.next() ? _maybe -> return "repeat-missed" ! second -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
+    if reader.next() == {
+        .Ok(_maybe) -> return "malformed-missed"
+        .Err(error) -> {
+            if reader.next() == {
+                .Ok(_maybe) -> return "repeat-missed"
+                .Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
+            }
+        }
     }
     return "unreachable"
 }

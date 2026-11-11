@@ -54,7 +54,6 @@ const PREC = {
   member: 2,
   call: 3,
   binding: 4,
-  handler: 5,
 };
 
 // Anonymous lowercase keywords that may still name a member after `.`.
@@ -85,9 +84,6 @@ module.exports = grammar({
     [$.label, $._decl_label],
     // `[K: V]` is a map type; any other bracket group is a list/index/type list.
     [$._type, $._element],
-    // `subject ? ok -> … ! error -> …` versus a lone postfix `?` (`T?`) that
-    // happens to precede an identifier on the next line.
-    [$._element, $.result_handler_expr],
   ],
 
   rules: {
@@ -121,7 +117,6 @@ module.exports = grammar({
         $.member_expr,
         $.method_call_expr,
         $.variant,
-        $.result_handler_expr,
         $.paren_expr,
         $.bracket_expr,
         $.map_type,
@@ -352,36 +347,6 @@ module.exports = grammar({
     // `.Ok(x)`, `.Executable{…}`, `.None`, `Key.Enter`.
     variant: ($) =>
       prec.right(PREC.member, seq(".", field("name", $.type_identifier))),
-
-    // D-RESULT-DECON2=B: one exhaustive Result handler. The contextual `?`/`!`
-    // pair is told apart from postfix propagation, optional chaining, unary `!`
-    // and ordinary arm arrows by the two payload-name + arrow slots; the
-    // subject is the preceding element.
-    result_handler_expr: ($) =>
-      prec.dynamic(
-        PREC.handler,
-        seq(
-          "?",
-          field("ok", $.identifier),
-          "->",
-          field("success", choice($.block, $._handler_value)),
-          "!",
-          field("error", $.identifier),
-          "->",
-          field("failure", choice($.block, $._handler_value)),
-        ),
-      ),
-
-    _handler_value: ($) =>
-      choice(
-        $.call_expr,
-        $.constructor,
-        $.identifier,
-        $.string_literal,
-        $.number_literal,
-        $.boolean,
-        $.paren_expr,
-      ),
 
     // ── Groups ───────────────────────────────────────────────────────────────
     paren_expr: ($) => seq(LPAREN(), repeat($._element), ")"),

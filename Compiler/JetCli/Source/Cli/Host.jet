@@ -1661,7 +1661,10 @@ jet_cli_build_effects_json: fn(authority: JetCLIAuthority) -> String Never! {
 jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: String, color: Bool, quiet: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     directory: jet_cli_parent(file) ?? "."
     project: jet_cli_manifest_root(directory) ?? directory
-    loaded: publication_load_publish_lock(project) ? found -> found ! error -> return jet_cli_build_failed("couldn't read the lock of {project}: {error}", jet_cli_why("E2105"), "repair or regenerate `.jet/lock` with `jetpack lock`", color)
+    loaded: if publication_load_publish_lock(project) == {
+        .Ok(found) -> found
+        .Err(error) -> return jet_cli_build_failed("couldn't read the lock of {project}: {error}", jet_cli_why("E2105"), "repair or regenerate `.jet/lock` with `jetpack lock`", color)
+    }
     lock: loaded ?? LockFile.empty()
     root: if jet_cli_file_manifest(file, source) == .Val(manifest) -> manifest.name else -> name
     build_dir: jet_cli_parent(binary) ?? "."

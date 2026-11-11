@@ -24,15 +24,24 @@ kind: fn(error: IOError) -> String {
 
 run: fn() {
     // Starting the program already used CPU time.
-    own: os.cpu_time() ? spent -> (spent.in(.Nanoseconds) ?? 0) > 0 ! error -> true
+    own: if os.cpu_time() == {
+        .Ok(spent) -> (spent.in(.Nanoseconds) ?? 0) > 0
+        .Err(error) -> true
+    }
     print("this program's CPU time is positive, or unreadable here: {own}")
-    parent: os.cpu_time(os.getppid()) ? spent -> (spent.in(.Nanoseconds) ?? -1) >= 0 ! error -> true
+    parent: if os.cpu_time(os.getppid()) == {
+        .Ok(spent) -> (spent.in(.Nanoseconds) ?? -1) >= 0
+        .Err(error) -> true
+    }
     print("the parent's CPU time reads, or is unreadable here: {parent}")
-    print("cpu_time(-1): {os.cpu_time(-1) ? spent -> "accepted" ! error -> kind(error)}")
+    print("cpu_time(-1): {if os.cpu_time(-1) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
     // No Linux pid is above 4194304, so no system call is made.
-    print("cpu_time(4194305): {os.cpu_time(4194305) ? spent -> "accepted" ! error -> kind(error)}")
+    print("cpu_time(4194305): {if os.cpu_time(4194305) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
     #Unsafe("posix set_wall_clock: a time before 1970 is refused before it reaches the kernel") {
-        refused: os.set_wall_clock(time.datetime(1969, 7, 20, 20, 17, 40)) ? ok -> "accepted" ! error -> kind(error)
+        refused: if os.set_wall_clock(time.datetime(1969, 7, 20, 20, 17, 40)) == {
+            .Ok(ok) -> "accepted"
+            .Err(error) -> kind(error)
+        }
         print("set_wall_clock(1969-07-20T20:17:40Z): {refused}")
     }
 }

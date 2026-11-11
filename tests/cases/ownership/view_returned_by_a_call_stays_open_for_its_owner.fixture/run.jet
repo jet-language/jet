@@ -23,7 +23,10 @@ Resolver: struct {
     }
 
     check: fn(self, directory: Directory) -> Bool Never! {
-        directory.stat() ? info -> info.is_dir ! error -> false
+        if directory.stat() == {
+            .Ok(info) -> info.is_dir
+            .Err(error) -> false
+        }
     }
 }
 

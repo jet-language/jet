@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("probe setuid with an invalid identifier") {
-        print(os.setuid(-1) ? ok -> true ! error -> false)
+        print(if os.setuid(-1) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

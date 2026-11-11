@@ -3,6 +3,9 @@ use os: core.sys
 
 run: fn() {
     #Unsafe("probe initgroups with a stable missing user") {
-        print(os.initgroups("__jet_conformance_missing_user_2286__", -1) ? ok -> true ! error -> false)
+        print(if os.initgroups("__jet_conformance_missing_user_2286__", -1) == {
+            .Ok(ok) -> true
+            .Err(error) -> false
+        })
     }
 }

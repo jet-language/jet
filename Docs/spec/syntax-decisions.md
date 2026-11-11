@@ -8403,7 +8403,24 @@ fallback block ends with one bare value or one real diverging tail, so
 This amends D-FAIL-BIND1 at the block-tail boundary and adds no token, binder,
 or second fallback mechanism.
 
-**2026-08-25 — D-RESULT-DECON2=B** *(card #2173; ratified 2026-08-25)*: the
+**2026-11-11 — D-RESULT-BRANCH1=C** *(card #6281; decision card c0oev2ib,
+ratified 2026-11-11)*: an ordinary pattern table may be written on one line.
+Its arms are separated by commas, and a trailing comma is allowed:
+`print(if lookup(k) == { .Val(n) -> n, .None -> 0, .Err(e) -> -1 })`. The comma
+is layout only. Compact and expanded tables use the same heads, patterns,
+exhaustiveness, ownership checks and control flow, and each evaluates its
+subject once. This holds for value and statement tables, guard tables, and
+enum as well as result subjects. The formatter keeps a table on one line only
+when it was written on one line, holds no comment and fits the width.
+Otherwise each arm takes its own line and the commas are dropped. A table
+inside an interpolation hole stays on one line. This amends D-RESULT-DECON2=B:
+the result-only `result ? ok -> success ! error -> failure` spelling retires
+with no teaching row or `jet fix` rule. Once the repository is converted, it
+is a generic parse error. No head is added; the shorter `subject ? { arms }`
+head was not adopted. Example: `Examples/ErrorsAndEffects/Errors/ResultTable.jet`.
+
+**2026-08-25 — D-RESULT-DECON2=B** *(card #2173; ratified 2026-08-25; its
+handler spelling is retired by D-RESULT-BRANCH1=C)*: the
 existing `?`, `!`, and `->` tokens form one fixed exhaustive Result handler:
 `result ? ok -> success ! error -> failure`. Each identifier binds one
 branch-local payload, source order is success then failure, and neither branch

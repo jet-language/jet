@@ -84,9 +84,15 @@ s6_hand_advisory_setup: fn(root: String) {
     s6_hand_advisory_sys.set("JET_KEYS_DIR", "{root}/keys")
     s6_hand_advisory_setup(root)
     accepted: s6_hand_advisory_files.read("{root}/accepted-digest.txt") ?? panic("accepted digest")
-    clean: publication_parse_advisory_feed(s6_hand_advisory_files.read("{root}/clean.db") ?? panic("clean feed")) ? feed -> feed ! error -> panic("clean feed parses")
+    clean: if publication_parse_advisory_feed(s6_hand_advisory_files.read("{root}/clean.db") ?? panic("clean feed")) == {
+        .Ok(feed) -> feed
+        .Err(error) -> panic("clean feed parses")
+    }
     assert_eq(publication_advisory_feed_digest(clean), accepted)
-    tampered: publication_parse_advisory_feed(s6_hand_advisory_files.read("{root}/tampered.db") ?? panic("tampered feed")) ? feed -> feed ! error -> panic("tampered feed parses")
+    tampered: if publication_parse_advisory_feed(s6_hand_advisory_files.read("{root}/tampered.db") ?? panic("tampered feed")) == {
+        .Ok(feed) -> feed
+        .Err(error) -> panic("tampered feed parses")
+    }
     assert_eq(tampered.signature, clean.signature)
     assert(publication_advisory_feed_digest(tampered) != accepted)
     if previous_keys == {

@@ -7,13 +7,25 @@ use {
 run: fn() {
     open256: "[".repeat(256)
     close256: "]".repeat(256)
-    json.parse("{open256}{close256}") ? _value -> { print("json256:accepted") } ! error -> { print("json256:{error.line}:{error.reason}") }
+    if json.parse("{open256}{close256}") == {
+        .Ok(_value) -> { print("json256:accepted") }
+        .Err(error) -> { print("json256:{error.line}:{error.reason}") }
+    }
 
     open257: "[".repeat(257)
     close257: "]".repeat(257)
-    json.parse("{open257}{close257}") ? _value -> { print("json257:accepted") } ! error -> { print("json257:{error.line}:{error.reason}") }
+    if json.parse("{open257}{close257}") == {
+        .Ok(_value) -> { print("json257:accepted") }
+        .Err(error) -> { print("json257:{error.line}:{error.reason}") }
+    }
 
-    toml.parse("value = {open256}{close256}") ? _value -> { print("toml256:accepted") } ! error -> { print("toml256:{error.line}:{error.reason}") }
+    if toml.parse("value = {open256}{close256}") == {
+        .Ok(_value) -> { print("toml256:accepted") }
+        .Err(error) -> { print("toml256:{error.line}:{error.reason}") }
+    }
 
-    toml.parse("value = {open257}{close257}") ? _value -> { print("toml257:accepted") } ! error -> { print("toml257:{error.line}:{error.reason}") }
+    if toml.parse("value = {open257}{close257}") == {
+        .Ok(_value) -> { print("toml257:accepted") }
+        .Err(error) -> { print("toml257:{error.line}:{error.reason}") }
+    }
 }

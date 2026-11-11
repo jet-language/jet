@@ -40,7 +40,10 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     root: files.join(parent, "project")
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "run.jet"), "run: fn() {{}}\n") ?? panic("write")
-    opened: AuthorityResolver.open_for_authority_walk(root) ? found -> found ! error -> panic("open for walk")
+    opened: if AuthorityResolver.open_for_authority_walk(root) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("open for walk")
+    }
     resolver: opened ?? panic("a source directory is an authority candidate")
     assert_eq(resolver.root, files.canonicalize(root) ?? panic("canonicalize"))
     if sys.is_unix() {
@@ -50,7 +53,10 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
         files.create_dir_all(shared) ?? panic("mkdir shared")
         files.write(files.join(shared, "noise.jet"), "run: fn() {{}}\n") ?? panic("write noise")
         files.set_mode(shared, 0o777) ?? panic("chmod 777")
-        shared_walk: AuthorityResolver.open_for_authority_walk(shared) ? found -> found ! error -> panic("walk shared")
+        shared_walk: if AuthorityResolver.open_for_authority_walk(shared) == {
+            .Ok(found) -> found
+            .Err(error) -> panic("walk shared")
+        }
         // Shared temp must stay discovery space.
         assert(shared_walk == None)
         files.set_mode(shared, 0o700) ?? panic("chmod 700")
@@ -68,7 +74,10 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "workspace.jet"), "workspace: module {{}}\n") ?? panic("write")
     files.set_mode(root, 0o777) ?? panic("chmod 777")
-    walk: AuthorityResolver.open_for_authority_walk(root) ? found -> found ! error -> panic("walk")
+    walk: if AuthorityResolver.open_for_authority_walk(root) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("walk")
+    }
     assert(walk == None)
     files.set_mode(root, 0o700) ?? panic("chmod 700")
     files.remove_all(root) ?? panic("cleanup")

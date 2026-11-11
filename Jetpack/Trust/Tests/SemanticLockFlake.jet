@@ -271,9 +271,15 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
   "flake-utils": { "inputs": { "systems": "systems" } },
   "systems": { "inputs": {} }
 }`)
-    through_root: trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("flake-utils"), Dyn.Text("systems")})), nodes, "root") ? name -> name ! error -> panic("the follow path should resolve")
+    through_root: if trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("flake-utils"), Dyn.Text("systems")})), nodes, "root") == {
+        .Ok(name) -> name
+        .Err(error) -> panic("the follow path should resolve")
+    }
     assert_eq(through_root, Val("systems"))
-    direct: trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("systems")})), nodes, "flake-utils") ? name -> name ! error -> panic("the direct reference should resolve")
+    direct: if trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("systems")})), nodes, "flake-utils") == {
+        .Ok(name) -> name
+        .Err(error) -> panic("the direct reference should resolve")
+    }
     assert_eq(direct, Val("systems"))
 }
 

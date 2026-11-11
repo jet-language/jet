@@ -24,16 +24,25 @@ describe: fn(policy: os.Scheduling) -> String {
 run: fn() {
     print("asked for: {describe(os.Scheduling.RoundRobin{priority: 100})}")
     #Unsafe("posix set_scheduling: the out-of-range priority never reaches the kernel") {
-        refused: os.set_scheduling(.RoundRobin{priority: 100}) ? ok -> "accepted" ! error -> (if error == {
-            .InvalidInput(_) -> "InvalidInput"
-            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
-        })
+        refused: if os.set_scheduling(.RoundRobin{priority: 100}) == {
+            .Ok(ok) -> "accepted"
+            .Err(error) -> (if error == {
+                .InvalidInput(_) -> "InvalidInput"
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
+            })
+        }
         print("set_scheduling(.RoundRobin{{priority: 100}}): {refused}")
     }
     // Whether this host lets a program change its scheduling varies, so a
     // move that applied and read back, and a refusal, print the same line.
     #Unsafe("posix set_scheduling: this program moves itself to batch time sharing and back") {
-        batch: os.set_scheduling(.Batch) ? ok -> (os.scheduling() ? now -> describe(now) == "batch" ! error -> false) ! error -> true
+        batch: if os.set_scheduling(.Batch) == {
+            .Ok(ok) -> (if os.scheduling() == {
+                .Ok(now) -> describe(now) == "batch"
+                .Err(error) -> false
+            })
+            .Err(error) -> true
+        }
         print("batch applied and read back, or refused: {batch}")
         os.set_scheduling(.Normal).drop("a refused move leaves the policy as it was")
     }

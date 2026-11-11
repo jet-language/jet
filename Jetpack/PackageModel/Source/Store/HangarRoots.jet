@@ -346,9 +346,12 @@ pkg_store_list_checked: fn(roots: HangarRoots) -[FS, Env]> [StoreEntry] HangarRe
 pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry] HangarReadError! {
     out := [StoreEntry]{}
     store: roots.hangar_dir()
-    entries: files.list_dir(store) ? listed -> listed ! error -> {
-        if pkg_io_is_not_found(error) || !strict -> return Ok(out)
-        return Err(HangarReadError.IO(error))
+    entries: if files.list_dir(store) == {
+        .Ok(listed) -> listed
+        .Err(error) -> {
+            if pkg_io_is_not_found(error) || !strict -> return Ok(out)
+            return Err(HangarReadError.IO(error))
+        }
     }
     object_count := 0
     loop entry in entries {
@@ -361,9 +364,12 @@ pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntr
         }
         if !kind.is_dir -> next
         meta: files.join(entry.path, "meta.json")
-        info: files.stat(meta) ? found -> found ! error -> {
-            if pkg_io_is_not_found(error) || !strict -> next
-            return Err(HangarReadError.IO(error))
+        info: if files.stat(meta) == {
+            .Ok(found) -> found
+            .Err(error) -> {
+                if pkg_io_is_not_found(error) || !strict -> next
+                return Err(HangarReadError.IO(error))
+            }
         }
         if !info.is_file || info.is_symlink {
             if strict -> return Err(HangarReadError.InvalidData("Hangar metadata `{meta}` is not a regular file"))

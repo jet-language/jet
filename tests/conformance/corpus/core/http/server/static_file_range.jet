@@ -6,5 +6,8 @@ use {
 
 run: fn() {
     request: client.request("GET", "http://127.0.0.1/")
-    print(server.static_file_range(request, "/__jet_conformance_missing_static_file__", "text/plain") ? ok -> false ! error -> true)
+    print(if server.static_file_range(request, "/__jet_conformance_missing_static_file__", "text/plain") == {
+        .Ok(ok) -> false
+        .Err(error) -> true
+    })
 }

@@ -2,5 +2,8 @@
 use net: core.net
 
 run: fn() {
-    print(net.dns_txt("example.test", 0) ? ok -> false ! error -> true)
+    print(if net.dns_txt("example.test", 0) == {
+        .Ok(ok) -> false
+        .Err(error) -> true
+    })
 }

@@ -79,7 +79,10 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
         signed: protocol.encode_request(malformed) ?? panic("sign malformed")
         assert(store_lease_test_is_err(protocol.accept_snapshot(signed, snapshot.digest, snapshot.path)))
     }
-    assert((protocol.current_receipt(lease_id) ? found -> found ! error -> panic("current")) == None)
+    assert((if protocol.current_receipt(lease_id) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("current")
+    }) == None)
     receipt: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
     assert_eq(receipt.version, "")
     assert_eq(receipt.reference, reference)

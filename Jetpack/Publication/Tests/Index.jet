@@ -221,8 +221,14 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 #Test("publication index find_entry_matches_exact_version") {
     repo: publication_index_test_root("find")
     publication_write_index_entry(repo, publication_index_test_entry("textkit", "1.0.0", false)) ?? panic("write")
-    assert((publication_find_entry(repo, "textkit", "1.0.0") ? found -> found ! error -> panic("find")) == .Val(_))
-    assert((publication_find_entry(repo, "textkit", "9.9.9") ? found -> found ! error -> panic("find absent")) == None)
+    assert((if publication_find_entry(repo, "textkit", "1.0.0") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("find")
+    }) == .Val(_))
+    assert((if publication_find_entry(repo, "textkit", "9.9.9") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("find absent")
+    }) == None)
     files.remove_all(repo) ?? panic("cleanup")
 }
 #Test("publication index mark_yanked_flips_in_place_never_deletes") {
@@ -433,6 +439,9 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
         .Err(error) -> assert("{error}".contains("SBOM evidence was not staged"))
         .Ok(_) -> panic("index exposed without SBOM")
     }
-    assert((publication_find_entry(repo, "ref-kit", "1.0.0") ? found -> found ! error -> panic("find")) == None)
+    assert((if publication_find_entry(repo, "ref-kit", "1.0.0") == {
+        .Ok(found) -> found
+        .Err(error) -> panic("find")
+    }) == None)
     files.remove_all(root) ?? panic("cleanup")
 }

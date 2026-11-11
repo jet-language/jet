@@ -355,7 +355,7 @@ parser_expression_form_redundant_dispatch: fn(state: &JetParserState, subject: E
     }
 }
 
-parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, result_handler: Bool) -> ParserExpressionFormValueBranch {
+parser_expression_form_value_block: fn(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
     open: parser_expect(state, TOKEN_LBRACE, "to open a value branch")
     statements := [Stmt]{}
     loop {
@@ -371,14 +371,13 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, resul
             }
             // A statement tail is E0114 at that statement; an empty branch is E0003 at
             // the `}`.
-            if result_handler -> parser_expression_form_result_error(state, close.span, "A Result handler branch cannot be empty", "each exhaustive branch must produce a value or diverge", "add a value, `return`, or another diverging tail")
-            else if statements.len() > 0 -> parser_expression_form_error(state, "E0114", jfmt_stmt_span(statements[statements.len() - 1]), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
+            if statements.len() > 0 -> parser_expression_form_error(state, "E0114", jfmt_stmt_span(statements[statements.len() - 1]), "this value branch ends with a statement instead of a value", "a value-expected block must end with one unadorned expression; statements yield unit", "put one unadorned expression last, or use `return ...` for an early exit")
             else -> parser_expression_form_error(state, "E0003", close.span, "this `if` branch is empty but is used as a value", "when `if` produces a value, each branch must end with one", "put a value as the last line, like `{{ x }}`")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: Span{start: close.span.start, end: close.span.start}, id: parser_node_id(state)}, span: parser_cover(open.span, close.span)}
         }
         if kind == TOKEN_EOF {
             token: parser_current(state)
-            if result_handler -> parser_expression_form_result_error(state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(state, "E0003", token.span, "expected `}}` to close this `if` branch, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            parser_expression_form_error(state, "E0003", token.span, "expected `}}` to close this `if` branch, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: token.span, id: parser_node_id(state)}, span: parser_cover(open.span, token.span)}
         }
         current_token: parser_current(state)
@@ -403,7 +402,7 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, resul
                     // terminator before `}`; that value is still the branch value.
                     // An authored `;` makes it a unit statement unless it diverges.
                     if semi.span.start != semi.span.end && !parser_expression_definitely_diverges(parsed.expr) {
-                        if result_handler -> parser_expression_form_result_error(state, parsed.span, "this Result handler branch ends with a semicolon-terminated expression", "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit", "remove the semicolon, or use `return ...` for an early exit") else -> parser_expression_form_error(state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
+                        parser_expression_form_error(state, "E0114", parsed.span, "this value branch ends with a semicolon-terminated expression", "a value branch produces its result only from an unadorned final expression", "remove the semicolon or use an early exit")
                         parser_bump(state)
                         statements.push(Stmt.Expr{expr: parsed.expr})
                         next
@@ -433,10 +432,10 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, resul
 // `next` arm parses as a name, which may be a local called `next`; sema
 // reads it as the loop-control word when no such name is in scope.
 parser_expression_form_selected_value: fn(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
-    if parser_current_kind(state) == TOKEN_LBRACE -> return parser_expression_form_value_block(state, depth + 1, false)
+    if parser_current_kind(state) == TOKEN_LBRACE -> return parser_expression_form_value_block(state, depth + 1)
     if parser_current_kind(state) == TOKEN_RETURN || parser_current_kind(state) == TOKEN_BREAK {
         start: parser_current(state).span
-        control: parser_parse_statement(state)
+        control: parser_parse_table_arm_statement(state)
         // The statement took the line break that ends it. Give the break back
         // so the table or the line around this branch ends there, and a `.Case`
         // on the next line starts the next arm instead of continuing a value.
@@ -476,6 +475,7 @@ parser_expression_form_parse_guard_table: fn(state: &JetParserState, start: Span
             branch: parser_expression_form_selected_value(state, depth + 1)
             else_body = branch.body
             else_value = branch.value
+            parser_table_arm_separator(state)
             parser_skip_semicolons(state)
             end = parser_current(state).span
             parser_expect(state, TOKEN_RBRACE, "after the final `else` value guard arm")
@@ -499,6 +499,7 @@ parser_expression_form_parse_guard_table: fn(state: &JetParserState, start: Span
         parser_expect_unified_arrow(state, "after a value guard condition")
         branch: parser_expression_form_selected_value(state, depth + 1)
         arms.push(ParserExpressionFormArm{cond: condition.move(), body: branch.body, value: branch.value})
+        parser_table_arm_separator(state)
         // A fatal arm error ends the table, as Rust's `?` does; malformed
         // input that consumed nothing must not retry forever either.
         if parser_aborting(state) -> break
@@ -536,6 +537,7 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
             arm_end: parser_previous_end(state)
             else_body = branch.body
             else_value = branch.value
+            parser_table_arm_separator(state)
             parser_skip_semicolons(state)
             close: parser_expect(state, TOKEN_RBRACE, "after the final `else` value dispatch arm")
             end = close.span
@@ -567,6 +569,7 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
         parser_expect_unified_arrow(state, "after a value dispatch arm head")
         branch: parser_expression_form_selected_value(state, depth + 1)
         arms.push(ParserExpressionFormArm{cond: condition.move(), body: branch.body, value: branch.value})
+        parser_table_arm_separator(state)
         if parser_aborting(state) -> break
         if state.position == arm_position -> parser_bump(state)
     }

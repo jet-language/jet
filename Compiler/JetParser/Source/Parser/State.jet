@@ -81,7 +81,6 @@ JetParserState: struct {
     block_spans: [Span]
     pending_type_gt: Bool
     pending_type_gt_span: Span
-    result_handler_depth: Int
     // Byte offset where the statement being parsed starts; a retired `++`/`--`
     // that spans the whole statement gets a Safe compound-assignment edit.
     statement_start: Int
@@ -113,6 +112,9 @@ JetParserState: struct {
     // Depth of one-statement arm-table bodies; their statement may end before
     // a `#Through` (parser_parse_arm_through).
     arm_body_depth: Int{0}
+    // The block depth of a braceless arm body in an arm table (-1 = none);
+    // its statement may end before the `,` that separates compact arms.
+    table_arm_block_depth: Int{-1}
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
     block_depth: Int{0}

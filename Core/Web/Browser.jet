@@ -845,7 +845,10 @@ __launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net, Ti
 // The BiDi socket of a session a driver already created: no `session.status`
 // or `session.new`, and close ends it through the engine's driver session.
 __connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
+    conn: if core.net.ws.__connect(endpoint) == {
+        .Ok(value) -> value
+        .Err(error) -> return Err(browser_ws_error(error))
+    }
     Ok(Browser{__state: Shared{__BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: true, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None
@@ -877,7 +880,10 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 }
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
+    conn: if core.net.ws.__connect(endpoint) == {
+        .Ok(value) -> value
+        .Err(error) -> return Err(browser_ws_error(error))
+    }
     browser: Browser{__state: Shared{__BrowserState{
         conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}, engine: None

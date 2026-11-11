@@ -48,20 +48,29 @@ run: fn() {
     ) ?? panic("duplicate")
     print("duplicate:{duplicate.len()}")
 
-    scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) ? _rows -> {
-        print("placeholder:accepted")
-    } ! _error -> {
-        print("placeholder:rejected")
+    if scoped.query(SQL{"SELECT body FROM tasks WHERE body = ?"}) == {
+        .Ok(_rows) -> {
+            print("placeholder:accepted")
+        }
+        .Err(_error) -> {
+            print("placeholder:rejected")
+        }
     }
-    scoped.query(SQL{"SELECT no_such_column FROM tasks"}) ? _rows -> {
-        print("driver:accepted")
-    } ! _error -> {
-        print("driver:rejected")
+    if scoped.query(SQL{"SELECT no_such_column FROM tasks"}) == {
+        .Ok(_rows) -> {
+            print("driver:accepted")
+        }
+        .Err(_error) -> {
+            print("driver:rejected")
+        }
     }
-    scoped.query(SQL{"SELECT body FROM other JOIN tasks"}) ? _rows -> {
-        print("authority:accepted")
-    } ! _error -> {
-        print("authority:rejected")
+    if scoped.query(SQL{"SELECT body FROM other JOIN tasks"}) == {
+        .Ok(_rows) -> {
+            print("authority:accepted")
+        }
+        .Err(_error) -> {
+            print("authority:rejected")
+        }
     }
 
     live: application.live(task_bodies, scoped.copy())

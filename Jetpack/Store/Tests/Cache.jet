@@ -98,13 +98,25 @@ store_cache_test_root: fn(label: String) -> String Never! {
     ingested: store_test_ingest_fixture(verification, roots, "cache-hangar-endpoint", [String: String]{"out": "trusted"}, [String]{})
     produced: store_write_nar(ingested.entry.out) ?? panic("real NAR")
     local: CacheEndpoint.Local(files.join(roots.root, "missing-mirror"))
-    assert_eq(store_cache_verify_hangar_endpoint(verification, roots, local, ingested.entry) ? found -> found ! error -> panic("non Hangar"), [U8]?{None})
-    actual: store_cache_verify_hangar_endpoint(verification, roots, CacheEndpoint.Hangar, ingested.entry) ? found -> found ! error -> panic("verify Hangar")
+    assert_eq(if store_cache_verify_hangar_endpoint(verification, roots, local, ingested.entry) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("non Hangar")
+    }, [U8]?{None})
+    actual: if store_cache_verify_hangar_endpoint(verification, roots, CacheEndpoint.Hangar, ingested.entry) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("verify Hangar")
+    }
     assert_eq(actual, Val(produced.bytes))
     destination: files.join(roots.root, "cache-copy")
-    assert_eq(store_cache_substitute_hangar_endpoint(verification, roots, local, ingested.entry, destination) ? found -> found ! error -> panic("non Hangar substitute"), [U8]?{None})
+    assert_eq(if store_cache_substitute_hangar_endpoint(verification, roots, local, ingested.entry, destination) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("non Hangar substitute")
+    }, [U8]?{None})
     assert(!files.exists(destination))
-    copied: store_cache_substitute_hangar_endpoint(verification, roots, CacheEndpoint.Hangar, ingested.entry, destination) ? found -> found ! error -> panic("substitute Hangar")
+    copied: if store_cache_substitute_hangar_endpoint(verification, roots, CacheEndpoint.Hangar, ingested.entry, destination) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("substitute Hangar")
+    }
     assert_eq(copied, Val(produced.bytes))
     assert_eq(pkg_try_output_hash_of(destination) ?? panic("copied tree hash"), ingested.entry.envelope.output_hash)
     store_test_drop_roots(roots)

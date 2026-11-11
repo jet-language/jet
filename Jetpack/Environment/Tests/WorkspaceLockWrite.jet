@@ -74,7 +74,10 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
     files.create_dir_all(files.join(root, "packages/hello")) ?? panic("member dir")
     files.write(files.join(root, PACKAGE_FILE), "name: \"root\"\nmembers: [\"packages/hello\"]\n") ?? panic("root manifest")
     env_wlock_test_manifest(root, "packages/hello", "hello")
-    loaded_plan: envmodel_workspace_load(cache, root) ? found -> found ! error -> panic("Package members must evaluate")
+    loaded_plan: if envmodel_workspace_load(cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("Package members must evaluate")
+    }
     plan: loaded_plan ?? panic("the Package root must provide the member plan")
     env_workspace_lock_write(cache, root, plan) ?? panic("write the Package graph")
     loaded: pkg_workspace_lock_load(cache, root) ?? panic("one unified lock must reload the Package graph")
@@ -101,7 +104,10 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
     source_digest: env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
     canonical: files.canonicalize(files.join(root, "packages/hello")) ?? panic("canonical member")
-    facts_loaded: PackageFacts.load(canonical) ? found -> found ! error -> panic("load member facts")
+    facts_loaded: if PackageFacts.load(canonical) == {
+        .Ok(found) -> found
+        .Err(error) -> panic("load member facts")
+    }
     facts: facts_loaded ?? panic("member facts exist")
     lock_text: "version = 1\nworkspace_source_digest = \"{source_digest}\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"{source_digest}\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{facts.semantic_digest()}\"\n"
     files.write(files.join(root, UNIFIED_LOCK_FILE), lock_text) ?? panic("write the lock")
