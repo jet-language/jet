@@ -433,6 +433,16 @@ ir_set_keep_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, sh
     ir_walk_close(m, b, walk)
 }
 
+// Inserts into `target` a copy of each key of `from`.
+ir_set_add_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, shape: IRMapShape, from: Int, target: Int, span: Span) Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    walk: ir_walk_open(m, b, from, shape.key.ty)
+    key: ir_copy_value(m, p, b, walk.item, span)
+    _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{target, key}, bool_row)
+    b.fresh[key] = false
+    ir_walk_close(m, b, walk)
+}
+
 // `rank.first()` / `rank.last()`: a copy of the least (greatest) key in an
 // Option box, None when the Rank is empty.
 ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
@@ -540,8 +550,9 @@ ir_set_symbol: fn(symbol: String) -> String Never! {
 // A Set builtin by its route symbol: from, len, capacity, is_empty, first,
 // last, max, shuffle, to_list, sort, values, has, insert/add, remove, pop,
 // replace, clear, equal, union, intersection, difference,
-// symmetric_difference, is_subset, is_superset and is_disjoint; None when
-// the builder does not lower `symbol` on Sets.
+// symmetric_difference, their in-place `_update` forms and `update`,
+// is_subset, is_superset and is_disjoint; None when the builder does not
+// lower `symbol` on Sets.
 ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     symbol: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
@@ -612,12 +623,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
             target = ir_copy_value(m, p, b, subject, span)
             // The copy shares the receiver's buffer until it is its own.
             ir_make_unique(m, p, b, target)
-            bool_row: ir_type_row(m, Type.Bool) ?? 0
-            walk: ir_walk_open(m, b, other, shape.key.ty)
-            key: ir_copy_value(m, p, b, walk.item, span)
-            _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{target, key}, bool_row)
-            b.fresh[key] = false
-            ir_walk_close(m, b, walk)
+            ir_set_add_keys(m, p, b, set_row, shape, other, target, span)
         } else {
             target = ir_set_empty_like(m, b, set_row, subject)
             ir_set_keep_keys(m, p, b, set_row, shape, subject, other, target, symbol == "jet_set_intersection", span)
@@ -626,6 +632,55 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
         ir_release(m, b, other)
         b.fresh[target] = true
         return Val(target)
+    }
+    // The in-place forms, each walking `other` (never the receiver it
+    // writes; the checker keeps `other` from being the receiver, E0204):
+    // `update(other)` inserts a copy of each key of `other`,
+    // `difference_update(other)` removes them, and
+    // `symmetric_difference_update(other)` removes those the receiver holds
+    // and inserts a copy of the rest. `intersection_update(other)` first
+    // gathers copies of the receiver's keys `other` lacks, then removes them.
+    if symbol == "jet_set_update" || symbol == "jet_set_difference_update" || symbol == "jet_set_symmetric_difference_update" || symbol == "jet_set_intersection_update" {
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Set {route} without an operand"))
+        }
+        other: ir_adapt(m, p, b, operands[1], set_row, span)
+        if ir_failed(b) -> return Val(-1)
+        if symbol == {
+            "jet_set_update" -> ir_set_add_keys(m, p, b, set_row, shape, other, subject, span)
+            "jet_set_intersection_update" -> {
+                lacking: ir_set_empty_like(m, b, set_row, subject)
+                ir_set_keep_keys(m, p, b, set_row, shape, subject, other, lacking, false, span)
+                walk: ir_walk_open(m, b, lacking, shape.key.ty)
+                _: ir_set_call(m, p, b, set_row, "set.remove", [Int]{subject, walk.item}, -1)
+                ir_walk_close(m, b, walk)
+                b.fresh[lacking] = true
+                ir_release(m, b, lacking)
+            }
+            "jet_set_difference_update" -> {
+                walk: ir_walk_open(m, b, other, shape.key.ty)
+                _: ir_set_call(m, p, b, set_row, "set.remove", [Int]{subject, walk.item}, -1)
+                ir_walk_close(m, b, walk)
+            }
+            else -> {
+                walk: ir_walk_open(m, b, other, shape.key.ty)
+                word_row: ir_word_row(m)
+                found: ir_set_call(m, p, b, set_row, "set.find", [Int]{subject, walk.item}, word_row)
+                none: ir_word_const(m, b, 0)
+                held: ir_bool_op(m, b, IROp.Ge, found, none)
+                ir_open_if(b.f, held, b.line)
+                _: ir_set_call(m, p, b, set_row, "set.remove", [Int]{subject, walk.item}, -1)
+                ir_else(b.f, b.line)
+                bool_row: ir_type_row(m, Type.Bool) ?? 0
+                key: ir_copy_value(m, p, b, walk.item, span)
+                _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{subject, key}, bool_row)
+                b.fresh[key] = false
+                ir_end(b.f, b.line)
+                ir_walk_close(m, b, walk)
+            }
+        }
+        ir_release(m, b, other)
+        return Val(-1)
     }
     // `is_subset(other)`: `other` holds every receiver key; `is_superset(other)`
     // the converse; `is_disjoint(other)`: it holds none of them.

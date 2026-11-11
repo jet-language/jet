@@ -2050,7 +2050,9 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     // An Iter whose method has no Iter route runs the List method over its
     // items as they are pulled (ir_iter_walks).
     walks: ir_iter_walks(receiver_ty, operation)
-    if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFold || operation == .BagAny -> return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
+    if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFlatMap || operation == .MapFold || operation == .BagAny {
+        return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
+    }
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
@@ -2156,8 +2158,10 @@ ir_float_add_fold_step: fn(p: IRProgram, b: IRBuilder, callback: Int) -> Bool Ne
 
 // The Map closure method `operation`: each entry, in key order, lends its
 // key and value to the closure. `filter` keeps copies of the accepted
-// entries, `map` pairs a copy of each key with the closure's value, and
-// `fold(initial, f)` threads the accumulator through `f(acc, key, value)`.
+// entries, `map` pairs a copy of each key with the closure's value,
+// `flat_map` sets a copy of each entry of each Map the closure returns (a
+// later one winning), and `fold(initial, f)` threads the accumulator through
+// `f(acc, key, value)`.
 ir_closure_map_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     map: ir_expr(m, p, b, receiver)
     if ir_failed(b) || map < 0 -> return -1
@@ -2184,10 +2188,10 @@ ir_closure_map_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
     } else if operation == .MapAny || operation == .MapAll || operation == .BagAny {
         result = ir_temp(m, b, bool_row)
         ir_emit(b.f, IROp.Const, result, if operation == .MapAll -> 1 else -> 0, -1, -1, b.line)
-    } else if operation == .MapFilter || operation == .MapMap {
+    } else if operation == .MapFilter || operation == .MapMap || operation == .MapFlatMap {
         result = ir_list_empty(m, b, result_row)
     }
-    mapped_shape: if operation == .MapMap -> ir_map_shape(m, p, result_row) ?? return ir_fail_slot(b, span, "map result {ir_type_name(ty)}") else -> shape
+    mapped_shape: if operation == .MapMap || operation == .MapFlatMap -> ir_map_shape(m, p, result_row) ?? return ir_fail_slot(b, span, "map result {ir_type_name(ty)}") else -> shape
     ordered: ir_map_ordered(m, p, b, map)
     walk: ir_walk_open(m, b, ordered, shape.entry)
     key: ir_load_at(m, b, walk.item, shape.key.offset, shape.key.ty)
@@ -2218,7 +2222,16 @@ ir_closure_map_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
             mapped: ir_call_callback(m, p, b, callback, callback_ty, [Int]{key, value}, mapped_shape.value.ty, span)
             ir_map_set(m, p, b, result_row, result, key, mapped)
         }
-        .EditDisjoint | .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .Find | .Any | .All | .CountWhere | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Scan | .Position | .MinBy | .MaxBy | .Fold | .GroupBy | .CountBy | .UpdateFirst | .Partition | .DedupBy | .IsSortedBy | .ChunkWhile | .FilterMap | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .OptionMap | .ViewFold | .ViewMap -> {
+        .MapFlatMap -> {
+            produced: ir_call_callback(m, p, b, callback, callback_ty, [Int]{key, value}, result_row, span)
+            inner: ir_walk_open(m, b, produced, mapped_shape.entry)
+            inner_key: ir_load_at(m, b, inner.item, mapped_shape.key.offset, mapped_shape.key.ty)
+            inner_value: ir_load_at(m, b, inner.item, mapped_shape.value.offset, mapped_shape.value.ty)
+            ir_map_set(m, p, b, result_row, result, inner_key, inner_value)
+            ir_walk_close(m, b, inner)
+            ir_release(m, b, produced)
+        }
+        .EditDisjoint | .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .MapFold | .ListBinarySearchBy | .ListMinMaxBy | .Find | .Any | .All | .CountWhere | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Scan | .Position | .MinBy | .MaxBy | .Fold | .GroupBy | .CountBy | .UpdateFirst | .Partition | .DedupBy | .IsSortedBy | .ChunkWhile | .FilterMap | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .OptionMap | .ViewFold | .ViewMap -> {
             next_value: ir_call_callback(m, p, b, callback, callback_ty, [Int]{result, key, value}, result_row, span)
             if ir_has_drop(m, b, result) -> ir_emit(b.f, IROp.Drop, -1, result, -1, -1, b.line)
             if ir_kind_of(m, b, result) == .Aggregate {

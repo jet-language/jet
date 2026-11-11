@@ -1,0 +1,85 @@
+// The Map and Set methods the IR build leaves unlowered. MapSetMethods.jet
+// calls each Current Map and Set row of the collection table (this checks
+// that it does: the Map rows in its `maps` function, the Set rows in `sets`),
+// and is built and run at each optimize level; every `ir.build unlowered`
+// fault is listed once. Run from the repository root:
+// `jet Tools/agent/CollectionLowering.jet`, with $JET naming the compiler
+// (default `jet`). Exits 1 on an uncalled row, a fault, or a build that
+// fails otherwise.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+ROWS: "Compiler/JetFoundation/Source/Collections.jet"
+
+EXAMPLE: "Examples/Collections/MapSetMethods.jet"
+
+LEVELS: [String]{"none", "basic", "full"}
+
+FAULT: "ir.build unlowered: "
+
+// The names of the Current rows of `receiver` (Map or Set) in the table text.
+row_names: fn(rows: String, receiver: String) -> [String] {
+    marker: "receivers: CollectionReceivers.{receiver}, name: \""
+    names := [String]{}
+    loop line in rows.split("\n") {
+        if !line.contains(marker) || !line.contains("status: CollectionStatus.Current") -> next
+        name: line.split(marker).to_list()[1].split("\"").to_list()[0]
+        if !names.contains(name) -> names.push(name.copy())
+    }
+    names
+}
+
+// The rows of `names` that `code` never calls as `.name(`.
+uncalled: fn(names: [String], code: String, receiver: String) -> [String] {
+    missing := [String]{}
+    loop name in names {
+        if !code.contains(".{name}(") -> missing.push("{receiver}.{name}")
+    }
+    missing
+}
+
+// Each fault of a build's output once into `found`, as `<what> at <where>`
+// after the function that holds it; how many fault lines `text` holds.
+faults_in: fn(text: String, found: &[String]) -> Int {
+    seen := 0
+    loop line in text.split("\n") {
+        if !line.contains(FAULT) -> next
+        seen += 1
+        fault: line.split(FAULT).to_list()[1]
+        what: if fault.contains("]: ") -> fault.split("]: ").to_list()[1] else -> fault
+        if !found.contains(what) -> found.push(what.copy())
+    }
+    seen
+}
+
+run: fn() {
+    rows: files.read(ROWS) ?? process.fail(1, "collection lowering: {ROWS}: {err}")
+    code: files.read(EXAMPLE) ?? process.fail(1, "collection lowering: {EXAMPLE}: {err}")
+    parts: code.split("\nsets: fn(").to_list()
+    if parts.len() != 2 {
+        process.fail(1, "collection lowering: {EXAMPLE} has no `sets` function after `maps`")
+    }
+    map_names: row_names(rows, "Map")
+    set_names: row_names(rows, "Set")
+    missing := uncalled(map_names, parts[0], "Map")
+    missing.extend(uncalled(set_names, parts[1], "Set"))
+    loop name in missing -> print("not called: {name}")
+    jet: sys.get("JET") ?? "jet"
+    found := [String]{}
+    failed := [String]{}
+    loop level in LEVELS {
+        ran: process.cmd([String]{jet, "run", "--optimize={level}", EXAMPLE}).run() ?? process.fail(1, "collection lowering: {jet} cannot start: {err}")
+        seen: faults_in(ran.output, found) + faults_in(ran.errors, found)
+        if ran.code != 0 && seen == 0 {
+            failed.push("{level}: exit {ran.code}: {ran.errors.trim()}")
+        }
+    }
+    loop fault in found -> print("unlowered: {fault}")
+    loop failure in failed -> print("build failed at {failure}")
+    print("{map_names.len()} Map and {set_names.len()} Set methods, {missing.len()} not called")
+    print("unlowered collection methods: {found.len()}")
+    if missing.len() > 0 || found.len() > 0 || failed.len() > 0 -> process.exit(1)
+}

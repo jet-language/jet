@@ -1,0 +1,84 @@
+// Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on).
+ints: fn(xs: [Int]) -> String { xs.map(n -> "{n}").join(",") }
+
+maps: fn() {
+    m := [String:Int]{"a": 1, "b": 2}
+    print("add: {m.add("c", 3) ?? 0}, replace: {m.replace("c", 4) ?? 0}")
+    if m.try_insert("d", 5) == {
+        .Ok(old) -> { print("try_insert: {old ?? 0}") }
+        .Err(_) -> print("try_insert: out of memory")
+    }
+    print("add_new: {m.add_new("e", 6)} {m.add_new("e", 7)}")
+    print("setdefault: {m.setdefault("e", 8)} {m.setdefault("f", 9)} {m.get("f") ?? 0}")
+    print("remove: {m.remove("f") ?? 0}, pop: {m.pop("e") ?? 0}, pop missing: {m.pop("zz") ?? -1}")
+    print("get: {m.get("a") ?? 0}, has_key: {m.has_key("b")}, contains_value: {m.contains_value(5)}")
+    m.update([String:Int]{"b": 20, "g": 7})
+    print("update: b={m.get("b") ?? 0} g={m.get("g") ?? 0} len={m.len()} is_empty={m.is_empty()}")
+    other: [String:Int]{"a": 100, "z": 26}
+    print("merge: {m.merge(other).get("a") ?? 0}, with conflict: {m.merge(other, conflict: (key: String, a: Int, b: Int) -> a + b).get("a") ?? 0}")
+    print("equal: {m.equal(other)}, intersection: {m.intersection(other).len()}, slice: {m.slice([String]{"a", "b", "q"}).len()}")
+    print("top_n: {m.top_n(2).len()}")
+    print("map: {m.map((key: String, value: Int) -> value * 2).get("b") ?? 0}")
+    print("filter: {m.filter((key: String, value: Int) -> value > 4).len()}")
+    print("flat_map: {m.flat_map((key: String, value: Int) -> [String:Int]{"{key}{key}": value}).len()}")
+    seen := [String]{}
+    m.each((key: String, value: Int) -> seen.push(key.copy()))
+    print("each: {seen.join(",")}")
+    print("any: {m.any((key: String, value: Int) -> value > 10)}, all: {m.all((key: String, value: Int) -> value > 10)}")
+    print("fold: {m.fold(0, (total: Int, key: String, value: Int) -> total + value)}")
+    print("keys: {m.keys().to_list().join(",")}, values: {ints(m.values().to_list())}")
+    print("first: {m.first() ?? ""}, min: {m.min() ?? 0}, max: {m.max() ?? 0}")
+    print("to_list: {m.to_list().len()}, items: {m.items().len()}")
+    print("pop_first: {m.pop_first() ?? 0}")
+    m.clear()
+    print("clear: {m.len()}")
+}
+
+sets: fn() {
+    s := Set.from([1, 2, 3])
+    print("add: {s.add(4)} {s.add(4)}, has: {s.has(4)}")
+    s.remove(4)
+    s.discard(9)
+    print("pop: {s.pop(3) ?? -1}, take: {s.take(2) ?? -1}, replace: {s.replace(1) ?? -1}")
+    s.update(Set.from([2, 3, 5]))
+    print("update: {ints(s.sort())}")
+    s.difference_update(Set.from([5, 6]))
+    print("difference_update: {ints(s.sort())}")
+    s.intersection_update(Set.from([2, 3, 4]))
+    print("intersection_update: {ints(s.sort())}")
+    s.symmetric_difference_update(Set.from([3, 4]))
+    print("symmetric_difference_update: {ints(s.sort())}")
+    t: Set.from([4, 7])
+    print("union: {ints(s.union(t).sort())}, intersection: {ints(s.intersection(t).sort())}")
+    print("difference: {ints(s.difference(t).sort())}, symmetric_difference: {ints(s.symmetric_difference(t).sort())}")
+    print("equal: {s.equal(s.to_set())}, is_subset: {s.is_subset(Set.from([2, 4, 7]))}, issubset: {s.issubset(t)}")
+    print("is_superset: {s.is_superset(Set.from([4]))}, issuperset: {s.issuperset(t)}")
+    print("is_disjoint: {s.is_disjoint(Set.from([9]))}, isdisjoint: {s.isdisjoint(t)}")
+    print("len: {s.len()}, is_empty: {s.is_empty()}, capacity: {s.capacity() >= s.len()}")
+    listed := s.to_list()
+    listed.sort()
+    valued := s.values().to_list()
+    valued.sort()
+    shuffled := s.shuffle()
+    shuffled.sort()
+    print("to_list: {ints(listed)}, values: {ints(valued)}, shuffle: {ints(shuffled)}, first: {s.has(s.first() ?? -1)}")
+    mapped := s.map(n -> n * 10)
+    mapped.sort()
+    kept := s.filter(n -> n > 2)
+    print("map: {ints(mapped)}, filter: {ints(kept)}")
+    visited := [Int]{}
+    s.each(n -> visited.push(n))
+    visited.sort()
+    print("each: {ints(visited)}, all: {s.all(n -> n > 0)}")
+    spread := s.flat_map(n -> [n, n + 100]).to_list()
+    spread.sort()
+    print("flat_map: {ints(spread)}")
+    print("fold: {s.fold(0, (total: Int, n: Int) -> total + n)}, min: {s.min() ?? 0}, max: {s.max() ?? 0}")
+    s.clear()
+    print("clear: {s.len()}")
+}
+
+run: fn() {
+    maps()
+    sets()
+}

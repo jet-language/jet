@@ -1861,9 +1861,10 @@ ir_map_clear_index: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int)
 }
 
 // A Map builtin by its route symbol: len, is_empty, has_key, get (an owned
-// copy), insert (the replaced value), remove (the removed value), keys /
-// values (an Iter) and top_n (a ranked List of entries); `ty` is the result
-// type. None when the builder does not lower `symbol` on Maps.
+// copy), insert (the replaced value), try_insert (it in a Result), remove
+// (the removed value), keys / values (an Iter), top_n (a ranked List of
+// entries), update and setdefault (in place); `ty` is the result type. None
+// when the builder does not lower `symbol` on Maps.
 ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     row: b.f.slot_type[subject]
     shape: ir_map_shape(m, p, row) ?? return None
@@ -1920,6 +1921,23 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         ir_walk_close(m, b, walk)
         ir_release(m, b, other)
         return Val(target)
+    }
+    // `update(other)`: each entry of `other` set in the receiver as a copy,
+    // in place, the right side winning as in `merge`. The checker keeps
+    // `other` from being the receiver itself (E0204).
+    if symbol == "jet_map_update_all" {
+        if operands.len() != 2 || operands[1] < 0 {
+            return Val(ir_fail_slot(b, span, "Map update with {operands.len() - 1} arguments"))
+        }
+        other: ir_adapt(m, p, b, operands[1], row, span)
+        if ir_failed(b) -> return Val(-1)
+        walk: ir_walk_open(m, b, other, shape.entry)
+        key: ir_load_at(m, b, walk.item, shape.key.offset, shape.key.ty)
+        value: ir_load_at(m, b, walk.item, shape.value.offset, shape.value.ty)
+        ir_map_set(m, p, b, row, subject, key, value)
+        ir_walk_close(m, b, walk)
+        ir_release(m, b, other)
+        return Val(-1)
     }
     if symbol == "jet_map_first_key" || symbol == "jet_map_min_value_kernel" || symbol == "jet_map_max_value_kernel" {
         if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Map {symbol} with {operands.len() - 1} arguments"))
@@ -2043,8 +2061,12 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         return Val(target)
     }
     keyed: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
-    if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None
-    if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "map builtin {symbol} without a key"))
+    if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_try_insert" && symbol != "jet_map_add_new" && symbol != "jet_map_setdefault" {
+        return None
+    }
+    if operands.len() < 2 || operands[1] < 0 {
+        return Val(ir_fail_slot(b, span, "map builtin {symbol} without a key"))
+    }
     key: ir_adapt(m, p, b, operands[1], shape.key.ty, span)
     if ir_failed(b) -> return Val(-1)
     option_row: ir_value_type(m, p, Type.Option{inner: shape.value_ty}) ?? return Val(ir_fail_slot(b, span, "map builtin {symbol} result"))
@@ -2057,6 +2079,52 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         b.fresh[owned_key] = false
         b.fresh[owned_value] = false
         return Val(old)
+    }
+    // `try_insert(key, value)`: `insert` in a Result, as `String.try_push`:
+    // Err(AllocError) naming one entry's bytes, with the Map untouched and the
+    // key and value dropped, when the allocation-failure hook refuses; else
+    // Ok holding the replaced value.
+    if symbol == "jet_map_try_insert" {
+        if operands.len() != 3 || operands[2] < 0 {
+            return Val(ir_fail_slot(b, span, "map try_insert without a value"))
+        }
+        err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
+            return Val(ir_fail_slot(b, span, "try_insert without its checked Result"))
+
+        }
+        result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
+        value: ir_adapt(m, p, b, operands[2], shape.value.ty, span)
+        if ir_failed(b) -> return Val(-1)
+        owned_key: ir_own(m, p, b, key)
+        owned_value: ir_own(m, p, b, value)
+        string_row: ir_string_row(m)
+        int_row: ir_type_row(m, Type.Int) ?? 0
+        bool_row: ir_type_row(m, Type.Bool) ?? 0
+        pointer_row: ir_pointer_row(m)
+        result: ir_fresh_temp(m, b, result_row)
+        refused: ir_runtime(m, b, "jet_fault_should_fail_allocation", [Int]{}, bool_row)
+        ir_open_if(b.f, refused, b.line)
+        ir_release(m, b, owned_key)
+        ir_release(m, b, owned_value)
+        requested: ir_int_constant(m, b, int_row, shape.stride)
+        map_text: ir_static_text(m, b, "Map")
+        allocator: ir_runtime(m, b, "jet_rt_string_from_static", map_text, string_row)
+        record: ir_runtime(m, b, "jet_rt_record_new_alloc_error", [Int]{requested, allocator}, pointer_row)
+        ir_release(m, b, requested)
+        ir_release(m, b, allocator)
+        failed: ir_result_box(m, p, b, ty, false, -1)
+        ir_record_in(m, p, b, err_ty, record, failed, 8, span)
+        ir_emit(b.f, IROp.Copy, result, failed, -1, -1, b.line)
+        b.fresh[failed] = false
+        ir_else(b.f, b.line)
+        old: ir_map_call(m, p, b, row, "map.insert", [Int]{subject, owned_key, owned_value}, option_row)
+        inserted: ir_result_box(m, p, b, ty, true, old)
+        ir_emit(b.f, IROp.Copy, result, inserted, -1, -1, b.line)
+        b.fresh[inserted] = false
+        ir_end(b.f, b.line)
+        b.fresh[owned_key] = false
+        b.fresh[owned_value] = false
+        return Val(result)
     }
     // `add_new(key, value)`: inserts only under a missing key, whether it was
     // missing; the copies made for the insert are dropped when the key is
@@ -2081,6 +2149,37 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
         b.fresh[owned_key] = false
         b.fresh[owned_value] = false
         return Val(missing)
+    }
+    // `setdefault(key, default)`: inserts a copy of the key with the default
+    // only under a missing key (the default is dropped otherwise), then gives
+    // a copy of the value the key holds.
+    if symbol == "jet_map_setdefault" {
+        if operands.len() != 3 || operands[2] < 0 {
+            return Val(ir_fail_slot(b, span, "map setdefault without a default"))
+        }
+        value: ir_adapt(m, p, b, operands[2], shape.value.ty, span)
+        if ir_failed(b) -> return Val(-1)
+        owned_value: ir_own(m, p, b, value)
+        word_row: ir_word_row(m)
+        found: ir_map_call(m, p, b, row, "map.find", [Int]{subject, key}, word_row)
+        zero: ir_word_const(m, b, 0)
+        missing: ir_bool_op(m, b, IROp.Lt, found, zero)
+        ir_open_if(b.f, missing, b.line)
+        // The key stays for the lookup below, so the map takes a copy.
+        owned_key: ir_copy_value(m, p, b, key, span)
+        _: ir_map_call(m, p, b, row, "map.set", [Int]{subject, owned_key, owned_value}, -1)
+        b.fresh[owned_key] = false
+        ir_else(b.f, b.line)
+        ir_release(m, b, owned_value)
+        ir_end(b.f, b.line)
+        b.fresh[owned_value] = false
+        held: ir_map_call(m, p, b, row, "map.find", [Int]{subject, key}, word_row)
+        entries: ir_load_word(m, b, subject, 16)
+        entry: ir_element_address(m, b, entries, held, shape.stride)
+        stored: ir_load_at(m, b, entry, shape.value.offset, shape.value.ty)
+        result: ir_copy_value(m, p, b, stored, span)
+        ir_release(m, b, key)
+        return Val(result)
     }
     result := -1
     if symbol == "jet_map_has_key" {
