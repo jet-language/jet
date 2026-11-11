@@ -559,8 +559,10 @@ ssl_bio_recv: fn(ssl: &ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SS
     n: if avail < len -> avail else -> len
     ssldefs.ssl_copy_into(ssl.in_buf, off, ssl.bio.rx, ssl.bio.rx_off, n)
     ssl.bio.rx_off += n
+    // Drained: clearing keeps the List's capacity for the next record the
+    // socket's read_into appends (#5976).
     if ssl.bio.rx_off == ssl.bio.rx.len() {
-        ssl.bio.rx = [U8]{}
+        ssl.bio.rx.clear()
         ssl.bio.rx_off = 0
     }
     n

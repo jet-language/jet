@@ -483,8 +483,13 @@ __tls_accepted: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
 __tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
     tcp: __tls_accepted(accepted) ?? return None
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
+    staged: shared [U8]{}
     Val(__HTTPSecure{
-        read: (max_bytes: Int, deadline: Duration) -> secure.read(max_bytes, deadline: deadline),
+        read_into: (limit: Int, deadline: Duration) -> {
+            guard := staged.guard_edit()
+            secure.read_into(guard.value, limit, deadline: deadline)
+        },
+        staged: staged,
         write_all: (bytes: [U8], deadline: Duration) -> {
             if secure.write_all(bytes, deadline: deadline) == {
                 .Ok(_) -> true
@@ -1159,7 +1164,10 @@ __HTTPConn: struct {
 // A TLS connection's stream, held only by these operations; `__tls_accept`
 // builds them, so a server without `tls:` reaches no TLS code.
 __HTTPSecure: struct {
-    read: fn(Int, Duration) -[Net, Time.Wait]> [U8] IOError!
+    // Appends up to the limit's plaintext bytes to `staged`: the count, 0 at
+    // the end of the stream. `staged` keeps its capacity across reads.
+    read_into: fn(Int, Duration) -[Net, Time.Wait]> Int IOError!
+    staged: Shared<[U8]>
     // Whether every byte was sent within the deadline.
     write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
     // Sends close_notify and closes the socket the stream owns.
@@ -1233,32 +1241,30 @@ __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool
     false
 }
 
-// Append what the peer sends next; false at end of stream.
+// Append what the peer sends next; false at end of stream. Both streams
+// append with read_into, so a connection's reads reuse their buffers.
 __wire_fill: fn(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __HTTPFault! {
     remaining: wire.end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
-    got := [U8]{}
     if stream.tls == .Val(secure) {
-        if secure.read(C_READ_BYTES, Duration{ns: remaining}) == {
-            .Ok(bytes) -> got = bytes
-            .Err(error) -> {
-                if error == .TimedOut(_) -> return Err(.Reply(408))
-                return Ok(false)
-            }
+        count: secure.read_into(C_READ_BYTES, Duration{ns: remaining}) ?? {
+            if err == .TimedOut(_) -> return Err(.Reply(408))
+            return Ok(false)
         }
+        if count == 0 -> return Ok(false)
+        guard := secure.staged.guard_edit()
+        loop b in guard.value -> wire.buffer.push(b)
+        guard.value.clear()
+        return Ok(true)
     }
     if stream.tcp == .Val(plain) {
-        if plain.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
-            .Ok(bytes) -> got = bytes
-            .Err(error) -> {
-                if __accept_timed_out(error) -> return Err(.Reply(408))
-                return Ok(false)
-            }
+        count: plain.read_into(wire.buffer, C_READ_BYTES, deadline: Duration{ns: remaining}) ?? {
+            if __accept_timed_out(err) -> return Err(.Reply(408))
+            return Ok(false)
         }
+        return Ok(count > 0)
     }
-    if got.len() == 0 -> return Ok(false)
-    loop b in got -> wire.buffer.push(b)
-    Ok(true)
+    Ok(false)
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.

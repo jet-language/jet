@@ -1113,9 +1113,9 @@ __take: fn(&tls: __TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
     remaining: end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
-    if tls.tcp.read(C_RECORD_BYTES, deadline: slice) == {
-        .Ok(bytes) -> {
-            if bytes.len() == 0 -> tls.ssl.bio.rx_eof = true else -> tls.ssl.bio.rx.extend(bytes)
+    if tls.tcp.read_into(tls.ssl.bio.rx, C_RECORD_BYTES, deadline: slice) == {
+        .Ok(count) -> {
+            if count == 0 -> tls.ssl.bio.rx_eof = true
             0
         }
         .Err(err) -> {

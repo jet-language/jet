@@ -715,9 +715,10 @@ __build_remaining: fn(wire: __BuildWire) -[Time.Wait]> Int Never! {
     left
 }
 
-// One read into the drained buffer: the byte count, 0 at EOF. A replay's
-// buffer started as the whole tape, so a read past it is the recorded
-// ending.
+// One read into the drained buffer: the byte count, 0 at EOF. The buffer is
+// cleared and read into, so its capacity carries over between reads. A
+// replay's buffer started as the whole tape, so a read past it is the
+// recorded ending.
 __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     if wire.prove == C_CLIENT_PROVE_REPLAY {
         if wire.ending != "eof" -> return Err(__build_fail(__build_ending_message(wire.ending)))
@@ -727,13 +728,15 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
     }
     remaining: __build_remaining(wire)
     if remaining <= 0 -> return Err(__build_tape_fail(wire, "timed_out", "timed out"))
-    got := [U8]{}
+    wire.buffer.clear()
+    wire.at = 0
+    count := 0
     failed := ""
     message := ""
     if wire.tls == {
         .Val(stream) -> {
-            if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
-                .Ok(bytes) -> got = bytes
+            if stream.read_into(wire.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                .Ok(read) -> count = read
                 .Err(err) -> {
                     failed = __build_io_portable(err)
                     message = "{err}"
@@ -743,8 +746,8 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
         .None -> {
             if wire.tcp == {
                 .Val(stream) -> {
-                    if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
-                        .Ok(bytes) -> got = bytes
+                    if stream.read_into(wire.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                        .Ok(read) -> count = read
                         .Err(err) -> {
                             failed = __build_net_portable(err)
                             message = "{err}"
@@ -756,13 +759,10 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
         }
     }
     if failed != "" -> return Err(__build_tape_fail(wire, failed, message))
-    count: got.len()
     if wire.prove == C_CLIENT_PROVE_CAPTURE {
-        wire.taped.extend(got.copy())
+        wire.taped.extend(wire.buffer.copy())
         if count == 0 -> wire.ending = "eof"
     }
-    wire.buffer = got
-    wire.at = 0
     Ok(count)
 }
 
