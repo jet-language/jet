@@ -9,7 +9,6 @@ use {
     json: core.encoding.json
     files: core.files
     process: core.process
-    term: core.term
 }
 
 PROBE: "Tools/agent-eval/domain-foundations/prim-tooling-hooks"
@@ -88,12 +87,4 @@ rename_probe: fn() -[Env, Exec, FS, Time.Wait]> String Err! {
     Ok("renamed identifiers={spans.len()}; preserved comment/literal=true; output={out_path}")
 }
 
-run: fn() {
-    if rename_probe() == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint("rename: {error}")
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(rename_probe() ?? process.fail(1, "rename: {err}")) }

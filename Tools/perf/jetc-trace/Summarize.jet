@@ -16,7 +16,6 @@ use {
     math: core.math
     process: core.process
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -149,11 +148,7 @@ local_clock: fn() -[Env, FS.Read, Time]> String {
 
 run: fn() {
     args: process.args()
-    path: args.find(a -> !a.starts_with("--")) ?? {
-        term.eprint("usage: Summarize.jet <trace.json> [--watch[=seconds]]")
-        process.exit(64)
-        return
-    }
+    path: args.find(a -> !a.starts_with("--")) ?? process.fail(64, "usage: Summarize.jet <trace.json> [--watch[=seconds]]")
     watch: args.find(a -> a == "--watch" || a.starts_with("--watch="))
     every: watch.map(w -> Float.parse(w.split_once("=")?.after ?? "") ?? 2.0) ?? 0.0
     if every > 0 {
@@ -167,9 +162,5 @@ run: fn() {
             time.sleep(time.duration_ns(math.round(every * 1e9)))
         }
     }
-    print(render(path) ?? {
-        term.eprint("{err}")
-        process.exit(1)
-        return
-    })
+    print(render(path) ?? process.fail(1, "{err}"))
 }

@@ -15,7 +15,6 @@ use {
     process: core.process
     re: core.regex
     sys: core.sys
-    term: core.term
 }
 
 POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
@@ -26,10 +25,7 @@ Rules: struct {
     hardening_removed: [String]
 }
 
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 // The node error code an OS error number names in a spawn or open failure.
 error_code: fn(error: String) -> String {

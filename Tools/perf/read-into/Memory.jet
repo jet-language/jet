@@ -19,7 +19,6 @@ use {
     math: core.math
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 TOOL: "/Tools/perf/read-into/Memory.jet"
@@ -41,10 +40,7 @@ Ran: struct { code: Int, output: String, errors: String }
 Counted: struct { allocations: Int, reads: Int, allocations_per_read: Float, peak_live_heap_bytes: Int }
 Interval: struct { lower: Float, upper: Float }
 
-fail: fn(message: String) -[Exec, IO]> Never {
-    term.eprint("memory: {message}")
-    process.exit(1)
-}
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "memory: {message}") }
 
 argument: fn(argv: [String], name: String, fallback: String) -> String {
     loop at in 0..<argv.len() {

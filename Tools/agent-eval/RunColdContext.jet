@@ -1223,19 +1223,12 @@ evaluate: fn(o: Options, repo: String) -> Int Failure! {
 
 run: fn() {
     repo: repo_root()
-    o: parse_args(process.args(), repo) ?? {
-        eprint("ERROR: {err.message}")
-        eprint(USAGE)
-        process.exit(64)
-    }
+    o: parse_args(process.args(), repo) ?? process.fail(64, "ERROR: {err.message}\n{USAGE}")
     if o.help {
         print(USAGE)
         return
     }
-    code: evaluate(o, repo) ?? {
-        eprint("{if err.kind == .Blocked -> "BLOCKED" else -> "ERROR"}: {err.message}")
-        process.exit(if err.kind == .Blocked -> 78 else -> 64)
-    }
+    code: evaluate(o, repo) ?? process.fail(if err.kind == .Blocked -> 78 else -> 64, "{if err.kind == .Blocked -> "BLOCKED" else -> "ERROR"}: {err.message}")
     if code != 0 -> process.exit(code)
 }
 

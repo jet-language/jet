@@ -282,11 +282,6 @@ hardening_main: fn(args: [String]) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool E
 }
 
 run: fn() {
-    if hardening_main(process.args()) == {
-        .Ok(passed) -> if !passed -> process.exit(1)
-        .Err(message) -> {
-            term.eprint("hardening: {message}")
-            process.exit(1)
-        }
-    }
+    passed: hardening_main(process.args()) ?? process.fail(1, "hardening: {err}")
+    if !passed -> process.exit(1)
 }

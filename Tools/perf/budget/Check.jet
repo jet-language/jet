@@ -1047,17 +1047,10 @@ check: fn(args: [String]) -> Outcome CheckError! {
 }
 
 run: fn() {
-    if check(process.args()) == {
-        .Ok(outcome) -> {
-            loop line in outcome.out -> print(line)
-            loop line in outcome.err -> term.eprint(line)
-            if outcome.code != 0 -> process.exit(outcome.code)
-        }
-        .Err(error) -> {
-            loop line in error.lines -> term.eprint(line)
-            process.exit(error.code)
-        }
-    }
+    outcome: check(process.args()) ?? process.fail(err.code, err.lines.join("\n"))
+    loop line in outcome.out -> print(line)
+    loop line in outcome.err -> term.eprint(line)
+    if outcome.code != 0 -> process.exit(outcome.code)
 }
 
 // ---- Tests (the node checker's suite) ----------------------------------------

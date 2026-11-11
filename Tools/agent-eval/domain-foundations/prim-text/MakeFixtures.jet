@@ -38,13 +38,7 @@ write_fixture: fn(name: String, bytes: [U8]) -[FS.Write, IO]> Bool Never! {
 }
 
 run: fn() {
-    if files.create_dir_all(FIXTURES) == {
-        .Ok(_) -> {}
-        .Err(error) -> {
-            term.eprint("make_fixtures: cannot create {FIXTURES}: {error}")
-            process.exit(1)
-        }
-    }
+    files.create_dir_all(FIXTURES) ?? process.fail(1, "make_fixtures: cannot create {FIXTURES}: {err}")
     corpus: repeated("Hello café κόσμε नमस्ते سلام — Jet tokenizer search. The quick brown fox jumps over 42 logs; user_id=31415 level=INFO.\n", CORPUS_BYTES)
     if !write_fixture("corpus_1m.txt", corpus) -> process.exit(1)
     log_seed: "2026-09-02T00:00:00Z INFO api request user_id=31415 path=/orders status=200\n2026-09-02T00:00:01Z WARN api retry user_id=27182 path=/orders status=503\n2026-09-02T00:00:02Z ERROR db timeout user_id=16180 path=/orders status=500\n"

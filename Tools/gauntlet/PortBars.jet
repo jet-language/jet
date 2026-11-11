@@ -130,7 +130,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -1754,10 +1753,7 @@ work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
     Ok(work)
 }
 
-cannot_run: fn(message: String) -[Exec, IO]> Never {
-    term.eprint(message)
-    process.exit(64)
-}
+cannot_run: fn(message: String) -[Exec, IO]> Never { process.fail(64, message) }
 
 usage: fn() -[Exec, IO]> Never { cannot_run("usage: jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR] [--measure]") }
 

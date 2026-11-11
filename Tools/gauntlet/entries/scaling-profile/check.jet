@@ -4,7 +4,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 ENTRY: "/Tools/gauntlet/entries/scaling-profile/check.jet"
@@ -26,7 +25,4 @@ run: fn() {
     }
 }
 
-stop: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+stop: fn(message: String) -> Never { process.fail(1, message) }

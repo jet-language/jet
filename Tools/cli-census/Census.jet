@@ -409,15 +409,8 @@ census_main: fn(args: [String]) -[Env, FS, IO, Exec, Time.Wait]> Int CensusError
 }
 
 run: fn() {
-    if census_main(process.args()) == {
-        .Ok(code) -> {
-            if code != 0 -> process.exit(code)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(error.code)
-        }
-    }
+    code: census_main(process.args()) ?? process.fail(err.code, err.message)
+    if code != 0 -> process.exit(code)
 }
 
 invoked_text: fn(text: String) -> String Never! {
