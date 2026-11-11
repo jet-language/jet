@@ -1339,7 +1339,7 @@ jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
         statement: body[0]
         comment_free := true
         if jfmt_single_stmt_braces(f, statement) == .Val(braces) -> comment_free = !jfmt_span_has_comment(f, braces.open, braces.close)
-        if jfmt_is_simple_stmt(statement) && comment_free {
+        if jfmt_is_simple_stmt(statement) && comment_free && !jfmt_is_table_value_stmt(f, statement) {
             mark: jfmt_mark(f)
             jfmt_write(f, " ")
             jfmt_fmt_stmt_inline(f, statement)
@@ -1351,6 +1351,13 @@ jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
         }
     }
     jfmt_fmt_body_expanded(f, body)
+}
+
+// A table is a control form: a lone table value keeps its body expanded, as a
+// table statement does, even when the table itself fits on one line.
+jfmt_is_table_value_stmt: fn(f: JetFmt, stmt: Stmt) -> Bool Never! {
+    if stmt == .Expr(expr) -> return jfmt_is_guard_expr(f, expr)
+    false
 }
 
 // ---- redundant `Val(x)` returns ----

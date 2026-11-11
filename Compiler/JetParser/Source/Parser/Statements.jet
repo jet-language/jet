@@ -639,12 +639,13 @@ parser_parse_scope_member: fn(state: &JetParserState) -> Stmt {
 }
 
 // Rust `stmt`: `next` is the loop-control word only before a line end, `}`,
-// or a `(name)` target; anywhere else it is an ordinary name (`next := 0`).
+// the `,` that ends a compact table arm, or a `(name)` target; anywhere else
+// it is an ordinary name (`next := 0`).
 parser_next_statement_ahead: fn(state: &JetParserState) -> Bool Never! {
     token: parser_current(state)
     if token.kind != TOKEN_IDENT || parser_value(state, token) != "next" -> return false
     following: parser_kind_at(state, 1)
-    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_LPAREN && parser_kind_at(state, 2) == TOKEN_IDENT && parser_kind_at(state, 3) == TOKEN_RPAREN)
+    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) || (following == TOKEN_LPAREN && parser_kind_at(state, 2) == TOKEN_IDENT && parser_kind_at(state, 3) == TOKEN_RPAREN)
 }
 
 // `next` or `next(name)`: continue the innermost or the named loop.
@@ -1299,7 +1300,7 @@ parser_parse_return_statement: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
     value := Expr?{None}
     end := start.span
-    if parser_current_kind(state) != TOKEN_SEMI && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+    if !parser_at_statement_end(state) {
         parsed: parser_parse_expression(state, 1, 0)
         value = Val(parsed.expr)
         end = parsed.span
@@ -1324,7 +1325,7 @@ parser_parse_break_statement: fn(state: &JetParserState) -> Stmt {
         parser_finish_statement(state)
         return Stmt.BreakLabel{name: parser_value(state, name), span: start.span}
     }
-    if parser_current_kind(state) != TOKEN_SEMI && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+    if !parser_at_statement_end(state) {
         value: parser_parse_expression(state, 1, 0)
         parser_finish_statement(state)
         return Stmt.BreakValue{value: value.expr, span: parser_cover(start.span, value.span)}
@@ -1929,18 +1930,26 @@ parser_expression_lvalue: fn(state: &JetParserState, expr: Expr, fallback_span: 
 }
 
 // S6-R: a statement ends at its line terminator, or before a closing `}` or
-// the end of the file; a one-statement `->` body may also end before `else`.
-// Anything else shares the line and is a fatal error.
+// the end of the file; a one-statement `->` body may also end before `else`,
+// a compact table arm before the `,` of the next arm, and an arm body before
+// its `#Through`. Anything else shares the line and is a fatal error.
 parser_finish_statement: fn(state: &JetParserState) {
     token: parser_current(state)
     if token.kind == TOKEN_SEMI {
         parser_bump(state)
         return
     }
-    if token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF || (token.kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) || (token.kind == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) -> return
-    if state.arm_body_depth > 0 && parser_at_arm_through(state) -> return
+    if parser_at_statement_end(state) -> return
     found: parser_describe_token(state, token)
     parser_add_error(state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
+}
+
+// The current token ends the statement before it (S6-R), so a bare `return`
+// or `break` there carries no value.
+parser_at_statement_end: fn(state: &JetParserState) -> Bool {
+    kind: parser_current_kind(state)
+    if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF || (kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) || (kind == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) -> return true
+    state.arm_body_depth > 0 && parser_at_arm_through(state)
 }
 
 parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
