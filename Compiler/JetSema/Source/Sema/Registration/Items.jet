@@ -440,6 +440,9 @@ SemaRegistrationFunction: struct {
     abi: SemaRegistrationCallableABI
     // The declared return stays raw for a protocol ABI trait-impl method.
     raw_protocol_return: Bool
+    // A method of a conditional impl (`impl Pair<T: Priced>.Describe`): the
+    // owner's parameters with the bounds the impl applies under.
+    impl_conditions: [TypeParam]{[TypeParam]{}}
 }
 
 SemaRegistrationField: struct {
@@ -2436,7 +2439,18 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, definition: ImplD
         SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
     hook_owner: sema_registration_operator_owner(owner_id, module_row.module_identity, target_type, definition.trait_name, definition.operator_rhs)
-    methods: loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
+    methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
+    // A conditional impl's methods carry its bounds. A list that does not
+    // name a resolved type's parameters is E0003 and the impl applies as an
+    // unconditional one. The type another package member declares resolves
+    // when the impl is attached to it (sema_registration_attach_namespace_impls).
+    if definition.type_params.len() > 0 {
+        valid: if nominal_index >= 0 -> sema_registration_impl_conditions_valid(definition, owner_row.nominals[nominal_index].generic_params, diagnostics) else if sema_registration_builtin_scalar(definition.type_name) != None -> sema_registration_impl_conditions_valid(definition, [SemaRegistrationGenericParam]{}, diagnostics) else -> true
+        if valid {
+            // copy: each method keeps the conditions; the declaration keeps its own.
+            loop index in 0..<methods.len() -> methods[index].impl_conditions = definition.type_params.copy()
+        }
+    }
     SemaRegistrationImpl{
         symbol: symbol,
         declaration: definition,
@@ -2461,6 +2475,29 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, definition: ImplD
         operator_rhs: definition.operator_rhs,
         target_os: definition.os_target,
     }
+}
+
+// A conditional impl lists its type's parameters in their declared order,
+// each with the bounds the impl applies under: `impl Pair<T: Priced>.Describe`
+// for `Pair: struct<T>`. Any other list is E0003 at the list.
+sema_registration_impl_conditions_valid: fn(definition: ImplDef, declared: [SemaRegistrationGenericParam], diagnostics: &[Diagnostic]) -> Bool {
+    matches := declared.len() == definition.type_params.len()
+    if matches {
+        loop index in 0..<declared.len() {
+            if declared[index].name != definition.type_params[index].name {
+                matches = false
+                break
+            }
+        }
+    }
+    if matches -> return true
+    names: loop param in declared -> param.name
+    written: loop param in definition.type_params -> param.name
+    span: Span{start: definition.type_params[0].name_span.start, end: definition.type_params[definition.type_params.len() - 1].name_span.end}
+    have: if names.len() == 0 -> "`{definition.type_name}` has no type parameters" else -> "`{definition.type_name}` declares `<{names.join(", ")}>`"
+    fix: if names.len() == 0 -> "remove `<{written.join(", ")}>` from the impl head" else -> "write `impl {definition.type_name}<{names.join(", ")}>` with each bound on its parameter"
+    diagnostics.push(sema_error("E0003", span, "the conditional impl of `{definition.type_name}` names `<{written.join(", ")}>`", "{have}; a conditional impl lists them in order, each with the bounds it applies under", fix))
+    false
 }
 
 // `rows` indexes `module_row`'s nominals (sema_registration_impl_rows),
@@ -2660,6 +2697,12 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
             row: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
+            // Only the attached registration knows the owner's parameters.
+            if definition.type_params.len() > 0 {
+                refused := [Diagnostic]{}
+                _: sema_registration_impl_conditions_valid(definition, graph.modules[owner_index].nominals[owner_nominal].generic_params, refused)
+                loop diagnostic in refused -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+            }
             graph.modules[module_index].impls[impl_index] = row
             loop method in row.methods -> graph.modules[owner_index].nominals[owner_nominal].methods.push(method)
         }

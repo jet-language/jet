@@ -36,6 +36,16 @@ impl Shape.Label {
     label: fn(self) -> String { "linux shape" }
 }
 
+Boxed: struct<T> {
+    inner: T
+}
+
+// A conditional impl (rule h, #6281 c159) stays where it is: a nested impl
+// could not state `T: Label`.
+impl Boxed<T: Label>.Label {
+    label: fn(self) -> String { "boxed {self.inner.label()}" }
+}
+
 run: fn() {
     shape: Shape{side: 3}
     print(shape.area())

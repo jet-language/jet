@@ -26,6 +26,9 @@ JetParserImplPlacementRule: enum {
     // (g) an inherent impl with its own markers, which in the body would
     // become the type's markers.
     MarkedInherent
+    // (h) a conditional impl, `impl Pair<T: Priced>.Describe`: a nested
+    // impl applies wherever its type does, so it cannot state the bounds.
+    Conditional
 }
 
 // L0535 for each top-level impl of a struct or enum the same program
@@ -77,5 +80,6 @@ parser_impl_placement_exception: fn(value: ImplDef) -> JetParserImplPlacementRul
     }
     if value.is_generated_serde -> return Val(JetParserImplPlacementRule.Generated)
     if value.trait_name == None && value.markers.len() > 0 -> return Val(JetParserImplPlacementRule.MarkedInherent)
+    if value.type_params.len() > 0 -> return Val(JetParserImplPlacementRule.Conditional)
     None
 }

@@ -783,7 +783,7 @@ sema_incremental_impl_header: fn(implementation: ImplDef) -> ImplDef Never! {
         delegation_field: implementation.delegation_field,
         assoc_type_impls: implementation.assoc_type_impls, constants: implementation.constants,
         is_generated_serde: implementation.is_generated_serde, os_target: implementation.os_target,
-        markers: implementation.markers,
+        markers: implementation.markers, type_params: implementation.type_params,
     }
 }
 
@@ -2859,8 +2859,32 @@ sema_check_method_input_row: fn(module_identity: String, job: SemaBodyJob, memor
             }
         }
     }
+    if registered.impl_conditions.len() > 0 && program.registration_graph == .Val(graph) -> sema_check_method_impl_conditions(graph, module_identity, registered, method_generic_params, diagnostics)
     function_kind: sema_check_method_input_kind(memory_plan, memory_position, registered.declaration, normalized_owner_type, trait_symbol)
     SemaMethodInput{job: job, memory_position: memory_position, diagnostics: diagnostics.move(), generic_params: method_generic_params.move(), normalized_owner_type: normalized_owner_type.move(), function_kind: function_kind.move(), memory_found: memory_position != None, memory_complete: memory_complete, owner_generic_complete: owner_generic_complete}
+}
+
+// A conditional impl's method (`impl Pair<T: Priced>.Describe`) sees its
+// owner's parameters with the impl's bounds too: in `describe`, `T` is
+// `Priced`. A bound that names no trait is E0301, as on a declaration.
+sema_check_method_impl_conditions: fn(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationFunction, params: &[TGenericParam], diagnostics: &[Diagnostic]) Never! {
+    loop condition in registered.impl_conditions {
+        loop index in 0..<params.len() {
+            if params[index].name != condition.name -> next
+            loop bound in condition.bounds {
+                symbol: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? next
+                if sema_resolved_kind(graph, symbol) != SymbolKind.Trait {
+                    diagnostics.push(sema_error("E0301", condition.name_span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
+                    next
+                }
+                id: sema_resolved_id(graph, symbol)
+                known: loop existing in params[index].bounds {
+                    if existing.key == id.key -> break true
+                } ?? false
+                if !known -> params[index].bounds.push(id)
+            }
+        }
+    }
 }
 
 // Select before computing the kind: a rewritten function does not also pay

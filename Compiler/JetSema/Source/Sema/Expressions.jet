@@ -2922,6 +2922,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
             method_signature: sema_inference_substitute_type_bindings(owner_signature, owner_inference.substitutions)
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             candidate: sema_call_method_candidate_from_registration(method_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, diagnostics) ?? next
+            if function.impl_conditions.len() > 0 -> sema_expr_impl_conditions_check(graph, function, owner_inference.substitutions, environment.generic_params, span, diagnostics)
             candidates.push(candidate)
         }
         // S62: a trait default body or a `using` delegation.
@@ -2931,6 +2932,36 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     }
     if !found_owner -> return sema_call_local_method_candidates(environment, program, method, owner_type_args, type_args)
     candidates
+}
+
+// A method of a conditional impl answers only where the receiver's type
+// arguments meet the impl's bounds: `pair.describe()` on a `Pair<Int>`, from
+// `impl Pair<T: Priced>.Describe`, is E0905 because `Int` isn't `Priced`. An
+// argument that is the caller's own type parameter meets the bounds that
+// parameter declares. The bounds are named as the impl's module names them.
+sema_expr_impl_conditions_check: fn(graph: SemaRegistrationGraph, function: SemaRegistrationFunction, substitutions: [SemaInferenceBinding], generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) Never! {
+    loop condition in function.impl_conditions {
+        found := -1
+        loop position in 0..<substitutions.len() {
+            if substitutions[position].name == condition.name {
+                found = position
+                break
+            }
+        }
+        if found < 0 -> next
+        loop bound in condition.bounds {
+            met: sema_type_bound_satisfied_with_generics(graph, substitutions[found].ty, bound, function.symbol.module_name, generic_params) ?? next
+            if met -> next
+            shown: type_name(substitutions[found].ty)
+            row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            fix := "implement `{bound}` for `{shown}`, or call `{function.symbol.name}` on a value whose `{condition.name}` is `{bound}`"
+            loop param in generic_params {
+                if param.name == shown -> fix = "declare the bound where `{shown}` is introduced: `<{shown}: {bound}>`"
+            }
+            diagnostics.push(sema_error("E0905", span, row.what.replace("{{type}}", shown).replace("{{bound}}", bound), row.why.replace("{{why_text}}", "`{function.symbol.name}` comes from a conditional impl that applies only where `{condition.name}` is `{bound}`, and here `{condition.name}` is `{shown}`"), row.fix.replace("{{fix_text}}", fix)))
+            return
+        }
+    }
 }
 
 // The methods named `method` that impls written for the built-in receiver

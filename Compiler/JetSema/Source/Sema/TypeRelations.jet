@@ -1511,7 +1511,7 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.
-    sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, bound_name)
+    sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, bound_name, actual_resolved, generic_params)
 }
 
 // A built-in type (`Int`, `[Int]`) has no nominal row: it meets a trait
@@ -1540,7 +1540,8 @@ sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actua
 
 // Impl rows are read by index through the read graph: element loops over
 // `graph.modules` copied every module, impls included, on each bound check.
-sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol, bound_name: String) -> Bool? {
+// `actual` is the type the bound is met at, for a conditional impl's bounds.
+sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol, bound_name: String, actual: Type, generic_params: [TGenericParam]) -> Bool? {
     if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
     unresolved_impl := false
     if graph.impl_traits_indexed {
@@ -1552,7 +1553,12 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
                     unresolved_impl = true
                     next
                 }
-                if target_matches -> return Val(true)
+                if !target_matches -> next
+                conditions_met: sema_type_impl_conditions_met(graph, graph.modules[impl_row.module_index].impls[impl_row.row], actual, generic_params) ?? {
+                    unresolved_impl = true
+                    next
+                }
+                if conditions_met -> return Val(true)
             }
         }
     } else {
@@ -1564,13 +1570,61 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
                     unresolved_impl = true
                     next
                 }
-                if target_matches -> return Val(true)
+                if !target_matches -> next
+                conditions_met: sema_type_impl_conditions_met(graph, graph.modules[module_index].impls[impl_index], actual, generic_params) ?? {
+                    unresolved_impl = true
+                    next
+                }
+                if conditions_met -> return Val(true)
             }
         }
     }
     if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
     if unresolved_impl || !graph.complete -> return None
     return Val(false)
+}
+
+// A conditional impl (`impl Pair<T: Priced>.Describe`) applies at `actual`
+// only where its type arguments meet the impl's bounds, named as the impl's
+// module names them; an argument that is a type parameter of the caller meets
+// the bounds it declares. None while one is unknown.
+sema_type_impl_conditions_met: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, actual: Type, generic_params: [TGenericParam]) -> Bool? {
+    conditions: implementation.declaration.type_params
+    if conditions.len() == 0 -> return Val(true)
+    arguments: if actual == .Apply(_, written) -> written else -> return None
+    if arguments.len() != conditions.len() -> return None
+    impl_module: sema_type_module_row(graph, implementation.source_module_identity)
+    loop index in 0..<conditions.len() {
+        loop bound in conditions[index].bounds {
+            met: sema_type_bound_satisfied_at(graph, arguments[index], bound, impl_module, generic_params) ?? return None
+            if !met -> return Val(false)
+        }
+    }
+    Val(true)
+}
+
+// The head of the conditional impl of `bound_name` for `actual`'s type, as
+// written (`impl Pair<T: Priced>.Describe`), when one exists: an unmet
+// bound then says that impl doesn't apply rather than asking for another
+// impl, which would overlap it (E0908).
+sema_type_conditional_impl_head: fn(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller_module: String) -> String? {
+    caller: sema_type_module_row(graph, caller_module)
+    if caller < 0 -> return None
+    nominal_row: sema_type_resolve_nominal_row_at(graph, actual, caller) ?? return None
+    trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].declaration.type_params.len() == 0 -> next
+            trait_matches: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
+            if !trait_matches -> next
+            target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], graph.modules[nominal_row.module_index].nominals[nominal_row.row]) ?? next
+            if !target_matches -> next
+            declaration: graph.modules[module_index].impls[impl_index].declaration
+            written: loop param in declaration.type_params -> if param.bounds.len() == 1 -> "{param.name}: {param.bounds[0]}" else if param.bounds.len() > 1 -> "{param.name}: [{param.bounds.join(", ")}]" else -> "{param.name}"
+            return Val("impl {declaration.type_name}<{written.join(", ")}>.{bound_name}")
+        }
+    }
+    None
 }
 
 // These provider-backed Core owners already implement the consuming runtime

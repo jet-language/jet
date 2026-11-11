@@ -2747,14 +2747,24 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         parts.push(parser_expect_name(state, "after `.` in `impl`"))
     }
     // `impl Stack<T> {`: an impl names its type bare and its methods already
-    // see the struct's type parameters.
+    // see the struct's type parameters. A list with a bound is a conditional
+    // impl, `impl Pair<T: Priced>.Describe`, which applies only where `T`
+    // meets its bounds; sema checks the list names the type's parameters.
+    type_params := [TypeParam]{}
     if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) {
         open: parser_current(state).span
-        _: parser_parse_type_params(state)
-        written := parser_value(state, parts[0])
-        loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
-        params_span: Span{start: open.start, end: parser_prev_token_end(state)}
-        parser_add_error_code_edit(state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
+        params: parser_parse_type_params(state)
+        bounded: loop param in params {
+            if param.bounds.len() > 0 -> break true
+        } ?? false
+        if bounded {
+            type_params = params
+        } else {
+            written := parser_value(state, parts[0])
+            loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
+            params_span: Span{start: open.start, end: parser_prev_token_end(state)}
+            parser_add_error_code_edit(state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
+        }
         loop parser_current_kind(state) == TOKEN_DOT && !parser_aborting(state) {
             parser_bump(state)
             parts.push(parser_expect_name(state, "after `.` in `impl`"))
@@ -2820,7 +2830,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         parser_bump(state)
         field: parser_expect_name(state, "after `using` for the delegation field")
         parser_finish_statement(state)
-        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers}}
+        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers, type_params: type_params}}
     }
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl` body")
     methods := [Func]{}
@@ -2862,7 +2872,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     if trait_name == .Val(text) -> written = "{written}.{text}"
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, start.span.start, close.span.start, "impl `{written}`")
     if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
-    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers}}
+    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers, type_params: type_params}}
 }
 
 // The native OS an impl is gated to by `#Target(OS.Linux|MacOS|Windows)`

@@ -2432,6 +2432,8 @@ jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
     jfmt_fmt_above_markers(f, i.markers)
     jfmt_write(f, "impl ")
     jfmt_write(f, i.type_name)
+    type_source: jfmt_source_list_span_after(f, i.type_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(f, i.type_params, type_source)
     if i.trait_name == .Val(trait_name) {
         jfmt_write(f, ".")
         jfmt_write(f, trait_name)

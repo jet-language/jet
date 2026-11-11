@@ -1,0 +1,26 @@
+Error [jet.TraitNotImplemented]: `U` isn't `Priced`
+  --> tests/ui/conditional_impl_unmet_bound.jet:24:46
+    |
+ 24 | loose: fn<U>(pair: Pair<U>) -> String { pair.describe() }
+    |                                              ^^^^^^^^
+ Why: `describe` comes from a conditional impl that applies only where `T` is `Priced`, and here `T` is `U`
+ Fix: Declare the bound where `U` is introduced: `<U: Priced>`
+More: jet-lang.dev/e/E0905
+
+Error [jet.TraitNotImplemented]: `Int` isn't `Priced`
+  --> tests/ui/conditional_impl_unmet_bound.jet:28:13
+    |
+ 28 |     print(n.describe())
+    |             ^^^^^^^^
+ Why: `describe` comes from a conditional impl that applies only where `T` is `Priced`, and here `T` is `Int`
+ Fix: Implement `Priced` for `Int`, or call `describe` on a value whose `T` is `Priced`
+More: jet-lang.dev/e/E0905
+
+Error [jet.TraitNotImplemented]: `conditional_impl_unmet_bound.Pair<Int>` isn't `Describe`
+  --> tests/ui/conditional_impl_unmet_bound.jet:29:11
+    |
+ 29 |     print(show(n))
+    |           ^^^^
+ Why: `impl Pair<T: Priced>.Describe` applies only where its bounds hold, and the type arguments of `conditional_impl_unmet_bound.Pair<Int>` don't meet them
+ Fix: Use type arguments that meet the bounds of `impl Pair<T: Priced>.Describe`, or implement those traits for them
+More: jet-lang.dev/e/E0905

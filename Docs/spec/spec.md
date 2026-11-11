@@ -678,6 +678,18 @@ orphan rule the owner of either the trait or the type may write the impl. An
 `impl Int.Trait` for a trait the module does not declare is E0301; wrap the
 built-in type in a type the module declares instead.
 
+An impl of a generic type may apply only under conditions on the type's
+parameters (D-IMPL-COND1=A): `impl Pair<T: Priced>.Describe { … }` makes a
+`Pair<T>` `Describe` only where `T` is `Priced`, and inside its methods `T` is
+`Priced`. The head lists the type's parameters in their declared order, each
+with its bounds (E0003 otherwise); a list with no bound at all is the plain
+`impl Pair.Describe` spelled with parameters and is E0003 too. A call on a
+`Pair<Int>`, or a `Pair<Int>` where a `Describe` bound is wanted, is E0905.
+Inside a function with `U: Priced`, a `Pair<U>` meets the condition, because
+the check reads `U`'s declared bounds. Two impls of one trait for one type
+overlap and are E0908, conditions or not. A conditional impl stays outside
+its type's body: a nested impl cannot state the bounds.
+
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
 and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,

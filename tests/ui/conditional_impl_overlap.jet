@@ -1,0 +1,26 @@
+// #6281 c159: a conditional impl and a plain impl of one trait for one type
+// overlap: E0908, conditions or not.
+Priced: trait {
+    price: fn(self) -> Int
+}
+
+Describe: trait {
+    describe: fn(self) -> String
+}
+
+Pair: struct<T> {
+    left: T
+    right: T
+
+    impl Describe {
+        describe: fn(self) -> String { "a pair" }
+    }
+}
+
+impl Pair<T: Priced>.Describe {
+    describe: fn(self) -> String { "pair costs {self.left.price() + self.right.price()}" }
+}
+
+run: fn() {
+    print("unreachable")
+}
