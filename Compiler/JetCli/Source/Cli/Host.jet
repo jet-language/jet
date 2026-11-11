@@ -2417,27 +2417,36 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
 
 // `jet test` of a Core library source (jet_cli_core_test_path): the Core unit
 // at the row path `path` runs its #Tests as the compiler loads it, with
-// Core's privileges (JetDriverCompileRequest.core_tests). The compile's entry
-// imports the module that loads it (jet_cli_core_test_source) from a scratch
-// directory, which holds the test build and goes when the run ends.
+// Core's privileges (JetDriverCompileRequest.core_tests), and its doctests as
+// claims appended to that unit's text, as a user file's are (Doctests.jet).
+// The compile's entry imports the module that loads it
+// (jet_cli_core_test_source) from a scratch directory, which holds the test
+// build and goes when the run ends.
 jet_cli_compile_core_test: fn(file: String, source: String, path: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     entry: "{scratch.path}/core_test.jet"
     cli_files.write(entry, jet_cli_core_test_source(path)) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    doctest_file: jet_cli_doctest_file(file, path, source)
+    doctests := [JetCLIDoctestFile]{}
+    tested := String?{None}
+    if doctest_file.tests.len() > 0 {
+        tested = Val(jet_cli_doctest_source(doctest_file))
+        doctests.push(doctest_file)
+    }
     measure := JetCLIMeasurePlan?{None}
     prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> {
             if options.measure -> measure = Val(jet_cli_measure_plan(snapshot, false, options.profile))
-            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, Val(file), path)
+            jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Test, Val(file), path, tested)
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
     compiled := jet_cli_compile_executable(prepared, None, options.build, None, trace_sink, color)
     if compiled.move() == {
         .Refused(refusal) -> refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_test_result(file, source, [JetCLIDoctestFile]{}, measure, color, verbose, options, result, inputs, snapshot)
+        .Checked(result, inputs, snapshot) -> jet_cli_test_result(file, tested ?? source, doctests, measure, color, verbose, options, result, inputs, snapshot)
     }
 }
 

@@ -875,9 +875,11 @@ default `--capture=failed`; the exit is 0 when the harness passed, else 1.
 A source of the toolchain's Core library (`jet test Core/Encoding/Cbor.jet`)
 tests as the Core unit the compiler loads, with Core's privileges: its
 `__core_*` imports and `__` names resolve as in any Core compile, and only its
-own #Tests run; a runtime unit tests as itself. `jet test` of a directory of
-the Core library (`jet test Core/Encoding`) runs `jet test <file>` for each
-Core source under it that declares #Tests, as a workspace runs its members.
+own #Tests and doctests run (its doctest claims are appended to that unit, so
+they reach the module's own names); a runtime unit tests as itself. `jet test`
+of a directory of the Core library (`jet test Core/Encoding`) runs
+`jet test <file>` for each Core source under it that declares #Tests or
+doctests, as a workspace runs its members.
 `jet test Compiler --profile core` runs every Core #Test at optimize none,
 basic and full.
 Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in

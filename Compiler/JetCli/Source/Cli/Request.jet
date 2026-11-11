@@ -60,6 +60,7 @@ use {
         jet_driver_compile_escaped_failure,
         jet_driver_shared_build_inputs,
         jet_driver_shared_build_http_inputs,
+        jet_driver_core_text,
         jet_driver_core_text_file,
         jet_driver_runtime_interface_file,
         jet_driver_runtime_interface_sources,
@@ -1716,13 +1717,21 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 
 // The request that compiles `snapshot` against the Core sources of the
 // toolchain of `core_input` (the snapshot's entry when `None`); `core_tests`
-// as JetDriverCompileRequest.core_tests. The organization's gate policy
-// (`JET_ORG_UNSAFE_POLICY`) is its outermost policy rung; a configured policy
-// that can't be read is refused (E3109), never skipped.
-jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_input: String?{None}, core_tests: String{""}) -> JetCLIPrepared {
-    core_sources: if jet_cli_core_sources(core_input ?? snapshot.entry_path) == {
+// as JetDriverCompileRequest.core_tests, its row compiled from
+// `core_tested_source` when given (the file with its doctest claims,
+// Doctests.jet). The organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is
+// its outermost policy rung; a configured policy that can't be read is
+// refused (E3109), never skipped.
+jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_input: String?{None}, core_tests: String{""}, core_tested_source: String?{None}) -> JetCLIPrepared {
+    core_sources := if jet_cli_core_sources(core_input ?? snapshot.entry_path) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
+    }
+    if core_tested_source == .Val(text) {
+        // A fresh cell: copies of a row share theirs (jet_driver_core_text).
+        loop index in 0..<core_sources.len() {
+            if core_sources[index].path == core_tests -> core_sources[index].text = jet_driver_core_text(text)
+        }
     }
     organization: pkg_load_organization_gate_policy() ? declarations -> declarations ! error -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
@@ -1775,8 +1784,8 @@ jet_cli_core_test_source: fn(path: String) -> String Never! {
     ""
 }
 
-// The Core sources under `directory` that declare #Tests, when `directory`
-// is in the Core library of the toolchain a compile there reads:
+// The Core sources under `directory` that declare #Tests or doctests, when
+// `directory` is in the Core library of the toolchain a compile there reads:
 // `jet test Core/Encoding` runs `jet test <file>` for each. `names` are
 // their row paths, `files` the toolchain files, in row order.
 JetCLICoreTestFiles: struct {
@@ -1797,7 +1806,8 @@ jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? 
         if !row.path.starts_with(within) || found.names.contains(row.path) -> next
         file: jet_cli_authority_path(root, row.path)
         source: cli_files.read(file) ?? next
-        if !source.starts_with("#Test(") && !source.contains("\n#Test(") -> next
+        tested: source.starts_with("#Test(") || source.contains("\n#Test(")
+        if !tested && jet_cli_doc_discover_doctests(JetCLIDocUnit{path: row.path, source: source}).len() == 0 -> next
         found.names.push(row.path.copy())
         found.files.push(file)
     }
