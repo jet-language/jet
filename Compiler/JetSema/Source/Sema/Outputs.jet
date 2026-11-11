@@ -363,19 +363,22 @@ sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, 
             }
         }
     }
+    // `-> Never` is a unit contract too: an entry that stops on every path
+    // (a usage error's exit, a server loop) returns nothing, and it is the
+    // spelling L2421 asks a public diverging function to write.
     return_ok: if function.declaration.return_type == {
         None -> true
         Val(ty) -> if ty == {
-            .Named(name) -> name == "Unit"
+            .Named(name) -> name == "Unit" || name == "Never"
             .Result(ok, _) -> if ok == {
-                .Named(name) -> name == "Unit"
+                .Named(name) -> name == "Unit" || name == "Never"
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     if params_ok && return_ok -> return true
-    contract: if kind == OutputKind.Executable -> "an Executable takes zero or one typed CLI parameter and declares no return type, or only a unit error contract such as `IOError!`" else -> "a Service or Check takes no parameters and declares no return type, or only a unit error contract such as `IOError!`"
+    contract: if kind == OutputKind.Executable -> "an Executable takes zero or one typed CLI parameter and declares no return type, `-> Never`, or only a unit error contract such as `IOError!`" else -> "a Service or Check takes no parameters and declares no return type, `-> Never`, or only a unit error contract such as `IOError!`"
     diagnostics.push(sema_output_error(span, "Output entry `{source_name}` has the wrong callable contract", contract, fix))
     false
 }
