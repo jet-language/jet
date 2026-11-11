@@ -364,9 +364,9 @@ below)*: in a file with `run: fn`, that is the file's execution body; `jet run`,
 `name: value` and `name := value` are module globals
 visible to every function in the file; the mutable form is writable and is
 initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
-instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23) amends the
-immutable form: its initializer is any expression, computed once in dependency
-order before `run: fn` and read as an ordinary copy on every tier (spec "Values,
+instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23 and by
+D-MODULE-BUILD1 below) amends the immutable form: its initializer is any
+expression, read as an ordinary copy on every tier (spec "Values,
 expressions, and calls"). Loose top-level statements beside `run: fn` are
 E0621, and an imported file with loose statements is E0620. Notebook and REPL
 adapters may construct an explicit `run: fn` for their submitted fragment.
@@ -384,6 +384,17 @@ and comptime bindings stay module declarations. A file with `run: fn` keeps the
 module rules above; a file with both is E0621; a file with neither is a library
 (E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
 meaning on every tier.
+
+**D-MODULE-BUILD1=A — module values are built, never computed at startup**
+*(owner ruling 2026-11-09, #6281 c132; amends D-MODULE-VALUE1)*: a module-level
+`name: value` is always evaluated while building and stored in the program,
+the same value on every tier. No code runs before `run: fn`. A value whose
+evaluation stops, reaches the outside world, or can't run while building is a
+build error (E0643, which retires E0627), whose fix names the three ways out:
+compute it in `run`, make it a function (`#Memo` when pure), or read a pinned
+build input through `comptime { embed_file(…) }`. Inside a function a plain
+`name: value` only tries to fold; top-level statement files run in order
+(D-ENTRY-STATEMENTS1).
 
 **D-CLI-POS1=A — positional by default, `#Arg(flag_only: true)` to opt out**
 *(ratified 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -8507,7 +8518,9 @@ S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
 **2026-10-29 — `::` folds as an optimization; `comptime` forces it** *(card
-#6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1)*: an
+#6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1; its
+module-level startup fallback is amended by D-MODULE-BUILD1, under which such
+a value is a build error, E0643)*: an
 immutable `::` binding asks for build-time evaluation as an optimization, and
 `comptime` forces it. A module-level `NAME: value` folds while building when
 its evaluation is pure and succeeds; otherwise the program computes it at

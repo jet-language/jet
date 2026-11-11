@@ -5147,7 +5147,7 @@ ModuleGlobalNotLiteral: struct {
         meaning: "A mutable or `#Persist` module global's value is not a literal"
         fix_next: "Initialize the global from a literal, or keep a computed value in an immutable `:` constant."
         what: fn(self) -> String { "A module binding's value must be a literal" }
-        why: fn(self) -> String { "A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`. An immutable `:` constant may compute its value: the build folds it when it can and computes it at startup otherwise." }
+        why: fn(self) -> String { "A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`. An immutable `:` constant may compute its value, which the build works out and stores in the program." }
         fix: fn(self) -> String { "Use an integer, float, or bool literal, or keep a computed value in an immutable `:` constant." }
     }
 }
@@ -5210,17 +5210,29 @@ DependencyCheckFailed: struct {
     }
 }
 
-CompileTimeReadsStartupValue: struct {
-    name: String
-
+RetiredStartupValueRead: struct {
     impl Diagnostic {
         code: "E0627"
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: compile-time code reads a constant computed at startup; no module value is computed at startup now, E0643)" }
+        why: fn(self) -> String { "The registered comptime rule applies here" }
+        fix: fn(self) -> String { "Follow the guidance for E0643" }
+    }
+}
+
+ModuleValueNotBuilt: struct {
+    name: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E0643"
         stage: [.Comptime]
-        meaning: "Compile-time code reads a constant that is only computed at startup"
-        fix_next: "Read the startup constant at runtime, or make its value foldable."
-        what: fn(self) -> String { "This compile-time code reads `{self.name}`, which is only known at startup" }
-        why: fn(self) -> String { "`{self.name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `run: fn`. Compile-time code runs while building, before that value exists." }
-        fix: fn(self) -> String { "Compute the value at runtime instead, or make `{self.name}` foldable: a pure expression that evaluates without failing." }
+        meaning: "A module-level value can't be computed while building"
+        fix_next: "Move the work into `run`, make it a function, or read a pinned build input."
+        what: fn(self) -> String { "`{self.name}` can't be computed while building: {self.reason}" }
+        why: fn(self) -> String { "A module-level `name: value` is computed while building and stored in the program, the same value on every tier. No code runs before `run: fn`, so a value that stops, reaches the outside world, or can't run while building is a build error." }
+        fix: fn(self) -> String { "Compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `comptime {{ embed_file(\"config.txt\") }}`." }
     }
 }
 

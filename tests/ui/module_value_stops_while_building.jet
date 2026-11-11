@@ -1,0 +1,12 @@
+port_of: fn(scheme: String) -> Int {
+    if scheme == "http" -> return 80
+    panic("no port for {scheme}")
+}
+
+// Computing it while building stops, which is a build error (E0643): no
+// code runs before `run: fn`, so nothing computes it later.
+GOPHER: port_of("gopher")
+
+run: fn() {
+    print(GOPHER)
+}

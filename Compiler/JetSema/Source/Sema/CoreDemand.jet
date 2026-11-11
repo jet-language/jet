@@ -140,9 +140,8 @@ sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, p
 // methods, whose waves follow it; waves repeat until no body names a new
 // deferred one. A program that names no Core body runs none. A compile that
 // lowers also lowers what the driver joins to the checked modules after
-// finalization, the comptime closures (jet_driver_merge_checked_text_functions)
-// and the startup functions (jet_driver_add_startup_functions), so the first
-// wave demands what those name too.
+// finalization, the comptime closures (jet_driver_merge_checked_text_functions),
+// so the first wave demands what those name too.
 sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
     if graph.core_demand_rows.len() == 0 -> return graph.move()
@@ -153,9 +152,6 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
             loop fact in result.call_facts {
                 if fact.callee == .Val(callee) -> seeds.push(callee.key)
             }
-        }
-        loop value in values {
-            if value.init == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, seeds)
         }
     }
     // Per module: how many of its functions and call-site facts were read.

@@ -359,10 +359,6 @@ IRProgram: struct {
     // definition, so neither a read nor a landed value copies one.
     constants: [String:Int]
     constant_defs: [TConstantDef]
-    // The keys of the constants computed at startup (TConstantDef.init),
-    // in declaration order: the entry computes each before the program
-    // runs (ir_entry_function).
-    startup: [String]
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>".
     render_impls: [String:Int]
@@ -625,10 +621,6 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         constant_keys.push((key: "constant:{definition.module_identity}::{definition.name}", at: 2 * index + 1, row: 2 * index + 1))
     }
     constant_rows: ir_first_rows(constant_keys)
-    startup := [String]{}
-    loop (index, definition) in defs {
-        if definition.init != None && constant_rows.get(definition.key) == Val(2 * index) -> startup.push(definition.key.copy())
-    }
     constants := [String:Int]{}
     loop (key, at) in constant_rows -> constants[key] = at /% 2
     // The Display, Printable and Close implementations of the host target,
@@ -666,7 +658,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -1274,28 +1266,23 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
     ir_build_waves_kept(p, roots, false, threads)
 }
 
-// The name prefix of a constant's startup function (TConstantDef.init):
-// the function the program runs to compute the constant at startup.
-IR_STARTUP_FUNCTION_PREFIX: "__startup_"
-
 // The function the executable starts: `entry` itself when it takes nothing,
-// returns nothing, the program computes no constant at startup, the
-// `backtrace` build option is the stock `full`, the program allocator the
-// system heap, no job is selectable, the build is neither checked nor
+// returns nothing, the `backtrace` build option is the stock `full`, the
+// program allocator the system heap, no job is selectable, the build is
+// neither checked nor
 // observed and sets no log filter, otherwise a generated `entry` function.
 // It first links a checked build's checked heap (ir_checked_alloc_link) and
 // an observed build's observation start (ir_observe_link), passes the log
 // filters (ir_log_configure), a `brief` or `off` backtrace to
 // the runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
 // program allocator's cap (jet_rt_program_allocator_configure,
-// IRChecks.counting), computes every constant computed at startup
-// (p.startup, through ir_startup_guard), then runs the job the program's
+// IRChecks.counting), then runs the job the program's
 // first word names (jet_rt_entry_job_selected over
 // IRChecks.jobs), reports any other job word as unknown (E1294,
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p)) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p)) -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}#entry"
     id: m.functions.len()
@@ -1319,17 +1306,6 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
         counting: ir_word_const(m, b, 1)
         limit: ir_word_const(m, b, cap)
         _: ir_runtime(m, b, "jet_rt_program_allocator_configure", [Int]{counting, limit}, -1)
-    }
-    loop constant_key in p.startup {
-        at: p.constants.get(constant_key) ?? next
-        definition: p.constant_defs[at]
-        guard: ir_startup_guard(m, p, definition)
-        if guard < 0 {
-            ir_fail(b, span, "the startup function of constant {definition.name}")
-            next
-        }
-        guard_operands: ir_args(b.f, [Int]{})
-        ir_emit(b.f, IROp.Call, -1, guard, guard_operands, 0, b.line)
     }
     loop job in p.checks.jobs -> ir_entry_job(m, p, b, job, p.checks.declared_jobs, span)
     selectable := false

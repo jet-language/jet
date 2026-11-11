@@ -14,9 +14,9 @@
 // value; a value `if`/else-if chain takes the arm its folded condition selects;
 // shifts stay within the checked width. Aggregates take the shape the evaluator
 // returns: the declared type name, field and named payload labels. A value
-// outside its checked type, a selected arm that stops (`panic`), a division or
-// power, a call, and any other shape is not folded: it is evaluated, and the
-// evaluator reports it.
+// outside its checked type, a selected arm that stops (`panic`), an integer
+// division, a power, a call, and any other shape is not folded: it is
+// evaluated, and the evaluator reports it.
 //
 // The fold reads each node and its checked type in place in the tree (no
 // node or type copy per visited node): a generated data table folds millions
@@ -54,6 +54,17 @@ sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
     }
     if low < tree.nodes.len() && tree.nodes[low].id == id -> return low
     panic("body tree has no node {id}")
+}
+
+// The payload node of a module `shared X` holder: `expression` is the
+// `Shared.new` static (`jet_std::JetShared`) over its one argument. The build
+// folds the payload; the program allocates the cell on its first read
+// (JetIR ir_shared_holder_read).
+sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never! {
+    if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .StaticCall(owner, _, method, _, args) {
+        if owner == .Prelude(rooted, path, _) && rooted && path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 -> return Val(args[0].value)
+    }
+    None
 }
 
 sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: Type, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
@@ -343,10 +354,11 @@ sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
     String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
 }
 
-// The value of a constant that already landed in this run.
+// The value of a constant that already landed in this run. A `shared`
+// holder's landed value is its payload, not the holder, so it folds no read.
 sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key == key -> return Val(value.value)
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder -> return Val(value.value)
     }
     None
 }
@@ -434,7 +446,10 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                 .Add -> return Val(TComptimeValue.Float{value: a + b, bits: 64})
                 .Sub -> return Val(TComptimeValue.Float{value: a - b, bits: 64})
                 .Mul -> return Val(TComptimeValue.Float{value: a * b, bits: 64})
-                .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
+                // IEEE-754 binary64 division never traps: a zero divisor
+                // gives an infinity or NaN, as the evaluator's does.
+                .Div -> return Val(TComptimeValue.Float{value: a / b, bits: 64})
+                .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
             }
         }
         return None

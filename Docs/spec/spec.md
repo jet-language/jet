@@ -279,12 +279,14 @@ D-FAIL-EXIT1=A).
 At ordinary file scope, `name: value` declares an immutable module global and
 `name := value` declares a mutable module global. A mutable or `#Persist`
 global's initializer is a tier-stable scalar literal; any other initializer is
-E0622. An immutable global's initializer is any expression, computed once in
-dependency order before `run: fn`, and every read is an ordinary copy
-(D-MODULE-VALUE1). An initializer that stops stops the program before `run: fn`
-with its normal report, the same way on every tier. Compile-time code reads an
-immutable global only when the build can compute it, which needs a pure
-evaluation that succeeds (E0627). Only an explicit `comptime { … }` reads build
+E0622. An immutable global's initializer is any expression, computed while
+building and stored in the program, and every read is an ordinary copy
+(D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
+initializer that stops, reaches the outside world, or can't run while building
+is a build error (E0643), the same on every tier. A `name: shared value`
+global holds one process-wide cell: the build computes `value`, which must be
+literal data, and every read shares the one cell. Only an explicit
+`comptime { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
@@ -525,11 +527,10 @@ the literal: `if a > (I32{0}) ->`.
 ## Compile-time names and staged syntax
 
 An immutable `:` binding asks for build-time evaluation as an optimization,
-and `comptime` forces it (#6125). A module-level `MAX_RETRIES: 3` or
-`LIMIT: 6 * 7 + 1` is evaluated while building when its evaluation is pure
-and succeeds, and is read as `MAX_RETRIES` like a literal. A value that reads
-the outside world, or fails while building, is computed once at startup,
-before `run: fn`, with no build error; a trap there is the program's own. In a
+and `comptime` forces it (#6125). A module-level `name: value`, such as
+`MAX_RETRIES: 3` or `LIMIT: 6 * 7 + 1`, is always evaluated while building
+and read as `MAX_RETRIES` like a literal (D-MODULE-BUILD1). A value that reads
+the outside world, or stops while building, is a build error (E0643). In a
 block, an immutable `name: value` of Int arithmetic (`+`, `-`, `*`,
 negation) over literals and other folded bindings holds its value from the
 build on, at every optimization level; any other block value computes at run

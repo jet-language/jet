@@ -1,0 +1,8 @@
+Error [jet.ModuleValueNotBuilt]: `MODE` can't be computed while building: `core.sys.get()` reaches the outside world (Env)
+  --> tests/ui/module_value_reads_the_outside_world.jet:10:7
+    |
+ 10 | MODE: env.get("JET_MODULE_VALUE_MODE") ?? "default"
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A module-level `name: value` is computed while building and stored in the program, the same value on every tier; no code runs before `run: fn`, so a value that stops, reaches the outside world, or can't run while building is a build error
+ Fix: Compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `comptime { embed_file("config.txt") }`
+More: jet-lang.dev/e/E0643

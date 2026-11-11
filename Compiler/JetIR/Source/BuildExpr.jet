@@ -3756,7 +3756,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     // place (sema admits only `#Persist` module state as a write place).
     if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
         at: p.constants.get(symbol.key) ?? return ir_fail_slot(b, span, "constant {symbol.key} without a declaration")
-        if p.constant_defs[at].is_storage && p.constant_defs[at].init == None {
+        if p.constant_defs[at].is_storage {
             definition: p.constant_defs[at]
             return ir_storage_address(m, p, b, definition, span)
         }
@@ -6961,13 +6961,13 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // A checked constant read: a borrow of its static object (BuildStatic.jet)
 // when its value freezes, else its compile-time value built in place; a
 // value holding a compiler value, the compiler answers (ir_host_constant).
-// A read of module storage loads its cell, and a read of a constant computed
-// at startup borrows the value its cell holds (ir_startup_read).
+// A read of module storage loads its cell, and a read of a module `shared`
+// holder shares its process cell (ir_shared_holder_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(m, p, b, ty, key, span)
     at: p.constants.get(key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
     definition: p.constant_defs[at]
-    if definition.init != None -> return ir_startup_read(m, p, b, definition, span)
+    if definition.shared_holder -> return ir_shared_holder_read(m, p, b, definition, span)
     if definition.is_storage {
         address: ir_storage_address(m, p, b, definition, span)
         if address < 0 -> return -1
@@ -6978,82 +6978,6 @@ ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String
     borrowed: ir_static_read(m, p, b, ty, key, definition.value)
     if borrowed >= 0 -> return borrowed
     ir_comptime(m, p, b, ty, definition.value, span)
-}
-
-// A read of a constant computed at startup: the entry computes every one
-// before the program runs (ir_entry_function), so a read is one load of
-// the cell's state word and one branch that only a read from another
-// startup function can take, to compute the constant first through its
-// guard. The value is borrowed: the cell owns it.
-ir_startup_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
-    row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
-    guard: ir_startup_guard(m, p, definition)
-    if guard < 0 -> return ir_fail_slot(b, span, "the startup function of constant {definition.name}")
-    cell: ir_startup_cell(m, b, definition, row)
-    state: ir_load_word(m, b, cell, 0)
-    computed: ir_word_const(m, b, 2)
-    pending: ir_bool_op(m, b, IROp.Ne, state, computed)
-    ir_open_if(b.f, pending, b.line)
-    operands: ir_args(b.f, [Int]{})
-    ir_emit(b.f, IROp.Call, -1, guard, operands, 0, b.line)
-    ir_end(b.f, b.line)
-    ir_load_at(m, b, cell, 8, row)
-}
-
-// The guard of a constant computed at startup, built on first use: it
-// returns at once when the cell holds the value; otherwise it marks the cell
-// computing, calls the constant's startup function, stores the value and
-// marks the cell computed. A guard entered while its constant is computing
-// (a startup function that reads its own constant through a call the
-// checker does not follow) panics with "NAME reads itself during startup".
-// -1 when the constant's startup function is not among the checked functions.
-ir_startup_guard: fn(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int Never! {
-    key: "{definition.key}#startup"
-    known: name_rows_value(m.function_rows, key) ?? -1
-    if known >= 0 -> return known
-    init_key: definition.init ?? return -1
-    init_row: ir_function_row(p, init_key) ?? return -1
-    init_function: p.functions[init_row]
-    row: ir_value_type(m, p, definition.ty) ?? return -1
-    callee_return: ir_executable_return(init_function) ?? return -1
-    callee_row: ir_value_type(m, p, callee_return) ?? return -1
-    init: ir_function_id(m, p, init_key, [Type]{}) ?? return -1
-    id: m.functions.len()
-    m.functions.push(ir_function_new("{definition.name}.startup", key, "{ir_symbol_name(init_function)}__guard", init_function.source_file, init_function.line))
-    name_rows_set(m.function_rows, key, id)
-    g := ir_builder_new(m.functions[id].copy())
-    g.line = init_function.line
-    span: Span{start: 0, end: 0}
-    cell: ir_startup_cell(m, g, definition, row)
-    state: ir_load_word(m, g, cell, 0)
-    computed: ir_word_const(m, g, 2)
-    done: ir_bool_op(m, g, IROp.Eq, state, computed)
-    ir_open_if(g.f, done, g.line)
-    ir_emit(g.f, IROp.Return, -1, -1, -1, -1, g.line)
-    ir_end(g.f, g.line)
-    computing: ir_word_const(m, g, 1)
-    cycle: ir_bool_op(m, g, IROp.Eq, state, computing)
-    ir_open_if(g.f, cycle, g.line)
-    message: ir_static_text(m, g, "{definition.name} reads itself during startup")
-    _: ir_runtime(m, g, "jet_rt_panic_message", message, -1)
-    ir_emit(g.f, IROp.Unreachable, -1, -1, -1, -1, g.line)
-    ir_end(g.f, g.line)
-    ir_emit(g.f, IROp.Store, -1, cell, 0, computing, g.line)
-    value: ir_fresh_temp(m, g, callee_row)
-    operands: ir_args(g.f, [Int]{})
-    ir_emit(g.f, IROp.Call, value, init, operands, 0, g.line)
-    adapted: ir_adapt(m, p, g, value, row, span)
-    ir_store_at(m, p, g, cell, 8, adapted)
-    ir_emit(g.f, IROp.Store, -1, cell, 0, computed, g.line)
-    ir_emit(g.f, IROp.Return, -1, -1, -1, -1, g.line)
-    if g.error != "" {
-        ir_emit(g.f, IROp.Unreachable, -1, -1, -1, -1, g.line)
-        m.functions[id] = g.f.move()
-        return -1
-    }
-    ir_resolve_deferred(m, p, g)
-    m.functions[id] = g.f.move()
-    id
 }
 
 // A named function used as a value of the function type `ty`: a closure box

@@ -3827,7 +3827,7 @@ sema_checked_runtime_tvalue_supported: fn(definition: ConstDef, value: TComptime
 }
 
 sema_checked_constant_from_value: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, value: SemaComptimeItemValue, diagnostics: &[Diagnostic]) -> TConstantDef? {
-    if !value.startup && !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
+    if !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
         diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
@@ -3838,14 +3838,13 @@ sema_checked_constant_from_value: fn(graph: SemaRegistrationGraph, module_row: S
             return None
         }
     }
-    init: if value.init == .Val(function) -> Val(function.key) else -> None
-    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value, init: init}
+    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value, shared_holder: value.shared_holder}
 }
 
 // `staged_values` holds the module's staged constant values by symbol key.
 sema_checked_constant_with_values: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
     if sema_output_metadata_binding(constant.declaration) -> return None
-    if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_soft(constant.declaration) {
+    if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_computed(constant.declaration) {
         diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
@@ -3867,10 +3866,9 @@ sema_checked_module_value_evaluates: fn(definition: ConstDef) -> Bool Never! {
 }
 
 // An immutable `NAME: expr` whose value is not literal data: the build
-// tries it (folding it when its evaluation is pure and succeeds) and
-// otherwise computes it at startup. Runtime storage (mutable or `#Persist`)
-// still needs a literal.
-sema_checked_module_value_soft: fn(definition: ConstDef) -> Bool Never! {
+// computes it, and refuses it (E0643) when its evaluation is impure or
+// fails. Runtime storage (mutable or `#Persist`) still needs a literal.
+sema_checked_module_value_computed: fn(definition: ConstDef) -> Bool Never! {
     if definition.mutable || definition.is_persist -> return false
     !sema_checked_module_value_evaluates(definition)
 }

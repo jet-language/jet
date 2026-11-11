@@ -1,0 +1,31 @@
+package: {
+    name: "module_values"
+    authority: { allow: [Env, IO] }
+}
+
+// A module-level `NAME: expr` is computed while building and stored in the
+// program like a literal, the same value on every tier. No code runs before
+// `run: fn`, so a value that reads the outside world (here an environment
+// variable) is read in `run` and passed on; a module-level read would be a
+// build error (E0643).
+use env: core.sys
+
+squares: fn(count: Int) -> [Int] {
+    values := [Int]{}
+    loop index in 1..<(count + 1) -> values.push(index * index)
+    values
+}
+
+// Computed while building.
+SQUARES: squares(4)
+TOTAL: SQUARES[0] + SQUARES[1] + SQUARES[2] + SQUARES[3]
+
+banner: fn(mode: String) -> String { "mode {mode}, total {TOTAL}" }
+
+run: fn() {
+    mode: env.get("JET_MODULE_VALUES_EXAMPLE_MODE") ?? "default"
+    print(SQUARES)
+    print(TOTAL)
+    print(mode)
+    print(banner(mode))
+}

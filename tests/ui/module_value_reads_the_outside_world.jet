@@ -1,0 +1,14 @@
+package: {
+    name: "module_value_reads_the_outside_world"
+    authority: { allow: [Env, IO] }
+}
+
+use env: core.sys
+
+// Reading the environment is an effect, and effects never run while
+// building, so this module value is a build error (E0643).
+MODE: env.get("JET_MODULE_VALUE_MODE") ?? "default"
+
+run: fn() {
+    print(MODE)
+}
