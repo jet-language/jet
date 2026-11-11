@@ -52,7 +52,6 @@ use {
     json: core.encoding.json
     process: core.process
     re: core.regex
-    term: core.term
 }
 
 USAGE: "usage: jet Toolchain/RuntimePack.jet pack --jet=JET --tree=DIR... --out=DIR --identity=FILE\n       jet Toolchain/RuntimePack.jet [--root DIR] unit OUT [--test NAME]...|--check"
@@ -89,10 +88,7 @@ Toolchain: struct {
     out: String
 }
 
-fail: fn(message: String) -> Never {
-    term.eprint("runtime-pack: {message}")
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, "runtime-pack: {message}") }
 
 // The file a checkout path names in the package at `root`.
 at: fn(root: String, path: String) -> String {

@@ -14,7 +14,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 // A Prelude source and the constant whose raw text is its copy, with the
@@ -113,15 +112,7 @@ prelude_sources_main: fn(args: [String]) -[FS]> String PreludeSourcesError! {
     Err(sources_fail("{differing.join(", ")} differ from what Compiler/Prelude generates (a generated file takes no hand edit, inside its raw strings or outside them); run jet build Compiler"))
 }
 
-run: fn() {
-    if prelude_sources_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(prelude_sources_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("a target is generated whole, its copies one blank line apart") {
     copies: [PreludeCopy]{

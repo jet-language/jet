@@ -15,7 +15,6 @@ use {
     files: core.files
     process: core.process
     re: core.regex
-    term: core.term
 }
 
 POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
@@ -50,10 +49,7 @@ Policy: struct {
     removed: [String]
 }
 
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 trapped: fn(name: String, tier: String, prefix: String, contains: [String]) -> Case {
     Case{name: name, tier: tier, status: None, signal: "SIGABRT", exact: None, prefix: prefix, contains: contains}

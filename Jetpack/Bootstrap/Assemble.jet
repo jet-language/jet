@@ -60,7 +60,6 @@ use {
     fspath: core.files.path
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 SELF: "Jetpack/Bootstrap/Assemble.jet"
@@ -101,8 +100,9 @@ run: fn() {
     if args.len() > 0 && args[0] == "slice" {
         if args.len() != 1 -> usage()
         problems: slice_problems(root, checkout_root(cwd)) ?? refuse_as("compiler-slice", err.message)
-        loop problem in problems -> term.eprint("compiler-slice: {problem}")
-        if problems.len() > 0 -> process.exit(1)
+        if problems.len() > 0 {
+            process.fail(1, problems.map(problem -> "compiler-slice: {problem}").join("\n"))
+        }
         print("compiler-slice: the Jetpack compiler slice is closed under the compiler's packages")
         return
     }
@@ -117,17 +117,11 @@ run: fn() {
 }
 
 usage: fn() -> Never {
-    term.eprint("usage: jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]")
-    term.eprint("       jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated")
-    term.eprint("       jet Jetpack/Bootstrap/Assemble.jet slice")
-    process.exit(64)
+    process.fail(64, "usage: jet Jetpack/Bootstrap/Assemble.jet [check|aot|hosted]\n       jet Jetpack/Bootstrap/Assemble.jet areas closure AREA|sources AREA|populated\n       jet Jetpack/Bootstrap/Assemble.jet slice")
 }
 
 // `message` after `prefix: ` on stderr, then exit 1.
-refuse_as: fn(prefix: String, message: String) -> Never {
-    term.eprint("{prefix}: {message}")
-    process.exit(1)
-}
+refuse_as: fn(prefix: String, message: String) -> Never { process.fail(1, "{prefix}: {message}") }
 
 // The checkout that holds this script; its tools (CompilerPackages.jet) run from it.
 checkout_root: fn(cwd: String) -> String {

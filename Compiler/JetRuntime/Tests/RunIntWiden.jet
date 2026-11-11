@@ -6,7 +6,6 @@ use {
     files: core.files
     process: core.process
     re: core.regex
-    term: core.term
 }
 
 POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
@@ -22,10 +21,7 @@ Ran: struct {
     error: String
 }
 
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {

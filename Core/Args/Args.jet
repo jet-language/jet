@@ -1606,10 +1606,7 @@ __args_parse: fn(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs E
 __args_parse_or_exit: fn(spec: ArgsSpec, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
     out := args_parsed()
     refusal: args_parse_level(spec, 0, args, 0, out)
-    if refusal.bytes().len() > 0 {
-        core.term.eprint(refusal)
-        core.process.exit(2)
-    }
+    if refusal.bytes().len() > 0 -> core.process.fail(2, refusal)
     if out.flags.get("help") ?? false {
         print(args_help(spec, 0))
         core.process.exit(0)

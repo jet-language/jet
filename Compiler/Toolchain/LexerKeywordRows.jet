@@ -14,7 +14,6 @@ use {
     json: core.encoding.json
     files: core.files
     process: core.process
-    term: core.term
 }
 
 SPANS_PATH: "JetLexer/Source/Lexer/KeywordSpans.jet"
@@ -218,15 +217,7 @@ keyword_rows_main: fn(args: [String]) -[FS]> String KeywordRowsError! {
     Ok("lexer keyword rows check passed")
 }
 
-run: fn() {
-    if keyword_rows_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(keyword_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 // The error text keyword_rows reports for these inputs, or "" when it accepts them.
 keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: String) -> String Never! {

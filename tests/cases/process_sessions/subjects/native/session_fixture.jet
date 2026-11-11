@@ -127,8 +127,7 @@ reaped: fn(pid_files: [String]) {
         if how == "" {
             stat: files.read("/proc/{pid}/stat") ?? ""
             wchan: files.read("/proc/{pid}/wchan") ?? ""
-            eprint("pipeline descendant {pid} survived timeout ({pid_file}): stat {stat.trim()} wchan {wchan}")
-            process.exit(1)
+            process.fail(1, "pipeline descendant {pid} survived timeout ({pid_file}): stat {stat.trim()} wchan {wchan}")
         }
         files.remove(pid_file) ?? panic("remove descendant pid file {pid_file}")
     }

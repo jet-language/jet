@@ -15,7 +15,6 @@ use {
     json: core.encoding.json
     process: core.process
     re: core.regex
-    term: core.term
 }
 
 HERE: "Compiler/JetRuntime/Tests"
@@ -29,10 +28,7 @@ Policy: struct {
     removed: [String]
 }
 
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 // path.resolve against the working directory.
 resolve: fn(cwd: String, path: String) -> String {

@@ -9,17 +9,13 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 FIXTURE: "tests/fixtures/native_inline_c_shared_state.jet"
 DEFINED: "int64_t jet_fixture_shared_counter = 0;"
 DECLARED: "extern int64_t jet_fixture_shared_counter;"
 
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
+fail: fn(message: String) -> Never { process.fail(1, message) }
 
 // One finished `jet build`; its executable is `{folder}/.jet/build/main`.
 Built: struct {

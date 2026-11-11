@@ -1,15 +1,12 @@
 // A `-> Never` helper is a complete non-returning contract. It can
-// report through `term.eprint` (which cannot fail) and stop with
-// `process.exit(1)`, and it serves as the `??` fallback of a fallible parse.
+// report and stop in one call, `process.fail(1, message)`, and it serves as
+// the `??` fallback of a fallible parse.
 package: {
     name: "fatal_exit"
     authority: { allow: [Exec, IO, Mem.Alloc] }
 }
 
-use {
-    process: core.process
-    term: core.term
-}
+use process: core.process
 
 RGB: struct {
     r: U8
@@ -17,10 +14,7 @@ RGB: struct {
     b: U8
 }
 
-fatal: fn(message: String) -> Never {
-    term.eprint("[fatal] {message}")
-    process.exit(1)
-}
+fatal: fn(message: String) -> Never { process.fail(1, "[fatal] {message}") }
 
 // "#9bbc0f" -> Rgb{r: 155, g: 188, b: 15}
 hex2rgb: fn(text: String) -> RGB {

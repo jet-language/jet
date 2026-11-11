@@ -85,10 +85,7 @@ run: fn() {
 }
 
 // `jetpack-bootstrap: {message}` on stderr, then exit `code`.
-fail: fn(code: Int, message: String) -> Never {
-    term.eprint("jetpack-bootstrap: {message}")
-    process.exit(code)
-}
+fail: fn(code: Int, message: String) -> Never { process.fail(code, "jetpack-bootstrap: {message}") }
 
 // The checkout that holds this script.
 repo_root: fn() -> String {
@@ -152,10 +149,7 @@ parse_options: fn(args: [String]) -> Options {
                 options.own = word.removeprefix("--area=")
                 options.closure = true
             }
-            else -> {
-                term.eprint(USAGE)
-                process.exit(64)
-            }
+            else -> process.fail(64, USAGE)
         }
         at += 1
     }

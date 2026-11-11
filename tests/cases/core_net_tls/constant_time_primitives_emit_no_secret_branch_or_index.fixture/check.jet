@@ -1282,8 +1282,7 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
             "expected" -> {
                 // The reason is required: an expected finding says why.
                 if words.len() < 3 {
-                    term.eprint("`{line}`: an expected function needs its reason")
-                    process.exit(2)
+                    process.fail(2, "`{line}`: an expected function needs its reason")
                 }
                 why := words[2].copy()
                 loop w in 3..<words.len() -> why = "{why} {words[w]}"
@@ -1294,10 +1293,7 @@ read_spec: fn(text: String, dropped: [String:Bool]) -> Spec Never! {
         }
     }
     loop (line, _) in dropped {
-        if seen.get(line) == None {
-            term.eprint("--drop `{line}` is no line of the spec")
-            process.exit(2)
-        }
+        if seen.get(line) == .None -> process.fail(2, "--drop `{line}` is no line of the spec")
     }
     spec
 }
@@ -1313,14 +1309,9 @@ run: fn() {
         first += 2
     }
     if argv.len() < first + 2 {
-        term.eprint("usage: jet check.jet [--drop <directive>]... <spec> <log>...")
-        process.exit(2)
+        process.fail(2, "usage: jet check.jet [--drop <directive>]... <spec> <log>...")
     }
-    spec_text: files.read(argv[first]) ?? {
-        term.eprint("{argv[first]}: cannot read: {err}")
-        process.exit(2)
-        return
-    }
+    spec_text: files.read(argv[first]) ?? process.fail(2, "{argv[first]}: cannot read: {err}")
     spec: read_spec(spec_text, dropped)
     failed := 0
     // The expected functions some log finds something in.
