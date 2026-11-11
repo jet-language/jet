@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99207,
+    "rev": 99208,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76110,7 +76110,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T09:14:58.581Z",
+      "updated": "2026-11-11T09:16:34.331Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -195324,7 +195324,7 @@
           "name": "Admit; propagate",
           "gist": "Remove allocating Never! contracts and propagate failures.",
           "detail": "Widen every affected E! to (E | mem.AllocError)!. Update propagation and exhaustive handlers; do not claim every syntactically nearby Err arm needs changing. Drop Never! only where allocation can fail. Inferred failures propagate to a recoverable application boundary. Proved nonallocating functions retain Never!. Common success prints 1; refusal is reported or explicitly stops.",
-          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
         },
         {
           "key": "B",
@@ -195338,14 +195338,14 @@
           "name": "Domain rule; propagate",
           "gist": "Remove allocating Never! contracts and propagate failures.",
           "detail": "Convert struct domains; admit AllocError in enum and builtin domains. Conversions must use bounded, nonallocating error storage. Drop Never! only where allocation can fail. Inferred failures propagate to a recoverable application boundary. Proved nonallocating functions retain Never!. Common success prints 1; refusal is reported or explicitly stops.",
-          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
         },
         {
           "key": "D",
           "name": "Admit; stop in helpers",
           "gist": "Keep Never! and explicitly handle its failures.",
           "detail": "Widen every affected E! to (E | mem.AllocError)!. Update propagation and exhaustive handlers; do not claim every syntactically nearby Err arm needs changing. Keep Never! only by handling each fallible operation with ?? panic, or one extracted fallible helper. This is explicit termination, not proof allocation cannot fail. Common success prints 1; refusal is reported or explicitly stops.",
-          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
         },
         {
           "key": "E",
@@ -195359,7 +195359,7 @@
           "name": "Domain rule; stop in helpers",
           "gist": "Keep Never! and explicitly handle its failures.",
           "detail": "Convert struct domains; admit AllocError in enum and builtin domains. Conversions must use bounded, nonallocating error storage. Keep Never! only by handling each fallible operation with ?? panic, or one extracted fallible helper. This is explicit termination, not proof allocation cannot fail. Common success prints 1; refusal is reported or explicitly stops.",
-          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+          "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
         }
       ],
       "comparisons": [],
@@ -195387,15 +195387,15 @@
           },
           {
             "key": "D",
-            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            "reason": "Admitting AllocError preserves its identity, but still widens typed signatures while helper panics prevent local recovery."
           },
           {
             "key": "E",
-            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            "reason": "Conversion changes enum cases and leaves builtin-domain exceptions, while helper panics also prevent local recovery."
           },
           {
             "key": "F",
-            "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+            "reason": "Type-shape rules give similar APIs different failure contracts, and keeping Never! adds stopping boundaries throughout those helpers."
           }
         ],
         "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
@@ -195434,7 +195434,7 @@
               "Callers must accept wider failure contracts."
             ],
             "proposed": {
-              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
             }
           },
           {
@@ -195462,7 +195462,7 @@
               "Callers must accept wider failure contracts."
             ],
             "proposed": {
-              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\nrun: fn() { print(load() ?? 0) }"
             }
           },
           {
@@ -195476,7 +195476,7 @@
               "Helpers can stop the whole process."
             ],
             "proposed": {
-              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
             }
           },
           {
@@ -195504,7 +195504,7 @@
               "Helpers can stop the whole process."
             ],
             "proposed": {
-              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing, OutOfMemory }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
+              "code": "// [UNCHECKED: proposed default allocation behavior; seed has try_push]\nuse mem: core.mem\n#Error\nStoreError: enum { Missing }\nload: fn() -> Int (StoreError | mem.AllocError)! {\n    rows := [Int]{}\n    rows.push(7)\n    rows.len()\n}\ncount: fn() -> Int Never! { load() ?? panic(\"no memory\") }\nrun: fn() { print(count()) }"
             }
           }
         ],
@@ -195531,15 +195531,15 @@
             },
             {
               "key": "D",
-              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+              "reason": "Admitting AllocError preserves its identity, but still widens typed signatures while helper panics prevent local recovery."
             },
             {
               "key": "E",
-              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+              "reason": "Conversion changes enum cases and leaves builtin-domain exceptions, while helper panics also prevent local recovery."
             },
             {
               "key": "F",
-              "reason": "Explicit stopping is useful for fixed ABIs, but sacrifices recovery inside those helpers."
+              "reason": "Type-shape rules give similar APIs different failure contracts, and keeping Never! adds stopping boundaries throughout those helpers."
             }
           ],
           "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
@@ -199195,6 +199195,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T09:16:34.331Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "NEW-D-ALLOC-MIGRATE1",
+      "note": ""
+    },
     {
       "at": "2026-11-11T09:15:23.360Z",
       "by": "Main",
