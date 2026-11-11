@@ -70,10 +70,10 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [PartialAndNotes](Errors/PartialAndNotes.jet) — The middle states of the one outcome carrier.
 - [PropagationJourney](Errors/PropagationJourney.jet) — A failure that propagates automatically reports where it started (`failed here`) and every call it passed through on the way out, origin first.
 - [QqControl](Errors/QqControl.jet) — `??
-- [RadixParse](Errors/RadixParse.jet) — `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`: both return `Int !ParseError`, so bad digits or a base outside 2..=36 reach the…
+- [RadixParse](Errors/RadixParse.jet) — `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`: both return `Int ParseError!`, so bad digits or a base outside 2..=36 reach the…
 - [ResultHandler](Errors/ResultHandler.jet) — One fixed exhaustive Result handler handles both payloads.
 - [RollbackTrait](Errors/RollbackTrait.jet)
 - [Transact](Errors/Transact.jet)
 - [TypedErrorFamilies](Errors/TypedErrorFamilies.jet)
-- [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T !(E1 | E2)` lets one callable fail with any listed error domain.
+- [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T (E1 | E2)!` lets one callable fail with any listed error domain.
 - [UnitFailureContract](Errors/UnitFailureContract.jet)
