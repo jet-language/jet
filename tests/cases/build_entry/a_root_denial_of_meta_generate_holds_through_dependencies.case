@@ -1,0 +1,22 @@
+# #3526 c2 (D-META-LADDER1): a dependency can't widen its importer's
+# authority, and the root's denials win. The `tool` library adds code only
+# through the `Compiler` value the root hands it. Its own
+# `authority: { allow: [Meta] }` row grants its importer nothing.
+# - The `open` root passes the value on, and its app runs the added function.
+# - The `denied` root's `authority: { deny: [Meta.Generate] }` reaches the
+#   same call inside the dependency, so its build is refused (E0749).
+# A dependency can't make the value itself; see
+# compiler_value_is_made_only_by_the_root_build.case (E0776).
+fixture: a_root_denial_of_meta_generate_holds_through_dependencies.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build open/main.jet
+exit: 0
+step: {work}/open/.jet/build/app
+exit: 0
+stdout: = "added by the tool\n"
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ E0749 # the root's denial holds inside the dependency
+stderr: ~ "reaches the `Meta.Generate` effect, which the package denies with `authority: { deny: [Meta.Generate] }`"
+file: denied/.jet/build/app absent

@@ -369,7 +369,10 @@ build that made it. `#code { items }` is a `Code` value holding its items,
 and `meta.add(code, scope: "name")` adds them to the value's target as the
 generated module `name`, checked with the program like hand-written code.
 `meta.add` uses `Meta.Generate`, so a function whose row denies that effect
-(`-[!Meta.Generate]>`) can't call it.
+(`-[!Meta.Generate]>`) can't call it. A root package's
+`authority: { deny: [Meta.Generate] }` refuses it wherever the root's build
+reaches it, a dependency's function included, and a dependency's own `allow`
+row widens nothing for its importer.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.
