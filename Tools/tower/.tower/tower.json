@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99350,
+    "rev": 99375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60472,15 +60472,6 @@
           "at": "2026-10-31T01:11:19.459Z"
         },
         {
-          "n": 16,
-          "text": "(was #4530) [#4533 remaining after SP05 patch] register + sema.check <= 6 s on L5 (estimate after patch ~14 s): stop copying/dropping the whole registration graph per checking environment (~2.4 s, also comptime/finalize); compute the memory plan once (~1 s); skip whole-program copies in no-op register passes (generic_modules_expand, inline_modules_lower, derive_expand_template_loops, error_conversion_items); remove derive-expansion clones (~1.9 s); add #4319 counters",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:36.294Z"
-        },
-        {
           "n": 17,
           "text": "(was #4530) [SP05c follow-up] land sp05b+sp05c ($JET_STATE_ROOT/scratch/SP05c/sp05c.patch, rebased onto master after integ-post-stage2 with SP02) and measure register + sema.check on L5 (estimate ~6.6 s vs 6 s target); then remove the remaining copies: comptime environment graph copy (resolved := graph in sema_comptime_environment), Pipeline.jet loaded-program copy into registration inputs, HTTP-routing helper environment copy per route",
           "status": "met",
@@ -60488,168 +60479,6 @@
           "verifiedBy": null,
           "evidence": "d248040524 (SelfMem). sp05b+sp05c were already on dev; this lands the rest of SP05c and removes the last copy c17 names: HTTP routing now passes the module identity instead of a copied SemaScopeEnvironment per route. The comptime graph copy and the Pipeline loaded-program copy were already gone on dev. Proof: FIXED_POINT at full (s2 == s3, jet b8f868cb8067ebe7); golden 1213/61/5 with 0 lost; ui 2393 rows with 0 lost; touched-area cases 722 rows with 0 lost; lane-check CHECK OK (JetFoundation, JetSema, JetDriver). register+sema.check on the self-compile (the current large unit; L5 was the Rust-era one), median of 5: 910 to 920 ms (noise), well under the 6 s target; peak RSS 1746 to 1740 MB.",
           "at": "2026-11-04T20:47:47.255Z"
-        },
-        {
-          "n": 18,
-          "text": "(was #4538) Type equality is a TypeId compare; no Type copy in the L5 sema profile",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:40.034Z"
-        },
-        {
-          "n": 19,
-          "text": "(was #4538) One sema.bodies pass <= 25 s on L5 (cell receipt), from 84.9 s",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:40.822Z"
-        },
-        {
-          "n": 20,
-          "text": "(was #4538) Stage-2 outputs and diagnostics byte-identical",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:41.813Z"
-        },
-        {
-          "n": 21,
-          "text": "(was #4538) [#4532] No exact-Int carrier on IDs or hashes. CtBigInt plus jet_int_owned_to_i64 is < 0.5% of samples in lower, emit and comptime on L5.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:42.597Z"
-        },
-        {
-          "n": 22,
-          "text": "(was #4538) [#4536] Tokens and AST carry interned Name (U32): no String name fields, and L5 load <= 4 s.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:43.417Z"
-        },
-        {
-          "n": 23,
-          "text": "(was #4538) [#4537] SymbolID and ItemID are integers: no formatted-string symbol keys on hot paths, and L5 register + sema.check <= 2 s.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:44.269Z"
-        },
-        {
-          "n": 24,
-          "text": "(was #4538) [#4539] TypeId through IR, optimizer and codegen: no type clones or instruction-vector copies in the L5 profile, and L5 lower + optimize <= 30 s.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:09:16.962Z"
-        },
-        {
-          "n": 25,
-          "text": "(was #4538) [#4540] Flat token and AST arrays plus side tables: parse >= 300k lines/s per core, and zero AST/TIR deep copies.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:45.860Z"
-        },
-        {
-          "n": 26,
-          "text": "(was #4538) [#4541] Per-function arenas and consuming handoffs: L5 peak RSS <= 768 MiB, bench300k <= 1 GiB, and no whole-program IR copies.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:46.713Z"
-        },
-        {
-          "n": 27,
-          "text": "(was #4538) [#4162] Dense per-function IR ids replace 64-bit stable hashes across lowering, codecs and consumers. Stage-2 fixed point and the image-size win are shown.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:09:17.839Z"
-        },
-        {
-          "n": 28,
-          "text": "(was #4538) [#4535] Allocator, memmove and clone frames are < 15% of busy samples in every phase.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:09:18.670Z"
-        },
-        {
-          "n": 29,
-          "text": "(was #4538) [#3999] The 108k-line PackageModel jet run stays at or below its pre-dee9a5fe4 memory (~3.9G).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:48.952Z"
-        },
-        {
-          "n": 30,
-          "text": "(was #5039) The throughput manifest lists the shape matrix (realistic, called sweep, huge function, many types, dead code, 100k diagnostics) with front-end and full-build cells for each.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:52.101Z"
-        },
-        {
-          "n": 31,
-          "text": "(was #5039) A same-session receipt records V (tcc, clang, FastC where it builds) and Jet on every cell with wall, CPU, instructions, peak RSS, at 1 and N threads; failures and timeouts are recorded as losses, not omitted.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:52.986Z"
-        },
-        {
-          "n": 32,
-          "text": "(was #5039) The realistic-shape front-end cell reaches >= 500k LOC/s and beats V on every cell under the strict gate, or each losing cell stays open on this card.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:53.684Z"
-        },
-        {
-          "n": 33,
-          "text": "(was #4551) bench300k jet build < 2.0 s wall (median and max of 5) at default jobs on the 32-thread reference machine",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:57.364Z"
-        },
-        {
-          "n": 34,
-          "text": "(was #4551) selfhost >= 150,000 lines/s at default jobs",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:58.245Z"
-        },
-        {
-          "n": 35,
-          "text": "(was #4551) 1-job and default-job artifacts and diagnostics byte-identical; peak RSS within the cell's memory gates",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:11:59.089Z"
         },
         {
           "n": 36,
@@ -60733,15 +60562,6 @@
           "at": "2026-10-31T01:26:39.055Z"
         },
         {
-          "n": 45,
-          "text": "(was #5094) (was #5060) Comptime growth path deep-copies closures and requests (per growth / per union)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:26:40.011Z"
-        },
-        {
           "n": 46,
           "text": "(was #5094) (was #5084) Imports: Jai/Go-style demand-driven loading, comptime-conditional use, no-bloat binaries",
           "status": "open",
@@ -60758,24 +60578,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:26:41.544Z"
-        },
-        {
-          "n": 48,
-          "text": "(was #5094) (was #5096) JetIR Map is a sorted list: string-keyed lookups binary-search with string compares (13-19% of sema.bodies)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:26:42.390Z"
-        },
-        {
-          "n": 49,
-          "text": "(was #5094) (was #5100) jet check of JetCli peaks at 20 GB with the self-hosted compiler (a0_010)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:26:43.241Z"
         },
         {
           "n": 51,
@@ -60866,7 +60668,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-11T12:43:22.529Z",
+      "updated": "2026-11-11T12:44:00.991Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -85790,33 +85592,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "Same-run interleaved A/B on a quiet slot (24 CPUs, 3+ rounds): dev compiler self-compile (jet build Compiler, default level) median wall <= 9.62 s, with phase trace and peak RSS recorded",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-01T01:36:16.741Z"
-        },
-        {
-          "n": 2,
-          "text": "Regression root(s) identified by bisect across seeds/waves with evidence, each fixed by a general compiler/runtime change (no workload-specific trick)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-01T01:36:18.776Z"
-        },
-        {
-          "n": 3,
-          "text": "Each wave REPORT carries a self-compile A/B against a pinned reference compiler and flags a >5% wall regression; landing a flagged wave needs a disposition",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-01T01:36:21.102Z"
-        },
-        {
           "n": 4,
           "text": "Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATCH_ROOT/lanes/G11Speed/report-bisect.md): 9afa7da76b (#6206 c22 CheckedText Hole/build) dropped the Distinct-only guard of sema_expression_checked_text_target, so every typed literal and Type.method() call walked every impl with string-cloning name lookups (77.9% of samples on seed-t22). It was amplified by 8c02016476, af8d3e09d0 and 8eaf6f17cc. Fixed by G11Speed-1, which indexes CheckedText impl rows once at registration (same rows, same order). Acceptance: the c1 cell's default-mode CPU-s on the t22 tree is at most 1.10x a0.0.43's per corpus line; comptime.precheck and sema.bodies wall are each at most 1.10x a0.0.43's; and perf shows sema_expression_checked_text_target under 1% of samples. Measured on the fix (n=1, basic): 749 to 164 CPU-s, 6.7K to 14.8K lines/s.",
           "status": "open",
@@ -85861,7 +85636,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-11T12:37:54.299Z",
+      "updated": "2026-11-11T12:43:32.727Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -197670,6 +197445,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T12:44:00.991Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#35: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1/c5-c8: the bench300k harness targets (2 s, 150K lines/s) are below the plan's gates and measured on the c1 cell; was [open]: (was #4551) 1-job and default-job artifacts and diagnostics byte-identical; peak RSS within the cell's memory gates"
+    },
+    {
+      "at": "2026-11-11T12:43:59.645Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#34: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1/c5-c8: the bench300k harness targets (2 s, 150K lines/s) are below the plan's gates and measured on the c1 cell; was [open]: (was #4551) selfhost >= 150,000 lines/s at default jobs"
+    },
+    {
+      "at": "2026-11-11T12:43:57.814Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#33: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1/c5-c8: the bench300k harness targets (2 s, 150K lines/s) are below the plan's gates and measured on the c1 cell; was [open]: (was #4551) bench300k jet build < 2.0 s wall (median and max of 5) at default jobs on the 32-thread reference machine"
+    },
+    {
+      "at": "2026-11-11T12:43:56.334Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#32: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1 (the cell) and c3 (30M lines/s end metric); corpus shapes are #4601 c1; was [open]: (was #5039) The realistic-shape front-end cell reaches >= 500k LOC/s and beats V on every cell under the strict gate, or each losing cell stays open on this card."
+    },
+    {
+      "at": "2026-11-11T12:43:55.118Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#31: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1 (the cell) and c3 (30M lines/s end metric); corpus shapes are #4601 c1; was [open]: (was #5039) A same-session receipt records V (tcc, clang, FastC where it builds) and Jet on every cell with wall, CPU, instructions, peak RSS, at 1 and N threads; failures and timeouts are recorded as"
+    },
+    {
+      "at": "2026-11-11T12:43:53.821Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#30: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c1 (the cell) and c3 (30M lines/s end metric); corpus shapes are #4601 c1; was [open]: (was #5039) The throughput manifest lists the shape matrix (realistic, called sweep, huge function, many types, dead code, 100k diagnostics) with front-end and full-build cells for each."
+    },
+    {
+      "at": "2026-11-11T12:43:52.423Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#49: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (peak RSS under 1 GB on the c1 cell); the a0_010-era measurements no longer describe the compiler; was [open]: (was #5094) (was #5100) jet check of JetCli peaks at 20 GB with the self-hosted compiler (a0_010)"
+    },
+    {
+      "at": "2026-11-11T12:43:51.146Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#29: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (peak RSS under 1 GB on the c1 cell); the a0_010-era measurements no longer describe the compiler; was [open]: (was #4538) [#3999] The 108k-line PackageModel jet run stays at or below its pre-dee9a5fe4 memory (~3.9G)."
+    },
+    {
+      "at": "2026-11-11T12:43:49.633Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#48: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #5094) (was #5096) JetIR Map is a sorted list: string-keyed lookups binary-search with string compares (13-19% of sema.bodies)"
+    },
+    {
+      "at": "2026-11-11T12:43:48.102Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#45: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #5094) (was #5060) Comptime growth path deep-copies closures and requests (per growth / per union)"
+    },
+    {
+      "at": "2026-11-11T12:43:46.738Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#28: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4535] Allocator, memmove and clone frames are < 15% of busy samples in every phase."
+    },
+    {
+      "at": "2026-11-11T12:43:45.388Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#27: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4162] Dense per-function IR ids replace 64-bit stable hashes across lowering, codecs and consumers. Stage-2 fixed point and the image-size win are shown."
+    },
+    {
+      "at": "2026-11-11T12:43:44.091Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#26: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4541] Per-function arenas and consuming handoffs: L5 peak RSS <= 768 MiB, bench300k <= 1 GiB, and no whole-program IR copies."
+    },
+    {
+      "at": "2026-11-11T12:43:42.585Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#25: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4540] Flat token and AST arrays plus side tables: parse >= 300k lines/s per core, and zero AST/TIR deep copies."
+    },
+    {
+      "at": "2026-11-11T12:43:41.124Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#24: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4539] TypeId through IR, optimizer and codegen: no type clones or instruction-vector copies in the L5 profile, and L5 lower + optimize <= 30 s."
+    },
+    {
+      "at": "2026-11-11T12:43:39.112Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#23: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4537] SymbolID and ItemID are integers: no formatted-string symbol keys on hot paths, and L5 register + sema.check <= 2 s."
+    },
+    {
+      "at": "2026-11-11T12:43:37.658Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#22: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4536] Tokens and AST carry interned Name (U32): no String name fields, and L5 load <= 4 s."
+    },
+    {
+      "at": "2026-11-11T12:43:35.941Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#21: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) [#4532] No exact-Int carrier on IDs or hashes. CtBigInt plus jet_int_owned_to_i64 is < 0.5% of samples in lower, emit and comptime on L5."
+    },
+    {
+      "at": "2026-11-11T12:43:34.072Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#18: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by #5479 c7 (interned u32 ids, columnar data, per-phase arenas, no RC on compiler data) and c8 (fused per-function pipeline); was [open]: (was #4538) Type equality is a TypeId compare; no Type copy in the L5 sema profile"
+    },
+    {
+      "at": "2026-11-11T12:43:32.727Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0pjwkhn",
+      "note": "#3: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by the #5479 c5 train speed gate (every train REPORT, previous seed vs new compiler on the c1 cell, red past +10% CPU-s); was [open]: Each wave REPORT carries a self-compile A/B against a pinned reference compiler and flags a >5% wall regression; landing a flagged wave needs a disposition"
+    },
+    {
+      "at": "2026-11-11T12:43:31.223Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0pjwkhn",
+      "note": "#2: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by c4-c7, one criterion per bisected root (F, C, B, A); was [open]: Regression root(s) identified by bisect across seeds/waves with evidence, each fixed by a general compiler/runtime change (no workload-specific trick)"
+    },
+    {
+      "at": "2026-11-11T12:43:29.697Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0pjwkhn",
+      "note": "#1: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by the #5479 c5 and c6 numeric gates on the c1 cell (55K then 400K lines/s, n=3 median, cold and uncached); was [open]: Same-run interleaved A/B on a quiet slot (24 CPUs, 3+ rounds): dev compiler self-compile (jet build Compiler, default level) median wall <= 9.62 s, with phase trace and peak RSS recorded"
+    },
+    {
+      "at": "2026-11-11T12:43:28.008Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#20: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: L5/SP-plan receipts on a retired corpus and plan; the c1 cell and the #5479 c5-c8 per-line gates replace them; was [open]: (was #4538) Stage-2 outputs and diagnostics byte-identical"
+    },
+    {
+      "at": "2026-11-11T12:43:26.245Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#19: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: L5/SP-plan receipts on a retired corpus and plan; the c1 cell and the #5479 c5-c8 per-line gates replace them; was [open]: (was #4538) One sema.bodies pass <= 25 s on L5 (cell receipt), from 84.9 s"
+    },
+    {
+      "at": "2026-11-11T12:43:24.442Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0fo37ov",
+      "note": "#16: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: L5/SP-plan receipts on a retired corpus and plan; the c1 cell and the #5479 c5-c8 per-line gates replace them; was [open]: (was #4530) [#4533 remaining after SP05 patch] register + sema.check <= 6 s on L5 (estimate after patch ~14 s): stop copying/dropping the whole registration graph per checking environment (~2.4 s, als"
+    },
     {
       "at": "2026-11-11T12:43:22.529Z",
       "by": "Main",
