@@ -4045,7 +4045,7 @@ with the source helpers, while application examples use public formatting.
 | `pad_center(text: String, width: Int, fill: String) -> String` | text | Pad on both sides; the left side gets the smaller half and the fill pattern restarts on each side (`pad_center("x", 4, "ab")` is `axab`). |
 | `pad(text: String, width: Int, fill: String) -> String` | text | Apply the module's default padding direction (right; `pad("ab", 5, "")` is `ab   `). |
 | `grouped(value: Float, frac: Int) -> String` | text | Add grouping separators and keep `frac` fractional digits, rounded like `decimal`. |
-| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output, rounding half away from zero with no negative zero (`decimal(0.125, 2)` is `0.13`, `decimal(-0.0001, 2)` is `0.00`). |
+| `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output, rounding half away from zero (`decimal(0.125, 2)` is `0.13`). A negative value keeps its sign when it rounds to zero, as Rust's `{:.2}`, JavaScript's `toFixed` and Python's `:.2f` print it (`decimal(-0.0001, 2)` is `-0.00`); negative zero prints unsigned (`decimal(-0.0, 2)` is `0.00`). |
 | `percent(value: Float, frac: Int) -> String` | text | Format a grouped percentage with `frac` fractional digits (`percent(12345.6, 0)` is `1,234,560%`). |
 | `sci(value: Float, frac: Int) -> String` | text | Format normalized scientific notation with a plain exponent (`sci(1234.0, 2)` is `1.23e3`, `sci(9.999, 2)` is `1.00e1`). |
 | `pretty(value: String) -> String` | text | Lay out Debug text one item per line with a space before the opener and commas between items; empty collections stay on one line, and `[:]` and `[redacted]` are unchanged. |

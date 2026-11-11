@@ -1,6 +1,8 @@
 // `:Fixed(n)`, `:Grouped(n)`, fmt.decimal and fmt.grouped round the exact
-// binary value of a Float at n decimals, half away from zero, with no negative
-// zero (owner ruling 2026-10-05, #4588; #5072 c24). 2.675 is stored as
+// binary value of a Float at n decimals, half away from zero (owner ruling
+// 2026-10-05, #4588; #5072 c24). A negative value keeps its sign when it
+// rounds to zero (-0.004 prints "-0.00", as Rust, JS and Python do; #5072
+// c51); -0.0 prints unsigned. 2.675 is stored as
 // 2.67499999999999982236431605997495353221893310546875, so it prints 2.67,
 // while an exact tie such as 0.125 or 62.5 rounds away from zero. The rows
 // cover values on both sides of a half, exact ties, negatives, -0.0, values

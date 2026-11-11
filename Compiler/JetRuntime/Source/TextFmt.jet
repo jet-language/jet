@@ -1,8 +1,11 @@
 // Native core.text.fmt.decimal: jet_fmt_decimal. Owner ruling 2026-10-05
 // (#4588): round the exact binary value at `precision` decimals, half away
-// from zero (2.675 -> "2.67", 0.125 -> "0.13"), and never print a negative
-// zero. One correctly rounded `value * 10^precision` names that rounding
-// unless it lies within an ulp of a half; then, and past 2^52 or 22 places,
+// from zero (2.675 -> "2.67", 0.125 -> "0.13"). A negative value keeps its
+// sign when it rounds to zero (-0.001 -> "-0.00", #5072 c51), as Rust's
+// `{:.2}`, JavaScript's toFixed and Python's `:.2f` print it; negative zero is
+// not below zero and prints unsigned. One correctly rounded
+// `value * 10^precision` names that rounding unless it lies within an ulp of
+// a half; then, and past 2^52 or 22 places,
 // the exact binary expansion decides (text_fmt_exact). The Word precision is
 // the raw carrier word the Rust adapter receives.
 TEXT_FMT_BIG_BYTES: I64{328}
@@ -195,21 +198,11 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
         body = text_fmt_exact(magnitude, places)
     }
     if !(value < Float{0.0}) -> return body
-    data: rt_text_data(body)
-    length: rt_text_len(body)
-    index := I64{0}
-    loop index < length {
-        byte: rt_text_byte(wrapping(data + index))
-        if (byte >= I64{49} && byte <= I64{57}) {
-            signed: rt_text_builder_with_capacity(length + I64{1})
-            rt_text_push_scalar(signed, I64{45})
-            jet_rt_string_builder_push(signed, body)
-            jet_rt_string_drop(body)
-            return signed
-        }
-        index += I64{1}
-    }
-    body
+    signed: rt_text_builder_with_capacity(rt_text_len(body) + I64{1})
+    rt_text_push_scalar(signed, I64{45})
+    jet_rt_string_builder_push(signed, body)
+    jet_rt_string_drop(body)
+    signed
 }
 
 // jet_fmt_grouped: jet_fmt_decimal with its whole digits grouped by commas in
