@@ -392,7 +392,11 @@ parser_bump: fn(state: &JetParserState) -> Token Never! {
     }
     token: parser_current(state)
     if token.kind == TOKEN_SEMI && token.span.start < token.span.end && !state.explicit_semicolon_reported -> parser_report_explicit_semicolon(state, token.span)
-    if token.kind == TOKEN_IDENT && state.derive_template_depth == 0 && parser_template_paste(state, token) -> parser_report_paste_outside_template(state, token)
+    if token.kind == TOKEN_IDENT && parser_glued_paste(state, token) {
+        parser_report_glued_paste(state, token)
+    } else if token.kind == TOKEN_IDENT && state.derive_template_depth == 0 && parser_template_paste(state, token) {
+        parser_report_paste_outside_template(state, token)
+    }
     if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
     token
 }
@@ -408,6 +412,25 @@ parser_template_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
 parser_report_paste_outside_template: fn(state: &JetParserState, token: Token) Never! {
     paste: parser_text(state, token)
     state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{paste}` pastes a template binding outside a template", "only a derive or marker template splices a binding's name into the code it generates", "write the name itself, or move this code into a derive or marker template"))
+}
+
+// Whether the identifier `token` is a word the lexer read with a paste glued
+// to its letters (`get_#{field}`, `#{field}_value`, `#{a}#{b}`). Only a word
+// with a `{` byte reads its text.
+parser_glued_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
+    source: state.sources[0]
+    if token.span.start < 0 || token.span.end > source.len() -> return false
+    brace := token.span.start
+    loop brace < token.span.end && source[brace] != (U8{123}) -> brace += 1
+    if brace == token.span.end -> return false
+    text: parser_text(state, token)
+    if !text.contains("#{{") -> return false
+    !text.starts_with("#{{") || !text.ends_with("}}") || text.slice(2, text.len()).contains("#{{")
+}
+
+parser_report_glued_paste: fn(state: &JetParserState, token: Token) Never! {
+    word: parser_text(state, token)
+    state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{word}` glues a paste onto letters", "a paste `#{{…}}` stands for a whole name; it never joins the letters beside it, so `pkg#1.4` and `[Int#4]` keep their meaning", "build the name as a string first, as in `method: \"get_{{field.name}}\"`, then paste `#{{method}}`"))
 }
 
 // An explicit `;` stays a statement boundary but is not canonical

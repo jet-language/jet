@@ -1,0 +1,35 @@
+// Template hygiene: a local declared in added code is private to that code,
+// so the user's function of the same name keeps its meaning, and `#` written
+// after a type in added code keeps its fixed-length meaning (`[Int#4]`).
+total: fn() -> Int { 5 }
+
+Corners: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            impl #{tname} {
+                corners: fn(self) -> [Int#4] { [Int#4]{1, 2, 3, 4} }
+
+                sum: fn(self) -> Int {
+                    total := 0
+                    loop corner in self.corners() -> total += corner
+                    total
+                }
+            }
+        }
+    }
+}
+
+#Corners
+Point: struct {
+    x: Int
+}
+
+run: fn() {
+    point: Point{x: 1}
+    print(point.corners()[3])
+    print(point.sum())
+    print(total())
+}

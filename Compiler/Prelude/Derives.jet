@@ -67,18 +67,18 @@ Comparable: struct {
         expand: fn(self, target: Target) {
             compare: fn(self, rhs: #{name}) -> Ordering {
                 comptime if target.kind == "enum" {
-                    jet_rhs_variant_index := 0
+                    rhs_variant_index := 0
                     comptime loop right in target.reflect().fields {
                         if rhs == {
-                            .#{right} -> { jet_rhs_variant_index = right.index }
+                            .#{right} -> { rhs_variant_index = right.index }
                             else -> {}
                         }
                     }
                     comptime loop left in target.reflect().fields {
                         if self == {
                             .#{left} -> {
-                                if jet_rhs_variant_index > left.index -> return .Less
-                                if jet_rhs_variant_index < left.index -> return .Greater
+                                if rhs_variant_index > left.index -> return .Less
+                                if rhs_variant_index < left.index -> return .Greater
                                 if rhs == {
                                     .#{left} -> {
                                         comptime loop field in left.reflect().fields {

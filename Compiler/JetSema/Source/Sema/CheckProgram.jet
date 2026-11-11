@@ -2007,6 +2007,12 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     function_generic_params := generics.own.copy()
     generic_params := generics.merged.copy()
     sema_function_apply_scope_policies(updated, program, scopes, func.span, func.markers)
+    // A function a marker template of another module generated reads the
+    // names that template wrote in the template's module; the caller's mark
+    // drops those bindings after the pass.
+    if func.definition_module != "" && func.definition_module != module_identity {
+        if program.registration_graph == .Val(graph) -> sema_scope_bind_definition_site(scopes, graph, func)
+    }
     state := sema_ownership_state_init()
     state.fixed_length_write_params = updated.fixed_length_write_params
     state.share_known = share_known

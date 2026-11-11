@@ -1831,6 +1831,23 @@ sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool
     true
 }
 
+// The module-level names a template wrote, bound for one generated function
+// (Func.definition_module): the template module's own declarations and its
+// `use` names, private ones included, pushed after the marker module's so
+// they hide its same-named rows. A name a paste produced (Func.site_names)
+// keeps resolving at the marker's site. The caller's mark drops the rows.
+sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, func: Func) Never! {
+    module_index: sema_registration_module_index(graph, func.definition_module) ?? return
+    loop symbol in graph.modules[module_index].symbols {
+        if !func.site_names.contains(symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    }
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            if !func.site_names.contains(binding.symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        }
+    }
+}
+
 sema_scope_add_compiler_builtin: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph) -> Bool Never! {
     builtin: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
     nominal: graph.modules[builtin.module_index].nominals[builtin.row]

@@ -98,6 +98,11 @@ SemaDeriveExpansion: struct {
     reports: [SemaDeriveReport]{[SemaDeriveReport]{}}
     // The rule's use site: a rejection's primary span.
     site: Span?{None}
+    // A marker template of another module: its module identity, which each
+    // generated function records (Func.definition_module), and the names
+    // pastes produced so far ("" and nothing recorded otherwise).
+    definition_module: String{""}
+    pasted: [String]{[String]{}}
 }
 
 // One `impl T.Diagnostic` visible to a rule body. The declaring module's
@@ -568,10 +573,16 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
     binding: sema_derive_bare(name)
     value: sema_derive_scope_value(expansion, binding) ?? return name
     if value == {
-        .Str(text) -> return text
+        .Str(text) -> {
+            if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
+            return text
+        }
         .Struct(_, _) -> {
             if !explicit -> return name.copy()
-            if sema_derive_struct_field(value, "name") == .Val(.Str(text)) -> return text
+            if sema_derive_struct_field(value, "name") == .Val(.Str(text)) {
+                if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
+                return text
+            }
             sema_derive_fail(expansion, sema_error("E0956", span, "compile-time name `${binding}` has no text name", "a generated item name needs the reflected value's `name` field", "bind the name to a String value"))
         }
         .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
@@ -1398,6 +1409,7 @@ sema_derive_expand_params: fn(expansion: &SemaDeriveExpansion, params: [Param]) 
 }
 
 sema_derive_expand_func: fn(expansion: &SemaDeriveExpansion, function: Func) -> Func Never! {
+    first_paste: expansion.pasted.len()
     updated := function
     updated.name = sema_derive_expand_name(expansion, function.name, function.name_span)
     updated.params = sema_derive_expand_params(expansion, function.params)
@@ -1407,6 +1419,10 @@ sema_derive_expand_func: fn(expansion: &SemaDeriveExpansion, function: Func) -> 
     updated.pre = sema_derive_expand_clauses(expansion, function.pre)
     updated.post = sema_derive_expand_clauses(expansion, function.post)
     updated.body = sema_derive_expand_stmts(expansion, function.body)
+    if expansion.definition_module != "" {
+        updated.definition_module = expansion.definition_module.copy()
+        loop at in first_paste..<expansion.pasted.len() -> updated.site_names.push(expansion.pasted[at].copy())
+    }
     updated
 }
 
@@ -1822,29 +1838,29 @@ sema_derive_report_text: fn(definition: ImplDef, name: String, value: CtValue) -
 // Rust `Comptime::expand_derive_body`: `name` and the template's `target` are
 // bound to the target's reflected handle.
 sema_derive_expand_provider_body: fn(body: [DeriveBodyItem], type_info: CtValue, diagnostics: &[Diagnostic]) -> [Item]? {
-    sema_derive_expand_rule_body(body, "target", type_info, None, [SemaDeriveReport]{}, None, diagnostics)
+    sema_derive_expand_rule_body(body, "target", type_info, None, [SemaDeriveReport]{}, None, "", diagnostics)
 }
 
 // A marker rule body expands like a provider body; `self` is the marker's own
 // value, its fields the use site's arguments; its `reject(value)` raises one
 // of `reports` at the rule's use site.
-sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, diagnostics: &[Diagnostic]) -> [Item]? {
+sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic]) -> [Item]? {
     scope := [NamedCtValue]{}
     if receiver == .Val(value) -> scope.push(NamedCtValue{name: "self", value: value})
     if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) -> scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
     scope.push(NamedCtValue{name: type_param, value: type_info})
-    sema_derive_expand_scoped(body, scope, reports, site, diagnostics)
+    sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics)
 }
 
 // Rust `Comptime::expand_template_body`: expand one typed item template in
 // the caller's compile-time scope. A failed expansion reports its one
 // diagnostic and generates nothing.
 sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
-    sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, diagnostics)
+    sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, "", diagnostics)
 }
 
-sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, diagnostics: &[Diagnostic]) -> [Item]? {
-    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site}
+sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic]) -> [Item]? {
+    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site, definition_module: definition_module}
     items := [Item]{}
     sema_derive_expand_body(expansion, body, items)
     if expansion.failure == .Val(diagnostic) {

@@ -81,6 +81,21 @@ anywhere else. A paste outside a derive or marker template is E0003, and so
 is any `$` word in program source (the site values are `#here` and
 `#caller`, D-SITE-CALLER1=A).
 
+A paste stands for a whole name and is never glued to letters:
+`get_#{field}` is E0003, so `pkg#1.4` and `[Int#4]` keep their meaning
+inside a template. Build a compound name as a string first,
+`method: "get_{field.name}"`, then paste `#{method}`. A local declared in
+added code is private to that code, so it needs no reserved prefix: a
+user's function of the same name keeps its meaning. A name the template
+wrote resolves where the template was written, so a template in another
+module calls that module's helpers (private ones too), and a pasted name
+resolves at the marker's site. A template's own local (a binding or a
+`comptime loop` name in `expand`) may not hide a `use` name of its file or a
+Prelude name such as `print`: that is E0118, like a hidden inner local
+([`template_local_hides_use_or_prelude_name.jet`](../../../tests/ui/template_local_hides_use_or_prelude_name.jet),
+[`TemplateHygiene.jet`](../../../tests/run/Comptime/TemplateHygiene.jet),
+[`TemplateDefinitionSite`](../../../tests/run/Comptime/TemplateDefinitionSite/run.jet)).
+
 ## Effect tiers and reproducibility
 
 Compile-time effects are classified by what they can observe:

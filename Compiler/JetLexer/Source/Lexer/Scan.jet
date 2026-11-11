@@ -135,6 +135,25 @@ scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     i
 }
 
+// A paste `#{name}` written against letters (`get_#{field}`,
+// `#{field}_value`) is read with them as one word, which the parser refuses:
+// a paste is never glued to letters. `end` is where the word or paste just
+// scanned stops; the result is where the glued word stops.
+scan_glued_paste_end: fn(source: [U8], end: Int) -> Int {
+    i := end
+    loop i < source.len() {
+        if byte_at(source, i) == 35 && byte_at(source, i + 1) == 123 && is_identifier_start(source, i + 2) {
+            paste_end: scan_identifier_end(source, i + 2)
+            if byte_at(source, paste_end) != 125 -> return i
+            i = paste_end + 1
+            next
+        }
+        if !is_identifier_continue(source, i) -> return i
+        i = scan_identifier_end(source, i)
+    }
+    i
+}
+
 scan_unit_suffix_end: fn(source: [U8], start: Int) -> Int {
     scan_identifier_end(source, start)
 }
@@ -547,7 +566,8 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             next
         }
         if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) {
-            end: scan_identifier_end(source, i)
+            word_end: scan_identifier_end(source, i)
+            end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
             kind: word_kind(source, i, end, last_code)
             if kind == K_FN -> fn_in_range = true
             last_code = push_code(facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
@@ -677,8 +697,9 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 paste_end := scan_identifier_end(source, i + 2)
                 if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 -> paste_end += 5
                 if byte_at(source, paste_end) == 125 {
-                    last_code = push_code(facts, K_IDENT, start, paste_end + 1, false)
-                    i = paste_end + 1
+                    glued: scan_glued_paste_end(source, paste_end + 1)
+                    last_code = push_code(facts, K_IDENT, start, glued, false)
+                    i = glued
                     next
                 }
             }
@@ -1087,7 +1108,8 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             next
         }
         if is_identifier_start(source, i) {
-            end: scan_identifier_end(source, i)
+            word_end: scan_identifier_end(source, i)
+            end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
             kind: word_kind(source, i, end, last_code)
             if kind == K_FN -> fn_in_range = true
             upper := false

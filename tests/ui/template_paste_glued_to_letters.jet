@@ -1,0 +1,23 @@
+Getter: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            comptime loop field in target.reflect().fields {
+                impl #{tname} {
+                    get_#{field}: fn(self) -> Int { self.#{field} }
+                }
+            }
+        }
+    }
+}
+
+#Getter
+Point: struct {
+    x: Int
+}
+
+run: fn() {
+    print(Point{x: 7}.x)
+}
