@@ -380,27 +380,30 @@ orchestrator failure. Fix it at once by queueing that worker's next task or
 reassigning it.
 
 The orchestrator does every build and test. It keeps every worker's next task
-queued, integrates submissions in batches with one collect-all pass, and lands
-each passing submission on `dev` as its own commit. At intake it runs a quick,
-narrow, targeted check of each submission with the current train's compiler
-and returns every finding to the worker as one list. Trains run continuously:
-when a train's preflight or census finds failures, it collects them all, their
-owners fix them all, and the train retests only the affected rows and
-continues. A failing submission is
-set aside without holding back the rest, and every failure goes back at once
-to the worker that owns it, as one list and that worker's top priority. The
-orchestration skill's intake reference defines the submission format, batch
-integration, and landing; the skill also covers briefs, liveness, proof
-cadence, recovery, and closure.
+queued and lands each passing submission on `dev` as its own commit. Landing
+runs one loop, never a train (owner order, 2026-11-11):
+
+1. **Land on targeted proof.** Each submission runs only its own named proof
+   lines with the current batch compiler, one or two submissions at a time. A
+   pass lands on `dev` at once; a failure goes straight back to its worker as
+   one list and that worker's top priority, and holds back nothing else. A
+   submission that changes the compiler, the runtime or Core and whose proof
+   needs a compiler built from it lands on its touched-file checks, and its
+   proof lines run on the next batch compiler.
+2. **Build a batch compiler.** About every 20 landings or two hours, the
+   orchestrator builds one compiler from the tip of `dev` with
+   `jet build --profile dev Compiler` and runs its self-check and the proof
+   lines waiting on it. It becomes the compiler every intake uses. If the build
+   breaks, the commit that broke it is reverted at once, so `dev` always builds.
+   Each batch compiler is a bisect point.
+3. **Sweep with the full suite.** Every three or four batch compilers, the
+   whole suite runs once in collect-all mode and is compared with the last full
+   run only. Every new failure is grouped by root, each root gets one owner,
+   and the whole list is fixed in one sweep. That swept compiler becomes the
+   owner's next a0.0.N release through `Tools/release/Main.jet` `admit`.
 
 Landing throughput is the measure of progress. These standing owner orders
 keep it high:
-- Two trains run in flight whenever memory allows, composed on disjoint paths
-  so a set-aside in one never recomposes the other.
-- A submission that changes no build input of the compiler, the runtime or
-  Core (docs, tool twins, gauntlet entries, review records, tests, examples
-  the last train's compiler already proves) is tested with that compiler and
-  lands on `dev` directly, without a train, within the hour.
 - A submission meets whole criteria and names each one with its exact proof
   command. Light work travels in its own submission, apart from compiler and
   Core changes, so it is never held by a build.
@@ -408,14 +411,10 @@ keep it high:
   each one meets.
 - Criteria that already hold on `dev` are found by sweep, proved and met
   directly, with no new code.
-- Every landed compiler train becomes the owner's next a0.0.N release:
-  `Tools/release/Main.jet` `admit` runs on the landed commit in the next free
-  build slot, so the owner always uses a compiler at most one train behind
-  `dev`.
 
 The orchestrator may name one Lander and one Closer. The Lander runs the
-batch, landing and seed loop in the orchestrator's place, as a rolling train
-that lands whatever passed and sets a failing submission aside. The Closer
+landing, batch-compiler and sweep loop in the orchestrator's place, landing
+whatever passed and sending every failure to its owner. The Closer
 takes the cards with the fewest open criteria, runs each criterion's proof,
 and hands the orchestrator the evidence. Tower writes, owner gates and
 dispatch stay with the orchestrator.
@@ -525,6 +524,26 @@ Broad suites, unfiltered censuses, and
 `Tools/agent/VerifyFull.jet` are milestone or release operations and need the
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
+
+**The owner's machine stays responsive.** This is a standing owner order:
+agent work froze the owner's desktop on 2026-11-11 and forced a power-off.
+The shared scratch disk is a slow drive, and a backlog of unwritten data on it
+stalls every program on the machine. So:
+
+- All agent work runs in the bounded agent slice, the same one the machine's
+  guard freezes when unwritten data or free memory threaten the desktop. Every
+  launched job (build, test, check or measurement) runs inside it; nothing runs
+  in the owner's session.
+- At most one heavy job runs on the machine at a time: a compiler build, a full
+  or sharded suite, a release admit or a timed measurement build. Only the
+  orchestrator or its Lander starts one. Workers run only touched-file checks
+  and single-file tests, one at a time.
+- No job traces a whole build (`strace -f`, `perf record -a` and the like), and
+  no tool reruns a check in a loop. A measurement takes its own turn in the
+  heavy-job slot; it never runs beside a build.
+- Before a heavy job starts, its launcher checks the machine: memory available
+  and unwritten data on disk. It waits, and never starts, while the guard holds
+  the agent slice frozen.
 
 Agent tooling lives in the repository: `Tools/agent/Chain.jet` (the self-host
 chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
