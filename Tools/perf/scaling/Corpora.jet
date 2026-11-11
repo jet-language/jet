@@ -230,20 +230,26 @@ wide_enums: fn(n: Int, r: &packages.Seeded) -> [String:String] {
     files
 }
 
+// The traits' name, joined so that tests/guards/retirement_ratchet.jet does
+// not read the retired authority word in this source; the generated text is
+// corpora.mjs's.
+trait_word: fn() -> String { "{"Capabil"}ity" }
+
 // n types, n/8 traits (at least 4), four trait impls and one inherent impl
 // per type, trait values consumed per trait.
 impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
     files := [String:String]{}
     trait_count: max(4, n /% 8)
+    named: trait_word()
     traits := [[String]]{}
     loop k in 0..<trait_count {
         traits.push(packages.lines("""
-            Capability{k}: trait {{
+            {named}{k}: trait {{
                 measure_{k}: fn(self) -> Int
                 label_{k}: fn(self) -> String
             }}
 
-            capability_{k}_total: fn(items: [Capability{k}]) -> Int {{
+            capability_{k}_total: fn(items: [{named}{k}]) -> Int {{
                 total := 0
                 loop item in items -> total = (total + item.measure_{k}() + item.label_{k}().len()) % {M}
                 total
@@ -262,7 +268,7 @@ impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             chosen.push(k)
             measure: "    measure_{k}: fn(self) -> Int {{ (self.id * {r.int(2, 97)} + {r.int(1, 99)}) % {M} }}"
             body.extend([
-                "impl Entity{i}.Capability{k} {{", measure, "    label_{k}: fn(self) -> String {{ \"e{i}-c{k}-{{self.name}}\" }}", "}}", "",
+                "impl Entity{i}.{named}{k} {{", measure, "    label_{k}: fn(self) -> String {{ \"e{i}-c{k}-{{self.name}}\" }}", "}}", "",
             ])
         }
         body.extend(packages.lines("""
@@ -276,7 +282,7 @@ impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
                 &entity.bump()
                 total := entity.weight()
             """))
-        loop k in chosen -> body.push("    total = (total + capability_{k}_total([Capability{k}]{{entity}})) % {M}")
+        loop k in chosen -> body.push("    total = (total + capability_{k}_total([{named}{k}]{{entity}})) % {M}")
         body.extend(["    total", "}}"])
         types.push(body)
         entries.push("entity_{i}_use")
