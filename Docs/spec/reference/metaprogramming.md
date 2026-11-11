@@ -373,6 +373,12 @@ generated module `name`, checked with the program like hand-written code.
 `authority: { deny: [Meta.Generate] }` refuses it wherever the root's build
 reaches it, a dependency's function included, and a dependency's own `allow`
 row widens nothing for its importer.
+`meta.rewrite_body(f, code)` replaces the body of the root package's own
+top-level function `f` with the statements of a `#code { statements }` block.
+The rewritten function, its own declaration with the new body, is the
+generated module `rewrite_body/f` of the value's target, checked with the
+program, and its original text is withdrawn from its file. It uses
+`Meta.Rewrite`, which a row denies with `-[!Meta.Rewrite]>`.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.
@@ -389,8 +395,9 @@ and rewrite written function bodies, each change rechecked with the callers it
 affects and recorded in a receipt that does not promise equivalence. Some
 limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
-facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`
-and `meta.add` are built; `meta.rewrite_body`, `meta.events` and the other
-operations on the value are ratified contract and not yet built.
+facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`,
+`meta.add` and `meta.rewrite_body` are built; pasting a body with `#{f.body}`,
+`meta.events` and the other operations on the value are ratified contract and
+not yet built.
 The source examples and the two executable registries linked above are the
 evidence; this page does not turn a schema row into an implementation claim.

@@ -1,0 +1,25 @@
+# #3526: `meta.rewrite_body(f, code)` on the root's
+# `Compiler` value replaces the body of the root package's function `f` with
+# the statements of a `#code { … }` block. The `good` build rewrites
+# `greeting`; the program runs the new body, and the function after it in the
+# same file is unchanged. The rewritten function is the generated module
+# `rewrite_body/greeting.jet`. Replacing a body uses `Meta.Rewrite`, so the
+# `denied` build's `-[!Meta.Rewrite]>` row refuses the call and nothing is
+# built. The `unnamed` build passes a local value, not a top-level function.
+fixture: rewrite_body_replaces_a_function_body.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build good/main.jet --write-generated=on
+exit: 0
+file: good/.jet/generated/main/rewrite_body/greeting.jet ~ "greeting: fn() {" # the rewritten function is a generated module
+step: {work}/good/.jet/build/app
+exit: 0
+stdout: = "rewritten by the build\nthe rest of the file stays\n"
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ "reaches the `Meta.Rewrite` effect, which it prohibits with `-[!Meta.Rewrite]>`" # the row's denial wins
+file: denied/.jet/build/app absent
+step: jet build unnamed/main.jet
+exit: 1
+stderr: ~ "`meta.rewrite_body` needs a top-level function's name" # a local value names no function
+file: unnamed/.jet/build/app absent

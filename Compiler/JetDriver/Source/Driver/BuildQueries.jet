@@ -278,16 +278,23 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     finished: build_session_finish(session, value)
     loop error in finished.diagnostics -> ran.push(jet_eval_build_session_diagnostic(error))
     plan: finished.plan.move() ?? return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+    // The selected generated modules, owned by the build's package: the
+    // final checked bundle below and every target compile of the plan
+    // (the response's `generated`) load them beside the package's sources.
+    selected_generated: build_plan_selected_generated(plan)
+    generated := [JetDriverGeneratedModule]{}
+    loop generated_row in selected_generated {
+        row: jet_driver_build_generated_row(generated_row, package, sources.modules) ?? {
+            function: generated_row.rewrites ?? ""
+            ran.push(jet_driver_diagnostic_without_span("E3502", "`meta.rewrite_body` names `{function}`, which is no function of this package with a braced body", "a body rewrite replaces the body of one of the root package's own top-level functions", "pass a function this package declares with a `{{ … }}` body"))
+            next
+        }
+        generated.push(row)
+    }
     if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
     loop error in ran -> errors.push(error)
-    // The selected generated modules, owned by the build's package: the
-    // final checked bundle below and every target compile of the plan
-    // (the response's `generated`) load them beside the package's sources.
-    // copy: each row's texts are views of the plan, which stays whole.
-    selected_generated: build_plan_selected_generated(plan)
-    generated: loop generated_row in selected_generated -> JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()}
     // The final ordinary checked bundle, not the staging build callable,
     // owns all source/generated identities, even when no output was generated.
     original_generated_count: request.generated_modules.len()
@@ -340,18 +347,73 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
 }
 // A report in a module `b.generate` made names the build file call that
 // made it, as its note (`detail`); the report itself names the module's
-// virtual source.
+// virtual source. A report in a rewritten function names the rewrite.
 jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String, rows: [BuildSessionGeneratedModule], build_path: String, build_source: String) Never! {
     loop index in 0..<diagnostics.len() {
         if diagnostics[index].detail != None -> next
         note := String?{None}
         loop row in rows {
             if diagnostics[index].source_path != Val(jet_driver_generated_module_path(package, row.path)) -> next
-            note = Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module")
+            note = if row.rewrites == .Val(function) -> { Val(" Note: `meta.rewrite_body` gave `{function}` this body") } else -> { Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module") }
             break
         }
         diagnostics[index].detail = note
     }
+}
+// The response row of one selected generated module. A `meta.rewrite_body`
+// row becomes its function, the declaration's own text up to its body with
+// the new body, which replaces the declaration in the package's own file
+// (the loader blanks it there). None when the package declares no top-level
+// function of that name with a braced body.
+jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
+    // copy: each row's texts are views of the plan, which stays whole.
+    function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy()})
+    loop module_row in modules {
+        if module_row.package_identity != package -> next
+        loop item in module_row.program.items {
+            if item == .Func(declared) && declared.name == function {
+                bytes: module_row.source.bytes()
+                open: jet_driver_function_body_open(bytes, declared.name_span.end, declared.span.end) ?? return None
+                head: String.from_bytes(bytes[declared.span.start..<open]) ?? return None
+                lines := row.source.split("\n").to_list()
+                loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
+                text := "{head}{{\n"
+                loop line in lines {
+                    text = if line.trim() == "" -> "{text}\n" else -> "{text}    {line}\n"
+                }
+                text = "{text}}}\n"
+                return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end})})
+            }
+        }
+    }
+    None
+}
+// The offset of the `{` that opens a function's braced body in `bytes`: the
+// first brace after its name (`after`) outside parentheses, brackets, string
+// literals and line comments, before the declaration's closing `}` at
+// `end - 1`. None for a declaration that ends in no braced body.
+jet_driver_function_body_open: fn(bytes: [U8], after: Int, end: Int) -> Int? Never! {
+    if end <= after || end > bytes.len() || bytes[end - 1] != 125 -> return None
+    depth := 0
+    quoted := false
+    at := after
+    loop at < end - 1 {
+        byte: bytes[at]
+        if quoted {
+            if byte == 92 -> at += 1
+            if byte == 34 -> quoted = false
+        } else {
+            if byte == 47 && at + 1 < end && bytes[at + 1] == 47 {
+                loop at < end - 1 && bytes[at] != 10 -> at += 1
+            }
+            if byte == 34 -> quoted = true
+            if byte == 40 || byte == 91 -> depth += 1
+            if byte == 41 || byte == 93 -> depth -= 1
+            if byte == 123 && depth == 0 -> return Val(at)
+        }
+        at += 1
+    }
+    None
 }
 // The package a build session spells its `.jet/generated/<package>/` and
 // contribution sources with: a manifest package's identity, or, for a build

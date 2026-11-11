@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, Expr, Item, NamedCtValue, ParamZone, Span, TComptimeField, TComptimeValue, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, type_name]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, Expr, Item, NamedCtValue, ParamZone, Span, Stmt, SymbolKind, TComptimeField, TComptimeValue, Type, ast_empty_call_arg_flags, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -212,7 +212,9 @@ sema_build_compiler_site: fn(environment: SemaScopeEnvironment, span: Span, diag
 
 // `#code { items }`: a `Code` value holding its items formatted as source,
 // expanded by the same path as a `b.generate` template. The items are
-// checked where the value lands, with the program (`meta.add`).
+// checked where the value lands, with the program (`meta.add`). A block of
+// statements alone is a body (`meta.rewrite_body`): its statements are
+// formatted as written, never run as template statements.
 sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     body := [DeriveBodyItem]?{None}
     if call.args.len() == 1 -> body = call.args[0].flags.template_items
@@ -220,23 +222,53 @@ sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnv
         diagnostics.push(sema_error("E3502", call.name_span, "`#code` needs one item block", "a `Code` value is the items written in its block", "write `#code {{ ... }}`"))
         return None
     }
-    items: sema_derive_expand_template_body(items_written, [NamedCtValue]{}, diagnostics) ?? return None
-    source: TComptimeField{name: "source", value: TComptimeValue.String{value: sema_build_generate_format(items)}}
+    statements := [Stmt]{}
+    loop written in items_written {
+        if written == .Stmt(statement) -> statements.push(statement.copy()) else -> break
+    }
+    text := ""
+    if items_written.len() > 0 && statements.len() == items_written.len() {
+        text = sema_build_code_statements(statements)
+    } else {
+        items: sema_derive_expand_template_body(items_written, [NamedCtValue]{}, diagnostics) ?? return None
+        text = sema_build_generate_format(items)
+    }
+    source: TComptimeField{name: "source", value: TComptimeValue.String{value: text}}
     value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source}}
     node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, Span{start: call.name_span.start, end: call.args[0].span.end})
     sema_expr_expected(node, expected, environment, program, diagnostics)
 }
 
+// Statements formatted as a function body's lines, unindented: the formatter
+// writes them inside a function, whose first and last lines are dropped.
+sema_build_code_statements: fn(statements: [Stmt]) -> String {
+    wrapper := ast_func("code", Span{start: 0, end: 0}, Span{start: 0, end: 0})
+    wrapper.body = statements.copy()
+    lines := sema_build_generate_format([Item]{Item.Func{value: wrapper}}).split("\n").to_list()
+    loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
+    if lines.len() < 2 -> return ""
+    text := ""
+    loop index in 1..<(lines.len() - 1) {
+        line: lines[index]
+        body_line: if line.starts_with("    ") -> line.removeprefix("    ") else -> line.copy()
+        text = "{text}{body_line}\n"
+    }
+    text
+}
+
 // A call on the root's `Compiler` value. `meta.add(code, scope: name)` adds
 // a `Code` value's items as the generated module `name` of the value's
 // target, checked with the program like hand-written code (JetBuildSession
-// `compiler.add`).
+// `compiler.add`). `meta.rewrite_body(f, code)` replaces the body of the
+// root package's top-level function `f` with a `Code` value's statements
+// (JetBuildSession `compiler.rewrite_body`).
 sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed: SemaMethodSpecialCheck{handled: true, value: None}
+    if method == "rewrite_body" -> return sema_call_compiler_rewrite_body(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
-        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`"))
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}` or `meta.rewrite_body(f, #code {{ ... }})`"))
         return failed
     }
     code := CallArg?{None}
@@ -286,6 +318,54 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     // unless the calling function's row denies it.
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.{method}", span, [EffectRowEntry]{EffectRowEntry{name: META_GENERATE, span: span}}, diagnostics) -> return failed
     value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `meta.rewrite_body(f, #code { statements })`: `f` names a top-level
+// function, sent as its name; the build replaces the body of the root
+// package's function of that name (JetDriver BuildQueries.jet), so naming
+// it lends nothing and moves nothing. Replacing a body uses `Meta.Rewrite`.
+sema_call_compiler_rewrite_body: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    shape: "meta.rewrite_body(f, #code {{ ... }})"
+    if args.len() != 2 {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.rewrite_body` expects a function and a `Code` value", "`meta.rewrite_body` replaces the body of one function with the statements of one `Code` value", "write `{shape}`"))
+        return failed
+    }
+    loop argument in args {
+        if argument.label != None || argument.spread || argument.flags.template_items != None {
+            diagnostics.push(sema_error("E0764", argument.span, "`Compiler.rewrite_body` doesn't take this argument", "`meta.rewrite_body` takes a function's name and one `Code` value, both unlabeled", "write `{shape}`"))
+            return failed
+        }
+    }
+    function := ""
+    if args[0].expr == .Ident(name, _, _) -> function = name.copy()
+    // Only a body binding is a local; the root frame holds the module's
+    // items and imports.
+    local := false
+    if function != "" && sema_scope_resolve_index(scopes, function) == .Val(index) -> local = scopes.frames[scopes.bindings[index].frame].parent >= 0
+    top_level := false
+    if function != "" && !local && program.registration_graph == .Val(graph) {
+        if sema_registration_lookup_name(graph, environment.module_identity, function) == .Val(resolved) -> top_level = sema_resolved_kind(graph, resolved) == SymbolKind.Function
+    }
+    if !top_level {
+        diagnostics.push(sema_error("E0764", args[0].span, "`meta.rewrite_body` needs a top-level function's name", "a body rewrite replaces the body of one function the root package declares, named directly", "pass a top-level function, as in `{shape}`"))
+        return failed
+    }
+    ordinary := [CallArg]{args[1].copy()}
+    code: sema_check_expression(args[1].expr, Val(Type.Named{name: "Code"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    compatible: sema_call_type_assignable(Type.Named{name: "Code"}, code.ty, environment, program) ?? return failed
+    if !compatible {
+        diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code.ty, args[1].span))
+        return failed
+    }
+    params := [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(code.ty), variadic: false}}
+    ownership: sema_ownership_check_method_call(state, "Compiler.rewrite_body", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.rewrite_body", span, [EffectRowEntry]{EffectRowEntry{name: META_REWRITE, span: span}}, diagnostics) -> return failed
+    // The session reads the function's name, then the `Code` value.
+    name: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: function}}}, args[0].span)
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "rewrite_body", args: [TExpr]{name, code}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

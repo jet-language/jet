@@ -483,7 +483,14 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                 if unit.source_origin == SemaSourceOrigin.Snapshot {
                     if unit.file_index < 0 || unit.file_index >= root.files.len() -> return [JetDriverDocModule]{}
                     file: root.files[unit.file_index]
-                    if jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), file.path) != unit.path || file.source != source -> return [JetDriverDocModule]{}
+                    if jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), file.path) != unit.path -> return [JetDriverDocModule]{}
+                    // A file with a function a `meta.rewrite_body` module
+                    // replaces was checked with that function withdrawn.
+                    if jet_driver_file_has_replaced(request, file.path) {
+                        if jet_driver_withdraw_replaced(request, file.path, file.source) != source -> return [JetDriverDocModule]{}
+                    } else {
+                        if file.source != source -> return [JetDriverDocModule]{}
+                    }
                     physical_path = file.path
                 } else {
                     if unit.file_index != -1 || unit.source_origin != SemaSourceOrigin.CompilerGenerated -> return [JetDriverDocModule]{}

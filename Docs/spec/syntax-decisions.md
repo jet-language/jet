@@ -50,7 +50,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `#program` | compiler authorized checked-program fact value |
 | `#here` | site value: the `SourceLocation` (file, line, column, function, module) where it is written, as in `#here.line` and `#here.file` |
 | `#caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{#caller}` or inside an #Expand macro |
-| `#code` | `Code` value: `#code { items }` holds the items written in its block, which `meta.add(code, scope: "name")` on the root's `Compiler` value adds to its target as the generated module `name` |
+| `#code` | `Code` value: `#code { items }` holds the items written in its block, which `meta.add(code, scope: "name")` on the root's `Compiler` value adds to its target as the generated module `name`; a block of statements alone is a body for `meta.rewrite_body(f, code)` |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |

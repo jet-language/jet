@@ -5795,6 +5795,16 @@ block, and `meta.add(code, scope: "name")` adds them to the value's target as
 the generated module `name`, which the program checks like hand-written code.
 `meta.add` writes declarations, so it uses the `Meta.Generate` effect: allowed
 unless the calling function's row denies it (`-[!Meta.Generate]>`).
+`meta.rewrite_body(f, code)` replaces the body of the root package's
+top-level function `f` with the statements of a `#code { statements }` block.
+The function keeps its own declaration up to its body and becomes the
+generated module `rewrite_body/f` of the value's target; its original text is
+withdrawn from its file, whose other code keeps its place. The new body is
+checked like hand-written code, in that module, which sees the package's
+declarations. `f` is named directly; a local value is refused, and a function
+the package doesn't declare with a braced body fails the build (E3502). One
+build rewrites a function's body once. Replacing a body uses the
+`Meta.Rewrite` effect, denied the same way (`-[!Meta.Rewrite]>`).
 
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`

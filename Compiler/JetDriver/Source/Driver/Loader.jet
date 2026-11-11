@@ -3870,7 +3870,29 @@ jet_driver_source_unit_text: fn(request: JetDriverCompileRequest, unit: JetDrive
     if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
     files: request.authorized_sources.roots[unit.root_index].files
     if unit.file_index < 0 || unit.file_index >= files.len() -> return None
+    if jet_driver_file_has_replaced(request, files[unit.file_index].path) -> return Val(jet_driver_withdraw_replaced(request, files[unit.file_index].path, files[unit.file_index].source))
     Val(files[unit.file_index].source)
+}
+// Whether a `meta.rewrite_body` module replaces a function of the
+// authorized file at `path` (JetDriverReplacedFunction).
+jet_driver_file_has_replaced: fn(request: JetDriverCompileRequest, path: String) -> Bool Never! {
+    loop generated in request.generated_modules {
+        if generated.replaces == .Val(replaced) && replaced.path == path -> return true
+    }
+    false
+}
+// `source`, the authorized file at `path`, with each function a
+// `meta.rewrite_body` module replaces blanked.
+jet_driver_withdraw_replaced: fn(request: JetDriverCompileRequest, path: String, source: String) -> String Never! {
+    bytes := source.bytes()
+    loop generated in request.generated_modules {
+        replaced: generated.replaces ?? next
+        if replaced.path != path || replaced.start < 0 || replaced.end > bytes.len() || replaced.start >= replaced.end -> next
+        jet_driver_blank_bytes(bytes, replaced.start, replaced.end)
+    }
+    // A replaced function starts and ends at ASCII bytes, and every byte
+    // between becomes a space or keeps its line ending, so the text stays UTF-8.
+    String.from_bytes(bytes) ?? source.copy()
 }
 // Whether `relative_path` is a package's `package.jet` whose `source` declares
 // a top-level `build: fn` beside its manifest blocks.

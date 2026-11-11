@@ -160,13 +160,19 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 
 // A call on the root's `Compiler` value, the value first. `meta.add` sends
 // its `Code` value's formatted items as the generated source and the scope
-// it joins (JetBuildSession `compiler.add`).
+// it joins (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
+// function's name and its `Code` value's formatted statements as the new
+// body (JetBuildSession `compiler.rewrite_body`).
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
-    if member != "Compiler.add" || args.len() != 3 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
+    if (member != "Compiler.add" && member != "Compiler.rewrite_body") || args.len() != 3 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
     compiler: jet_eval_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
-    source: jet_driver_code_source(args[1]) ?? return jet_driver_build_host_failure(session, span, "`meta.add` received code without its items")
-    scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`meta.add`'s scope must be a string")
-    reply: build_session_call(session, "compiler.add", [BuildSessionValue]{compiler, scope}, Val(source), false, span.start, span.end)
+    rewrite: member == "Compiler.rewrite_body"
+    code_index: if rewrite -> 2 else -> 1
+    text_index: if rewrite -> 1 else -> 2
+    source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
+    text: jet_eval_build_session_input(args[text_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+    method: if rewrite -> "compiler.rewrite_body" else -> "compiler.add"
+    reply: build_session_call(session, method, [BuildSessionValue]{compiler, text}, Val(source), false, span.start, span.end)
     if reply == {
         .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}
         .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}

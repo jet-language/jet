@@ -178,6 +178,15 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                 generated = build_plan_generated(plan)
                 // copy: `query` is returned whole to report a failure above.
                 target_generated = query.generated.copy()
+                // A `meta.rewrite_body` row's plan source is the new body
+                // alone; it is written and locked as the whole function the
+                // target compiles load.
+                loop index in 0..<generated.len() {
+                    if generated[index].rewrites == None -> next
+                    loop module_row in target_generated {
+                        if module_row.relative_path == generated[index].path -> generated[index].source = module_row.source.copy()
+                    }
+                }
             }
         }
     }

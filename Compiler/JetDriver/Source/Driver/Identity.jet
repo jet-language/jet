@@ -237,6 +237,18 @@ JetDriverGeneratedModule: struct {
     name: String
     relative_path: String
     source: String
+    // A `meta.rewrite_body` module holds a function that replaces one in an
+    // authorized file: the loader blanks that function there.
+    replaces: JetDriverReplacedFunction?{None}
+}
+
+// The bytes `start..<end` of the authorized file at `path` (its physical
+// path), a function declaration a generated module replaces. Blanking keeps
+// every other offset in the file, so its other reports stay in place.
+JetDriverReplacedFunction: struct {
+    path: String
+    start: Int
+    end: Int
 }
 
 JetDriverCompileRequest: struct {
