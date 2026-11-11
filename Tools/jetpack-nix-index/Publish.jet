@@ -11,7 +11,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 OPTIONS: ["--target-root", "--manifest", "--manifest-request", "--destination", "--sign-index", "--sign-manifest", "--upload"]
@@ -29,8 +28,8 @@ run: fn() {
     if publish(process.args()) == {
         .Ok(_) -> print("published immutable targets, then manifest")
         .Err(error) -> {
-            if error.message != "" -> term.eprint(error.message)
-            process.exit(error.code)
+            if error.message == "" -> process.exit(error.code)
+            process.fail(error.code, error.message)
         }
     }
 }

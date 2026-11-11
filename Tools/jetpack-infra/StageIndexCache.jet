@@ -17,7 +17,6 @@ use {
     process: core.process
     random: core.crypto.random
     sys: core.sys
-    term: core.term
 }
 
 TOOL: "/Tools/jetpack-infra/StageIndexCache.jet"
@@ -149,15 +148,7 @@ Listing: struct {
     snapshot: files.Stat
 }
 
-run: fn() {
-    if main(process.args()) == {
-        .Ok(_) -> {}
-        .Err(error) -> {
-            term.eprint("stage-index-cache: {error.message}")
-            process.exit(1)
-        }
-    }
-}
+run: fn() { main(process.args()) ?? process.fail(1, "stage-index-cache: {err.message}") }
 
 main: fn(args: [String]) -[Env, Exec, FS, IO, Rand]> StageError! {
     ensure_descriptor_fs() ?? return Err(err)

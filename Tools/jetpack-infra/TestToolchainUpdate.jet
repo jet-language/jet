@@ -13,7 +13,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -48,19 +47,12 @@ Proof: struct {
 
 run: fn() {
     jet: sys.get("JET") ?? ""
-    if jet == "" {
-        term.eprint("JET must name the admitted native jet compiler")
-        process.exit(1)
-    }
+    if jet == "" -> process.fail(1, "JET must name the admitted native jet compiler")
     if !files.is_file(jet) || !files.can_execute(jet) {
-        term.eprint("missing {jet}; build jet first")
-        process.exit(1)
+        process.fail(1, "missing {jet}; build jet first")
     }
     repo: repo_root()
-    if repo == "" {
-        term.eprint("TestToolchainUpdate: no checkout holds {TOOL}")
-        process.exit(1)
-    }
+    if repo == "" -> process.fail(1, "TestToolchainUpdate: no checkout holds {TOOL}")
     work: "{scratch_root()}/toolchain-update-{sys.getpid()}"
     proof: Proof{jet: jet, stager: "{repo}{STAGER}", work: work, stage: "{work}/site", root: "{work}/root"}
     if prove(proof) == {
@@ -70,8 +62,7 @@ run: fn() {
         }
         .Err(error) -> {
             clean(work)
-            term.eprint(error.message)
-            process.exit(1)
+            process.fail(1, error.message)
         }
     }
 }
