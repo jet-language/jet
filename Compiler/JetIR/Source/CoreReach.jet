@@ -644,10 +644,12 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 
 // Which checked functions to lower: one flag per row of `functions`, read in
 // place (never copied). Only rows flagged in `candidates` take part: every
-// candidate outside `core_module_identities` (the entry package's code) is a
-// root, and a top-level candidate of a listed module (Core source, including a
-// compiler-private part's receiver function, or a dependency package) is kept
-// only when a kept body names it. Authored Core
+// candidate outside `core_module_identities` is a root, and a top-level
+// candidate of a listed module (Core source, including a compiler-private
+// part's receiver function, a dependency package, or under `dead_code:
+// remove` the entry package's own) is kept only when a kept body names it or
+// its key is in `rooted_keys` (the entry package's entry, jobs and exports;
+// Pipeline.jet jet_driver_entry_root_keys). Authored Core
 // methods stay rooted because Codegen resolves their implicit uses (`close`,
 // `display`, index hooks, trait dispatch) by owner type rather than by a key
 // in the caller's body. The closed precise-operation source registry
@@ -667,7 +669,7 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // Reachability is a closure, so the flags are the same for any thread
 // count. `functions` leaves for the threads and comes back unchanged.
 // `decls` is the run's declaration table the direct calls name.
-ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [String], threads: CompilerThreads) -> [Bool] {
+ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [String], rooted_keys: [String:Bool], threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [String:Bool]{}
     loop identity in core_module_identities -> core_modules[identity] = true
@@ -693,7 +695,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &
         }
         if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) || ir_args_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
         // A startup function runs before the entry (ir_entry_function), read or not.
-        rooted: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
+        rooted: !core_modules.has_key(function.module_identity) || rooted_keys.has_key(function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
         reachable.push(rooted)
         if rooted {
             roots.push(index)

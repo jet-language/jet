@@ -1647,6 +1647,10 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
             compiled_request := contributed.request.move()
             if entry != None -> compiled_request.selected_entry = entry.copy()
+            // `dead_code: remove` lowers only the entry package's reached
+            // bodies; `keep` lowers them all, so the image can carry them
+            // (Host.jet jet_cli_ir_checks).
+            compiled_request.lower_reached_only = build_options_value(options, "dead_code") == "remove"
             // A single program compile without a named start function is a
             // singular intent: sema selects its entry in the decided order
             // (explicit address, legacy `run: fn`, sole compatible Output,

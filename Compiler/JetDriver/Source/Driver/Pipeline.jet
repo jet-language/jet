@@ -2964,6 +2964,76 @@ jet_driver_prunable_dependency_modules: fn(load: JetDriverLoadResult, modules: [
     identities
 }
 
+// The entry package's own modules (a source root's loose files among them),
+// whose top-level bodies `dead_code: remove` lowers only when the entry's
+// roots (jet_driver_entry_root_keys) reach them, as a dependency's are. Core
+// source is listed apart (jet_driver_prunable_core_modules); a module with
+// foreign rows stays rooted, as in Core.
+jet_driver_prunable_entry_modules: fn(load: JetDriverLoadResult, modules: [SemaGraphModuleResult]) -> [String] Never! {
+    identities := [String]{}
+    loop semantic_module in modules {
+        if semantic_module.foreign_functions.len() > 0 || semantic_module.foreign_providers.len() > 0 -> next
+        loop module_row in load.modules {
+            if module_row.module_identity != semantic_module.module_identity -> next
+            if module_row.source_unit_index >= 0 && jet_driver_unit_is_core(load.source_units[module_row.source_unit_index]) -> next
+            if module_row.package_identity == load.package_identity || module_row.package_identity.starts_with("source-root:") -> identities.push(semantic_module.module_identity)
+        }
+    }
+    identities
+}
+
+// The functions of `modules` (jet_driver_prunable_entry_modules) that
+// `dead_code: remove` lowers with no call reaching them: the entry
+// `entry_key` and the functions entry resolution names beside it (the entry
+// module's `run`, which a typed CLI's generated `__jet_cli_run` may never
+// call, and each selected Output's function, whose generated wrapper may be
+// the entry; jet_driver_resolve_entry_key); every function the compiler
+// generated or injected (a `__jet_` name, as the typed CLI's run and parse,
+// and the Prelude error conversions a `?` calls) or that is a `#Job`
+// (ir_entry_function selects one by the program's first word), scheduled by
+// `#Every`, in a web partition or under any other marker (an `#Export(c)`
+// function among them), since a host, a scheduler or a generated table runs
+// it by name; and every function a foreign call or C handle names as its
+// callback, `#Close` or `undo` inverse. A callback Jet code passes is reached
+// through the function value its taker names.
+jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [String], semantic_graph: SemaGraphResult, entry_module_identity: String, entry_key: String?) -> [String:Bool] Never! {
+    listed := [String:Bool]{}
+    loop identity in modules -> listed[identity] = true
+    roots := [String:Bool]{}
+    if entry_key == .Val(key) -> roots[key] = true
+    roots[symbol_id(SymbolKind.Function, entry_module_identity, "", "run").key] = true
+    loop registration_module in graph.modules {
+        if !listed.has_key(registration_module.module_identity) -> next
+        loop row in registration_module.functions {
+            declaration: row.declaration
+            if declaration.compiler_generated || declaration.name.starts_with("__jet_") || declaration.is_job || declaration.every != None || declaration.web_marker != None || declaration.markers.len() > 0 -> roots[row.symbol.id.key] = true
+        }
+    }
+    loop semantic_module in semantic_graph.modules {
+        loop constant in semantic_module.constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                if !output.selected || output.kind == OutputKind.Check || output.module_id < 0 || output.module_id >= semantic_graph.modules.len() -> next
+                roots[symbol_id(SymbolKind.Function, semantic_graph.modules[output.module_id].module_identity, "", output.semantic_name).key] = true
+            }
+        }
+        if listed.has_key(semantic_module.module_identity) {
+            loop key in semantic_module.injected_function_keys -> roots[key] = true
+        }
+        loop foreign in semantic_module.foreign_functions {
+            if foreign.callback_key == .Val(key) -> roots[key] = true
+            if foreign.close_function_key == .Val(key) -> roots[key] = true
+            if foreign.undo_function_key == .Val(key) -> roots[key] = true
+        }
+        loop provider in semantic_module.foreign_providers {
+            loop handle in provider.handles {
+                if handle.close_function_key == .Val(key) -> roots[key] = true
+                if handle.undo_function_key == .Val(key) -> roots[key] = true
+            }
+        }
+    }
+    roots
+}
+
 // The Core functions and methods a compile that lowers checks up front under
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
 // top-level functions lowering keeps with no keyed call in a checked body
@@ -4246,7 +4316,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
 
     // From here on the registration graph is read only for the entry
-    // module's C export rows and the Rust foreign facts; its declaration
+    // module's C export rows, the entry package's lowering roots and the
+    // Rust foreign facts; its declaration
     // table moves on with the checked functions, whose direct calls name it.
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.registration")
     c_export_rows: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
@@ -4255,13 +4326,24 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     budget_spans: jet_driver_effect_budget_name_spans(load, registration_graph)
     // A user module only compile-time code uses is left out like an
     // unreached Core module, and a dependency package's top-level bodies are
-    // lowered only when reached, as Core's are; a Test compile keeps every
-    // module's bodies, and the Core unit a `jet test` of a Core source runs is
-    // rooted whole, as an entry is, so its #Test bodies lower.
+    // lowered only when reached, as Core's are; under `dead_code: remove` on
+    // the executable route the entry package's are too, from its roots
+    // (jet_driver_entry_root_keys: the entry resolves here over every checked
+    // function, its diagnostics left to the resolution after lowering). A Test
+    // compile keeps every module's bodies, and the Core unit a `jet test` of a
+    // Core source runs is rooted whole, as an entry is, so its #Test bodies
+    // lower.
     prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
+    entry_roots := [String:Bool]{}
     if request.mode != JetDriverCompileMode.Test {
         loop identity in registration_graph.comptime_only_modules -> prunable_modules.push(identity)
         loop identity in jet_driver_prunable_dependency_modules(load, runtime_semantic_modules) -> prunable_modules.push(identity)
+    }
+    if request.mode == JetDriverCompileMode.Program && request.lower_reached_only {
+        entry_modules: jet_driver_prunable_entry_modules(load, runtime_semantic_modules)
+        unreported := [Diagnostic]{}
+        entry_roots = jet_driver_entry_root_keys(registration_graph, entry_modules, checked_graph, load.entry_module_identity, jet_driver_resolve_entry_key(load, checked_graph, checked_functions, runtime_semantic_modules, unreported))
+        loop identity in entry_modules -> prunable_modules.push(identity)
     }
     if request.core_tests != "" {
         tested: jet_driver_test_modules(load, request.core_tests)
@@ -4280,7 +4362,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // #3980: lower only the Core source bodies the program reaches (Rust
     // reference lowering's `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(checked_functions, decls, lowering_candidates, prunable_modules, request.compiler_threads)
+    lowering_rows := ir_reachable_core_rows(checked_functions, decls, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads)
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}
     jet_driver_partition_checked_functions(checked_functions, lowering_rows, sema_functions, unlowered_functions)

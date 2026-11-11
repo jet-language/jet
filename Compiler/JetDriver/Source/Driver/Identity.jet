@@ -300,6 +300,12 @@ JetDriverCompileRequest: struct {
     // A shipped artifact (`jet build`): sema rejects every remaining `debug`
     // trace (E3405), as a release-profile compile does.
     artifact_build: Bool{false}
+    // `dead_code: remove` on the executable route (`jet build`, `jet run`, a
+    // script, `jet dev`): the entry package's top-level bodies lower only when
+    // its roots reach them (Pipeline.jet jet_driver_entry_root_keys), as a
+    // dependency's do. false lowers every one, as `dead_code: keep` and every
+    // other compile do.
+    lower_reached_only: Bool{false}
     // The OS an OS-less build option selects (`os: web`), which `#build.target.os`
     // folds on instead of the host triple's; empty for a native build.
     build_os: String{""}
