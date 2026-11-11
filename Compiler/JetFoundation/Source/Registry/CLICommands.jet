@@ -508,6 +508,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
             {name: "sync", usage: "sync", summary: "Apply typed managed environment files", handler: "Env", also_canonical_top_level: false},
             {name: "info", usage: "info", summary: "Show the typed environment plan", handler: "Env", also_canonical_top_level: false},
             {name: "fetch-toolchain", usage: "fetch-toolchain", summary: "Download this jet's C toolchain pack for offline C builds", handler: "Env", also_canonical_top_level: false},
+            {name: "vars", usage: "vars [--command=COMMAND] [--json] [-- FLAGS]", summary: "List the compiler controls with each one's value and the source that set it", handler: "Env", also_canonical_top_level: false},
         },
     },
     {
@@ -904,8 +905,9 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
 
 // Every jet flag: the fixed rows, with one row per build option
 // (BuildOptions.jet) after `--profile`, the short level flags `-O0`, `-O1`
-// and `-O2` after `--optimize`, and one per `jet test` setting
-// (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
+// and `-O2` after `--optimize`, one per `jet test` setting
+// (TestSettings.jet) after `--explain-partition`, and one per compiler
+// control (CLIControls.jet) after `--threads`. A setting whose flag is a
 // fixed row shared with other commands keeps that row; one whose flag is a
 // build option's (`--optimize`) shares that option's row, which says both.
 JET_CLI_FLAGS: comptime { jet_cli_flag_rows() }
@@ -923,6 +925,9 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
                 if option.name != "optimize" -> next
                 loop (level, value) in option.values -> rows.push(JetCLIFlagSpec{long: "-O{level}", help: "Short form of {flag}={value}"})
             }
+        }
+        if spec.long == "--threads" {
+            loop control in JET_CLI_CONTROLS -> rows.push(jet_cli_control_flag_row(control))
         }
         if spec.long != "--explain-partition" -> next
         loop setting in JET_TEST_SETTINGS {
@@ -994,7 +999,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--deep-checks", help: "With run/dev/test/build: Keep every deep check, or with =<scope> (repeatable) those of one package, module, type or function, such as =tree.run", value: JetCLIFlagValue.Optional, typed: "operand"},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},
     {long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio"},
-    {long: "--gc-trace", help: "With run/dev: Record bounded automatic GC-promotion evidence"},
+    {long: "--command", help: "With env vars: List the controls as COMMAND sees them", value: JetCLIFlagValue.Value},
     {long: "--structural", help: "With diff/merge: Compare checked definitions by semantic identity"},
     {long: "--base-receipt", help: "With review: Proof receipt for the base change-set side", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--receipt", help: "With review: Proof receipt for the reviewed change-set side", value: JetCLIFlagValue.Value, typed: "operand"},
@@ -1212,9 +1217,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--set", help: "With build/run/dev/jobs/test/check: Set one declared package setting as key=value", value: JetCLIFlagValue.Repeated},
     // The compiler's thread cap; never the program's own threads.
     {long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads", value: JetCLIFlagValue.Value},
-    // The compiler's streaming trace (owner-directed 2026-10-16), the flag
-    // form of JET_TRACE_FILE.
-    {long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE", value: JetCLIFlagValue.Optional},
+    // The compiler controls' rows (CLIControls.jet) follow this one.
     {long: "--builder", help: "With build/jobs: Select a previously bound remote builder", value: JetCLIFlagValue.Value},
     // (c134 Phase 6): accessibility is an opt-in lint category.
     {long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},

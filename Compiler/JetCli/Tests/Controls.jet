@@ -1,0 +1,130 @@
+// Compiler controls (#6606): one value per control from its default, the
+// settings, its variable and its flag, the later one winning; a flag written
+// wrong or on a command that does not take it is refused at the front door;
+// `jet env vars` lists each control with the source that won.
+use {
+    jet_cli.[
+        JetCLIControlValue, JetCLIStatusValue, jet_cli_control_environment, jet_cli_control_resolve,
+        jet_cli_control_written, jet_cli_env_redact, jet_cli_env_vars_source, jet_cli_env_vars_table, jet_cli_plan,
+    ]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[JetCLIControlSpec, jet_cli_control_named]
+}
+
+controls_test_control: fn(name: String) -> JetCLIControlSpec Never! {
+    jet_cli_control_named(name) ?? panic("no control {name}")
+}
+
+// A value as the tests compare it: on, off, the text, the list joined with
+// `|`, `null`, or `none` for no value.
+controls_test_show: fn(value: JetCLIStatusValue?) -> String Never! {
+    given: value ?? return "none"
+    if given == {
+        .Bool(on) -> if on -> "on" else -> "off"
+        .Text(text) -> text.copy() // copy: the value keeps its text.
+        .Array(items) -> {
+            shown: loop item in items -> controls_test_show(Val(item.copy())) // copy: the list keeps its item.
+            shown.join("|")
+        }
+        .Null -> "null"
+        .Integer(_) | .Float(_) | .Object(_) -> "other"
+    }
+}
+
+// The value and source a resolved control shows.
+controls_test_resolved: fn(resolved: JetCLIControlValue) -> String Never! {
+    "{controls_test_show(Val(resolved.value.copy()))} from {jet_cli_env_vars_source(resolved.source)}" // copy: the caller keeps its value.
+}
+
+// The report code `argv` is refused with; any other plan fails the test.
+controls_test_refused: fn(argv: [String]) -> String Never! {
+    if jet_cli_plan(argv) == .Refused(report, _, code, _) {
+        assert_eq(code, JET_DRIVER_EXIT_USAGE)
+        return report.code.copy() // copy: the plan is dropped here.
+    }
+    panic("`jet {argv.join(" ")}` is refused")
+}
+
+#Test("a flag is written bare, with =off, or with its value, and a repeated flag adds up") {
+    keep_going: controls_test_control("keep_going")
+    assert_eq(controls_test_show(jet_cli_control_written(keep_going, [String]{"build", "x.jet"})), "none")
+    assert_eq(controls_test_show(jet_cli_control_written(keep_going, [String]{"--keep-going"})), "on")
+    assert_eq(controls_test_show(jet_cli_control_written(keep_going, [String]{"--keep-going", "--keep-going=off"})), "off")
+    assert_eq(controls_test_show(jet_cli_control_written(keep_going, [String]{"--keep-going=false", "--keep-going=true"})), "on")
+    assert_eq(controls_test_show(jet_cli_control_written(keep_going, [String]{"--", "--keep-going"})), "none")
+    trace: controls_test_control("trace")
+    assert_eq(controls_test_show(jet_cli_control_written(trace, [String]{"--trace"})), "on")
+    assert_eq(controls_test_show(jet_cli_control_written(trace, [String]{"--trace=off"})), "off")
+    assert_eq(controls_test_show(jet_cli_control_written(trace, [String]{"--trace=out.json"})), "out.json")
+    skip: controls_test_control("keep_going_skip")
+    assert_eq(controls_test_show(jet_cli_control_written(skip, [String]{"--keep-going-skip=a", "--keep-going-skip=b"})), "a|b")
+}
+
+#Test("a variable is on with 1 or true, and a list variable splits on commas") {
+    verify: controls_test_control("opt_verify")
+    assert_eq(controls_test_show(jet_cli_control_environment(verify, "1")), "on")
+    assert_eq(controls_test_show(jet_cli_control_environment(verify, "true")), "on")
+    assert_eq(controls_test_show(jet_cli_control_environment(verify, "0")), "off")
+    assert_eq(controls_test_show(jet_cli_control_environment(verify, "")), "none")
+    assert_eq(controls_test_show(jet_cli_control_environment(controls_test_control("opt_dump"), "main, helper,,")), "main|helper")
+}
+
+#Test("the flag beats the variable, the variable the settings, the settings the default") {
+    report: controls_test_control("keep_going_report")
+    settings: [String]{"--keep-going-report=settings.tsv"}
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(report, [String]{}, [String]{}, None)), "null from default")
+    assert_eq(controls_test_resolved(jet_cli_control_resolve(report, [String]{}, settings, None)), "settings.tsv from setting")
+    variable: jet_cli_control_resolve(report, [String]{}, settings, Val("env.tsv"))
+    assert_eq(controls_test_resolved(variable), "env.tsv from environment")
+    assert_eq(variable.location, "JET_KEEP_GOING_REPORT")
+    assert(!variable.shadowed, "a variable that wins is not hidden")
+    flag: jet_cli_control_resolve(report, [String]{"--keep-going-report=flag.tsv"}, settings, Val("env.tsv"))
+    assert_eq(controls_test_resolved(flag), "flag.tsv from flag")
+    assert(flag.shadowed, "the flag hides the variable")
+    empty: jet_cli_control_resolve(report, [String]{}, [String]{}, Val(""))
+    assert_eq(controls_test_resolved(empty), "null from default")
+    assert(!empty.shadowed, "an empty variable gives nothing to hide")
+}
+
+#Test("a control flag written wrong or on a command that does not take it is refused") {
+    assert_eq(controls_test_refused([String]{"check", "--keep-going=yes", "x.jet"}), "E2102")
+    assert_eq(controls_test_refused([String]{"build", "--keep-going-report", "x.jet"}), "E2104")
+    assert_eq(controls_test_refused([String]{"build", "--trace=", "x.jet"}), "E2104")
+    assert_eq(controls_test_refused([String]{"build", "--trace-detail=everything", "x.jet"}), "E2104")
+    assert_eq(controls_test_refused([String]{"build", "--opt-disable=no-such-pass", "x.jet"}), "E2104")
+    assert_eq(controls_test_refused([String]{"check", "--opt-dump=main", "x.jet"}), "E2102")
+}
+
+#Test("jet env vars lists the controls a command takes with the source that won") {
+    if jet_cli_plan([String]{"env", "vars", "--command=check", "--", "--keep-going", "--trace=out.json"}) == .Done(output) {
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+        lines: output.stdout.split("\n").to_list()
+        assert(lines[0].starts_with("FLAG"), "a header row comes first")
+        keep: lines.filter(line -> line.starts_with("--keep-going "))
+        assert_eq(keep.len(), 1)
+        assert(keep[0].contains("check.keep_going") && keep[0].contains(" on ") && keep[0].contains("flag"), "--keep-going is on from the flag: {keep[0]}")
+        assert_eq(lines.filter(line -> line.starts_with("--trace ") && line.contains("out.json")).len(), 1)
+        assert_eq(lines.filter(line -> line.starts_with("--opt-dump")).len(), 0)
+    } else {
+        panic("`jet env vars` lists the controls")
+    }
+    if jet_cli_plan([String]{"env", "vars", "--json"}) == .Done(output) {
+        assert(output.stdout.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"env.vars\",\"ok\":true"), "the env.vars status object: {output.stdout}")
+        assert(output.stdout.contains("\"name\":\"memory_ledger\""), "without --command every control is listed")
+    } else {
+        panic("`jet env vars --json` writes its status")
+    }
+    assert_eq(controls_test_refused([String]{"env", "vars", "--command=nope"}), "E2104")
+    assert_eq(controls_test_refused([String]{"env", "vars", "--", "--keep-going"}), "E2104")
+    assert_eq(controls_test_refused([String]{"env", "vars", "--command=check", "--", "--opt-dump=main"}), "E2102")
+}
+
+#Test("a URL's user and password never show") {
+    assert_eq(jet_cli_env_redact("https://user:secret@example.com/trace.json"), "https://***@example.com/trace.json")
+    assert_eq(jet_cli_env_redact("https://example.com/a@b"), "https://example.com/a@b")
+    assert_eq(jet_cli_env_redact("out/trace.json"), "out/trace.json")
+    report: controls_test_control("keep_going_report")
+    resolved: jet_cli_control_resolve(report, [String]{"--keep-going-report=s3://key:secret@bucket/r.tsv"}, [String]{}, None)
+    table: jet_cli_env_vars_table(None, [JetCLIControlValue]{resolved})
+    assert(!table.contains("secret") && table.contains("s3://***@bucket/r.tsv"), "the table hides the password: {table}")
+}

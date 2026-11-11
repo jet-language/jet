@@ -1,0 +1,370 @@
+// The compiler controls' values (#6606; the registry is
+// Compiler/JetFoundation/Source/Registry/CLIControls.jet). One control's
+// value is its default, then the command settings (CommandSettings.jet), then
+// its environment variable, then its flag typed on the command line: each
+// one replaces the value below it, and a repeated flag's values add up only
+// within the one place that wins. The reader of a control asks this process
+// for it (jet_cli_control), so no value is passed down to the compile that
+// reads it.
+use {
+    controls_process: core.process
+    controls_sys: core.sys
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[JET_CLI_CONTROLS, JetCLIControlSpec, JetCLIFlagValue, jet_cli_control_flag, jet_cli_control_flag_row, jet_cli_control_named, jet_cli_control_of_flag]
+    jet_ir.[IR_OPT_PASS_NAMES]
+}
+
+// Where a control's value came from, lowest first.
+JetCLIControlSource: enum {
+    Default
+    Setting
+    Environment
+    Flag
+}
+
+// One control's value: false or true, a string, a list of strings, or null
+// for a value nothing gave. `location` names the place `source` is: the
+// variable, the settings, or the command line. `variable` is the
+// environment's input when it is set, `shadowed` when a flag hides it.
+JetCLIControlValue: struct {
+    control: JetCLIControlSpec
+    value: JetCLIStatusValue
+    source: JetCLIControlSource
+    location: String
+    variable: String?
+    shadowed: Bool
+}
+
+// The value a control has when nothing gives it one: off, or an empty list.
+jet_cli_control_default: fn(control: JetCLIControlSpec) -> JetCLIStatusValue Never! {
+    if control.value == {
+        .Switch | .Bool -> jet_cli_status_bool(false)
+        .Repeated -> jet_cli_status_texts([String]{})
+        .Value | .Optional -> JetCLIStatusValue.Null
+    }
+}
+
+// The value `words` (a command line, or the words the settings write) give
+// `control`, or None when no word is its flag. Words after `--` are a
+// program's. A Bool flag is on bare or `=true`, off with `=off` or `=false`;
+// an Optional flag is on bare, off with `=off`, else its `=VALUE`; a later
+// flag wins, but a Repeated flag's values add up in order. The front door
+// refuses any other spelling first (jet_cli_control_refusal).
+jet_cli_control_written: fn(control: JetCLIControlSpec, words: [String]) -> JetCLIStatusValue? Never! {
+    flag: jet_cli_control_flag(control)
+    found := JetCLIStatusValue?{None}
+    items := [String]{}
+    loop word in words {
+        if word == "--" -> break
+        if word != flag && !word.starts_with("{flag}=") -> next
+        valued: word.len() > flag.len()
+        value: if valued -> word.slice(flag.len() + 1..<word.len()) else -> ""
+        if control.value == {
+            .Switch | .Bool -> found = Val(jet_cli_status_bool(!valued || value == "true"))
+            .Optional -> found = Val(if !valued -> jet_cli_status_bool(true) else if value == "off" -> jet_cli_status_bool(false) else -> jet_cli_status_text(value))
+            .Value -> found = Val(jet_cli_status_text(value))
+            .Repeated -> {
+                items.push(value)
+                found = Val(jet_cli_status_texts(items.copy())) // copy: later flags still add to the list.
+            }
+        }
+    }
+    found
+}
+
+// The value the environment's `input` for `control` gives, or None when it
+// is empty. A Bool is on with `1` or `true` and off otherwise; a Repeated
+// variable lists its values with commas.
+jet_cli_control_environment: fn(control: JetCLIControlSpec, input: String) -> JetCLIStatusValue? Never! {
+    if input == "" -> return None
+    if control.value == {
+        .Switch | .Bool -> Val(jet_cli_status_bool(input == "1" || input == "true"))
+        .Value | .Optional -> Val(jet_cli_status_text(input))
+        .Repeated -> {
+            items := [String]{}
+            loop item in input.split(",").to_list() {
+                if item.trim().len() > 0 -> items.push(item.trim())
+            }
+            Val(jet_cli_status_texts(items))
+        }
+    }
+}
+
+// `control`'s value given the words typed on the command line (`written`),
+// the words the settings write for this command (`settings`), and its
+// variable's input (`environment`).
+jet_cli_control_resolve: fn(control: JetCLIControlSpec, written: [String], settings: [String], environment: String?) -> JetCLIControlValue Never! {
+    from_variable: if environment == .Val(input) -> jet_cli_control_environment(control, input) else -> JetCLIStatusValue?{None}
+    if jet_cli_control_written(control, written) == .Val(value) {
+        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Flag, location: "command line", variable: environment.copy(), shadowed: from_variable != None} // copy: the caller keeps its control and input.
+    }
+    if from_variable == .Val(value) {
+        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Environment, location: control.variable.copy(), variable: environment.copy(), shadowed: false} // copy: the caller keeps its control and input.
+    }
+    if jet_cli_control_written(control, settings) == .Val(value) {
+        return JetCLIControlValue{control: control.copy(), value: value.copy(), source: JetCLIControlSource.Setting, location: "settings", variable: environment.copy(), shadowed: false} // copy: the caller keeps its control and input.
+    }
+    JetCLIControlValue{control: control.copy(), value: jet_cli_control_default(control), source: JetCLIControlSource.Default, location: "default", variable: environment.copy(), shadowed: false} // copy: the caller keeps its control and input.
+}
+
+// This jet process's words before its program's (Host.jet `jet_cli_main`).
+jet_cli_control_words: fn() -> [String] Never! {
+    words := [String]{controls_sys.executable()}
+    loop word in controls_process.args() -> words.push(word)
+    jet_cli_owned_flags(jet_cli_alias_args(words))
+}
+
+// The control `name` of this jet process: its command line and environment.
+jet_cli_control: fn(name: String) -> JetCLIControlValue Never! {
+    jet_cli_control_given(name, jet_cli_control_words())
+}
+
+// The control `name` given the command line `words` and this process's
+// environment.
+jet_cli_control_given: fn(name: String, words: [String]) -[Env]> JetCLIControlValue Never! {
+    control: jet_cli_control_named(name) ?? panic("`{name}` is not a compiler control")
+    jet_cli_control_resolve(control, words, [String]{}, controls_sys.get(control.variable))
+}
+
+// The file the Value or Optional control `name` names given the command
+// line `words`, else `fallback` (its default file; an Optional control on
+// alone names it too).
+jet_cli_control_path: fn(name: String, words: [String], fallback: String) -[Env]> String Never! {
+    if jet_cli_control_given(name, words).value == .Text(path) -> return path.copy() // copy: the value is dropped here.
+    fallback.copy() // copy: the caller keeps its default.
+}
+
+// Is the Bool control `name` on?
+jet_cli_control_on: fn(name: String) -> Bool Never! {
+    jet_cli_control(name).value == .Bool(true)
+}
+
+// The string the Value or Optional control `name` holds, if one.
+jet_cli_control_text: fn(name: String) -> String? Never! {
+    if jet_cli_control(name).value == .Text(text) -> return Val(text.copy()) // copy: the value is dropped here.
+    None
+}
+
+// The strings the Repeated control `name` holds.
+jet_cli_control_items: fn(name: String) -> [String] Never! {
+    items := [String]{}
+    if jet_cli_control(name).value == .Array(values) {
+        loop value in values {
+            if value == .Text(text) -> items.push(text.copy()) // copy: the value is dropped here.
+        }
+    }
+    items
+}
+
+// The front door's E2102 or E2104 for a control flag written wrong: a Bool
+// takes no value but `=off`, `=true` or `=false`; a Value or Repeated flag
+// needs its `=VALUE`, one of its choices when it has them (the optimizer's
+// pass names for `--opt-disable`); `--trace=` names no file. None when
+// `argument` is not a control flag or is written right.
+jet_cli_control_refusal: fn(argument: String, head: String, color: Bool) -> JetCLIPlan? Never! {
+    control: jet_cli_control_of_flag(head) ?? return None
+    valued: argument.len() > head.len()
+    value: if valued -> argument.slice(head.len() + 1..<argument.len()) else -> ""
+    if control.value == {
+        .Switch | .Bool -> {
+            if valued && value != "off" && value != "true" && value != "false" {
+                return Val(jet_cli_fail("E2102", "`{argument}` isn't a flag jet understands: `{head}` takes no value but `=off`", jet_cli_why("E2102"), "write `{head}` or `{head}=off`", color, JET_DRIVER_EXIT_USAGE))
+            }
+        }
+        .Optional -> {
+            if valued && value == "" {
+                return Val(jet_cli_fail("E2104", "`{head}=` needs a value", jet_cli_why("E2104"), "write `{head}` alone, `{head}=off`, or `{head}=VALUE`", color, JET_DRIVER_EXIT_USAGE))
+            }
+        }
+        .Value | .Repeated -> {
+            if value == "" {
+                return Val(jet_cli_fail("E2104", "`{head}` needs a value", jet_cli_why("E2104"), "write `{head}=VALUE`", color, JET_DRIVER_EXIT_USAGE))
+            }
+            choices: jet_cli_control_choices(control)
+            if choices.len() > 0 && !choices.contains(value) {
+                return Val(jet_cli_fail("E2104", "`{value}` isn't a value `{head}` takes", jet_cli_why("E2104"), "write `{head}=` and one of {choices.join(", ")}", color, JET_DRIVER_EXIT_USAGE))
+            }
+        }
+    }
+    None
+}
+
+// The values a control takes, when it names them: its registry row's, or
+// for `--opt-disable` the optimizer's pass names.
+jet_cli_control_choices: fn(control: JetCLIControlSpec) -> [String] Never! {
+    if control.name == "opt_disable" -> return IR_OPT_PASS_NAMES.copy() // copy: the optimizer keeps its list.
+    control.choices.copy() // copy: the registry keeps its row.
+}
+
+// `jet env vars [--command=COMMAND] [--json] [-- FLAGS]`: each compiler
+// control with its variable, its setting key, its value and the source that
+// gave it. With `--command`, only the controls COMMAND takes, as COMMAND
+// sees them with FLAGS typed on its command line; without it, every control
+// with no flag typed. A URL's user and password are never shown.
+jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, json: Bool) -[Env]> JetCLIPlan Never! {
+    usage: "write `jet env vars [--command=COMMAND] [--json] [-- FLAGS]`"
+    command := String?{None}
+    named := false
+    value_next := false
+    loop word in jet_argv {
+        if value_next {
+            command = Val(word.copy()) // copy: the argv keeps its word.
+            value_next = false
+            next
+        }
+        if !named {
+            named = word == "vars"
+            next
+        }
+        if word == "--command" {
+            value_next = true
+            next
+        }
+        if word.starts_with("--command=") {
+            command = Val(word.slice(10..<word.len()))
+            next
+        }
+        // A flag every command takes (`--json`, `--color`, `-q`).
+        if jet_cli_flag_spec(word.split("=").to_list()[0]) == .Val(spec) {
+            if jet_cli_flag_commands(spec.help) == None -> next
+        }
+        return jet_cli_fail("E2104", "`jet env vars` takes no `{word}`", jet_cli_why("E2104"), usage, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if value_next || (command ?? "-") == "" -> return jet_cli_fail("E2104", "`--command` needs a command", jet_cli_why("E2104"), "write `--command=build`, or leave it out to list every control", color, JET_DRIVER_EXIT_USAGE)
+    flags: passthrough ?? [String]{}
+    if command == .Val(word) {
+        if jet_cli_command_index(word) == None && jet_cli_word_group(word) == None {
+            return jet_cli_fail("E2104", "`{word}` isn't a jet command", jet_cli_why("E2104"), "write `--command=` and a command, such as `build`", color, JET_DRIVER_EXIT_USAGE)
+        }
+        loop argument in flags {
+            if argument == "--" -> break
+            head: argument.split("=").to_list()[0]
+            control: jet_cli_control_of_flag(head) ?? next
+            row: jet_cli_control_flag_row(control)
+            if !jet_cli_flag_takes(row, word) -> return jet_cli_misplaced_flag(head, word, jet_cli_flag_commands(row.help) ?? [String]{}, color)
+            if jet_cli_control_refusal(argument, head, color) == .Val(refusal) -> return refusal
+        }
+    } else if flags.len() > 0 {
+        return jet_cli_fail("E2104", "the flags after `--` are a command's, and `jet env vars` names no command", jet_cli_why("E2104"), "add `--command=COMMAND`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    values := [JetCLIControlValue]{}
+    loop control in JET_CLI_CONTROLS {
+        if command == .Val(word) {
+            if !jet_cli_flag_takes(jet_cli_control_flag_row(control), word) -> next
+        }
+        values.push(jet_cli_control_resolve(control, flags, [String]{}, controls_sys.get(control.variable)))
+    }
+    if json -> return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, values))}\n", "", JET_DRIVER_EXIT_OK)
+    jet_cli_done(jet_cli_env_vars_table(command, values), "", JET_DRIVER_EXIT_OK)
+}
+
+// A control's setting key under COMMAND (`build.keep_going`); without a
+// command, the key with `<command>` in its place.
+jet_cli_env_vars_setting: fn(command: String?, control: JetCLIControlSpec) -> String Never! {
+    name: jet_cli_setting_flag_name(jet_cli_control_flag(control))
+    if command == .Val(word) -> return "{jet_cli_setting_command_path(word)}.{name}"
+    "<command>.{name}"
+}
+
+// How a control's flag is written, as `jet env vars --json` names it.
+jet_cli_env_vars_kind: fn(value: JetCLIFlagValue) -> String Never! {
+    if value == {
+        .Switch | .Bool -> "bool"
+        .Value -> "value"
+        .Optional -> "optional"
+        .Repeated -> "list"
+    }
+}
+
+// The source word `jet env vars` shows: where the value came from.
+jet_cli_env_vars_source: fn(source: JetCLIControlSource) -> String Never! {
+    if source == {
+        .Default -> "default"
+        .Setting -> "setting"
+        .Environment -> "environment"
+        .Flag -> "flag"
+    }
+}
+
+// A value as one table cell: on, off, the text, the list joined with
+// commas, or `-` for none; a URL's user and password are `***`.
+jet_cli_env_vars_cell: fn(value: JetCLIStatusValue) -> String Never! {
+    if value == {
+        .Bool(on) -> if on -> "on" else -> "off"
+        .Text(text) -> jet_cli_env_redact(text)
+        .Array(items) -> {
+            cells: loop item in items -> jet_cli_env_vars_cell(item)
+            if cells.len() == 0 -> "-" else -> cells.join(",")
+        }
+        .Null | .Integer(_) | .Float(_) | .Object(_) -> "-"
+    }
+}
+
+// A value with every text's URL user and password shown as `***`.
+jet_cli_env_vars_redacted: fn(value: JetCLIStatusValue) -> JetCLIStatusValue Never! {
+    if value == {
+        .Text(text) -> jet_cli_status_text(jet_cli_env_redact(text))
+        .Array(items) -> jet_cli_status_array(loop item in items -> jet_cli_env_vars_redacted(item))
+        .Null | .Bool(_) | .Integer(_) | .Float(_) | .Object(_) -> value.copy() // copy: the caller keeps its value.
+    }
+}
+
+// `text` with a URL's user and password (`scheme://user:secret@host`) shown
+// as `***`; any other text as it is.
+jet_cli_env_redact: fn(text: String) -> String Never! {
+    scheme: text.partition("://")
+    if scheme.sep == "" -> return text.copy() // copy: the caller keeps its text.
+    authority: scheme.tail.partition("/")
+    user: authority.head.rpartition("@")
+    if user.sep == "" -> return text.copy() // copy: the caller keeps its text.
+    "{scheme.head}://***@{user.tail}{authority.sep}{authority.tail}"
+}
+
+// The `env.vars` status fields: the command, and one object per control.
+jet_cli_env_vars_fields: fn(command: String?, values: [JetCLIControlValue]) -> [JetCLIStatusField] Never! {
+    rows := [JetCLIStatusValue]{}
+    loop resolved in values {
+        control: resolved.control
+        input: if resolved.variable == .Val(text) -> jet_cli_status_text(jet_cli_env_redact(text)) else -> JetCLIStatusValue.Null
+        rows.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(control.name.copy())), // copy: the row keeps its control.
+            jet_cli_status_field("flag", jet_cli_status_text(jet_cli_control_flag(control))),
+            jet_cli_status_field("variable", jet_cli_status_text(control.variable.copy())), // copy: the row keeps its control.
+            jet_cli_status_field("kind", jet_cli_status_text(jet_cli_env_vars_kind(control.value))),
+            jet_cli_status_field("setting", jet_cli_status_text(jet_cli_env_vars_setting(command, control))),
+            jet_cli_status_field("value", jet_cli_env_vars_redacted(resolved.value)),
+            jet_cli_status_field("source", jet_cli_status_text(jet_cli_env_vars_source(resolved.source))),
+            jet_cli_status_field("location", jet_cli_status_text(resolved.location.copy())), // copy: the row keeps its location.
+            jet_cli_status_field("variable_input", input),
+            jet_cli_status_field("shadowed", jet_cli_status_bool(resolved.shadowed)),
+        }))
+    }
+    [JetCLIStatusField]{
+        jet_cli_status_field("command", jet_cli_status_optional_text(command)),
+        jet_cli_status_field("controls", jet_cli_status_array(rows)),
+    }
+}
+
+// The `jet env vars` table: one row per control, its columns aligned, and a
+// variable a flag hides named after the row's source.
+jet_cli_env_vars_table: fn(command: String?, values: [JetCLIControlValue]) -> String Never! {
+    rows := [[String]]{[String]{"FLAG", "VARIABLE", "SETTING", "VALUE", "SOURCE"}}
+    loop resolved in values {
+        source := jet_cli_env_vars_source(resolved.source)
+        if resolved.shadowed && resolved.variable == .Val(input) -> source = "{source} (hides {resolved.control.variable}={jet_cli_env_redact(input)})"
+        rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable.copy(), jet_cli_env_vars_setting(command, resolved.control), jet_cli_env_vars_cell(resolved.value), source}) // copy: the row keeps its control.
+    }
+    widths := [Int]{0, 0, 0, 0}
+    loop row in rows {
+        loop index in 0..<widths.len() {
+            if row[index].len() > widths[index] -> widths[index] = row[index].len()
+        }
+    }
+    out := ""
+    loop row in rows {
+        line := ""
+        loop index in 0..<widths.len() -> line = "{line}{jet_cli_pad(row[index], widths[index])}  "
+        out = "{out}{line}{row[4]}\n"
+    }
+    out
+}

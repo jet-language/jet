@@ -462,8 +462,9 @@ The generated help groups subcommands as follows:
 - **Project:** `parts`.
 - **Self:** `toolchain`, `update`, `doctor`, `completions`, `man`, `devtools`,
   `lsp`, and authority-bound `exec`.
-- **Environment and stores:** `env test|hook|sync|info` and
-  `cache status|prune|limit`.
+- **Environment and stores:** `env test|hook|sync|info|fetch-toolchain|vars`
+  and `cache status|prune|limit`. `env vars` lists the compiler controls
+  ([environment reference](environment.md#compiler-controls)).
 - **Jetos and performance:** `os push|bridge|services|config`, `gc report`,
   and `perf run|test|attach|view|compare|export`.
 
@@ -673,7 +674,9 @@ every function the program takes as a value (a function stored in a list, each
 implementation a trait-value call may run), and a C call lists `FFI.C`. `--json` reports the same problems as the standard `diagnostics` JSON
 status envelope on stderr, leaving stdout to the program; it never changes the
 exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
+`--json`, `--color`, `--threads`, `--allow`, `-A`, `--deny`, and the compiler
+controls a run takes (`--keep-going`, `--trace`, `--opt-dump` and the others
+the [environment reference](environment.md#compiler-controls) lists) are
 refused with E2104, naming the card the command model gives them, until they are ported.
 
 Jet tells a file's language by its extension. A `.jet` file, or one with no
@@ -751,22 +754,24 @@ program.
 compiler work: one line per event on stderr as it happens, with the elapsed
 time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
-`JET_TRACE_DETAIL=functions`, a function; that detail also writes one
+`--trace-detail=functions`, a function; that detail also writes one
 `ir.function` event per function the IR builder receives, so a trace names
 every body the compile lowers), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
 follows a running compile; Perfetto loads the file); timestamps have
-millisecond resolution. `JET_TRACE_FILE=FILE` is the environment form for
-the same five commands (`-` or `stderr` selects the readable stream), and
-`--trace` takes precedence over it; `JET_PHASE_COUNTERS=1` also prints each
-counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
+millisecond resolution. `--trace=off` traces nothing. `--trace` is a compiler
+control: `JET_TRACE_FILE=FILE` is its environment form for the same five
+commands (`-` or `stderr` selects the readable stream), and the flag takes
+precedence over it, as for every control (`jet env vars` shows which one
+won); `--phase-counters` also prints each counter as a `JET_PHASE_COUNTERS`
+line on stderr. The phases are the CLI's
 `sources` walk, the driver's (`load` and its `parse` waves, `register`,
 `sema.check`, `comptime`, `sema.finalize`,
 `comptime.bodies`, `comptime.validate`, `lower`, `assemble`, `optimize`,
 `driver.result` holding `emit`, `driver.release` as the compile's
-intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
+intermediate state drops, and under `--keep-going` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
 which a cold store lays out first; opened only while saved work is reused) and

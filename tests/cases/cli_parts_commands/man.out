@@ -239,6 +239,9 @@ Show the typed environment plan
 .B env fetch-toolchain
 Download this jet's C toolchain pack for offline C builds
 .TP
+.B env vars
+List the compiler controls with each one's value and the source that set it
+.TP
 .B cache
 Manage the machine-wide artifact store
 .TP
@@ -356,6 +359,9 @@ With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LO
 .TP
 .B --deep-checks
 With run/dev/test/build: Keep every deep check, or with =<scope> (repeatable) those of one package, module, type or function, such as =tree.run
+.TP
+.B --command
+With env vars: List the controls as COMMAND sees them
 .TP
 .B --structural
 With diff/merge: Compare checked definitions by semantic identity
@@ -828,8 +834,41 @@ With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one t
 .B --trace
 With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE
 .TP
-.B --builder
-With jobs: Select a previously bound remote builder
+.B --keep-going
+With build/run/check/test/emit: Go on past the first failure through every phase, and report every failure
+.TP
+.B --keep-going-report
+With build/run/check/test/emit: Write the --keep-going failure census, one TSV row per failure, to PATH
+.TP
+.B --keep-going-skip
+With build/run/check/test/emit: Leave ITEM out of the --keep-going collector; repeat for more
+.TP
+.B --trace
+With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing
+.TP
+.B --trace-detail
+With build/run/check/test/emit: What the trace shows: phases, or each function as well with functions
+.TP
+.B --phase-counters
+With build/run/check/test/emit: Also print each trace counter on stderr
+.TP
+.B --opt-dump
+With build/run/test/inspect decisions: Show FUNCTION's IR before and after the optimizer's passes; repeat for more
+.TP
+.B --opt-disable
+With build/run/test/inspect decisions: Skip the optimizer pass PASS; repeat for more
+.TP
+.B --opt-verify
+With build/run/test/inspect decisions: Check each function with IR Lint after every optimizer pass
+.TP
+.B --opt-ssa-stress
+With build/run/test/inspect decisions: Move every SSA value out of SSA through a fresh slot
+.TP
+.B --gc-trace
+With gc report: Read the GC trace at PATH with --gc-trace=PATH
+.TP
+.B --memory-ledger
+With audit memory/fix memory: Read the memory ledger at PATH
 .TP
 .B --a11y
 With lint: Check roles, labels, and other accessibility basics

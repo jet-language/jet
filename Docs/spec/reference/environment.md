@@ -50,6 +50,36 @@ one exists instead of adding another spelling for the same job.
 | `JET_TIMING` | `1` | Prints compiler phase timings. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
 
+## Compiler controls
+
+Each compiler control is one flag, one setting and one variable, spelled once
+in [`CLIControls.jet`](../../../Compiler/JetFoundation/Source/Registry/CLIControls.jet).
+Its value is its default, then the command settings
+(`<command>.<name>`, such as `build.keep_going`), then its variable, then its
+flag typed on the command line: each replaces the one before. A repeated flag
+adds its values within the one place that wins. A boolean variable is on with
+`1` or `true` and off with any other value; a boolean flag is on bare or with
+`=true`, off with `=off` or `=false`. A list variable separates its values with
+commas. `jet env vars` lists every control with its value and the source that
+set it, and `jet env vars --command=build -- --trace` shows them as that
+command line would see them; `--json` writes them as the `env.vars` status
+object. A URL's user and password never appear in that list.
+
+| Flag | Variable | Commands | Accepted value | Effect |
+| --- | --- | --- | --- | --- |
+| `--keep-going` | `JET_KEEP_GOING` | build, run, check, test, emit | boolean | Goes on past the first failure through every phase, and reports every failure. |
+| `--keep-going-report=PATH` | `JET_KEEP_GOING_REPORT` | build, run, check, test, emit | path | Writes the `--keep-going` failure census, one TSV row per failure, to PATH. |
+| `--keep-going-skip=ITEM` | `JET_KEEP_GOING_SKIP` | build, run, check, test, emit | list | Leaves ITEM out of the `--keep-going` collector. |
+| `--trace[=FILE]` | `JET_TRACE_FILE` | build, run, check, test, emit | bare, `off`, or a path | Streams the compiler's phases and progress to stderr, or to FILE; `off` streams nothing. |
+| `--trace-detail=DETAIL` | `JET_TRACE_DETAIL` | build, run, check, test, emit | `phases` or `functions` | Says what the trace shows: the phases, or each function as well. |
+| `--phase-counters` | `JET_PHASE_COUNTERS` | build, run, check, test, emit | boolean | Also prints each trace counter on stderr. |
+| `--opt-dump=FUNCTION` | `JET_OPT_DUMP` | build, run, test, inspect decisions | list of function names | Prints the slot IR of each named function before and after the optimizer's passes, at O0 (the inline Int facts only), O1 and O2. |
+| `--opt-disable=PASS` | `JET_OPT_DISABLE` | build, run, test, inspect decisions | list of optimizer pass names | Skips the named optimizer passes; any other name is refused with the list of passes. |
+| `--opt-verify` | `JET_OPT_VERIFY` | build, run, test, inspect decisions | boolean | Checks each function with IR Lint after every optimizer pass. |
+| `--opt-ssa-stress` | `JET_OPT_SSA_STRESS` | build, run, test, inspect decisions | boolean | Moves every SSA value out of SSA through a fresh slot. |
+| `--gc-trace[=PATH]` | `JET_GC_TRACE` | run and dev (the variable; their flag form is not ported yet), gc report | bare, `off`, or a path | Records bounded automatic GC-promotion evidence; `jet gc report` reads the trace at PATH. |
+| `--memory-ledger=PATH` | `JET_MEMORY_LEDGER` | audit memory, fix memory | path | Reads the memory ledger at PATH. |
+
 ## Maintainer and CI controls
 
 | Variable | Accepted value | Effect |
@@ -60,7 +90,6 @@ one exists instead of adding another spelling for the same job.
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (E2105) and names both. A code suite of `jet test` (the `packages`, `selfhost` and `perf` profiles of `Compiler`) gets the identity of the jet under test here, so it runs in a shell that sets none. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
-| `JET_OPT_DUMP` | comma-separated function names | Makes `jet inspect decisions` print the slot IR of each named function before and after the optimizer's passes, at O0 (the inline Int facts only), O1 and O2 (`--optimize=none`, `basic`, `full`). |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget. |
 | `JET_TEST_TOOLCHAIN_ROOT` | path | Names the toolchain tree the rows of a corpus suite (`golden`, `run`, `ui`, `ui_lint`, `cases`) read their Core from; the testkit hands it to each row as its `JET_TOOLCHAIN_ROOT` and passes on no `JET_TEST_TOOLCHAIN_ROOT`. Unset, the rows get the kit's `JET_TOOLCHAIN_ROOT`, else the nearest tree at or above the kit's directory. The `jet` running the kit still reads `JET_TOOLCHAIN_ROOT`, so a newer runner can test an older `jet` against that jet's own tree, as the release gate does for the current release (`Tools/release/Admit.jet`). |

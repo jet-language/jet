@@ -7,7 +7,7 @@ use {
     jet_cli.[
         JET_CLI_LOCK_UNPORTED_SECTIONS, JET_CLI_RUN_PORTED_FLAGS,
         jet_cli_completions_fish, jet_cli_flag_takes, jet_cli_form_row, jet_cli_man_page,
-        jet_cli_not_built_page, jet_cli_plan, jet_cli_usage_page,
+        jet_cli_not_built_page, jet_cli_plan, jet_cli_run_control, jet_cli_usage_page,
     ]
     jet_foundation.[
         JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_FORMS, JET_TEST_SETTINGS,
@@ -92,6 +92,9 @@ command_model_listed_refusals: fn() -> [String] Never! {
         // `jet dev` watches by itself: `--watch` (`=on`/`=off`) is its own switch.
         if jet_cli_flag_takes(spec, "dev") && spec.long != "--watch" -> commands.push("dev")
         loop command in commands {
+            // A compiler control the front door admits on this command is
+            // ported there (jet_cli_run_control).
+            if jet_cli_run_control(spec.long, command) -> next
             if command_model_unported_problem("{command} {spec.long}") == .Val(problem) -> problems.push(problem)
         }
     }

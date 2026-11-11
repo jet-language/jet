@@ -91,16 +91,13 @@ use {
     jet_web.[web_runtime_partition]
 }
 
-// The production CLI's compile, under the driver's all-phases collector when
-// JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
-// `trace_sink` traces the keep-going report write (`keepgoing.report`).
+// The production CLI's compile, under the driver's all-phases collector with
+// `--keep-going` (Controls.jet). A diagnostic trap is a failed compile, never
+// an artifact. `trace_sink` traces the keep-going report write
+// (`keepgoing.report`).
 jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
     if !jet_cli_keep_going_enabled() -> return jet_driver_compile(request)
-    skip := [String]{}
-    loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
-        if row.trim().len() > 0 -> skip.push(row.trim())
-    }
-    result := jet_driver_compile_keep_going(request, JetDriverKeepGoing{skip: skip})
+    result := jet_driver_compile_keep_going(request, JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")})
     if result.keep_going_rows.len() > 0 -> result.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem: jet_cli_keep_going_report(result.keep_going_rows)
@@ -114,11 +111,7 @@ jet_cli_compile_request: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
 // (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
 jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
     if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(request, None)
-    skip := [String]{}
-    loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
-        if row.trim().len() > 0 -> skip.push(row.trim())
-    }
-    front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: skip}))
+    front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: jet_cli_control_items("keep_going_skip")}))
     if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem: jet_cli_keep_going_report(front.compile.keep_going_rows)
@@ -127,15 +120,15 @@ jet_cli_lowering_inputs: fn(request: &&JetDriverCompileRequest, trace_sink: JetC
     front
 }
 
-// JET_KEEP_GOING=1 selects the all-phases collector.
+// `--keep-going` selects the all-phases collector.
 jet_cli_keep_going_enabled: fn() -> Bool Never! {
-    (cli_sys.get("JET_KEEP_GOING") ?? "") == "1"
+    jet_cli_control_on("keep_going")
 }
 
-// Writes the TSV failure census `rows` to JET_KEEP_GOING_REPORT when it is
-// set; the write's failure text, else "".
+// Writes the TSV failure census `rows` to the `--keep-going-report` file
+// when one is named; the write's failure text, else "".
 jet_cli_keep_going_report: fn(rows: [String]) -> String {
-    report: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
+    report: jet_cli_control_text("keep_going_report") ?? return ""
     lines := [String]{"phase\titem\tcode\tmessage\tspan"}
     loop row in rows -> lines.push(row.copy())
     lines.push("")
@@ -143,10 +136,10 @@ jet_cli_keep_going_report: fn(rows: [String]) -> String {
     ""
 }
 
-// Appends `rows` to the JET_KEEP_GOING_REPORT census the front end wrote
+// Appends `rows` to the `--keep-going-report` census the front end wrote
 // (jet_cli_keep_going_report); the write's failure text, else "".
 jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
-    report: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
+    report: jet_cli_control_text("keep_going_report") ?? return ""
     text: rows.join("\n")
     problem: jet_cli_trace_append(report, "{text}\n") ?? return ""
     "cannot append to the compiler failure census `{report}`: {problem}"
@@ -1470,7 +1463,7 @@ JetCLIOverlay: struct {
 // `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
-// `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
+// `build`, `run`, `check`, `test` and `emit` (the `--trace` control).
 // `settings` are the command line's `--set` writers and `profile` the
 // `--profile` it selects ("" keeps the request's default; `jet check`).
 jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
@@ -1946,7 +1939,7 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
     None
 }
 
-// ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
+// ---- The compiler's streaming trace: the `--trace[=FILE]` control ----
 //
 // The native `jet` implements the driver's CompilerTraceSink
 // (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
@@ -1959,7 +1952,7 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // only its task's `cpu_ns`, and nested phases closer than
 // JET_CLI_TRACE_PROCESS_MS share one process read, so per-item events stay
 // cheap; throttled `C` progress events, `<phase>.<name>` counter events, and
-// `JET_PHASE_COUNTERS` stderr lines when that variable is set, so Tools/perf
+// `JET_PHASE_COUNTERS` stderr lines with `--phase-counters`, so Tools/perf
 // and Tools/agent read either compiler's trace. `-` or `stderr` streams one
 // readable line per event to stderr instead. The target stays open for the
 // whole compile and every line is flushed as soon as its event happens, so a
@@ -1967,9 +1960,6 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // compile. The sink's calls stay inside the trait's FS row: monotonic time is
 // `/proc/uptime` (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as
 // `/dev/stderr`.
-JET_CLI_TRACE_FILE_ENV: "JET_TRACE_FILE"
-JET_CLI_TRACE_DETAIL_ENV: "JET_TRACE_DETAIL"
-JET_CLI_PHASE_COUNTERS_ENV: "JET_PHASE_COUNTERS"
 JET_CLI_TRACE_STDERR: "/dev/stderr"
 // Minimum spacing of the progress events of one kind; the last item is always
 // written.
@@ -2118,7 +2108,7 @@ JetCLITraceSink: struct {
 
     // A `counters.<phase>.<name>` progress kind: one #4319 scaling counter
     // value, written unthrottled as the `<phase>.<name>` counter event and,
-    // with JET_PHASE_COUNTERS set, as a `JET_PHASE_COUNTERS` stderr line.
+    // with `--phase-counters`, as a `JET_PHASE_COUNTERS` stderr line.
     counter: fn(self, kind: String, value: Int) Never! {
         parts := kind.split(".").to_list()
         if parts.len() < 3 -> return
@@ -2147,14 +2137,19 @@ JetCLITraceMemory: struct {
     peak_kb: Int
 }
 
-// The process's one sink, opened by `jet_cli_main` for a compiling verb:
-// the target `requested` (`--trace` passes `-`, `--trace=FILE` the file)
-// selects, else JET_TRACE_FILE; `None` when neither asks for a trace or the
-// target cannot be written (the reason goes to stderr, the compile goes on).
-// A file target is truncated and starts with the trace header.
-jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
-    chosen := cli_sys.get(JET_CLI_TRACE_FILE_ENV) ?? ""
-    if requested == .Val(flag) -> chosen = flag
+// The process's one sink, opened by `jet_cli_main` for a compiling verb: the
+// target the `--trace` control names (Controls.jet: on alone or `-` for
+// stderr, else the file); `None` when it asks for no trace or the target
+// cannot be written (the reason goes to stderr, the compile goes on).
+// `--trace-detail=functions` traces each function, `--phase-counters` also
+// prints the counters. A file target is truncated and starts with the trace
+// header.
+jet_cli_trace_sink: fn() -> JetCLITraceSink? {
+    chosen: if jet_cli_control("trace").value == {
+        .Bool(on) -> if on -> "-" else -> ""
+        .Text(file) -> file.copy() // copy: the control's value is dropped here.
+        .Null | .Integer(_) | .Float(_) | .Array(_) | .Object(_) -> ""
+    }
     if chosen == "" -> return None
     human: chosen == "-" || chosen == "stderr"
     target: if human -> JET_CLI_TRACE_STDERR else -> chosen
@@ -2163,7 +2158,7 @@ jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
     executable: cli_sys.executable().split("/").to_list()
     process := "jet"
     if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
-    functions: (cli_sys.get(JET_CLI_TRACE_DETAIL_ENV) ?? "") == "functions"
+    functions: (jet_cli_control_text("trace_detail") ?? "") == "functions"
     detail: if functions -> "true" else -> "false"
     opening: if human -> "[{jet_cli_trace_clock(0)}] trace: {process} pid {pid}, functions {detail}\n" else -> "[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{pid},\"tid\":0,\"args\":{{\"name\":{foundation_json_quote(process)}}}}},\n"
     opened: if human -> jet_cli_trace_append(target, opening) else -> jet_cli_trace_create(target, opening)
@@ -2192,7 +2187,7 @@ jet_cli_trace_sink: fn(requested: String?) -> JetCLITraceSink? {
         start_ms: start_ms,
         pid: pid,
         functions: functions,
-        phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
+        phase_counters: jet_cli_control_on("phase_counters"),
         state: Shared{JetCLITraceState{
             writing: true,
             writer: writer,

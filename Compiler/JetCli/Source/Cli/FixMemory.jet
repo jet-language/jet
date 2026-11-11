@@ -3,7 +3,6 @@
 use {
     jet_driver.[JET_DRIVER_EXIT_OK]
     cli_files: core.files
-    cli_sys: core.sys
 }
 
 JetCLIMemoryApplied: struct {
@@ -63,7 +62,7 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
         }
     }
     dry_run: args.contains("--dry-run")
-    ledger_path: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
+    ledger_path: jet_cli_control_path("memory_ledger", args, "{root}/.jet/memory/ledger-v1.jsonl")
     rows: jet_cli_memory_read(ledger_path) ?? return jet_cli_memory_fail(err.message, color, json)
     candidates := [String:[JetCLIMemoryRow]]{}
     options := [JetCLIMemoryRow]{}

@@ -7,7 +7,6 @@ use {
     ]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     cli_files: core.files
-    cli_sys: core.sys
 }
 
 JetCLIMemoryRow: struct {
@@ -192,7 +191,7 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
             return jet_cli_memory_fail("unexpected audit memory argument `{argument}`", color, json)
         }
     }
-    path: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
+    path: jet_cli_control_path("memory_ledger", args, "{root}/.jet/memory/ledger-v1.jsonl")
     rows: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
     if json {
         values := [JetCLIStatusValue]{}

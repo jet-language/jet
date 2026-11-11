@@ -680,16 +680,16 @@ jet_cli_ice_trap: fn(census: &[JetDriverIceRow], program: &IRModule, key: String
     jet_cli_ir_trap(program.functions[id])
 }
 
-// The ICE report of the native route's census: every row, exit 101. Under
-// JET_KEEP_GOING the rows also go to JET_KEEP_GOING_REPORT after the front
-// end's.
-jet_cli_ice_census: fn(file: String, census: [JetDriverIceRow]) -[FS, Env]> JetDriverVerbOutput Never! {
+// The ICE report of the native route's census: every row, exit 101. With
+// `--keep-going` the rows also go to the `--keep-going-report` census after
+// the front end's.
+jet_cli_ice_census: fn(file: String, census: [JetDriverIceRow]) -[FS, Env, Exec.Args]> JetDriverVerbOutput Never! {
     jet_cli_ice_report("the Jet backend failed on `{file}`", census)
 }
 
-// `summary` and every census row, exit 101 (the rows also reach
-// JET_KEEP_GOING_REPORT under JET_KEEP_GOING).
-jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env]> JetDriverVerbOutput Never! {
+// `summary` and every census row, exit 101 (the rows also reach the
+// `--keep-going-report` census with `--keep-going`).
+jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env, Exec.Args]> JetDriverVerbOutput Never! {
     text: "{summary}: {jet_driver_ice_text(census)}"
     if !jet_cli_keep_going_enabled() -> return jet_cli_ice(text)
     rows: loop row in census -> jet_driver_ice_keep_going_row(row)
@@ -726,7 +726,7 @@ jet_cli_ice_report: fn(summary: String, census: [JetDriverIceRow]) -[FS, Env]> J
 // still has object bytes, so each later phase reports too. `options` are the
 // build options: the IR passes' optimization level (jet_cli_native_level) and
 // the runtime checks the program keeps (jet_cli_ir_checks).
-// JET_TRACE_FILE / `--trace`: the route's phases are spans of the compile's
+// `--trace`: the route's phases are spans of the compile's
 // trace sink: `native.rust_foreign` (a Rust foreign helper's realization),
 // `ir.build`, `ir.opt` (level > 0), `ir.x64` (on the threads the compile
 // admits), `ir.object`, `native.foreign` (the wait for the C closure and the
@@ -1137,7 +1137,7 @@ JetCLINativeProgram: struct {
     failure: JetCLINativeFailure?
 }
 
-jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String) -[FS, Env, Time]> JetCLINativeProgram Never! {
+jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
     checked := inputs.move()
@@ -1167,7 +1167,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
             break
         }
     }
-    // With per-function detail (JET_TRACE_DETAIL=functions) each function the
+    // With per-function detail (`--trace-detail=functions`) each function the
     // IR builder receives is one `ir.function` event, so a trace names every
     // body a compile lowers.
     if trace_sink == .Val(sink) {
@@ -1231,7 +1231,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // At O0 only the inline Int facts run (Opt.jet ir_opt_module_facts).
     if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
     report: ir_optimize_module(built.program, jet_cli_opt_options(level, options), threads)
-    // With JET_OPT_VERIFY, the lint of each body as the passes get it
+    // With `--opt-verify`, the lint of each body as the passes get it
     // (`ir.opt.prepare`) and after each pass (`ir.opt.<pass>`).
     loop finding in report.lint -> jet_cli_ice_trap(census, built.program, finding.key, finding.pass, finding.rule, finding.message)
     if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
@@ -1281,7 +1281,7 @@ jet_cli_emit_log_report: fn(lines: [String]) -[FS, Env]> String Never! {
 // jet_cli_native_executable. The object lays out the functions `hot` names
 // first (ir_x64_hot_order); `--trace` counts the names that name none
 // (`ir.object.hot_missing`).
-jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String]) -[FS, Env, Time]> JetCLINativeObject Never! {
+jet_cli_native_object: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String]) -[FS, Env, Time, Exec.Args]> JetCLINativeObject Never! {
     trace_sink: result.trace_sink
     built := jet_cli_native_program(result, inputs, harness, options, runtime, census, file, root)
     if built.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
@@ -1349,8 +1349,8 @@ jet_cli_ir_trap: fn(function: &IRFunction) Never! {
 // (jet_cli_native_level): the linked image (`binary` is where it goes), else
 // the report. `jet run` links at LINK_RUN_BASE, where Image/Loader.jet maps
 // it. Every compiler fault the route found is one ICE row, all reported at
-// once with exit 101 (AGENTS.md I2; jet_cli_ice_census). Under JET_KEEP_GOING
-// the rows also go to JET_KEEP_GOING_REPORT after the front end's, and the
+// once with exit 101 (AGENTS.md I2; jet_cli_ice_census). With `--keep-going`
+// the rows also go to the `--keep-going-report` census after the front end's, and the
 // executable is still written while the route has object bytes (each faulty
 // function traps).
 jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time]> JetCLIBuilt Never! {
@@ -1365,7 +1365,7 @@ jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, r
     split_debug: command == "build" && build_options_value(options, "debug_info") == "split"
     linked := jet_cli_native_executable(result, inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, census, file, jet_driver_entry_root_path(snapshot), hot, split_debug)
     if census.len() > 0 {
-        // JET_KEEP_GOING still writes the image, each faulty function a trap.
+        // `--keep-going` still writes the image, each faulty function a trap.
         if jet_cli_keep_going_enabled() {
             if linked == .Image(executable) {
                 if jet_cli_build_dir(jet_cli_parent(binary) ?? ".", color) == .Val(refused) -> return JetCLIBuilt.Failed{output: refused}
@@ -3417,8 +3417,7 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 // A compiling verb's compile traces through the process's one sink: the
-// target of `--trace[=FILE]` (which the front door admits only on those
-// verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
+// target of the `--trace` control (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
 // every other verb's output ends it here, as its `--json` outcome
 // (jet_cli_json_outcome), through jet_cli_finish too, so its ICE exits 101.
@@ -3432,7 +3431,7 @@ jet_cli_main: fn(args: [String]) {
         .Replay(replayed) -> jet_cli_finish(replayed)
         .Run(claimed) -> recording = claimed
     }
-    done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned), recording) else -> jet_cli_execute(plan)
+    done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
     // A check that ends here (refused before its compile) is still recorded.
     if recording == .Val(claimed) -> jet_cli_check_receipt_publish(claimed, output, [JetCLIReceiptInput]{})
@@ -3451,10 +3450,10 @@ jet_cli_main: fn(args: [String]) {
 // made on the worker, the thread the compile runs on.
 JET_CLI_COMPILE_STACK_BYTES: 201326592
 
-jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     steps := [JetCLIRunStep]{}
     task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
-        compiling: task jet_cli_execute_compiling(plan, trace, recording)
+        compiling: task jet_cli_execute_compiling(plan, recording)
         steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))
     }
     step := steps.pop() ?? panic("the compile thread lost its step")
@@ -3463,8 +3462,8 @@ jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?, recording: Jet
 
 // A compiling plan, on its worker (jet_cli_compile_on_worker): `jet run`
 // stops at the step the main thread finishes; every other verb at its output.
-jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?) -> JetCLIRunStep {
-    trace_sink: jet_cli_trace_sink(trace)
+jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, recording: JetCLICheckRecording?) -> JetCLIRunStep {
+    trace_sink: jet_cli_trace_sink()
     if plan == .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) {
         if !watch {
             jet_cli_write_notice(notice)
@@ -3486,7 +3485,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
     }
 }
 
-// The plans whose compile `--trace` and JET_TRACE_FILE trace.
+// The plans whose compile the `--trace` control traces.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
         .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
@@ -3500,7 +3499,7 @@ jet_cli_locked_build_host: fn(check: [String], build: [String]) -> JetDriverVerb
     checked: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "build --locked", check)
     if checked.exit_code != 0 -> return checked
     plan: jet_cli_locked_plan(jet_cli_front(build))
-    if jet_cli_plan_compiles(plan) -> return jet_cli_compile_on_worker(plan, jet_cli_trace_flag(jet_cli_owned_flags(build)))
+    if jet_cli_plan_compiles(plan) -> return jet_cli_compile_on_worker(plan)
     jet_cli_execute(plan)
 }
 

@@ -54,14 +54,12 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
-// a difference to one pass: "retslot", "unique", "accumulate", "entry",
-// "once", "localbox", "scalar", "promote", "version", "range", "ssa",
-// "stops", "fold", "glue", "split", "reduce", "sink"), whether
-// IR Lint checks each function after every pass and every SSA form is
-// verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
-// SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
-// out of SSA), and the names of the functions whose IR before and after the
-// passes the report carries (`dump`, comma-separated, "" for none).
+// a difference to one pass; IR_OPT_PASS_NAMES), whether IR Lint checks each
+// function after every pass and every SSA form is verified (`verify`; tests,
+// CI and `--opt-verify`), whether every SSA value leaves SSA in a fresh slot
+// (`stress`, which exercises the moves out of SSA), and the names of the
+// functions whose IR before and after the passes the report carries (`dump`,
+// comma-separated, "" for none).
 IROptOptions: struct {
     level: Int
     small: Bool
@@ -95,19 +93,8 @@ ir_opt_options: fn(level: Int) -> IROptOptions Never! {
     IROptOptions{level: level, small: false, inline: IROptInline.Auto, disabled: [String]{}, verify: false, stress: false, dump: ""}
 }
 
-// Options from the environment's values: JET_OPT_DISABLE (pass names,
-// comma-separated), JET_OPT_VERIFY and JET_OPT_SSA_STRESS ("1": on),
-// JET_OPT_DUMP (function names, comma-separated).
-ir_opt_options_from: fn(level: Int, small: Bool, inline: IROptInline, disable: String?, verify: String?, stress: String?, dump: String?) -> IROptOptions Never! {
-    disabled := [String]{}
-    if disable == .Val(text) {
-        loop name in text.split(",") {
-            trimmed: name.trim()
-            if trimmed != "" -> disabled.push(trimmed)
-        }
-    }
-    IROptOptions{level: level, small: small, inline: inline, disabled: disabled.move(), verify: (verify ?? "") == "1", stress: (stress ?? "") == "1", dump: dump ?? ""}
-}
+// The passes IROptOptions.disabled can name (`--opt-disable`).
+IR_OPT_PASS_NAMES: [String]{"retslot", "unique", "accumulate", "entry", "once", "localbox", "scalar", "promote", "version", "range", "ssa", "stops", "fold", "glue", "split", "reduce", "sink"}
 
 ir_opt_enabled: fn(options: IROptOptions, pass: String) -> Bool Never! {
     loop name in options.disabled {

@@ -1,0 +1,86 @@
+// The compiler controls (#6606): behaviors that change checking,
+// optimization, tracing and reporting, each spelled once here. A control is
+// its flag (`--` and `name` with dashes), its setting `<command>.<name>` under
+// each command `scope` names (Compiler/JetCli/Source/Cli/CommandSettings.jet),
+// and its registered environment variable `variable`. The effective value is
+// the default, then the settings layers, then the variable, then the flag
+// typed on the command line (Compiler/JetCli/Source/Cli/Controls.jet);
+// `jet env vars` lists each one with the source that won.
+//
+// `value` is how the flag is written: Bool the bare flag or `=off`; Value one
+// `=VALUE`; Optional the bare flag, `=off` or `=VALUE`; Repeated one `=VALUE`
+// per flag, appended within one command line. `choices` lists the values a
+// Value or Repeated control accepts; empty accepts any nonempty value.
+JetCLIControlSpec: struct {
+    name: String
+    variable: String
+    value: JetCLIFlagValue
+    scope: String
+    help: String
+    choices: [String]{[String]{}}
+}
+
+// The commands that compile a program, as a flag's `With` scope.
+JET_CLI_CONTROL_COMPILE_SCOPE: "build/run/check/test/emit"
+
+// The commands that run the optimizer, as a flag's `With` scope.
+JET_CLI_CONTROL_OPTIMIZE_SCOPE: "build/run/test/inspect decisions"
+
+JET_CLI_CONTROLS: comptime { [JetCLIControlSpec]{
+    {name: "keep_going", variable: "JET_KEEP_GOING", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Go on past the first failure through every phase, and report every failure"},
+    {name: "keep_going_report", variable: "JET_KEEP_GOING_REPORT", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Write the --keep-going failure census, one TSV row per failure, to PATH"},
+    {name: "keep_going_skip", variable: "JET_KEEP_GOING_SKIP", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Leave ITEM out of the --keep-going collector; repeat for more"},
+    {name: "trace", variable: "JET_TRACE_FILE", value: JetCLIFlagValue.Optional, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing"},
+    {name: "trace_detail", variable: "JET_TRACE_DETAIL", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "What the trace shows: phases, or each function as well with functions", choices: [String]{"functions", "phases"}},
+    {name: "phase_counters", variable: "JET_PHASE_COUNTERS", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Also print each trace counter on stderr"},
+    {name: "opt_dump", variable: "JET_OPT_DUMP", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Show FUNCTION's IR before and after the optimizer's passes; repeat for more"},
+    {name: "opt_disable", variable: "JET_OPT_DISABLE", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Skip the optimizer pass PASS; repeat for more"},
+    {name: "opt_verify", variable: "JET_OPT_VERIFY", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Check each function with IR Lint after every optimizer pass"},
+    {name: "opt_ssa_stress", variable: "JET_OPT_SSA_STRESS", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Move every SSA value out of SSA through a fresh slot"},
+    {name: "gc_trace", variable: "JET_GC_TRACE", value: JetCLIFlagValue.Optional, scope: "run/dev", help: "Record bounded automatic GC-promotion evidence; with gc report: Read the GC trace at PATH with --gc-trace=PATH"},
+    {name: "memory_ledger", variable: "JET_MEMORY_LEDGER", value: JetCLIFlagValue.Value, scope: "audit memory/fix memory", help: "Read the memory ledger at PATH"},
+} }
+
+// A control's flag: `--` and its name with dashes.
+jet_cli_control_flag: fn(control: JetCLIControlSpec) -> String Never! {
+    "--{control.name.replace("_", "-")}"
+}
+
+// The control whose flag is `flag` (the word before any `=`), if one is.
+jet_cli_control_of_flag: fn(flag: String) -> JetCLIControlSpec? Never! {
+    loop control in JET_CLI_CONTROLS {
+        if jet_cli_control_flag(control) == flag -> return Val(control.copy()) // copy: the registry keeps its row.
+    }
+    None
+}
+
+// The control named `name`, if one is.
+jet_cli_control_named: fn(name: String) -> JetCLIControlSpec? Never! {
+    loop control in JET_CLI_CONTROLS {
+        if control.name == name -> return Val(control.copy()) // copy: the registry keeps its row.
+    }
+    None
+}
+
+// A control's flag row (JET_CLI_FLAGS): its scope, help and spelling.
+jet_cli_control_flag_row: fn(control: JetCLIControlSpec) -> JetCLIFlagSpec Never! {
+    JetCLIFlagSpec{long: jet_cli_control_flag(control), help: "With {control.scope}: {control.help}", value: control.value}
+}
+
+#Test("each control is one flag row with its scope and spelling, and one variable") {
+    variables := [String]{}
+    loop control in JET_CLI_CONTROLS {
+        assert(!variables.contains(control.variable), "{control.variable} backs two controls")
+        variables.push(control.variable.copy())
+        flag: jet_cli_control_flag(control)
+        wanted: flag.copy() // copy: the lambda's own name; a capture moves the name it reads.
+        rows: JET_CLI_FLAGS.filter(row -> row.long == wanted)
+        assert_eq(rows.len(), 1)
+        assert_eq(rows[0].help, "With {control.scope}: {control.help}")
+        assert(rows[0].value == control.value, "{flag} is not written as its control is")
+        assert_eq(rows[0].typed, "")
+    }
+    assert_eq(jet_cli_control_flag(jet_cli_control_named("opt_ssa_stress") ?? panic("no opt_ssa_stress")), "--opt-ssa-stress")
+    assert(jet_cli_control_of_flag("--keep-going-skip") != None)
+    assert(jet_cli_control_of_flag("--keep_going") == None)
+}

@@ -155,12 +155,11 @@ jet_cli_remote_run_host: fn(target: JetCLIRemoteRunTarget, jet_argv: [String], a
         entry_argv.push(word.copy())
     }
     plan: jet_cli_run(entry_argv, entry_args, passthrough, false, false, color, quiet, verbose, threads)
-    trace: jet_cli_trace_flag(jet_cli_owned_flags(entry_argv))
     if plan == .Run(file, source, run_color, options, run_verbose, json, run_threads, program_args, invocation, notice, watch, entry) {
         rows := invocation.move() ?? JetCLIInvocationAuthority{all: false, allow: [String]{}, deny: [String]{}}
         rows.remote = Val(origin)
         remote_plan: JetCLIPlan.Run{file: file.move(), source: source.move(), color: run_color, options: options.move(), verbose: run_verbose, json: json, threads: run_threads, program_args: program_args.move(), invocation: Val(rows), notice: notice.move(), watch: watch, entry: entry.move()}
-        return jet_cli_compile_on_worker(remote_plan, trace)
+        return jet_cli_compile_on_worker(remote_plan)
     }
     // Only a program run asks before its first instruction; any other plan
     // a pinned entry made is a refusal or usage output.

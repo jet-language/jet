@@ -236,7 +236,7 @@ jet_cli_gc_report_at: fn(root: String, args: [String], color: Bool, json: Bool) 
     loop argument in args {
         if !argument.starts_with("-") -> return jet_cli_gc_fail(jet_cli_gc_error("malformed", "unexpected gc report argument `{argument}`"), color, json)
     }
-    path: cli_sys.get("JET_GC_TRACE") ?? "{root}/.jet/gc/trace-v1.json"
+    path: jet_cli_control_path("gc_trace", args, "{root}/.jet/gc/trace-v1.json")
     raw: jet_cli_gc_read(path) ?? return jet_cli_gc_fail(err, color, json)
     now: jet_cli_table_max(0, cli_time.unix_ns() /% 1000000)
     trace: jet_cli_gc_parse(raw, root, now) ?? return jet_cli_gc_fail(err, color, json)

@@ -117,6 +117,7 @@ Env Commands:
   jet env sync                                             Apply typed managed environment files
   jet env info                                             Show the typed environment plan
   jet env fetch-toolchain                                  Download this jet's C toolchain pack for offline C builds
+  jet env vars [--command=COMMAND] [--json] [-- FLAGS]     List the compiler controls with each one's value and the source that set it
 
 Perf Commands:
   jet perf run                                              Run a program and write a .jettrace
@@ -142,6 +143,7 @@ Flags:
   --observe                    With run: Expose bounded live runtime facts for attachment
   --log                        With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG
   --deep-checks                With run/dev/test/build: Keep every deep check, or with =<scope> (repeatable) those of one package, module, type or function, such as =tree.run
+  --command                    With env vars: List the controls as COMMAND sees them
   --structural                 With diff/merge: Compare checked definitions by semantic identity
   --base-receipt               With review: Proof receipt for the base change-set side
   --receipt                    With review: Proof receipt for the reviewed change-set side
@@ -298,7 +300,18 @@ Flags:
   --action-timeout             With build/run/dev/test/inspect: How long one build step may run, such as 10min
   --set                        With build/run/dev/jobs/test/check: Set one declared package setting as key=value
   --threads                    With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads
-  --trace                      With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE
+  --keep-going                 With build/run/check/test/emit: Go on past the first failure through every phase, and report every failure
+  --keep-going-report          With build/run/check/test/emit: Write the --keep-going failure census, one TSV row per failure, to PATH
+  --keep-going-skip            With build/run/check/test/emit: Leave ITEM out of the --keep-going collector; repeat for more
+  --trace                      With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing
+  --trace-detail               With build/run/check/test/emit: What the trace shows: phases, or each function as well with functions
+  --phase-counters             With build/run/check/test/emit: Also print each trace counter on stderr
+  --opt-dump                   With build/run/test/inspect decisions: Show FUNCTION's IR before and after the optimizer's passes; repeat for more
+  --opt-disable                With build/run/test/inspect decisions: Skip the optimizer pass PASS; repeat for more
+  --opt-verify                 With build/run/test/inspect decisions: Check each function with IR Lint after every optimizer pass
+  --opt-ssa-stress             With build/run/test/inspect decisions: Move every SSA value out of SSA through a fresh slot
+  --gc-trace                   With gc report: Read the GC trace at PATH with --gc-trace=PATH
+  --memory-ledger              With audit memory/fix memory: Read the memory ledger at PATH
   --builder                    With jobs: Select a previously bound remote builder
   --a11y                       With lint: Check roles, labels, and other accessibility basics
   --complexity                 With lint: Report per-function cognitive complexity
