@@ -6903,7 +6903,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Memory/Pin.jet",
-      "line": 43,
+      "line": 42,
       "column": 5,
       "reason": "node storage is fixed for the returned pin; self_addr names this place"
     },
@@ -11172,7 +11172,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/LowLevel/UnsafeObligations.jet | 9:5 | "cell stays live and the pointer remains local" |
 | Examples | Examples/Memory/Allocation/Uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
 | Examples | Examples/Memory/ExpiringSecret.jet | 22:5 | "vault key import: expiring secret lifetime" |
-| Examples | Examples/Memory/Pin.jet | 43:5 | "node storage is fixed for the returned pin; self_addr names this place" |
+| Examples | Examples/Memory/Pin.jet | 42:5 | "node storage is fixed for the returned pin; self_addr names this place" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
