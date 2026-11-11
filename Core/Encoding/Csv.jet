@@ -154,7 +154,7 @@ TypedCSV: struct {
     close_field: fn(&self) Never! {
         text := ""
         #Unsafe("input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field") {
-            text = encoding.__bytes_into_text(self.field)
+            text = rt.bytes_into_text(self.field)
         }
         self.field = [U8]{}
         self.fields.push(text)
@@ -392,7 +392,7 @@ query_text: fn(path: String) -[FS]> String [FieldError]! {
     if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
     encoding.__utf8_validate(bytes) ?? return Err(query_read_error(path, err))
     #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
-        return Ok(encoding.__bytes_into_text(bytes))
+        return Ok(rt.bytes_into_text(bytes))
     }
 }
 
@@ -412,7 +412,7 @@ delimiter_at: fn(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
 // boundary and the bytes are complete UTF-8.
 field_text: fn(&&bytes: [U8]) -> String Never! {
     #Unsafe("a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8") {
-        return encoding.__bytes_into_text(bytes)
+        return rt.bytes_into_text(bytes)
     }
 }
 
@@ -895,7 +895,7 @@ CSVReader: struct {
         self.fields_heap += mem.__list_capacity<U8>(self.field)
         text := ""
         #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
-            text = encoding.__bytes_into_text(self.field)
+            text = rt.bytes_into_text(self.field)
         }
         self.field = [U8]{}
         self.fields.push(text)
@@ -1053,7 +1053,7 @@ CSVReader: struct {
                         if !self.allocation.charge(taken) -> return Err(self.capacity_error())
                         self.fields_heap += taken
                         #Unsafe("every byte of the field is below 128, so it is whole UTF-8") {
-                            self.fields.push(encoding.__bytes_into_text(self.buffer[start..<end]))
+                            self.fields.push(rt.bytes_into_text(self.buffer[start..<end]))
                         }
                         self.buffered = end + 1
                         self.total += taken + 1

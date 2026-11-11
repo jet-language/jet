@@ -819,8 +819,7 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
 }
 
 // The effect leaf a plain Core call needs, or None when its root suffices.
-// D-AUTH-AMBIENT1=A: ending the program's own process is a leaf of `Exec`
-// (`Exec.Exit`); spawning a process keeps the ungranted `Exec` root.
+// D-AUTH-AMBIENT1=A: spawning a process keeps the ungranted `Exec` root.
 call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
     if module_name == {
         "core.net" -> if member == "gethostname" -> Val("FS.Read") else -> when_listed(member, NET_WAITS, "Time.Wait")
@@ -831,7 +830,6 @@ call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
         }
         "core.process" -> if member == {
             "__keep_open_raw" -> Val("FS.Read")
-            "exit" -> Val("Exec.Exit")
             "run" | "pipeline" -> Val("Time.Wait")
             else -> None
         }

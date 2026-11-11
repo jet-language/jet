@@ -39,6 +39,7 @@ use {
     base64: core.encoding.base64
     math: core.math
     stream: __core_encoding_stream
+    rt: jet.runtime.encoding
 }
 
 syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -114,7 +115,7 @@ decode: fn(text: String) -> Dyn EncodingError! {
 
 emit_coercion: fn(line: String) Never! {
     #Unsafe("preserve the shipped decoder's hidden stderr effect at its existing host boundary") {
-        core.encoding.__coerce_emit(line)
+        rt.coerce_emit(line)
     }
 }
 
@@ -122,7 +123,7 @@ coerce_line: fn(path: String, target: String) -> String Never! {
     label: if path == "" -> "<root>" else -> path
     timestamp := 0
     #Unsafe("preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary") {
-        timestamp = core.encoding.__coerce_now()
+        timestamp = rt.coerce_now()
     }
     "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\",\"ts\":{timestamp}}}"
 }

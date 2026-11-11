@@ -11,6 +11,7 @@ use {
     math: core.math
     stream: __core_encoding_stream
     parser: __core_encoding_cbor_parse
+    rt: jet.runtime.encoding
 }
 
 error: fn(kind: EncodingErrorKind, offset: Int, path: String, reason: String) -> EncodingError Never! {
@@ -219,7 +220,7 @@ CBORPull: struct {
         loop i in 0..<text.count_bytes() -> stored.push(stream.byte_at(text, i))
         key := ""
         #Unsafe("the retained key copies exactly the already validated text bytes") {
-            key = encoding.__bytes_into_text(stored)
+            key = rt.bytes_into_text(stored)
         }
         path: self.path()
         growth: reserve<String>(self.allocation, self.frames[at].keys, 1, start, path, "CBOR map key table allocation failed") ?? {
@@ -320,7 +321,7 @@ CBORPull: struct {
             else {
                 encoding.__utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))
                 text := ""
-                #Unsafe("the exact CBOR text allocation passed strict UTF-8 validation") { text = encoding.__bytes_into_text(bytes) }
+                #Unsafe("the exact CBOR text allocation passed strict UTF-8 validation") { text = rt.bytes_into_text(bytes) }
                 if key_expected {
                     if self.retained + text.count_bytes() * 2 > self.limits.max_item_bytes -> return Err(error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
                     index: self.retain_key(text, start) ?? return Err(err)

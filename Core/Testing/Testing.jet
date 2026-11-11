@@ -17,6 +17,7 @@ use {
     core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot]
     crypto: core.crypto
     json: core.encoding.json
+    rt: jet.runtime.encoding
 }
 
 // A second spelling, never a second owner.
@@ -1386,7 +1387,7 @@ snapshot_name: fn(name: String) -> String Never! {
 // UTF-8 boundary choices are made here, not in a host-side diff algorithm.
 testing_byte: fn(text: String, index: Int) -> Int Never! {
     #Unsafe("the caller bounded this byte position by the String storage length") {
-        return Int.from_u8(core.encoding.__string_byte(text, U64{index}))
+        return Int.from_u8(rt.string_byte(text, U64{index}))
     }
 }
 
@@ -1407,7 +1408,7 @@ testing_window: fn(text: String, start: Int, end: Int) -> String Never! {
 
 testing_owned_text: fn(bytes: &&[U8]) -> String Never! {
     #Unsafe("all appended bytes came from complete UTF-8 strings or ASCII") {
-        return core.encoding.__bytes_into_text(bytes)
+        return rt.bytes_into_text(bytes)
     }
 }
 

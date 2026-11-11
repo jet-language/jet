@@ -1358,8 +1358,8 @@ unexercised native carrier or runtime receipt.
 | `core.encoding.__write_bytes` | `stream.jet` JSON push and `csv.jet` writer | Existing file write-all; source owns encoding and limits |
 | `core.encoding.__flush` | `stream.jet` JSON push and `csv.jet` writer | Existing file flush; source owns sticky terminal failure |
 | `core.encoding.__utf8_validate` | `cbor_parse.jet` text chunks and `stream.jet` text conversion | Existing strict validator; source chooses validation point and maps errors |
-| `core.encoding.__bytes_into_text` | `stream.jet` and `csv.jet` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
-| `core.encoding.__string_byte` | `stream.jet` checked string-byte accessor | Borrow byte only after source bounds proof |
+| `jet.runtime.encoding.bytes_into_text` (`priv`) | `stream.jet`, `csv.jet`, the CBOR and XML engines and `core.testing` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
+| `jet.runtime.encoding.string_byte` (`priv`) | `stream.jet`, the XML engine and `core.testing` checked string-byte accessors | Borrow byte only after source bounds proof |
 | `core.encoding.__object_from_entries` | `stream.jet` owned object construction | Move ordered entries into the existing native carrier |
 | `core.encoding.__write_text` | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
 | `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume the text; its bytes are copied into the list and the text is released |
@@ -1374,12 +1374,11 @@ along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
 any Jet codec, emitter, JS or comptime consumer.
 
-The D-JSON3 `__coerce_now` and `__coerce_emit` registrations use the ambient
-interpreter route as well as the existing AOT host symbols. The resident
-aliases call the same epoch-millisecond sampling leaf and the same stderr
-leaf; when a capture sink is present, they marshal through the existing
-terminal newline frame. Coercion traversal and audit formatting remain in
-`json.jet`. The shipped hidden Time/IO effects remain unchanged pending the
+The D-JSON3 coercion audit calls the `priv` runtime bindings
+`jet.runtime.encoding.coerce_now` and `coerce_emit`: the epoch-millisecond
+sampling leaf and the stderr leaf. Coercion traversal and audit formatting
+remain in `json.jet`, which calls them only inside its audited `#Unsafe`
+regions. The shipped hidden Time/IO effects remain unchanged pending the
 separately recorded effect-truthfulness ruling.
 
 `core.encoding.json.writer` now constructs a source `JSONWriter` around the

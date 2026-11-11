@@ -1363,21 +1363,13 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
             return None
         }
     }
-    if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
-        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
-            diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
-            return None
-        }
-    }
-    backing: (record.module_name == "core.mem" && (record.member == "__list_capacity" || record.member == "__list_reserve_exact" || record.member == "__type_size")) || (record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__read_into" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__bytes_into_text" || record.member == "__text_into_bytes" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text"))
-    // Testing shares the two audited String leaves, not stream or Dyn backing access.
-    checked_testing_text: environment.module_name == "core.testing" && record.module_name == "core.encoding" && (record.member == "__string_byte" || record.member == "__bytes_into_text")
-    checked_backing_source: environment.source_file.starts_with("<corelib>/") && (environment.module_name == "__core_encoding_stream" || environment.module_name == "__core_encoding_cbor_stream" || environment.module_name == "core.encoding.csv" || environment.module_name == "core.encoding.xml" || environment.module_name == "__core_encoding_xml_engine" || checked_testing_text || (record.module_name == "core.mem" && record.member == "__list_reserve_exact" && (environment.module_name == "__core_crypto_ct" || environment.module_name == "__core_crypto_cipher")) || ((record.module_name == "core.mem" || (record.module_name == "core.encoding" && record.member == "__utf8_validate")) && environment.module_name == "__core_encoding_cbor_parse"))
+    backing: (record.module_name == "core.mem" && (record.member == "__list_capacity" || record.member == "__list_reserve_exact" || record.member == "__type_size")) || (record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__read_into" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__text_into_bytes" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text"))
+    checked_backing_source: environment.source_file.starts_with("<corelib>/") && (environment.module_name == "__core_encoding_stream" || environment.module_name == "__core_encoding_cbor_stream" || environment.module_name == "core.encoding.csv" || environment.module_name == "core.encoding.xml" || environment.module_name == "__core_encoding_xml_engine" || (record.module_name == "core.mem" && record.member == "__list_reserve_exact" && (environment.module_name == "__core_crypto_ct" || environment.module_name == "__core_crypto_cipher")) || ((record.module_name == "core.mem" || (record.module_name == "core.encoding" && record.member == "__utf8_validate")) && environment.module_name == "__core_encoding_cbor_parse"))
     if backing && !checked_backing_source {
         diagnostics.push(sema_error("E0510", span, "encoding backing leaves are compiler-private", "raw carrier operations are restricted to vetted Core encoding internals", "use the public JSON or JSONL API"))
         return None
     }
-    audited: record.module_name == "core.encoding" && (record.member == "__bytes_into_text" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text")
+    audited: record.module_name == "core.encoding" && (record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text")
     if audited && context.unsafe_depth == 0 {
         diagnostics.push(sema_error("E0510", span, "raw encoding carrier access requires an audited #Unsafe region", "the caller must establish the carrier variant or byte bounds", "check the precondition immediately before the audited call"))
         return None

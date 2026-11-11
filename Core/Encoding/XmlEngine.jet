@@ -21,6 +21,7 @@ use {
     unicode: core.text
     core.prelude.[min, max]
     stream: __core_encoding_stream
+    rt: jet.runtime.encoding
 }
 
 DocumentStart: struct { encoding: Dyn, bom: Dyn }
@@ -136,7 +137,7 @@ utf8_scalar: fn(bytes: View<U8>, offset: Int) -> UTF8Scalar Never! {
 }
 text_byte: fn(value: String, index: Int) -> U8 Never! {
     #Unsafe("all callers iterate or check the UTF-8 byte bounds before borrowing this byte") {
-        encoding.__string_byte(value, U64{index})
+        rt.string_byte(value, U64{index})
     }
 }
 byte_prefix_text: fn(bytes: View<U8>, start: Int, needle: String) -> Bool Never! {
@@ -174,7 +175,7 @@ byte_text: fn(bytes: View<U8>, start: Int, end: Int) -> String Never! {
     owned := [U8]{}
     loop index in start..<end -> owned.push(bytes[index])
     #Unsafe("the caller selected a scalar-aligned window of validated UTF-8 bytes") {
-        return encoding.__bytes_into_text(owned)
+        return rt.bytes_into_text(owned)
     }
 }
 scalar_count: fn(bytes: View<U8>, end: Int) -> Int Never! {
@@ -2675,7 +2676,7 @@ normalize_attribute_text: fn(raw: String) -> String Never! {
     }
     loop bytes.len() > write -> _: bytes.pop()
     #Unsafe("attribute whitespace compaction preserves the already validated UTF-8 byte sequence") {
-        encoding.__bytes_into_text(bytes)
+        rt.bytes_into_text(bytes)
     }
 }
 split_name: fn(raw: String) -> SplitName Never! {

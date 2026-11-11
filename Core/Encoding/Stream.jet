@@ -8,6 +8,7 @@ use {
     core.files.[FileReader, FileWriter]
     mem: core.mem
     math: core.math
+    rt: jet.runtime.encoding
 }
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
@@ -363,7 +364,7 @@ JSONPull: struct {
         }
         text := ""
         #Unsafe("the shared UTF-8 validator just accepted this owned byte allocation") {
-            text = encoding.__bytes_into_text(bytes)
+            text = rt.bytes_into_text(bytes)
         }
         self.output_heap = capacity
         Ok(text)
@@ -503,7 +504,7 @@ JSONPull: struct {
         }
         text := ""
         #Unsafe("the shared UTF-8 validator just accepted this owned ASCII token") {
-            text = encoding.__bytes_into_text(bytes)
+            text = rt.bytes_into_text(bytes)
         }
         if self.typed_numbers {
             self.output_heap = capacity
@@ -704,7 +705,7 @@ JSONPull: struct {
             capacity: mem.__list_capacity<U8>(bytes)
             if !self.allocation.charge(capacity) -> return Err(self.item_error("record"))
             heap.tracked += capacity
-            return Ok(encoding.__bytes_into_text(bytes))
+            return Ok(rt.bytes_into_text(bytes))
         }
     }
 
@@ -1087,7 +1088,7 @@ sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
 text_from_bytes: fn(bytes: &&[U8]) -> String EncodingError! {
     encoding.__utf8_validate(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err))
     #Unsafe("the shared UTF-8 validator just accepted this owned allocation") {
-        return Ok(encoding.__bytes_into_text(bytes))
+        return Ok(rt.bytes_into_text(bytes))
     }
 }
 
@@ -1099,7 +1100,7 @@ byte_at: fn(text: String, index: Int) -> U8 Never! {
     }
     result := U8{0}
     #Unsafe("the byte position was checked against this String's storage length") {
-        result = encoding.__string_byte(text, U64{index})
+        result = rt.string_byte(text, U64{index})
     }
     result
 }
@@ -1663,7 +1664,7 @@ ascii_text: fn(bytes: &&[U8]) -> String Never! {
     encoding.__utf8_validate(bytes) ?? panic("Core ASCII formatter produced invalid UTF-8")
     out := ""
     #Unsafe("the shared UTF-8 validator accepted this exact owned formatter buffer") {
-        out = encoding.__bytes_into_text(bytes)
+        out = rt.bytes_into_text(bytes)
     }
     out
 }
@@ -1678,7 +1679,7 @@ plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
         n: Int.from_u8(bytes[at])
         if n == 34 {
             #Unsafe("every byte before the closing quote is printable ASCII, so it is whole UTF-8") {
-                return Val(encoding.__bytes_into_text(bytes[open + 1..<at]))
+                return Val(rt.bytes_into_text(bytes[open + 1..<at]))
             }
         }
         if n == 92 || n < 32 || n > 126 -> return None
@@ -2055,7 +2056,7 @@ jsonl_writer: fn(output: &&FileWriter, limits: EncodingLimits) -> JSONLinesPush 
     #Unsafe("owned validated UTF-8 allocation transfers in the encoding source seam") {
         bytes: encoding.__text_into_bytes(original)
         capacity: mem.__list_capacity<U8>(bytes)
-        restored: encoding.__bytes_into_text(bytes)
+        restored: rt.bytes_into_text(bytes)
         roundtrip: encoding.__text_into_bytes(restored)
         assert_eq(mem.__list_capacity<U8>(roundtrip), capacity)
         assert_eq(roundtrip, [U8]{97, 240, 159, 153, 130, 122})
