@@ -2541,12 +2541,16 @@ sema_comptime_find_function_source: fn(graph: SemaRegistrationGraph, module_iden
     sema_comptime_indexed_function_source(graph, module_index, function_key)
 }
 
-// The checked foreign row of the inline foreign (`#FFI`) function registered
-// under `function_key`. Its validation findings are the module check's to
-// report (sema_checked_foreign_functions), so this lookup drops them.
-sema_comptime_inline_foreign_row: fn(graph: SemaRegistrationGraph, function_key: String) -> SemaCheckedForeignFunction? {
+// The checked foreign row of the foreign function registered under
+// `function_key`: an inline foreign (`#FFI`) function, or a per-callable
+// `#Import(c)`. A jet.runtime binding is one of the latter, and IR lowers its
+// row as a runtime route on every tier, compile time included. Validation
+// findings are the module check's to report (sema_checked_foreign_functions),
+// so this lookup drops them.
+sema_comptime_foreign_row: fn(graph: SemaRegistrationGraph, function_key: String) -> SemaCheckedForeignFunction? {
     row: sema_registration_callable_row(graph, function_key) ?? return None
     if row == .Function(declaring, index) {
+        if sema_function_is_guest_import(graph.modules[declaring].functions[index].declaration) -> return sema_checked_guest_import_foreign_row(graph, graph.modules[declaring], graph.modules[declaring].functions[index])
         reported := [Diagnostic]{}
         return sema_checked_inline_foreign_row(graph, graph.modules[declaring], graph.modules[declaring].functions[index], reported)
     }
@@ -2630,13 +2634,17 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         incomplete_reasons: [String]{"`{function_key}` has no registered comptime function source in module `{module_identity}`"},
     }
     source: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
-    if source.declaration.inline_foreign != None {
+    if source.declaration.inline_foreign != None || sema_function_is_guest_import(source.declaration) {
         unresolved.incomplete_reasons = [String]{}
-        unresolved.foreign = sema_comptime_inline_foreign_row(graph, function_key)
+        unresolved.foreign = sema_comptime_foreign_row(graph, function_key)
         if unresolved.foreign == None {
-            unresolved.incomplete_reasons.push("the inline foreign function `{source.declaration.name}` has no checked foreign row")
+            unresolved.incomplete_reasons.push("the foreign function `{source.declaration.name}` has no checked foreign row")
             return unresolved
         }
+        // A per-callable `#Import(c)` has no body, so no failure source and
+        // no edge: the closure's solve proves an unannotated one infallible,
+        // as the bundle solve does (sema_failure_solve).
+        if sema_function_is_guest_import(source.declaration) -> unresolved.failure = Val(SemaFunctionFailureFacts{function_key: function_key, direct: false, edges: [String]{}})
         unresolved.complete = true
         return unresolved
     }

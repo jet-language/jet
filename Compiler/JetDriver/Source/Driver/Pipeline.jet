@@ -1022,6 +1022,9 @@ jet_driver_comptime_function_closure: fn(
         checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
         if checked.foreign == .Val(row) {
             foreign.push(row.copy())
+            // An `#Import(c)`'s failure row (sema_check_comptime_function):
+            // its callers' obligations against it settle over the closure.
+            sema_comptime_failure_closure_add(graph, failure_closure, checked)
             next
         }
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
