@@ -1,0 +1,19 @@
+// The derive lens prints a distinct's forwarded members as Jet source
+// (sema_derive_distinct_forward_source). The generated impls carry spans in
+// the file that declared the distinct, and the formatter gets no source text
+// for them, so formatting must not read those spans as offsets into it.
+use {
+    jet_parser.[parse_source]
+    jet_sema.[sema_derive_distinct_forward_source]
+}
+
+#Test("a distinct's forwarded members format as Jet source") {
+    source: "// Leading lines put the distinct's span past the start of the file,\n// as in Examples/Types/DistinctForwarding.jet.\n#[Comparable, Printable, CodableAsBase]\nScore: distinct Int\n\nrun: fn() {{\n}}\n"
+    parsed: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("the fixture source must parse")
+    forwarded: sema_derive_distinct_forward_source(parsed.program.items)
+    text: forwarded.get("Score") ?? panic("no forwarded source for Score")
+    loop expected in ["impl Score.Equatable {{", "self.raw() == rhs.raw()", "impl Score.Comparable {{", "self.raw() < rhs.raw()"] {
+        if !text.contains(expected) -> panic("forwarded source lacks `{expected}`:\n{text}")
+    }
+}

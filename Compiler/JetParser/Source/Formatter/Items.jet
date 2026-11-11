@@ -672,12 +672,7 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
             // carries enough ordering information to reconstruct markers
             // before the name, so preserve that source form verbatim. Written
             // `impl Type { … }` blocks still use canonical fmt.
-            line_start: (jfmt_items_rfind(f.src_bytes, "\n".bytes(), i.span.start) ?? -1) + 1
-            text_bytes: f.src_bytes[line_start..<i.span.end].copy()
-            sugar: jfmt_items_find(text_bytes, "{i.type_name}.".bytes(), 0)
-            impl_keyword: jfmt_items_find(text_bytes, "impl ".bytes(), 0)
-            external: if sugar == .Val(at) -> impl_keyword == None || (impl_keyword ?? 0) > at else -> false
-            if external {
+            if jfmt_impl_sugar_text(f, i) == .Val(text_bytes) {
                 // The AST does not retain the marker ordering for this sugar,
                 // so the declaration is written as the source spelled it. The
                 // parser accepts only the canonical arrows, so there is no
@@ -761,6 +756,22 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
             jfmt_write_verbatim(f, ma.span.start, ma.span.end, true)
         }
     }
+}
+
+// The source of an impl written as external-method sugar, from its line's
+// start to its end. None for a written `impl Type { … }` block, and for an
+// impl whose span is not in this source text: a derive's generated impl,
+// formatted from its AST alone, has no spelling to keep.
+jfmt_impl_sugar_text: fn(f: JetFmt, i: ImplDef) -> [U8]? Never! {
+    if !jfmt_src_valid(f, i.span.start, i.span.end) -> return None
+    line_start: (jfmt_items_rfind(f.src_bytes, "\n".bytes(), i.span.start) ?? -1) + 1
+    // copy: the sugar's line is written out on its own; the source stays whole.
+    text_bytes := f.src_bytes[line_start..<i.span.end].copy()
+    sugar: jfmt_items_find(text_bytes, "{i.type_name}.".bytes(), 0) ?? return None
+    if jfmt_items_find(text_bytes, "impl ".bytes(), 0) == .Val(keyword) {
+        if keyword <= sugar -> return None
+    }
+    Val(text_bytes.move())
 }
 
 jfmt_fmt_fact_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
