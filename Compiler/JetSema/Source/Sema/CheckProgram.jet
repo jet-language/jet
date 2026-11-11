@@ -9440,9 +9440,13 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     }
     file_caps: sema_effect_file_module_caps(final_graph.modules, final_graph.edges)
     trait_caps: sema_effect_trait_caps(final_graph.modules)
+    // The functions the build checked to run while compiling are prep code,
+    // never a runtime entry (sema_effect_runtime_input_paths).
+    prep_functions := [String:Bool]{}
+    loop result in comptime_functions -> prep_functions[result.function_key.copy()] = true
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, threads)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, prep_functions, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false

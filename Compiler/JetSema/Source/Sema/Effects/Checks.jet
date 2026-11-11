@@ -1110,20 +1110,22 @@ sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int,
 
 // The compiler answers a comptime input while it compiles, so the running
 // program must never reach one. The runtime entries are the functions that
-// nothing names: no function calls or takes them as a value, and no
+// nothing names: no function calls or takes them as a value, no
 // compile-time site (a comptime item, a `comptime {}` site or a module value,
-// SemaCallSiteFact.comptime) calls them. That is `run`, a test, a job and a
-// callback a host names; `build`, which runs while building, is not one. A
-// function that only compile-time sites or prep code name is prep code. The
-// result holds, for each function the entries reach that makes an input, the
-// call path from an entry to it, entry first (E0956).
-sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput]) -> [[Int]] Never! {
+// SemaCallSiteFact.comptime) calls them, and the build did not check them to
+// run while compiling (`prep_functions`, a comptime item's callees). That is
+// `run`, a test, a job and a callback a host names; `build`, which runs while
+// building, is not one. A function that only compile-time sites or prep code
+// name is prep code. The result holds, for each function the entries reach
+// that makes an input, the call path from an entry to it, entry first
+// (E0956).
+sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool]) -> [[Int]] Never! {
     paths := [[Int]]{}
     any: loop node in nodes {
         if node.comptime_inputs.len() > 0 -> break true
     } ?? false
     if !any -> return paths
-    comptime_callees := [String:Bool]{}
+    comptime_callees := prep_functions.copy()
     loop module_row in inputs {
         loop fact in modules[module_row.module_index].call_facts {
             if !fact.comptime -> next
@@ -3784,8 +3786,11 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // by graph module index, the `#FX(…)` caps a file module takes from the
 // `name: module` declarations above it. `trait_caps` is each capped trait's
 // `#FX(…)` cap (sema_effect_trait_caps). `decls` is the run's declaration
-// table, which direct callees name.
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
+// table, which direct callees name. `prep_functions` holds the keys of the
+// functions the build checked to run while compiling (a comptime item's
+// callees, whose call sites no module records): prep code, never a runtime
+// entry (sema_effect_runtime_input_paths).
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -3918,7 +3923,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
     }
     // No function a runtime entry reaches may make a comptime input.
-    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs) {
+    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs, prep_functions) {
         maker: path[path.len() - 1]
         input_diagnostics := loop input in nodes[maker].comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)

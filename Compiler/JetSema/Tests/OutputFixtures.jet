@@ -133,7 +133,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
     }
     effect_inputs.reverse()
     prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls)
-    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph.modules), graph.decls, compiler_threads_single())
+    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph.modules), graph.decls, [String:Bool]{}, compiler_threads_single())
     if republished.memory_declarations.len() != 2 -> failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
