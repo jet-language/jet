@@ -3945,6 +3945,66 @@ None when `n` has a bit no case stands for; either on another Set is E1133.
 This amends only D-COLLBREADTH1's storage: Set's methods and printing are
 unchanged. All four are built.
 
+**D-JAI-CODE1=A — Code values and checked macros** *(ratified 2026-10-17,
+card #5023)*: code is a value. `code { … }` and `code(expr)` hold parsed,
+not yet checked source of type `Code`; `c.nodes()` gives a typed, read-only
+tree with kinds, children, locations and, after checking, types; and `c.map(f)`
+builds new code from a transform, so compiler nodes are never mutable. A
+pasted code value is checked where it lands, like hand-written code, and its
+names resolve where it was written. Option A also added call-site macros:
+`paste c`, `#Expand` functions called as `name!()`, the `uses:`, `defines:`
+and `exits` clauses, `$caller.code`, `#ExpandLimit` and `#NoDebug`.
+*Narrowed by D-META-COMPILER1=A (ratified 2026-10-22) and D-META-LADDER1=A
+(ratified 2026-11-09):* the owner ruled out macros. `paste`, `#Expand`,
+`name!()` calls, the `uses:`, `defines:` and `exits` clauses, `#ExpandLimit`
+and `#NoDebug` are removed. The `Code` type, `c.nodes()` and `c.map` survive,
+and `code(expr)` is written `#code { expr }`. Code is placed by a marker plus
+`meta.rewrite_body`, by `b.generate` or by `meta.add`. A wrapper that times a
+block is a closure plus `defer`. Changing the caller's own variables has no
+replacement.
+
+**D-PRE-COMPILE1=A — `#Pre` decided while compiling when it can be**
+*(ratified 2026-10-31, card #5024)*: there is no new mark. At each call, if
+every value a `#Pre` condition reads is known while compiling (a literal, a
+constant, a `comptime` parameter), the compiler decides the condition after
+substituting the call's arguments. False is a build error on the caller's
+line, with the author's message and the values. True leaves that call
+without a run-time check, since a proved check is erased (D-PROVE-SEM1). Any
+other call is checked when the program runs, as before. A condition that
+exceeds the compile-time step budget stays a run-time check and is never
+dropped. `#Post` needs nothing new: when a whole call is computed while
+compiling, its `#Post` is checked then too. D-PREPOST1 already makes every
+condition pure, so deciding one early changes no behavior except where the
+failure is reported. A function that needs a fixed value writes a `comptime`
+parameter (D-COMPTIME-WORD1, D-CONSTGEN2), and every call then decides its
+`#Pre` while compiling.
+
+**D-JAI-GENERIC1=F — Require an early answer with `#run`** *(ratified
+2026-11-11, card #5024)*: a marker expression whose answer must be known
+while building is wrapped in Jet's existing `#run`:
+`#Pre(#run { lanes == 4 || lanes == 8 }, "need 4 or 8")`. The parentheses
+belong to `Pre`, and `#run` owns its braced expression. Calls stay ordinary.
+There is no new sigil, no parameter grammar and no build-error operation.
+The requirement is evaluated at the contract's normal instantiation point,
+after the checked argument facts of the call are substituted, never once
+while reading the declaration. A false required `#Pre` is a build error as
+under D-PRE-COMPILE1. An unavailable input, an invalid operation, a refused
+effect or an exhausted budget is its own error and never falls back to run
+time. Arguments the expression does not read stay run-time values, and
+requiring a fact makes no parameter generic and runs no body early. The same
+`#run` applies to every expression-bearing marker at its documented point:
+`#Post(#run { result > 0 }, "positive")` needs a permitted early result fact,
+`#Memo(bound: #run compute_bound())` an early bound, and
+`#Layout(c, align(#run alignment()))` an early alignment. Legal sites,
+schemas and authority do not change: `#Unsafe(#run reason())` computes a
+reason, not an unsafe action. Forwarding keeps a requirement and the
+argument facts it depends on. A known literal or a pure early expression
+discharges it at an outer call, and a runtime wrapper cannot hide it.
+Interfaces, methods, defaults and generic instances keep the same
+obligation, and a plain callable or foreign callback cannot erase one. Use
+`comptime` number parameters only when a value must shape types. Card #5024
+tracks the build of this decision and of D-PRE-COMPILE1.
+
 
 ### Low-level tier
 
