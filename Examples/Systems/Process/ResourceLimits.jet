@@ -34,7 +34,7 @@ run: fn() IOError! {
     sys.set_cpu_time_limit(3600500ms, cpu.hard)
     rounded: sys.cpu_time_limit()
     span: rounded.soft ?? panic("the CPU limit read back as unlimited")
-    print("cpu limit: {span.in(.Seconds) ?? -1} s")
+    print("cpu limit: {span.in(.Seconds)} s")
     sys.set_cpu_time_limit(cpu.soft, cpu.hard)
 
     // A negative limit is refused before the kernel sees it.
@@ -42,7 +42,7 @@ run: fn() IOError! {
 
     mine: sys.usage()
     print("program peak memory recorded: {mine.peak_memory > 0}")
-    print("program CPU time not negative: {(mine.user.in(.Nanoseconds) ?? -1) >= 0 && (mine.system.in(.Nanoseconds) ?? -1) >= 0}")
+    print("program CPU time not negative: {mine.user.in(.Nanoseconds) >= 0 && mine.system.in(.Nanoseconds) >= 0}")
     children: sys.usage(of: .Children)
     print("children peak memory recorded: {children.peak_memory > 0}")
 }

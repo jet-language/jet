@@ -25,12 +25,12 @@ kind: fn(error: IOError) -> String {
 run: fn() {
     // Starting the program already used CPU time.
     own: if os.cpu_time() == {
-        .Ok(spent) -> (spent.in(.Nanoseconds) ?? 0) > 0
+        .Ok(spent) -> spent.in(.Nanoseconds) > 0
         .Err(error) -> true
     }
     print("this program's CPU time is positive, or unreadable here: {own}")
     parent: if os.cpu_time(os.getppid()) == {
-        .Ok(spent) -> (spent.in(.Nanoseconds) ?? -1) >= 0
+        .Ok(spent) -> spent.in(.Nanoseconds) >= 0
         .Err(error) -> true
     }
     print("the parent's CPU time reads, or is unreadable here: {parent}")
