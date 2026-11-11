@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99235,
+    "rev": 99236,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92075,12 +92075,12 @@
         },
         {
           "n": 5,
-          "text": "A warm-cache `jet file.jet` run costs about what the built binary costs plus a cache lookup, and beats python3 and node on both wall time and peak memory. Measured 2026-11-11 with GNU time on hello world (seed-t21): `jet hello.jet` takes 20-30 ms and 8.7-10.7 MB, the built O1 binary 0 ms and 256 KB, python3 10 ms and 13.1 MB, node 20 ms and 60 MB. Every repository tool twin runs as `jet X.jet`, so this launcher floor sits under every PortBars timing. Name where the 20 ms and 9 MB go (mapping the compiler binary, cache verification, in-memory link, O0 code), fix it in the launcher mechanism, and prove it on hello world and on a tool twin.",
+          "text": "An uncached `jet file.jet` (a fresh cache dir: compile from cold, link and run from memory) beats python3 and node on wall time and peak memory, with no script cache, result cache or incremental state serving the run. Measured 2026-11-11 with GNU time on hello world (seed-t21): uncached `jet hello.jet` takes 30 ms and 36-40 MB, a script-cache hit 20-30 ms and 8.7-10.7 MB, the built O1 binary 0 ms and 256 KB, python3 10 ms and 13.1 MB, node 20 ms and 60 MB. Name where the uncached 30 ms and 37 MB go (front end, sema, lowering, emission, link, runtime start), fix them in those general mechanisms toward the 30M lines/s compile target, and prove it on hello world and on a repository tool twin.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:34.131Z"
+          "at": "2026-11-11T10:55:58.344Z"
         }
       ],
       "refs": [],
@@ -92091,7 +92091,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:23:24.506Z",
-      "updated": "2026-11-11T10:50:34.131Z",
+      "updated": "2026-11-11T10:55:58.344Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -199592,6 +199592,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T10:55:58.344Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0g6fxb9",
+      "note": "#5: Owner 2026-11-11: never rely on caches; measure live and uncached; the targets are 30M lines/s compile speed and hand-optimized machine code; was: A warm-cache `jet file.jet` run costs about what the built binary costs plus a cache lookup, and beats python3 and node on both wall time and peak memory. Measured 2026-11-11 with GNU time on hello wo"
+    },
     {
       "at": "2026-11-11T10:52:25.272Z",
       "by": "Main",
