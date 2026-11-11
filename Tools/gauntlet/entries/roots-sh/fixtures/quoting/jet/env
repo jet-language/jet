@@ -1,0 +1,15 @@
+# Quoting, references and expansions, as a sourcing bash reads them.
+JET_STATE_ROOT="$HOME/expanded"
+JET_SCRATCH_ROOT="$JET_STATE_ROOT/sub"
+JET_RUN_ROOT='$HOME/literal'
+JET_BASE_ROOT="${HOME}/base"'/$single'\$escaped"\"q\\\x"
+JET_TARGET_ROOT=${UNSET_IN_FIXTURE:-~/targets}:~/second
+EMPTY_IN_FIXTURE=
+A=1; B=$A$A  # a comment
+B+=2
+export JET_SEEDS=/${UNSET_IN_FIXTURE-dash}/${EMPTY_IN_FIXTURE-dash}x${JET_STATE_ROOT:+plus}${#JET_RUN_ROOT}/$B C=3
+: ${JET_SEED:=/assigned/$B}
+PREFIX_ONLY=/no true
+JET_DEV_WORKTREE=$PREFIX_ONLY/srv/\
+tree-$1; IGNORED=1
+NOT_A_ROOT=1 JET_STATE_ROOT=/not/applied true

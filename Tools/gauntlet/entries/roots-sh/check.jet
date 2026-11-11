@@ -1,16 +1,29 @@
 // The roots a roots-sh or roots-mjs case printed (PortBars.jet and the
 // gauntlet harness run this in the case directory with the file holding the
 // program's output), with the machine's cache directory written as
-// `$XDG_CACHE_HOME`. The cases leave XDG_CACHE_HOME as the machine sets it:
-// the harness starts both programs through Tools/agent/JetEnv.jet, which
-// keeps its dev shells there.
+// `$XDG_CACHE_HOME`, a root that is this checkout as `<checkout>` and the
+// machine's home directory elsewhere as `<HOME>`. The cases leave HOME and
+// XDG_CACHE_HOME as the machine sets them: the harness starts both programs
+// through Tools/agent/JetEnv.jet, which keeps its dev shells there.
 use {
     files: core.files
     process: core.process
+    sys: core.sys
 }
 
 run: fn() {
+    home: process.env_get("HOME") ?? ""
     set: process.env_get("XDG_CACHE_HOME") ?? ""
-    cache: if set != "" -> set else -> "{process.env_get("HOME") ?? ""}/.cache"
-    loop line in files.read(process.args()[0]).lines() -> print(line.replace("={cache}/", "=$XDG_CACHE_HOME/"))
+    cache: if set != "" -> set else -> "{home}/.cache"
+    // This file is Tools/gauntlet/entries/roots-sh/check.jet.
+    checkout: files.dirname(files.dirname(files.dirname(files.dirname(files.dirname(files.absolute(sys.executable()) ?? sys.executable())))))
+    loop line in files.read(process.args()[0]).lines() {
+        named: line.replace("={cache}/", "=$XDG_CACHE_HOME/")
+        root: named.partition("=")
+        if root.tail == checkout {
+            print("{root.head}=<checkout>")
+            next
+        }
+        print(if home == "" || home == "/" -> named else -> named.replace(home, "<HOME>"))
+    }
 }

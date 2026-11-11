@@ -17,7 +17,7 @@
 //
 // Run as a program (`node Tools/agent/roots.mjs NAME...`), it prints
 // `NAME=value` for each root named, and exits 64 at any other name. Its Jet
-// twin is Tools/agent/orchestrator/Roots.jet (gauntlet tool entry roots-mjs).
+// twin is Tools/agent/Roots.jet (gauntlet tool entry roots-mjs).
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

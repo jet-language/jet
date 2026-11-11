@@ -29,6 +29,7 @@ use {
     binary: core.encoding.binary
     files: core.files
     process: core.process
+    text: core.text
 }
 
 ELF_MAGIC: 0x7f454c46
@@ -67,9 +68,73 @@ fields: fn(bytes: [U8], at: Int, format: String, size: Int) -> [Int] {
     binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}")
 }
 
+// bytes[from..<to] as node's subarray takes it: both ends held inside the
+// bytes, and nothing when `to` is not past `from`.
+part: fn(bytes: [U8], from: Int, to: Int) -> [U8] Never! {
+    start: if {
+        from < 0 -> 0
+        from > bytes.len() -> bytes.len()
+        else -> from
+    }
+    end: if {
+        to < start -> start
+        to > bytes.len() -> bytes.len()
+        else -> to
+    }
+    bytes.slice(start, end)
+}
+
+// The bytes as node's toString('latin1') reads them: each byte is the
+// character of that code point.
+latin1: fn(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    loop byte in bytes {
+        if byte < (U8{128}) {
+            out.push(byte)
+            next
+        }
+        out.push(U8{192 + Int{byte} /% 64})
+        out.push(U8{128 + Int{byte} %% 64})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// Whether a latin1 byte is whitespace to JavaScript's trim and parseInt.
+js_space: fn(byte: U8) -> Bool Never! {
+    [9, 10, 11, 12, 13, 32, 160].contains(Int{byte})
+}
+
+// The bytes without the JavaScript whitespace at their end (trimEnd).
+trimmed_end: fn(bytes: [U8]) -> [U8] Never! {
+    end := bytes.len()
+    loop end > 0 && js_space(bytes[end - 1]) -> end -= 1
+    bytes.slice(0, end)
+}
+
+// Number.parseInt of the latin1 bytes, base 10: the signed digits after the
+// leading whitespace, None (NaN) when there are none.
+parse_int: fn(bytes: [U8]) -> Int? Never! {
+    codes: bytes.map(byte -> Int{byte})
+    at := 0
+    loop at < codes.len() && js_space(bytes[at]) -> at += 1
+    sign := 1
+    if at < codes.len() && (codes[at] == 43 || codes[at] == 45) {
+        if codes[at] == 45 -> sign = -1
+        at += 1
+    }
+    digits := 0
+    value := 0
+    loop at < codes.len() && codes[at] >= 48 && codes[at] <= 57 {
+        value = value * 10 + codes[at] - 48
+        digits += 1
+        at += 1
+    }
+    if digits == 0 -> None else -> Val(sign * value)
+}
+
 elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
     // The magic and EI_CLASS ELFCLASS64.
-    if (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
+    if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
     // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
     header: fields(bytes, 0x28, "<QIHHHHH", 22)
     // sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize
@@ -80,16 +145,19 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
         // SHT_SYMTAB
         if table[1] != 2 -> next
         strings: section(table[6])[4]
-        loop entry in 1..<table[5] /% table[9] {
+        // Every entry after the first that starts inside the table.
+        at := table[4] + table[9]
+        loop at < table[4] + table[5] {
             // st_name, st_info, st_other, st_shndx; the binding is st_info's high nibble
-            symbol: fields(bytes, table[4] + entry * table[9], "<IBBH", 8)
+            symbol: fields(bytes, at, "<IBBH", 8)
+            at += table[9]
             bind: symbol[1] >> 4
             // STB_LOCAL
             if symbol[0] == 0 || bind == 0 -> next
             start: strings + symbol[0]
             end := start
             loop bytes[end] != 0 -> end += 1
-            text: String.from_bytes_lossy(bytes.slice(start, end))
+            text: latin1(bytes.slice(start, end))
             // SHN_UNDEF, STB_WEAK
             if {
                 symbol[3] != 0 -> symbols.defines.push(text)
@@ -101,27 +169,42 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
 }
 
 // The ELF members of a System V / GNU ar archive, long names resolved. The
-// symbol tables (`/`, `/SYM64/`) and the long-name table (`//`) are not ELF,
-// so they are passed over with every other non-ELF member.
+// symbol tables (`/`, `/SYM64/`) and the long-name table (`//`) are passed
+// over, and so is every other member that is not ELF. Names and sizes are
+// read as the original reads them: latin1, the size as parseInt does, and
+// a size that is not a number ends the archive.
 archive_members: fn(bytes: [U8], label: String) -> [Symbols] {
-    if String.from_bytes_lossy(bytes.slice(0, 8)) != "!<arch>\n" -> process.fail(1, "{label}: not an ar archive")
+    if latin1(part(bytes, 0, 8)) != "!<arch>\n" -> process.fail(1, "{label}: not an ar archive")
     members := [Symbols]{}
     long_names := [U8]{}
     at := 8
     loop at + 60 <= bytes.len() {
-        raw: String.from_bytes_lossy(bytes.slice(at, at + 16)).trim_end()
-        size: String.from_bytes_lossy(bytes.slice(at + 48, at + 58)).trim().to_int() ?? 0
-        body: bytes.slice(at + 60, at + 60 + size)
-        at += 60 + size + size % 2
-        if raw == "//" -> long_names = body.copy()
-        // A long name is `/N`, N its offset in the long-name table.
-        start: raw.removeprefix("/").to_int() ?? -1
-        name := raw
-        if raw.starts_with("/") && start >= 0 {
-            tail: long_names.slice(start, long_names.len())
-            name = String.from_bytes_lossy(tail.slice(0, tail.index_of(U8{10}) ?? tail.len()))
+        raw: latin1(trimmed_end(part(bytes, at, at + 16)))
+        size: parse_int(part(bytes, at + 48, at + 58)) ?? break
+        body: part(bytes, at + 60, at + 60 + size)
+        // JavaScript's remainder takes the sign of the size.
+        at += 60 + size + (if size < 0 -> 0 - (0 - size) %% 2 else -> size %% 2)
+        if raw == "/" || raw == "/SYM64/" -> next
+        if raw == "//" {
+            long_names = body.copy()
+            next
         }
-        if binary.unpack_u32be(body, 0) == Val(ELF_MAGIC) -> members.push(elf_symbols(body, "{label}({name.removesuffix("/")})"))
+        name := raw
+        // A long name is `/N`, N its offset in the long-name table, and runs
+        // to the newline after it (without one, to the table's last byte).
+        digits: raw.removeprefix("/")
+        if raw.starts_with("/") && digits != "" && text.scalars(digits).all(c -> "0123456789".contains(c)) {
+            start: digits.to_int() ?? 0
+            newline := -1
+            loop index in start..<long_names.len() {
+                if long_names[index] == (U8{10}) {
+                    newline = index
+                    break
+                }
+            }
+            name = latin1(part(long_names, start, if newline < 0 -> long_names.len() - 1 else -> newline))
+        }
+        if body.len() >= 4 && binary.unpack_u32be(body, 0) == Val(ELF_MAGIC) -> members.push(elf_symbols(body, "{label}({name.removesuffix("/")})"))
     }
     members
 }

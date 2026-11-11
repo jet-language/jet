@@ -1,83 +1,416 @@
-// The dev tool roots for the orchestrator's Jet twins, the twin of
-// Tools/agent/roots.sh (which their originals source) and of
-// Tools/agent/roots.mjs (gauntlet tool entries roots-sh and roots-mjs): a root
-// is what a shell that sources the machine's ${XDG_CONFIG_HOME:-~/.config}/jet/env
-// sees, else the default derived from $HOME and the XDG directories.
+// The dev tool roots for the orchestrator's Jet twins: the twin of
+// Tools/agent/roots.sh, which their originals source (gauntlet tool entry
+// roots-sh). A root is what bash sees once it has sourced the machine's
+// ${XDG_CONFIG_HOME:-$HOME/.config}/jet/env, else the default derived from
+// $HOME and the XDG directories; the checkout is the one holding the program
+// (four directories up from it, as roots.sh's is two up from roots.sh), unless set.
 //
 //   jet Tools/agent/orchestrator/Roots.jet NAME...
 //
 // prints `NAME=value` for each root named (JET_STATE_ROOT, JET_SCRATCH_ROOT,
 // JET_RUN_ROOT, JET_BASE_ROOT, JET_TARGET_ROOT, JET_SEEDS, JET_SEED,
-// JET_DEV_WORKTREE, JET_BIN), as `bash roots.sh NAME...` and
-// `node roots.mjs NAME...` do; any other name exits 64.
+// JET_DEV_WORKTREE), as `bash roots.sh NAME...` does, and exits 64 at any
+// other name. Tools/agent/Roots.jet is the twin of roots.mjs.
+//
+// The env file is read as bash sources it. A command ends at a newline or `;`,
+// `#` starts a comment, and a command of assignments alone (or after `export`
+// or `readonly`) assigns them left to right, `+=` appending. Words take single
+// and double quotes, backslashes, line continuations, `~` (at the start of a
+// word and after `:` in an assignment), $NAME, $1-$9 and ${NAME} with `#` or
+// with `-`, `=`, `+` or `?`, with or without `:`; a ${NAME?} that fails exits
+// 1, as bash does. Any other command runs nothing here, though its expansions
+// still assign. A command with a pipeline, list, redirection, subshell,
+// command substitution, any other parameter form or `~user` is skipped whole.
 use {
     files: core.files
     process: core.process
     sys: core.sys
+    text: core.text
 }
 
-// `$name`, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
+// The roots `bash roots.sh NAME...` prints.
+ROOTS: [String]{"JET_STATE_ROOT", "JET_SCRATCH_ROOT", "JET_RUN_ROOT", "JET_BASE_ROOT", "JET_TARGET_ROOT", "JET_SEEDS", "JET_SEED", "JET_DEV_WORKTREE"}
+
+// The shell once roots.sh has run: what it assigned, over the environment.
+Shell: struct {
+    vars: [String: String]
+    args: [String]
+}
+
+// Characters being read, and where.
+Src: struct {
+    cs: [String]
+    at: Int
+}
+
+// `$name` in `sh`: None when it is unset.
+lookup: fn(sh: Shell, name: String) -[Env]> String? Never! {
+    if sh.vars.get(name) == .Val(value) -> return Val(value.copy())
+    found: process.env_get(name) ?? return None
+    Val(found)
+}
+
+// `${name:-fallback}` in `sh`: empty is unset.
+shell_or: fn(sh: Shell, name: String, fallback: String) -[Env]> String Never! {
+    value: lookup(sh, name) ?? return fallback.copy()
     if value == "" -> fallback.copy() else -> value
 }
 
-// `$name` once the machine's jet/env file is sourced, else `fallback`: the
-// environment's value, then each of the file's assignments of it in turn
-// (`NAME=value` or `export NAME=value`, quoted or not, `$HOME` expanded; a
-// `${NAME:-default}` value keeps a value already set).
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found := env_or(name, "")
-    home: env_or("HOME", "")
-    defaulted: "${{{name}:-"
-    loop line in (files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? "").lines() {
-        parts: line.trim().removeprefix("export ").partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value: parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'").replace("$HOME", home)
-        if {
-            !value.starts_with(defaulted) || !value.ends_with("}}") -> found = value
-            found == "" -> found = value.removeprefix(defaulted).removesuffix("}}")
-        }
-    }
-    if found != "" -> found else -> fallback.copy()
+// `$name` once roots.sh has run, else `fallback` when it is unset or empty.
+env_or: fn(name: String, fallback: String) -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! {
+    shell_or(sourced(), name, fallback)
 }
 
-state: fn() -[Env, FS]> String Never! {
-    root("JET_STATE_ROOT", "{root("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")
-}
+state: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_STATE_ROOT", "") }
 
-scratch: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state()) }
+scratch: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_SCRATCH_ROOT", "") }
 
 // The land queue, locks and slot ledger.
-run_dir: fn() -[Env, FS]> String Never! { root("JET_RUN_ROOT", "{scratch()}/run") }
+run_dir: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_RUN_ROOT", "") }
 
 // The lanes/Main directory under the scratch root.
-main: fn() -[Env, FS]> String Never! { "{scratch()}/lanes/Main" }
+main: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { "{scratch()}/lanes/Main" }
 
-// The checkout the lander commits to: the one holding this program unless set.
-worktree: fn() -[Env, FS]> String Never! {
-    root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
-}
+// The checkout the lander commits to.
+worktree: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_DEV_WORKTREE", "") }
 
 // The seed store.
-seeds: fn() -[Env, FS]> String Never! {
-    root("JET_SEEDS", "{root("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
+seeds: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_SEEDS", "") }
+
+seed: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> String Never! { env_or("JET_SEED", "") }
+
+// The shell after roots.sh: the env file sourced, then each root exported,
+// its default taking an unset or empty value's place.
+sourced: fn() -[Env, FS, Exec.Args, Exec.Exit, IO]> Shell Never! {
+    sh := Shell{vars: [String: String]{}, args: process.args()}
+    home: process.env_get("HOME") ?? ""
+    config: process.env_get("XDG_CONFIG_HOME") ?? ""
+    file: "{if config == "" -> "{home}/.config" else -> config}/jet/env"
+    if files.is_file(file) {
+        raw: files.read_bytes(file) ?? [U8]{}
+        src := Src{cs: text.scalars(String.from_bytes_lossy(raw)), at: 0}
+        loop src.at < src.cs.len() {
+            words: command_words(src) ?? next
+            apply(sh, words)
+        }
+    }
+    shell_home: lookup(sh, "HOME") ?? ""
+    sh.vars["JET_STATE_ROOT"] = shell_or(sh, "JET_STATE_ROOT", "{shell_or(sh, "XDG_CACHE_HOME", "{shell_home}/.cache")}/jet-dev")
+    sh.vars["JET_SCRATCH_ROOT"] = shell_or(sh, "JET_SCRATCH_ROOT", lookup(sh, "JET_STATE_ROOT") ?? "")
+    scratch_root: lookup(sh, "JET_SCRATCH_ROOT") ?? ""
+    sh.vars["JET_RUN_ROOT"] = shell_or(sh, "JET_RUN_ROOT", "{scratch_root}/run")
+    sh.vars["JET_BASE_ROOT"] = shell_or(sh, "JET_BASE_ROOT", "{scratch_root}/discovery/base")
+    sh.vars["JET_TARGET_ROOT"] = shell_or(sh, "JET_TARGET_ROOT", "{scratch_root}/targets")
+    sh.vars["JET_SEEDS"] = shell_or(sh, "JET_SEEDS", "{shell_or(sh, "XDG_DATA_HOME", "{shell_home}/.local/share")}/jet-seeds")
+    sh.vars["JET_SEED"] = shell_or(sh, "JET_SEED", "{lookup(sh, "JET_SEEDS") ?? ""}/current")
+    if shell_or(sh, "JET_DEV_WORKTREE", "") == "" {
+        sh.vars["JET_DEV_WORKTREE"] = files.dirname(files.dirname(files.dirname(files.dirname((files.absolute(sys.executable()) ?? sys.executable())))))
+    }
+    sh
 }
 
-seed: fn() -[Env, FS]> String Never! { root("JET_SEED", "{seeds()}/current") }
+// --- the env file, as bash sources it ----------------------------------------
+
+name_start: fn(c: String) -> Bool Never! {
+    c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".contains(c)
+}
+
+digit: fn(c: String) -> Bool Never! { c != "" && "0123456789".contains(c) }
+
+// The character `ahead` past `src.at`, "" past the end.
+peek: fn(src: Src, ahead: Int) -> String Never! {
+    if src.at + ahead < src.cs.len() -> src.cs[src.at + ahead].copy() else -> ""
+}
+
+// Moves `count` characters (fewer at the end) into `word`.
+carry: fn(src: &Src, word: &[String], count: Int) Never! {
+    loop _ in 0..<count {
+        if src.at >= src.cs.len() -> return
+        word.push(src.cs[src.at].copy())
+        src.at += 1
+    }
+}
+
+skip_line: fn(src: &Src) Never! {
+    loop src.at < src.cs.len() {
+        src.at += 1
+        if src.cs[src.at - 1] == "\n" -> return
+    }
+}
+
+// The raw words of the command at `src.at`, which ends at an unquoted newline
+// or `;` (consumed) or at the end: None, with the rest of its line skipped,
+// when it holds what this reader does not model.
+command_words: fn(src: &Src) -> [[String]]? Never! {
+    words := [[String]]{}
+    loop {
+        loop peek(src, 0) == " " || peek(src, 0) == "\t" -> src.at += 1
+        c: peek(src, 0)
+        if c == {
+            "" -> return Val(words)
+            "\n" | ";" -> {
+                src.at += 1
+                return Val(words)
+            }
+            "#" -> {
+                skip_line(src)
+                return Val(words)
+            }
+            else -> {
+                word := [String]{}
+                if !scan_word(src, word) {
+                    skip_line(src)
+                    return None
+                }
+                if word.len() > 0 -> words.push(word)
+            }
+        }
+    }
+}
+
+// Moves one unquoted word into `word`: false at what this reader does not model.
+scan_word: fn(src: &Src, word: &[String]) -> Bool Never! {
+    loop src.at < src.cs.len() {
+        c: peek(src, 0)
+        if c == " " || c == "\t" || c == "\n" || c == ";" -> return true
+        if "&|<>()".contains(c) -> return false
+        if !scan_one(src, word, "") -> return false
+    }
+    true
+}
+
+// Moves the piece at `src.at` into `word`: a character, an escape, a quoted
+// string or an expansion; a line continuation is dropped. False at what this
+// reader does not model; `within` is "\"" inside double quotes, else "".
+scan_one: fn(src: &Src, word: &[String], within: String) -> Bool Never! {
+    c: peek(src, 0)
+    if c == "\\" && peek(src, 1) == "\n" {
+        src.at += 2
+        return true
+    }
+    if c == "`" -> return false
+    if c == "'" && within == "" -> return scan_single(src, word)
+    if c == "\"" -> return scan_double(src, word)
+    if c == "$" -> return scan_dollar(src, word, within)
+    carry(src, word, if c == "\\" -> 2 else -> 1)
+    true
+}
+
+scan_single: fn(src: &Src, word: &[String]) -> Bool Never! {
+    carry(src, word, 1)
+    loop src.at < src.cs.len() {
+        c: peek(src, 0)
+        carry(src, word, 1)
+        if c == "'" -> return true
+    }
+    false
+}
+
+scan_double: fn(src: &Src, word: &[String]) -> Bool Never! {
+    carry(src, word, 1)
+    loop src.at < src.cs.len() {
+        if peek(src, 0) == "\"" {
+            carry(src, word, 1)
+            return true
+        }
+        if !scan_one(src, word, "\"") -> return false
+    }
+    false
+}
+
+// A `$` and, for `${`, all up to its `}`.
+scan_dollar: fn(src: &Src, word: &[String], within: String) -> Bool Never! {
+    if peek(src, 1) == "(" -> return false
+    if peek(src, 1) != "{{" {
+        carry(src, word, 1)
+        return true
+    }
+    carry(src, word, 2)
+    loop src.at < src.cs.len() {
+        if peek(src, 0) == "}}" {
+            carry(src, word, 1)
+            return true
+        }
+        if !scan_one(src, word, within) -> return false
+    }
+    false
+}
+
+// The name an assignment word assigns, "" when `word` is not one.
+assigned: fn(word: [String]) -> String Never! {
+    if word.len() == 0 || !name_start(word[0]) -> return ""
+    name := word[0].copy()
+    at := 1
+    loop at < word.len() && (name_start(word[at]) || digit(word[at])) {
+        name = "{name}{word[at]}"
+        at += 1
+    }
+    if at < word.len() && word[at] == "=" -> return name
+    if at + 1 < word.len() && word[at] == "+" && word[at + 1] == "=" -> return name
+    ""
+}
+
+// Runs one command's assignments: all of them when the command is nothing
+// else, after `export` or `readonly` too; otherwise only what its expansions assign.
+apply: fn(sh: &Shell, words: [[String]]) -[Env, Exec.Exit, IO]> Never! {
+    if words.len() == 0 -> return
+    head: words[0].join("")
+    declare: head == "export" || head == "readonly"
+    from: if declare -> 1 else -> 0
+    plain := true
+    loop at in from..<words.len() {
+        if !declare && assigned(words[at]) == "" -> plain = false
+    }
+    loop at in from..<words.len() {
+        name: assigned(words[at])
+        w := Src{cs: words[at].copy(), at: 0}
+        if name == "" || !plain {
+            if name == "" && declare -> next
+            _ := expand(sh, w, "", How{quoted: false, live: true, assignment: false}) ?? return
+            next
+        }
+        w.at = text.scalars(name).len()
+        appended: w.cs[w.at] == "+"
+        w.at += if appended -> 2 else -> 1
+        value: expand(sh, w, "", How{quoted: false, live: true, assignment: true}) ?? return
+        sh.vars[name] = if appended -> "{lookup(sh, name) ?? ""}{value}" else -> value
+    }
+}
+
+// How a word expands: `quoted` is inside double quotes; `live` applies the
+// `=` operators and fails the `?` ones, which bash skips in an operator word
+// it does not use; `assignment` expands `~` after `:` too.
+How: struct {
+    quoted: Bool
+    live: Bool
+    assignment: Bool
+}
+
+// The raw word at `w.at` up to `stop` (consumed; "" for the end), expanded
+// with its quotes removed: None at what this reader does not model.
+expand: fn(sh: &Shell, w: &Src, stop: String, how: How) -[Env, Exec.Exit, IO]> String? Never! {
+    out := ""
+    tilde := !how.quoted
+    loop w.at < w.cs.len() {
+        c: peek(w, 0)
+        next_c: peek(w, 1)
+        at_start: tilde
+        tilde = false
+        w.at += 1
+        if c == stop -> return Val(out)
+        if c == "\\" {
+            if {
+                next_c != "" && (!how.quoted || next_c == "$" || next_c == "`" || next_c == "\"" || next_c == "\\") -> {
+                    out = "{out}{next_c}"
+                    w.at += 1
+                }
+                else -> out = "{out}\\"
+            }
+            next
+        }
+        if c == "'" && !how.quoted {
+            loop w.at < w.cs.len() && peek(w, 0) != "'" {
+                out = "{out}{peek(w, 0)}"
+                w.at += 1
+            }
+            w.at += 1
+            next
+        }
+        if c == "\"" {
+            inner: expand(sh, w, "\"", How{quoted: true, live: how.live, assignment: false}) ?? return None
+            out = "{out}{inner}"
+            next
+        }
+        if c == "$" {
+            value: dollar(sh, w, how) ?? return None
+            out = "{out}{value}"
+            next
+        }
+        if c == "~" && at_start {
+            if next_c == "" || next_c == "/" || next_c == stop || (how.assignment && next_c == ":") {
+                out = "{out}{lookup(sh, "HOME") ?? sys.home_dir() ?? ""}"
+                next
+            }
+            if next_c != "\"" && next_c != "'" && next_c != "\\" -> return None
+        }
+        if c == ":" && how.assignment && !how.quoted -> tilde = true
+        out = "{out}{c}"
+    }
+    if stop != "" -> return None
+    Val(out)
+}
+
+// The expansion after a `$` at `w.at`.
+dollar: fn(sh: &Shell, w: &Src, how: How) -[Env, Exec.Exit, IO]> String? Never! {
+    c: peek(w, 0)
+    if c == "{{" {
+        w.at += 1
+        return braced(sh, w, how)
+    }
+    if name_start(c) || digit(c) {
+        name: if digit(c) -> c.copy() else -> param_name(w)
+        if digit(c) -> w.at += 1
+        if name == "0" -> return None
+        return Val(param(sh, name) ?? "")
+    }
+    if "@*#?-$!".contains(c) && c != "" -> return None
+    if !how.quoted && (c == "'" || c == "\"") -> return None
+    Val("$")
+}
+
+// The name or the digits at `w.at`, "" when neither starts there.
+param_name: fn(w: &Src) -> String Never! {
+    name := ""
+    numeric: digit(peek(w, 0))
+    loop digit(peek(w, 0)) || (!numeric && name_start(peek(w, 0))) {
+        name = "{name}{peek(w, 0)}"
+        w.at += 1
+    }
+    name
+}
+
+// A variable's value or a positional parameter ($1 is the first NAME): None when it is unset.
+param: fn(sh: Shell, name: String) -[Env]> String? Never! {
+    if !digit(text.scalars(name)[0]) -> return lookup(sh, name)
+    at: (Int.parse(name) ?? 0) - 1
+    if at < sh.args.len() -> Val(sh.args[at].copy()) else -> None
+}
+
+// `${...}` after its `{`.
+braced: fn(sh: &Shell, w: &Src, how: How) -[Env, Exec.Exit, IO]> String? Never! {
+    length: peek(w, 0) == "#"
+    if length -> w.at += 1
+    name: param_name(w)
+    if name == "" || name == "0" -> return None
+    set: param(sh, name)
+    value: set ?? ""
+    if peek(w, 0) == "}}" {
+        w.at += 1
+        return Val(if length -> "{text.scalars(value).len()}" else -> value)
+    }
+    if length -> return None
+    colon: peek(w, 0) == ":"
+    if colon -> w.at += 1
+    op: peek(w, 0)
+    if op != "-" && op != "=" && op != "+" && op != "?" -> return None
+    w.at += 1
+    missing: set == None || (colon && value == "")
+    used: if op == "+" -> !missing else -> missing
+    live: how.live && used
+    word: expand(sh, w, "}}", How{quoted: how.quoted, live: live, assignment: false}) ?? return None
+    if !used -> return Val(if op == "+" -> "" else -> value)
+    if op == "=" {
+        if digit(text.scalars(name)[0]) -> return None
+        if live -> sh.vars[name] = word.copy()
+    }
+    if op == "?" && live -> process.fail(1, "roots: {name}: {if word == "" -> "parameter null or not set" else -> word}")
+    Val(word)
+}
 
 run: fn() {
-    known: [String: String]{
-        "JET_STATE_ROOT": state(),
-        "JET_SCRATCH_ROOT": scratch(),
-        "JET_RUN_ROOT": run_dir(),
-        "JET_BASE_ROOT": root("JET_BASE_ROOT", "{scratch()}/discovery/base"),
-        "JET_TARGET_ROOT": root("JET_TARGET_ROOT", "{scratch()}/targets"),
-        "JET_SEEDS": seeds(),
-        "JET_SEED": seed(),
-        "JET_DEV_WORKTREE": worktree(),
-        // The jet under test, which `jet test` passes its children.
-        "JET_BIN": root("JET_BIN", "{seed()}/jet"),
+    sh: sourced()
+    loop name in process.args() {
+        if !ROOTS.contains(name) -> process.fail(64, "roots: unknown root {name}")
+        print("{name}={lookup(sh, name) ?? ""}")
     }
-    loop name in process.args() -> print("{name}={known.get(name) ?? process.fail(64, "roots: unknown root {name}")}")
 }
