@@ -1,8 +1,13 @@
 // core-conformance: core.web.table.with_column
 use api: core.web.table
 
+Row: struct {
+    name: String
+}
+
 run: fn() {
-    table: api.new<String>("", [String]{"jet"})
-    col: api.column<String>("jet", "jet", value -> value)
-    print(api.with_column(table, col))
+    table := api.new<Row>("", [Row]{Row{name: "jet"}})
+    col: api.column<Row>("name", "Name", row -> row.name)
+    api.with_column(table, col)
+    print(api.facts(table))
 }

@@ -3,6 +3,7 @@ use api: core.web.forms
 
 run: fn() {
     form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
-    submission: api.typed_submit_async(form)
-    print(api.typed_submission_cancel(submission))
+    submission := api.typed_submit_async(form)
+    api.typed_submission_cancel(submission)
+    print(submission.pending)
 }

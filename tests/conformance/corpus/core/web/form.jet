@@ -1,6 +1,13 @@
 // core-conformance: core.web.form
 use api: core.web
 
+Item: struct {
+    name: String
+}
+
+save: fn(input: Item) -> String { "saved {input.name}" }
+
 run: fn() {
-    print(api.form(WebFormInput{}, "jet"))
+    form: api.form(Item, action: save)
+    print(form.render())
 }
