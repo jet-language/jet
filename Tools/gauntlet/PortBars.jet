@@ -68,9 +68,12 @@
 // `_` and non-ASCII bytes (a number may take one `.digits` part). Of the rest,
 // each of MULTI_SYMBOLS is one token where it is written and every other byte
 // is one token. A JavaScript regex literal is one token, as a pattern string
-// is in the other languages: a `/` that starts no comment opens one at the
-// start of the file, after any symbol but `)`, `]` and `}`, and after one of
-// REGEX_KEYWORDS. A Jet program's `#Test(…) {…}` blocks are its proof, not
+// is in the other languages. A `/` that starts no comment opens one where an
+// operand is expected, by the token before it: at the start of the file; after
+// one of REGEX_KEYWORDS (any other word ends an operand); after any symbol but
+// `)`, `]`, `}` and a postfix `++` or `--`; after a `)` that closes the head of
+// one of REGEX_HEADS; after a `}` that closes a block, not an object literal.
+// A Jet program's `#Test(…) {…}` blocks are its proof, not
 // its program: neither the tokens nor the proxies count them.
 //
 // SOURCE RULES. Both bars measure a program, not one file: the program's
@@ -144,6 +147,12 @@ MULTI_SYMBOLS: [String]{"===", "!==", "...", "..<", "&&", "||", "??", "?.", "->"
 CONTROL_WORDS: [String]{"if", "else", "loop", "for", "while", "do", "switch", "try", "catch", "finally", "elif", "except", "with", "match", "case"}
 // The JavaScript words after which a `/` opens a regex literal.
 REGEX_KEYWORDS: [String]{"return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "instanceof", "yield", "await"}
+// The JavaScript words whose `(…)` head ends where a statement begins.
+REGEX_HEADS: [String]{"if", "while", "for", "with"}
+// The JavaScript words after which a `{` opens a block.
+BLOCK_WORDS: [String]{"else", "try", "finally", "do"}
+// The symbols after which a JavaScript `{` opens a block.
+BLOCK_SYMBOLS: [String]{")", ";", "{{", "}}", "=>"}
 SHELL_OPENERS: [String]{"if", "for", "while", "until", "case"}
 SHELL_CLOSERS: [String]{"fi", "done", "esac"}
 
@@ -637,16 +646,71 @@ without_tests: fn(list: [Token]) -> [Token] Never! {
     }
 }
 
-// Whether a JavaScript `/` after the tokens `list` opens a regex literal
-// (TOKEN RULES): where an operand is expected.
-regex_opens: fn(list: [Token]) -> Bool Never! {
-    if list.len() == 0 -> return true
-    last: list[list.len() - 1]
-    if last.kind == {
-        .Text -> false
-        .Word -> REGEX_KEYWORDS.contains(last.text)
-        .Symbol -> !(last.text == ")" || last.text == "]" || last.text == "}}")
+// The index of the `open` symbol that the `close` symbol at `at` in `list`
+// closes, or -1.
+opener_of: fn(list: [Token], at: Int, open: String, close: String) -> Int Never! {
+    depth := 0
+    index := at
+    loop index >= 0 {
+        token: list[index]
+        if token.kind == .Symbol && token.text == close -> depth += 1
+        if token.kind == .Symbol && token.text == open {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+        index -= 1
     }
+    -1
+}
+
+// Whether the JavaScript token at `at` in `list` ends an operand: a literal,
+// a word but REGEX_KEYWORDS, `)` or `]`.
+operand_ends: fn(list: [Token], at: Int) -> Bool Never! {
+    if at < 0 -> return false
+    token: list[at]
+    if token.kind == {
+        .Text -> true
+        .Word -> !REGEX_KEYWORDS.contains(token.text)
+        .Symbol -> token.text == ")" || token.text == "]"
+    }
+}
+
+// Whether the JavaScript `(` at `open` in `list` opens the head of one of
+// REGEX_HEADS (`for await (` too).
+control_head: fn(list: [Token], open: Int) -> Bool Never! {
+    if open < 1 || list[open - 1].kind != .Word -> return false
+    word: list[open - 1].text
+    if word == "await" -> return open >= 2 && list[open - 2].text == "for"
+    REGEX_HEADS.contains(word)
+}
+
+// Whether the JavaScript `{` at `open` in `list` opens a block, not an
+// object literal: at the start of a statement or after BLOCK_WORDS or
+// BLOCK_SYMBOLS.
+block_brace: fn(list: [Token], open: Int) -> Bool Never! {
+    if open < 0 -> return false
+    if open == 0 -> return true
+    before: list[open - 1]
+    if before.kind == {
+        .Text -> false
+        .Word -> BLOCK_WORDS.contains(before.text)
+        .Symbol -> BLOCK_SYMBOLS.contains(before.text)
+    }
+}
+
+// Whether a JavaScript `/` after the tokens `list` opens a regex literal
+// (TOKEN RULES): where an operand is expected, by the token before it.
+regex_opens: fn(list: [Token]) -> Bool Never! {
+    at: list.len() - 1
+    if at < 0 -> return true
+    last: list[at]
+    if last.kind == .Text -> return false
+    if last.kind == .Word -> return REGEX_KEYWORDS.contains(last.text)
+    // `++` and `--` are two symbols: postfix after an operand, else prefix.
+    if (last.text == "+" || last.text == "-") && at >= 1 && list[at - 1].kind == .Symbol && list[at - 1].text == last.text -> return !operand_ends(list, at - 2)
+    if last.text == ")" -> return control_head(list, opener_of(list, at, "(", ")"))
+    if last.text == "}}" -> return block_brace(list, opener_of(list, at, "{{", "}}"))
+    last.text != "]"
 }
 
 // The index just past the JavaScript regex literal that opens at `at`, its
@@ -960,14 +1024,17 @@ shell_fallbacks: fn(text: String) -> Int Never! {
 CaseState: enum { Header Pattern Body }
 
 // The arms of the shell `case` blocks in `list` but the default `*)`: each
-// arm's `pattern)`, after its block's `in` or the `;;` before it.
+// arm's `pattern)`, after its block's `in` or the terminator before it, one of
+// `;;`, `;&` and `;;&` (the symbols `;;`, or `;` or `;;` then `&`).
 shell_arms: fn(list: [Token]) -> Int Never! {
     states := [CaseState]{}
     pattern := ""
     arms := 0
-    loop token in list {
+    loop index in 0..<list.len() {
+        token: list[index]
         word: token.kind == .Word
         symbol: token.kind == .Symbol
+        before: if index > 0 && list[index - 1].kind == .Symbol -> list[index - 1].text else -> ""
         if word && token.text == "case" {
             states.push(.Header)
             next
@@ -990,11 +1057,12 @@ shell_arms: fn(list: [Token]) -> Int Never! {
                         pattern = ""
                         states[last] = .Body
                     }
-                    !(symbol && token.text == "(" && pattern == "") -> pattern = "{pattern}{token.text}"
+                    // A leading `(` and the `&` of a `;;&` are no pattern.
+                    !(symbol && pattern == "" && (token.text == "(" || (token.text == "&" && before == ";;"))) -> pattern = "{pattern}{token.text}"
                 }
             }
             .Body -> {
-                if symbol && token.text == ";;" -> states[last] = .Pattern
+                if symbol && (token.text == ";;" || (token.text == "&" && before == ";")) -> states[last] = .Pattern
             }
         }
     }
@@ -1671,6 +1739,41 @@ run: fn() {
     assert_eq(proxies(tokens(shell, .Shell), .Shell), Proxies{branches: 4, depth: 3})
     arms: "case $1 in\n  a|b) x=${{2:-none}} ;;\n  (c) y=${{3:+set}}\nesac\nuntil false || ${{#z}}; do w=${{v:2}} ${{u%x}} ${{q=${{r?}}}}; done\nif a; then :; elif b; then :; fi\n"
     assert_eq(proxies(tokens(arms, .Shell), .Shell), Proxies{branches: 10, depth: 1})
+}
+
+// "TOKENS BRANCHES" of `source` read as `language`.
+counted: fn(source: String, language: Language) -> String Never! {
+    list: tokens(source, language)
+    "{list.len()} {branches(list, language)}"
+}
+
+#Test("a JavaScript slash divides after an operand, a postfix ++ or --, a call's or group's closing paren and an object's closing brace, and opens a regex literal after a keyword, an operator, a control head's closing paren and a block's closing brace") {
+    assert_eq(counted("x++ / 2; if (y) f();", .JavaScript), "14 1")
+    assert_eq(counted("if (x) /a?b/.test(y);", .JavaScript), "11 1")
+    assert_eq(counted("x-- / 2 ? a : b;", .JavaScript), "10 1")
+    assert_eq(counted("a = b / c / d ? e : f;", .JavaScript), "12 1")
+    assert_eq(counted("g(x) / 2 ? a : b;", .JavaScript), "11 1")
+    assert_eq(counted("(a) / 2 ? b : c;", .JavaScript), "10 1")
+    assert_eq(counted("v[0] / 2 ? a : b;", .JavaScript), "11 1")
+    assert_eq(counted("const o = {{}} / 2 ? a : b;", .JavaScript), "12 1")
+    assert_eq(counted("while (x) /a?/.exec(s);", .JavaScript), "11 1")
+    assert_eq(counted("for (;;) /a?|b/.test(s);", .JavaScript), "11 1")
+    assert_eq(counted("for await (const l of r) /a?/.test(l);", .JavaScript), "15 1")
+    assert_eq(counted("if (x) {{}} /a?b/.test(y);", .JavaScript), "13 1")
+    assert_eq(counted("function f() {{}} /a?/.test(s);", .JavaScript), "13 0")
+    assert_eq(counted("return /a?/.test(s) ? 1 : 2;", .JavaScript), "12 1")
+    assert_eq(counted("typeof /a?/;", .JavaScript), "3 0")
+    assert_eq(counted("x = y ? /a?/ : z;", .JavaScript), "8 1")
+}
+
+#Test("a shell case arm ends at each of ;;, ;& and ;;&, and the default *) after any of them counts none") {
+    assert_eq(counted("case x in a) f;& b) g;; esac", .Shell), "13 2")
+    assert_eq(counted("case x in a) f;;& *) g;; esac", .Shell), "13 1")
+    assert_eq(counted("case x in a) f;& *) g;; esac", .Shell), "13 1")
+    assert_eq(counted("case x in a) f;; b) g;;& c) h;& *) i;; esac", .Shell), "22 3")
+    assert_eq(counted("case x in a) f & ;; b) g;; esac", .Shell), "13 2")
+    assert_eq(counted("case x in a) f; ;; b) g; esac", .Shell), "13 2")
+    assert_eq(counted("case x in a) case y in b) f;& *) g;; esac;; *) h;; esac", .Shell), "24 2")
 }
 
 // A checklist object scoring every item `score`.
