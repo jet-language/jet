@@ -9248,6 +9248,20 @@ ThroughUnreachable: struct {
     }
 }
 
+AsRepeated: struct {
+    name: String
+    field: String
+
+    impl Diagnostic {
+        code: "E1129"
+        meaning: "A second `#As` field in one struct"
+        detail: true
+        what: fn(self) -> String { "`{self.name}` already passes as its field `{self.field}`." }
+        why: fn(self) -> String { "A struct passes as one field, so only one of its fields carries `#As`." }
+        fix: fn(self) -> String { "Remove `#As` from all but one field." }
+    }
+}
+
 RetiredKernelCrossing: struct {
     impl Diagnostic {
         code: "E1130"
@@ -9256,6 +9270,19 @@ RetiredKernelCrossing: struct {
         what: fn(self) -> String { "*Retired*" }
         why: fn(self) -> String { "The registered sema/parse rule applies here" }
         fix: fn(self) -> String { "Follow the guidance for E1130" }
+    }
+}
+
+AsComputed: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1131"
+        meaning: "`#As` on a computed field"
+        detail: true
+        what: fn(self) -> String { "`#As` is on computed field `{self.name}`." }
+        why: fn(self) -> String { "`#As` passes the struct as a stored field's value, and a computed field stores none." }
+        fix: fn(self) -> String { "Put `#As` on a stored field, or remove it." }
     }
 }
 

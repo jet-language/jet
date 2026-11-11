@@ -18,6 +18,7 @@ use {
         DeclID,
         DeclTable,
         MARKER_ARG,
+        MARKER_AS,
         MARKER_CLI,
         MARKER_DEPRECATED,
         MARKER_DOC,
@@ -2906,6 +2907,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     // A `#Layout(U8)` enum gains its `to_int` and `from_int` methods
     // (EnumNumbers.jet).
     sema_enum_numbers_expand(module_row.program.items, diagnostics)
+    // `#As` sits on one stored field of a struct (E1129, E1131), read
+    // before the computed fields become getters.
+    sema_registration_as_fields(module_row.program.items, diagnostics)
     // Each computed field becomes its generated getter method, which a
     // read of the field calls.
     sema_derive_computed_getters(module_row.program.items)
@@ -3376,6 +3380,36 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
             }
         }
     }
+}
+
+// `#As`: a struct passes as one stored field where that
+// field's type is expected (sema_expression_as_field). A second `#As` field
+// is E1129; `#As` on a computed field, which stores no value, is E1131.
+sema_registration_as_fields: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Struct(definition) {
+            first := String?{None}
+            loop field in definition.fields {
+                marker: sema_registration_as_marker(field.serde_markers) ?? next
+                if field.computed != None {
+                    diagnostics.push(sema_error("E1131", marker.span, "`#As` is on computed field `{field.name}`", "`#As` passes the struct as a stored field's value, and a computed field stores none", "put `#As` on a stored field, or remove it"))
+                    next
+                }
+                if first == .Val(earlier) {
+                    diagnostics.push(sema_error("E1129", marker.span, "`{definition.name}` already passes as its field `{earlier}`", "a struct passes as one field, so only one of its fields carries `#As`", "remove `#As` from all but one field"))
+                    next
+                }
+                first = Val(field.name)
+            }
+        }
+    }
+}
+
+sema_registration_as_marker: fn(markers: [Marker]) -> Marker? {
+    loop marker in markers {
+        if marker.name == MARKER_AS -> return Val(marker.copy())
+    }
+    None
 }
 
 // E1318: the field's `#Arg(short:)`, when it is one literal string, is one

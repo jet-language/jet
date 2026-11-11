@@ -1197,6 +1197,12 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
     if sema_expr_unit_coherent_value(owned, required, environment, program) == .Val(coherent) -> return Val(coherent.move())
     compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
     if !compatible {
+        // `#As`: a struct whose `#As` field fills `required` passes as that field.
+        if sema_expression_as_field(offered, required, owned.span, environment, program) == .Val(as_field) {
+            span: owned.span
+            projected: sema_tree_node(as_field.ty, TExprKind.Field{receiver: owned.move(), field: as_field.field}, span)
+            return sema_expr_expected_owned(projected, expected, environment, program, diagnostics)
+        }
         diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, owned.span))
         return None
     }

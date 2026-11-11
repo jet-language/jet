@@ -728,6 +728,12 @@ Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
 map or a function has no order, so an explicit `#Comparable` over a type that
 holds one is E0905 at the marker.
 
+`#As` on one stored field lets the struct pass where that field's type is
+expected, read as that field (D-JAI-SMALL1=A): with `Labeled: struct { #As at:
+Point, label: String }`, a `Labeled` passes to a `Point` parameter as its `at`.
+A value that already fits the expected type passes as itself. A second `#As`
+field in one struct is E1129, and `#As` on a computed field is E1131.
+
 ### Encoding and validation
 
 `Encode.encode(self) -> Dyn` and

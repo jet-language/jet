@@ -3935,9 +3935,10 @@ its number: `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A case
 without a number is E1124, and `#Specified` on a struct or on an enum whose
 cases have no numbers is E1125. `#Through` on the last arm is E1126, a next
 body that reads a name its own arm binds is E1127, and `#Through` on an arm
-that always leaves, or in a table that gives a value, is E1128. `#Specified`
-and `#Through` are built; the Set bits and `#As` are ratified and not yet
-implemented (card #5028).
+that always leaves, or in a table that gives a value, is E1128. A second `#As`
+field in one struct is E1129, and `#As` on a computed field is E1131.
+`#Specified`, `#Through` and `#As` are built; the Set bits are ratified and not
+yet implemented (card #5028).
 
 
 ### Low-level tier

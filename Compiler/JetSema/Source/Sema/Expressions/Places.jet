@@ -528,6 +528,55 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     None
 }
 
+// `#As`: a struct whose stored field carries `#As` passes
+// where that field's type is expected, read as the field. `offered` is the
+// value's resolved type. None when it names no struct, the struct has no
+// visible `#As` field, or that field's type does not fill `required`.
+SemaExpressionAsField: struct {
+    ty: Type
+    field: TFieldRef
+}
+
+sema_expression_as_field: fn(offered: Type, required: Type, use_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaExpressionAsField? {
+    owner_name := ""
+    owner_args := [Type]{}
+    if offered == .Named(name) -> owner_name = name
+    if offered == .Apply(name, args) {
+        owner_name = name
+        // copy: the owner's type arguments substitute into the field type; `offered` keeps its own.
+        owner_args = args.copy()
+    }
+    if owner_name == "" -> return None
+    owner_symbol: sema_expression_graph_type_symbol(environment, program, owner_name) ?? return None
+    struct_def: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
+    if struct_def.type_params.len() != owner_args.len() -> return None
+    loop field in struct_def.fields {
+        if field.computed != None || sema_registration_as_marker(field.serde_markers) == None -> next
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, use_span, false, environment, program) -> return None
+        names: loop param in struct_def.type_params -> param.name
+        field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
+        fits: sema_expr_expected_assignable(required, sema_expr_expected_type(field_ty, environment, program), environment, program) ?? return None
+        if !fits -> return None
+        field_id: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
+        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+        reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
+        reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, field.name)
+        return Val(SemaExpressionAsField{ty: field_ty, field: reference})
+    }
+    None
+}
+
+// A type's symbol by the name its resolved type carries, read through the
+// registration graph in place (as sema_expression_type_symbol does without
+// a local binding).
+sema_expression_graph_type_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
+    if program.registration_graph == .Val(graph) {
+        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return None
+        return if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
+    }
+    None
+}
+
 // Whether `member` is a field of a module's Module record `record`, so
 // `pricing.category` reads the record and `pricing.missing` stays the module
 // member report.
