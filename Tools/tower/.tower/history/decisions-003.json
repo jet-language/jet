@@ -17409,6 +17409,385 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-06",
       "retiredAt": "2026-11-11T02:35:31.063Z"
+    },
+    {
+      "id": "D-LOG-LADDER1",
+      "cardId": "c0920a2g",
+      "group": "api",
+      "title": "The log level follows the setting order, plus `JET_LOG` for operators",
+      "situation": "A Jet program sets its log level only by calling a function in its own code. The level is one value for the whole process. An operator cannot raise it for one run without editing the program. One noisy module cannot be quieted alone. Level names also have aliases, so `warning` and `warn` mean the same. Build options already follow one order. The package sets a default, code overrides it, and the flag wins. The vote decides where log levels are set, how they are spelled, and in what order.",
+      "gist": "Should the log level follow the setting order, with an environment variable for operators?",
+      "lesson": "Yes: package, then code, then `JET_LOG`, then `--log`; each level can be set per module.",
+      "explainer": "",
+      "story": "A shop is slow in production. The operator restarts it with `JET_LOG=warn,shop.db=debug` and sees only database debug lines, with no rebuild.",
+      "inWild": "Option          Who wins        Per module   Like\nA setting order flag > env      yes          Spring Boot, .NET\nB code wins     code > env      yes          Rust env_logger\nC code only     code            yes          Go slog, Python",
+      "detail": "WHAT WE BUILD\n- `log` becomes a row of the D-SETTING-ORDER1=A option table: package.jet `log:`, `--log` on `jet run`/`jet dev`, the code method. `debug` in text is `.Debug` in code.\n- `JET_LOG` read from the captured environment (D-EFF-ENV-SNAPSHOT1=A); a built binary reads it, and its own argv stays the program's.\n- Records carry the declared module path of the calling function, passed by the compiler (emit, Log.jet:38-62, has none today). Files with no module declaration share the package root.\n\n- No pin for `log`. A bad filter fails at startup naming the pair (today ignored, Log.jet:138-143). Credential-tagged values stay blocked at every level (D-TAINT2=A).\n- Migration: `set_level`, `log.log`, `enabled` and `setup` take the typed level; `canon_level` aliases (:256-265) and `log.warning()` (:49) are removed.\n\nEVIDENCE (r14 jet, probe r11)\n- Logging needs `--allow=Log` (E1803). `set_level(\"warning\")` and `setup(\"level=err\")` work; `JET_LOG=debug` is ignored; `--log` is E2102.\n\nIDS\nUnder A amends D-SETTING-ORDER1=A for the log row: a process-environment source between code and flag, and no pin. D-CONF-MERGE1=A's environment layer is package `environments:` (PackageParse.jet:206), not a process variable. `log:` is a table field, not a `settings:` entry (D-CONF-KEY1=A). Hosts #6056 (L-18).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Setting order plus `JET_LOG`",
+          "detail": "`log` is one row of the setting table. `JET_LOG` sits between code and the flag, and cannot be pinned. Gains: Operators change logging without a rebuild. One noisy module can be set alone. Same order and spelling as every setting. Losses: `JET_LOG` is an environment source no other setting has.",
+          "technical": "The setting table generates `log:` in package.jet, `--log` and the code method. Order: stock info < package.jet < code < `JET_LOG` < `--log`. Filter text is a default, then `module=level` pairs; the longest module path wins. The compiler passes each record's module. A code call under `JET_LOG` or `--log` keeps the operator level and logs one note. A bad filter fails at startup. `jet explain log` shows each source.",
+          "code": "# A: one order, weakest first\n# package.jet: log: \"warn\"\n# code:        log.set_level(.Debug, module: \"shop.cache\")\n$ JET_LOG=warn,shop.db=debug ./shop\n$ jet run --log=error         # strongest\n$ jet explain log             # each source, file:line"
+        },
+        {
+          "key": "B",
+          "name": "Code wins over `JET_LOG`",
+          "detail": "`JET_LOG` sets the starting filter, and any code call replaces it. Gains: No change to the setting order. Losses: One code call silences the operator. Logging stays outside the setting table.",
+          "technical": "`core.log` reads `JET_LOG` once before `fn run`, with A's filter text. `log.set_level` replaces the filter at any time. Typed levels; aliases removed.",
+          "code": "# B: JET_LOG is a starting default; code wins\n$ JET_LOG=warn,shop.db=debug ./shop\n// later, in code:\nlog.set_level(.Warn)      // replaces the JET_LOG filter"
+        },
+        {
+          "key": "C",
+          "name": "Code only",
+          "detail": "Logging stays the program's job. Code sets typed levels, per module, and reads any config it wants. Gains: Nothing new in the toolchain. Losses: An operator must edit and rebuild to raise logging. Every program invents its own switch.",
+          "technical": "Core/Log keeps code-only control, with typed levels and per-module calls. Aliases are removed.",
+          "code": "// C: code only, typed levels\nlog.set_level(.Warn)\nlog.set_level(.Debug, module: \"shop.db\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Spring Boot",
+          "note": "Command line beats environment, which beats the config file. Source: https://docs.spring.io/spring-boot/reference/features/external-config.html",
+          "code": "# Spring Boot\n$ LOGGING_LEVEL_COM_SHOP_DB=debug java -jar shop.jar\n$ java -jar shop.jar --logging.level.root=error"
+        },
+        {
+          "lang": ".NET",
+          "note": "appsettings.json, then environment, then command line. Source: https://learn.microsoft.com/aspnet/core/fundamentals/logging/",
+          "code": "# .NET\n$ Logging__LogLevel__Default=Warning dotnet run\n$ dotnet run --Logging:LogLevel:Shop.Db=Debug"
+        },
+        {
+          "lang": "Rust",
+          "note": "RUST_LOG gives a default and per-module levels in one string. Source: https://docs.rs/env_logger/latest/env_logger/",
+          "code": "# Rust, env_logger\n$ RUST_LOG=warn,shop::db=debug ./shop\n[DEBUG shop::db] query took 12ms"
+        },
+        {
+          "lang": "Go",
+          "note": "slog levels are set in code; no standard variable. Source: https://pkg.go.dev/log/slog",
+          "code": "// Go\nlvl := new(slog.LevelVar)\nlvl.Set(slog.LevelWarn)"
+        },
+        {
+          "lang": "Python",
+          "note": "logging levels are set per logger in code or a config file. Source: https://docs.python.org/3/library/logging.html",
+          "code": "# Python\nlogging.basicConfig(level=logging.WARNING)\nlogging.getLogger(\"shop.db\").setLevel(logging.DEBUG)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Logging is a setting, so it takes the setting order. The person debugging production needs the last word, so the environment and flag win.",
+        "gains": [
+          "Operators raise logging per run, per module, without a rebuild.",
+          "One order, one spelling, as for every setting.",
+          "One command shows where each level came from."
+        ],
+        "losses": [
+          {
+            "loss": "`JET_LOG` is an environment source no other setting has.",
+            "mitigation": "A built binary has no jet flags, so only the environment can reach it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One code call silently overrides the operator."
+          },
+          {
+            "key": "C",
+            "reason": "Raising logging in production needs an edit and a rebuild."
+          }
+        ],
+        "tradeoff": "One environment source, for logging an operator can always raise."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked whether the operator should beat code, whether C is still a strawman, and each peer row. The facts and peers hold, the one loss is stated plainly, and A beats B because one code call cannot silence the operator."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the log level follow the setting order, with an environment variable for operators?",
+        "lesson": "Yes: package, then code, then `JET_LOG`, then `--log`; each level can be set per module.",
+        "trio": {
+          "current": {
+            "note": "Today: only code sets one level for the whole process, with alias spellings.",
+            "code": "// Today\nlog.set_level(\"warning\")     // same as \"warn\"; whole process\nlog.setup(\"level=err\")       // same as \"error\"\n// $ JET_LOG=debug jet run --allow=Log shop.jet   ignored\n// $ jet run --log=debug shop.jet   E2102: not a flag"
+          },
+          "wild": {
+            "lang": "Spring Boot",
+            "note": "Config file, then environment, then command line, each per package.",
+            "code": "# Spring Boot\n# application.properties: logging.level.com.shop=warn\n$ LOGGING_LEVEL_COM_SHOP_DB=debug java -jar shop.jar\n$ java -jar shop.jar --logging.level.root=error"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Setting order plus `JET_LOG`",
+            "gist": "`log` is one row of the setting table. `JET_LOG` sits between code and the flag, and cannot be pinned.",
+            "gains": [
+              "Operators change logging without a rebuild.",
+              "One noisy module can be set alone.",
+              "Same order and spelling as every setting."
+            ],
+            "losses": [
+              "`JET_LOG` is an environment source no other setting has."
+            ],
+            "proposed": {
+              "code": "# A: one order, weakest first\n# package.jet: log: \"warn\"\n# code:        log.set_level(.Debug, module: \"shop.cache\")\n$ JET_LOG=warn,shop.db=debug ./shop\n$ jet run --log=error         # strongest\n$ jet explain log             # each source, file:line"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Code wins over `JET_LOG`",
+            "gist": "`JET_LOG` sets the starting filter, and any code call replaces it.",
+            "gains": [
+              "No change to the setting order."
+            ],
+            "losses": [
+              "One code call silences the operator.",
+              "Logging stays outside the setting table."
+            ],
+            "proposed": {
+              "code": "# B: JET_LOG is a starting default; code wins\n$ JET_LOG=warn,shop.db=debug ./shop\n// later, in code:\nlog.set_level(.Warn)      // replaces the JET_LOG filter"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Code only",
+            "gist": "Logging stays the program's job. Code sets typed levels, per module, and reads any config it wants.",
+            "gains": [
+              "Nothing new in the toolchain."
+            ],
+            "losses": [
+              "An operator must edit and rebuild to raise logging.",
+              "Every program invents its own switch."
+            ],
+            "proposed": {
+              "code": "// C: code only, typed levels\nlog.set_level(.Warn)\nlog.set_level(.Debug, module: \"shop.db\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Logging is a setting, so it takes the setting order. The person debugging production needs the last word, so the environment and flag win.",
+          "gains": [
+            "Operators raise logging per run, per module, without a rebuild.",
+            "One order, one spelling, as for every setting.",
+            "One command shows where each level came from."
+          ],
+          "losses": [
+            {
+              "loss": "`JET_LOG` is an environment source no other setting has.",
+              "mitigation": "A built binary has no jet flags, so only the environment can reach it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "One code call silently overrides the operator."
+            },
+            {
+              "key": "C",
+              "reason": "Raising logging in production needs an edit and a rebuild."
+            }
+          ],
+          "tradeoff": "One environment source, for logging an operator can always raise."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:55:10.923Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-11T09:03:08.096Z"
+    },
+    {
+      "id": "D-PIPE1",
+      "cardId": "c09umw0r",
+      "group": "syntax",
+      "title": "Which glyph stands for the value a pipe step receives: <>, $ or {}?",
+      "situation": "You called the named steps terrible and asked for a glyph such as dollar, braces or angle brackets, leaning to angle brackets because they echo the fence. This revision drops the named steps, so every option is the same pipe with a different glyph for the value from the line above. The recommendation is the empty angle pair, which means nothing in Jet today, while the dollar sign already marks facts and environment reads, and empty braces already build an empty value. Each claim about today's compiler was checked with a probe, and each option shows one complete program with its output.",
+      "gist": "Should a pipe step write the value it receives as <>, as $, or as {}?",
+      "lesson": "A dot chain such as text.trim().len() reads in the order it runs. Many steps are not methods, such as Int.parse, so those flows nest inside out or need a name per line. A pipe passes each value down to the next line. This vote picks the glyph that stands for that value inside a step.",
+      "explainer": "",
+      "story": "Ana reads a port: bytes become text, text becomes a number, and each step can fail. Today she invents a name for every step or nests the calls. With a pipe she writes one step per line, and one glyph marks where the value goes.",
+      "inWild": "Hack: $x |> foo($$) writes the piped value as $$ in every step.\nJavaScript (Stage 2 proposal): every step writes the piped value as %.\nR 4.2: x |> f(data = _) marks the piped value with _, in a named argument only.\nElixir and Gleam: x |> f(1) passes x as the first argument, with no glyph.\nSQL and Pascal: a <> b means not equal. Elixir joins strings with <>, and Haskell combines values with it.",
+      "detail": "YOUR QUESTION\n\nYou called the named steps terrible and asked for a glyph such as $, {} or <>, leaning to <> because it echoes the fence, as in <: 1, 2 :>. The named steps are gone. Each option below is the same pipe, with one glyph standing for the value from the line above. A recommends <>.\n\nWHAT A MEANS\n\nA step is |> expression, and <> inside it is the value made by the line above. The step's result goes down to the next line. The whole pipe is one ordinary expression, so it can be returned, bound or passed.\n\nraw |> String.from_bytes(<>) ?? return fallback means the same as text :: String.from_bytes(raw) ?? return fallback. Each step lowers to a hidden :: binding before type checking. The compiled code equals the named form at every optimisation level, so a pipe costs nothing while running.\n\nTHE RULES\n\n- Every step uses <> at least once. A step without it is an error, with a fix that uses <> or removes the step.\n\n- <> may appear more than once in a step. The value is computed once and read each time, as a named line is.\n\n- <> outside a pipe step is an error that says <> is the value from the line above in a pipe.\n\n- <> means the value of the nearest enclosing step. A lambda inside a step may capture it, as it captures any local (scaled in the program).\n\n- A pipe inside a lambda or inside parentheses has its own steps, and there <> means its own value (total and badge in the program). Its first line may still read the outer <>.\n\n- A step runs to the next |>. So ?? return fallback returns fallback and leaves the function, as return does in an arm or a loop body (probe q04).\n\n- break and continue in a step act on the enclosing loop, as in an arm.\n\n- A step that only calls a method, |> <>.trim(), is joined onto the line above as .trim() by the formatter, because a dot chain already reads in order.\n\nWHY <> COLLIDES WITH NOTHING\n\nProbes are in $JET_SCRATCH_ROOT/lanes/Research/ballots-2026-11-05/pipe2, run with the pinned compiler (jet@0.0.1#006bccd5).\n\n- Comparisons: a <> b is E0003, \"Expected a value, found >\" (g01). show(<>) is E0003 too (g02). x < y && y > z and the tight a<c && c>a print true (g03, g06).\n\n- Fence: <: 1, 2 :> and <:3:> print beside Box<Box<Int>>, and 1 <=> 2 works (g06). Fence tokens start <: and end :>, so neither can form <>.\n\n- Generics: fn one<>() is already \"A generic parameter list cannot be empty\" (g05b), and id<>(1) is E0003 (g05). Box<>{value: 1} is accepted today with a broken type, Box<><Int> (g04). A makes it the same empty-list error, with a fix that removes <>.\n\n- Shifts: 1 << 2, 8 >> 1 and 1 <= 2 print 4, 4 and true (g12). <> becomes one longest-match token, as the fence tokens are.\n\n- Tight runs: <> touching another < or > is an error with a fix that adds a space. So <>>2 can never quietly mean <> > 2 when >> was meant. jet fmt always spaces these operators.\n\n- Strings: \"a<>b\" prints a<>b (g11). Inside a string <> stays text; inside an interpolation hole, as in \"{<>.len()}\", it is code.\n\n- Census on dev 63b075b2af: 0 uses of <> in 18,184 .jet files, outside strings and comments.\n\nWHY NOT B, $\n\nA bare $ is free today: print($) is E0003 (g07). But $ already marks three other things. Facts and template splices use it today, as T.$layout, $package.name and {$count}, until the cutover to # under D-META-HASH1=A (#4276 c22) lands.\n\nConfig files keep $HOME for environment reads under D-ONCE-DOLLAR1=B, and that stays after the cutover (g08 shows the teaching error outside config). In a config file, $ and $HOME would then mean the piped value and the environment, one letter apart. Waiting for the cutover cannot remove that.\n\nWHY NOT C, {}\n\n{} already has a meaning. With struct Opts { size: Int{4} }, size({}) builds an empty Opts and prints 4 today (g09b). Under C the same text inside a step would mean the piped value, so moving a line into a pipe changes what it does. In a string, {} is already an error that says to write {{}} (g10).\n\nBEGINNER AND EXPERT\n\nA beginner can ignore pipes and keep naming each line, as today. When they meet a pipe they learn one sentence: <> is the value from the line above. An expert writes long flows one step per line, gives each step its own fallback, nests pipes in lambdas, and sets a breakpoint per step. Hover shows the type of <> on each line.\n\nTHE ONE COST LEFT\n\nReaders from SQL or Pascal know <> as not equal. Elixir joins strings with it, and Haskell combines values with it. That outside meaning cannot be removed, because it lives in other languages. Under D-TEACH-RECONCILE1=A no error names another language: a <> b outside a pipe gets the generic error, which lists the legal operators there, including !=. Inside Jet, <> has exactly one meaning.\n\nAn error names the step and the type of <>:\n\n```text\nError [jet.TypeMismatch]: This needs String, but `<>` is [U8]\n  --> app.jet:3:23\n  3 |         |> Int.parse(<>.trim()) ?? return fallback\n    |                      ^^ `<>` here is the [U8] made by line 2\n Fix: add a step such as `|> String.from_bytes(<>) ?? return fallback`\n```\n\nDROPPED\n\nNamed steps, such as |> b -> String.from_bytes(b), are dropped as you asked. A hidden first argument, as in Elixir, and function-only steps, as in F#, stay dropped. The first fits about a third of real chains. The second cannot give a step its own ?? return (research probe p15).\n\nTODAY AND THE CENSUS\n\nt02_today_full runs the same program in today's spelling and prints the six lines shown in each option. |> itself is still free (q02, E0003). The census on dev 0d1ea12f79 finds 516 nested, 824 mixed and 1,850 named runs. About 950 sites read better as a pipe, and 910 named runs end a step in a ?? fallback.\n\nThe programs use D-LAMBDA-SHAPE1=C lambdas, such as fn(v) { v * 2 }, which are not built yet (probe q03). Today's v -> v * 2 form is in t02. Pipes ship after that cutover.\n\nRATIFIED DECISIONS IT TOUCHES\n\nEvery option amends D-SHAPE-PIPE1=C (2026-07-14), which says Jet has no general flow operator; its warning against tap, error, async and mutation variants stays. D-UFCS1=B keeps one call spelling, since the value goes exactly where <> is written. A adds <> beside D-FENCE2=A's longest-match fence tokens.\n\nB would give $ a fourth meaning beside D-COMPILER-NS1=A, D-NAME-SPLICE1=B and D-ONCE-DOLLAR1=B. C would overload the typed anonymous value. Docs/proposals/2026-11-04-pipes.md needs updating from named stages to the <> step.",
+      "options": [
+        {
+          "key": "A",
+          "name": "<> is the value from the line above",
+          "detail": "A step is |> expression, and <> inside it is the value from the line above. Every step uses <> at least once and may use it more. A step may carry its own ?? return fallback, which leaves the function. <> means nothing else in Jet.",
+          "technical": "Lexer: <> is one longest-match token, beside <: and :> (D-FENCE2=A); <, <=, <=>, <<, >> and > never form it. <> touching another < or > is an error with an add-space fix. Box<> after a type name becomes the empty type-list error (g04 accepts it today).\n\nParser: |> is one token, left-associative and loosest; a step runs to the next |>. <> is a primary expression, legal only inside a step.\n\nFront end: each step lowers to a hidden :: binding in a fresh scope before type checking, and <> resolves to the nearest enclosing step, through lambdas. A step with no <> is an error with a fix. The IR equals the named form.\n\nTools: the formatter joins method-only steps into a dot chain. Hover shows the type of <> per step, and the debugger gives each step its own line. Outside a pipe, a <> b gets the generic error listing the legal operators, including !=.",
+          "code": "// proposed (A): <> is the value from the line above.\n// Prints the same six lines as today's named version (probe t02_today_full).\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes(<>) ?? return fallback        // each step has its own fallback\n        |> Int.parse(<>.trim()) ?? return fallback\n        |> if <> < 1 || <> > 65535 -> fallback else -> <>   // <> may repeat in a step\n}\n\n// A pipe inside a lambda: there <> is that pipe's own value.\nfn total(lines: [String]) -> Int {\n    lines.map(fn(line) { line |> Int.parse(<>.trim()) ?? 0 }).sum()\n}\n\n// A lambda inside a step captures that step's <>.\nfn scaled(values: [Int], factor_text: String) -> [Int] {\n    factor_text\n        |> Int.parse(<>.trim()) ?? return values\n        |> values.map(fn(v) { v * <> })\n}\n\nfn clamp(n: Int, low: Int, high: Int) -> Int {\n    if n < low -> low else if n > high -> high else -> n\n}\n\nfn label(name: String, size: Int) -> String {\n    \"{name}#{size}\"\n}\n\n// A nested pipe: its first line reads the outer <>, its step sees its own.\nfn badge(raw: [U8]) -> String {\n    raw\n        |> String.from_bytes(<>) ?? return \"?\"\n        |> label(<>.trim(), (<>.len() |> clamp(<>, 0, 9)))\n}\n\n// <> means nothing else in Jet. These keep their meaning:\n//   a < b, a <= b, a <=> b, 1 << 2, Box<Int>, <: 1, 2 :>\n// These become errors with fixes:\n//   a <> b            -> write a != b\n//   <>>2              -> write <> >> 2 or <> > 2 (space after <>)\n//   Box<>{value: 1}   -> write Box<Int>{value: 1}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))     // 8080\n    print(app_port([U8]{\"http\"}, 80))       // 80\n    print(total([\" 1\", \"2 \", \"x\"]))         // 3\n    print(scaled([1, 2, 3], \" 10\"))         // [10, 20, 30]\n    print(scaled([1, 2, 3], \"ten\"))         // [1, 2, 3]\n    print(badge([U8]{\" hi \"}))              // hi#4\n}"
+        },
+        {
+          "key": "B",
+          "name": "$ is the value from the line above",
+          "detail": "The same pipe and rules as A, with $ for the value. A bare $ is free today, but $ already marks facts and splices until the # cutover, and environment reads such as $HOME in config files after it.",
+          "technical": "Lexer: a lone $ not followed by a name becomes the step value; $name stays a fact, a splice or an environment read. Rules and lowering are A's. In config files $ and $HOME sit side by side for good. In derive templates $ and {$count} do until #4276 c22 lands.",
+          "code": "// proposed (B): $ is the value from the line above.\n// Prints the same six lines as today's named version (probe t02_today_full).\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes($) ?? return fallback        // each step has its own fallback\n        |> Int.parse($.trim()) ?? return fallback\n        |> if $ < 1 || $ > 65535 -> fallback else -> $   // $ may repeat in a step\n}\n\n// A pipe inside a lambda: there $ is that pipe's own value.\nfn total(lines: [String]) -> Int {\n    lines.map(fn(line) { line |> Int.parse($.trim()) ?? 0 }).sum()\n}\n\n// A lambda inside a step captures that step's $.\nfn scaled(values: [Int], factor_text: String) -> [Int] {\n    factor_text\n        |> Int.parse($.trim()) ?? return values\n        |> values.map(fn(v) { v * $ })\n}\n\nfn clamp(n: Int, low: Int, high: Int) -> Int {\n    if n < low -> low else if n > high -> high else -> n\n}\n\nfn label(name: String, size: Int) -> String {\n    \"{name}#{size}\"\n}\n\n// A nested pipe: its first line reads the outer $, its step sees its own.\nfn badge(raw: [U8]) -> String {\n    raw\n        |> String.from_bytes($) ?? return \"?\"\n        |> label($.trim(), ($.len() |> clamp($, 0, 9)))\n}\n\n// The same $ already means other things:\n//   T.$layout, $package.name    a compiler fact, until the cutover to #\n//   {$count} in a template      a splice, until the cutover to #\n//   $HOME in a config file      an environment read, which stays\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))     // 8080\n    print(app_port([U8]{\"http\"}, 80))       // 80\n    print(total([\" 1\", \"2 \", \"x\"]))         // 3\n    print(scaled([1, 2, 3], \" 10\"))         // [10, 20, 30]\n    print(scaled([1, 2, 3], \"ten\"))         // [1, 2, 3]\n    print(badge([U8]{\" hi \"}))              // hi#4\n}"
+        },
+        {
+          "key": "C",
+          "name": "{} is the value from the line above",
+          "detail": "The same pipe and rules as A, with {} for the value. {} already builds an empty value of a known struct type, so inside a step its meaning flips. In strings {} is already an error.",
+          "technical": "Parser: {} inside a step becomes the step value, overriding the typed anonymous empty value (g09b prints 4). Outside steps it keeps today's meaning, so moving code into a step changes its type with no syntax error. Rules and lowering are A's.",
+          "code": "// proposed (C): {} is the value from the line above.\n// Prints the same six lines as today's named version (probe t02_today_full).\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes({}) ?? return fallback        // each step has its own fallback\n        |> Int.parse({}.trim()) ?? return fallback\n        |> if {} < 1 || {} > 65535 -> fallback else -> {}   // {} may repeat in a step\n}\n\n// A pipe inside a lambda: there {} is that pipe's own value.\nfn total(lines: [String]) -> Int {\n    lines.map(fn(line) { line |> Int.parse({}.trim()) ?? 0 }).sum()\n}\n\n// A lambda inside a step captures that step's {}.\nfn scaled(values: [Int], factor_text: String) -> [Int] {\n    factor_text\n        |> Int.parse({}.trim()) ?? return values\n        |> values.map(fn(v) { v * {} })\n}\n\nfn clamp(n: Int, low: Int, high: Int) -> Int {\n    if n < low -> low else if n > high -> high else -> n\n}\n\nfn label(name: String, size: Int) -> String {\n    \"{name}#{size}\"\n}\n\n// A nested pipe: its first line reads the outer {}, its step sees its own.\nfn badge(raw: [U8]) -> String {\n    raw\n        |> String.from_bytes({}) ?? return \"?\"\n        |> label({}.trim(), ({}.len() |> clamp({}, 0, 9)))\n}\n\n// Today {} already builds an empty value of a known struct type.\nstruct Opts { size: Int{4} }\n\nfn size(o: Opts) -> Int { o.size }\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))     // 8080\n    print(app_port([U8]{\"http\"}, 80))       // 80\n    print(total([\" 1\", \"2 \", \"x\"]))         // 3\n    print(scaled([1, 2, 3], \" 10\"))         // [10, 20, 30]\n    print(scaled([1, 2, 3], \"ten\"))         // [1, 2, 3]\n    print(badge([U8]{\" hi \"}))              // hi#4\n    print(size({}))                         // 4: an empty Opts, as today\n    // \"x\" |> size({})                      // under C: {} is now \"x\", a type error\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Hack",
+          "note": "Hack writes the piped value as $$, a glyph used for nothing else. A takes the same idea with <>.",
+          "code": "$port = $raw\n  |> trim($$)\n  |> intval($$);"
+        },
+        {
+          "lang": "JavaScript (Stage 2 proposal)",
+          "note": "Every step writes the value as %, which is also the remainder operator there.",
+          "code": "const port = raw\n  |> %.trim()\n  |> Number(%);"
+        },
+        {
+          "lang": "R 4.2",
+          "note": "R marks the value with _, and only in a named argument.",
+          "code": "fit <- mtcars |> lm(mpg ~ disp, data = _)"
+        },
+        {
+          "lang": "Elixir",
+          "note": "The value goes in as the first argument. Elixir also joins strings with <>.",
+          "code": "port =\n  raw\n  |> String.trim()\n  |> String.to_integer()\n\n\"a\" <> \"b\"   # \"ab\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "<> means nothing in Jet today, so it gets exactly one meaning: the value from the line above. It echoes the fence's angle brackets, and every step keeps its own ?? return.",
+        "gains": [
+          "One glyph with one meaning, unused anywhere in Jet today.",
+          "Each step keeps its own ?? return fallback.",
+          "Nested pipes and lambdas follow one rule: the nearest step."
+        ],
+        "losses": [
+          {
+            "loss": "Readers from SQL or Pascal know <> as not equal. That meaning lives outside Jet, so it cannot be removed.",
+            "mitigation": "Outside a pipe, a <> b gets the generic error, which lists != among the legal operators. Inside Jet, <> has one meaning."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "$ already marks facts and splices until the # cutover, and $HOME in config files after it, so $ would mean two things in one file."
+          },
+          {
+            "key": "C",
+            "reason": "{} already builds an empty value, so the same text would change meaning when moved into a pipe."
+          }
+        ],
+        "tradeoff": "A glyph some readers know from other languages, for one that means nothing else in Jet."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the BallotDesign-3 draft under the four-agent cap. Findings were that the not-equal mitigation used a teaching error, which D-TEACH-RECONCILE1=A forbids; it now uses the generic error listing !=."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a pipe step write the value it receives as <>, as $, or as {}?",
+        "lesson": "A pipe passes each value down to the next line, so a flow reads top to bottom. This vote picks the glyph for that value.",
+        "trio": {
+          "current": {
+            "note": "Today each step needs its own name, or the calls nest inside out.",
+            "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    text :: String.from_bytes(raw) ?? return fallback\n    port :: Int.parse(text.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))   // 8080\n    print(app_port([U8]{\"http\"}, 80))     // 80\n    lines :: [\" 1\", \"2 \"]\n    print(lines.map(s -> Int.parse(s.trim()) ?? 0).sum())   // 3\n}"
+          },
+          "wild": {
+            "lang": "Hack",
+            "note": "Hack writes the piped value as $$, a glyph with no other meaning.",
+            "code": "$port = $raw\n  |> trim($$)\n  |> intval($$);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "<>",
+            "gist": "<> stands for the value from the line above. It means nothing else in Jet.",
+            "gains": [
+              "No clash with anything in Jet today.",
+              "Echoes the fence's angle brackets."
+            ],
+            "losses": [
+              "SQL readers know <> as not equal."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes(<>) ?? return fallback\n        |> Int.parse(<>.trim()) ?? return fallback\n        |> if <> < 1 || <> > 65535 -> fallback else -> <>\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))   // 8080\n    print(app_port([U8]{\"http\"}, 80))     // 80\n    lines :: [\" 1\", \"2 \"]\n    print(lines.map(fn(s) { s |> Int.parse(<>.trim()) ?? 0 }).sum())   // 3\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "$",
+            "gist": "$ stands for the value. $ already marks facts, splices and environment reads.",
+            "gains": [
+              "One character, familiar from shells."
+            ],
+            "losses": [
+              "$ and $HOME would share config files.",
+              "Means facts and splices until the # cutover."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes($) ?? return fallback\n        |> Int.parse($.trim()) ?? return fallback\n        |> if $ < 1 || $ > 65535 -> fallback else -> $\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))   // 8080\n    print(app_port([U8]{\"http\"}, 80))     // 80\n    lines :: [\" 1\", \"2 \"]\n    print(lines.map(fn(s) { s |> Int.parse($.trim()) ?? 0 }).sum())   // 3\n    // in a config file, $HOME still reads the environment\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "{}",
+            "gist": "{} stands for the value. Today {} already builds an empty value.",
+            "gains": [
+              "Looks like an empty slot."
+            ],
+            "losses": [
+              "size({}) already means an empty value.",
+              "Inside strings {} is an error."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    raw\n        |> String.from_bytes({}) ?? return fallback\n        |> Int.parse({}.trim()) ?? return fallback\n        |> if {} < 1 || {} > 65535 -> fallback else -> {}\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))   // 8080\n    print(app_port([U8]{\"http\"}, 80))     // 80\n    lines :: [\" 1\", \"2 \"]\n    print(lines.map(fn(s) { s |> Int.parse({}.trim()) ?? 0 }).sum())   // 3\n    // today size({}) builds an empty Opts; here {} is the line above\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "<> is unused in Jet, so it gets one meaning. Every step keeps its own fallback.",
+          "gains": [
+            "One glyph, one meaning, no clash.",
+            "Each step keeps its own ?? return."
+          ],
+          "losses": [
+            {
+              "loss": "SQL and Pascal readers know <> as not equal; that lives outside Jet.",
+              "mitigation": "Outside a pipe, a <> b gets the generic error, which lists != among the legal operators."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "$ would mean two things in config files."
+            },
+            {
+              "key": "C",
+              "reason": "{} already builds an empty value."
+            }
+          ],
+          "tradeoff": "An outside meaning some readers know, for a glyph that is free in Jet."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T19:36:17.691Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-05",
+      "retiredAt": "2026-11-11T09:03:08.096Z"
     }
   ]
 }

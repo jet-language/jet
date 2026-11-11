@@ -93562,6 +93562,237 @@
       "completedAt": "2026-11-08T07:52:29.149Z",
       "questions": [],
       "retiredAt": "2026-11-11T08:01:57.553Z"
+    },
+    {
+      "id": "c0920a2g",
+      "num": 6056,
+      "title": "Ladder L-18 (Logging/observability): Log level is a process-global string; no env, flag, package or module rung",
+      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-18; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Log level is a process-global string; no env, flag, package or module rung\n\nEvidence: Core/Log/Log.jet:49,129,144\n\nAudit action: add a rung. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07 23:40 ruling (owner may veto): D-LOG-LADDER1=A ratifies that records carry the caller's declared module path, passed by the compiler, and leaves the carrier open. The carrier is one defaulted field, SourceLocation.module, filled by sema at every $caller site; a file with no module declaration gets the package root. This extends the existing $caller capture instead of adding a log-only mechanism (I8), so it needs no second ballot. G1Lead builds it with typed levels, JET_LOG, --log, package log: and jet explain log, and the bad-filter and credential cases."
+        },
+        {
+          "at": "2026-10-29",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner ballot on L-18 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-LOG-LADDER1 was ratified 2026-10-29 (the card log reads \"All decisions ratified\"). Main's 2026-11-07 ruling settled the carrier inside it: SourceLocation.module, package.jet log:, and --log.",
+          "at": "2026-11-08T07:38:39.377Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ff909aea78 (the one spelling) and 1dca65bf95 (LogLevel kernel row). No string level, warning or setup(\"level=\") spelling is left in code, Examples or Docs/spec (G1Lead census). a0_037 candidate kit of 8447fc0cf4 (release run 2026-11-08 03:25-03:51; it failed only on the two corelib interrupt cases): cases observe/log_ladder, structured_log_json_escape, structured_log_json_fields and structured_log_level_filter PASS; ui taint/credential_is_denied_at_every_log_level PASS; golden Examples/Systems/Log, LogHuman, LogJob and LogTraceExport o0/o1/o2 PASS.",
+          "at": "2026-11-08T08:56:23.878Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ladder",
+        "logging-observability"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T18:07:15.930Z",
+      "updated": "2026-11-08T08:56:25.320Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ],
+      "completedAt": "2026-11-08T08:56:25.320Z",
+      "questions": [],
+      "retiredAt": "2026-11-11T09:03:08.095Z"
+    },
+    {
+      "id": "c09umw0r",
+      "num": 6565,
+      "title": "Pipe syntax: steps read top to bottom with the value written as it (D-PIPE1)",
+      "body": "The owner asked for pipes to be researched and proposed (2026-11-04), knowing they duplicate a named value used once. The study (Docs/research/2026-11-04-pipes.md) finds about 950 repo sites where steps are functions rather than methods, so dots cannot fix them. The ballot D-PIPE1 chooses the spelling. Nothing is built before it is ratified.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Regression from 8405a508b0: a value table over an &place subject lost its write window, because sema_expression_window_source only knew __jet_switch_subject_N names. Jetpack CacheLease.jet:470 gave FieldWriteWithoutMarker (it reproduces on the 8405 compiler with the extended case). Fixed in 15b9773dee: the generated it (AST_NODE_GENERATED) is a window source; a written it never is. Proof with the census-built compiler: case switch_on_listed_optional_reader_closes_it_once (extended: the payload passes on through a &FileReader parameter) PASS; core_files_opaque_handles 9 PASS, 1 known-failing; golden Basics/ValueDispatch 3/3; hosted Jetpack check OK."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: respelled for D-DECL-COLON1=A."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Precondition, a wrong-meaning bug found by the pipes study: inside a bindingless loop body, a subject table over a computed value (if .age * 2 == { … }) must give its arms its own subject as it, not the loop item. Fixed with a golden on o0, o1 and o2 before any pipe work starts.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8405a508b0 (Main). A value table over a subject that is not a plain name or a place now binds that subject to it in a frame of its own: a generated grouping from parser_expression_form_parse_dispatch_table, hoisted by sema even with one arm. Its binding is pushed into that frame (as the statement form's is), so a nested table's it shadows the enclosing one. A bindingless loop body's table therefore reads its own subject, not the loop item. Examples/Basics/ValueDispatch.jet has the loop case (loop people -> if .age /% 10 == { 3 -> \"in the 30s\" ... }) and a top-level age_band. Its golden matches on O0, O1 and O2 with a compiler the seed built from the patch (jet run --optimize=none|basic|full, cmp against ValueDispatch.out). Precommit census of the landed tree: check, build and runtime pack OK, compiler self-check rc=0 rows=0. The first attempt's 7 self-check rows (nested tables reading the outer it) are fixed by the frame-scoped binding. Nested probe $JET_SCRATCH_ROOT/lanes/Main/burn/it/nest.jet prints b1 s1 / b7 inner err 7 / outer err -1 on O0 and O2.",
+          "at": "2026-11-07T22:37:37.050Z"
+        },
+        {
+          "n": 2,
+          "text": "After D-PIPE1 is ratified: the ratified spelling is registered in the syntax registry, parses, and lowers each stage to a hidden name: value binding before type checking. A paired IR test proves the pipe and the hand-named form give identical IR at O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Spellings.jet registry rows for |> and <> (mirrored in syntax-decisions.md). JetParser parser_parse_expression_restricted (Parser/Expressions.jet) lowers each step to a hidden __jet_pipe_<offset> binding before sema. a0_037 candidate kit of 8447fc0cf4 (release run 2026-11-08 03:25-03:51; it failed only on the two corelib interrupt cases): tests/cases/pipes/a_pipe_compiles_to_its_hand_named_form_on_every_tier PASS (same slot IR at O0, and after the O1 and O2 passes).",
+          "at": "2026-11-08T08:56:15.509Z"
+        },
+        {
+          "n": 3,
+          "text": "After D-PIPE1 is ratified: every pipe error the ratified ballot (D-PIPE1=A) names has a registered code, what/why/fix text and a UI snapshot: E0437 `<>` outside a step, E0438 a step without `<>`, E0439 `<>` touching an angle bracket, E0440 the empty type argument list `Box<>`; outside a pipe, `a <> b` is the generic E0003. An example with goldens runs on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a0_037 candidate kit of 8447fc0cf4 (release run 2026-11-08 03:25-03:51; it failed only on the two corelib interrupt cases), ui: pipe_value_outside_step (E0437), pipe_step_without_value (E0438), pipe_value_touches_angle (E0439), empty_type_argument_list (E0440), pipe_value_between_values (E0003), flow_pipe_unassigned and compiler_api/flow_pipe_shape_has_no_foreign_guess all PASS. Golden Examples/Basics/Pipes o0/o1/o2 PASS. Cases fmt/bar_formatting_is_stable and grammar/parse_pipe_switch_arms_as_subject_tests PASS.",
+          "at": "2026-11-08T08:56:16.334Z"
+        },
+        {
+          "n": 5,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "504fd88a5a adds the D-PIPE1=A entry to Docs/spec/syntax-decisions.md (ratified 2026-11-05, card #6565) plus its index row, and marks D-SHAPE-PIPE1 as amended by D-PIPE1=A.",
+          "at": "2026-11-08T08:56:40.678Z"
+        },
+        {
+          "n": 6,
+          "text": "Editor grammars regenerated (`jet self devtools grammars`) and current.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "504fd88a5a regenerated the editor grammars with the pipe spelling. G1Lead 2026-11-08 reran `jet self devtools grammars` on a HEAD export: the 4 grammars (vscode, tmGrammar, tree-sitter, zed) came out with zero diff against HEAD, so they are current.",
+          "at": "2026-11-08T08:56:41.591Z"
+        }
+      ],
+      "refs": [
+        "Docs/proposals/2026-11-04-pipes.md",
+        "Docs/research/2026-11-04-pipes.md"
+      ],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T19:36:01.124Z",
+      "updated": "2026-11-08T08:56:43.129Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7,
+      "completedAt": "2026-11-08T08:56:43.129Z",
+      "questions": [
+        {
+          "id": "q5tsb32b",
+          "cardId": "c09umw0r",
+          "decisionId": "D-PIPE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I don't like the \"it\" thing",
+          "status": "answered",
+          "answer": "Done: pipes no longer have any implicit name. In the new A, each step names the value it receives, as in |> b -> String.from_bytes(b), and that name lives for one line only. B passes the value as a hidden first argument, as in Elixir; C passes it only to function values, as in F#. Both run the same program, but B hides an argument and C cannot give a step its own ?? return. (it still exists in arm tables and bindingless loops; retiring it everywhere would be a separate ballot.)",
+          "created": "2026-11-04T23:43:19.278Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qamwuhtr",
+          "cardId": "c09umw0r",
+          "decisionId": "D-PIPE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Terrible, should be something like $ or {} or <> or something. Maybe <> since that's similar to the fence expansion?",
+          "status": "answered",
+          "answer": "Done: the named steps are gone, and the ballot recommends <>, as in raw |> String.from_bytes(<>) ?? return fallback. Probes show <> means nothing in Jet today and never forms out of the <: :> fence, generics, comparisons or shifts. $ and {} are options B and C on the same program; they lose because $ already marks facts and $HOME in config files, and size({}) already builds an empty value. Box<>{value: 1} (accepted today with a broken type) becomes an error, and <> touching another < or > must be spaced. Outside a pipe, a <> b gets the generic error listing !=, with no teaching.",
+          "created": "2026-11-05T00:41:21.714Z",
+          "answeredAt": "2026-11-05",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-11T09:03:08.096Z"
+    },
+    {
+      "id": "c09f0vsn",
+      "num": 6660,
+      "title": "perf run: observation gaps for task-free programs and completed socket I/O spans",
+      "body": "From #6418 n6 (5f7a43c868, CoreCliLead-2). Two runtime gaps under jet perf run: (1) a program that links no task, channel, value or event installs no observation writer, so perf_run_short_program records nothing; (2) perf_run_keeps_completed_socket_echo_io_span needs --allow=Net, the runtime reports a network wait, and jet reaps the child before the exit publication, so the completed I/O span is lost.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/cases jet_perf_trace_parts rows perf_run_short_program* and perf_run_keeps_completed_socket_echo_io_span PASS on every applicable tier, with no KF line.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a0_037 candidate kit of 8447fc0cf4 (release run 2026-11-08 03:25-03:51; it failed only on the two corelib interrupt cases): tests/cases/jet_perf_trace_parts_capture_run/perf_run_short_program_has_repeatable_source_attribution and jet_perf_trace_parts_io/perf_run_keeps_completed_socket_echo_io_span PASS with no KF line (0fc484a458 removed the lines; 8447fc0cf4 keeps --observe/--log in a kept program's full build).",
+          "at": "2026-11-08T08:56:21.505Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T07:52:37.999Z",
+      "updated": "2026-11-08T08:56:22.975Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-08T08:56:22.975Z",
+      "questions": [],
+      "retiredAt": "2026-11-11T09:03:08.096Z"
     }
   ]
 }
