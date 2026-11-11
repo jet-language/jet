@@ -2205,9 +2205,10 @@ effect rows, denials and run grants, from three fixed laws
   as written.
 - Any other argument covers by equality.
 
-The runtime's Authority values (`with`, `without`) cover by the same laws
-(`jet_authority_covers`), and one normalization table checks that the two
-answer alike.
+These laws have one implementation, the runtime's (`jet_authority_covers`):
+the checker's rows, grants and denials, `--allow` and `--deny`, the runtime's
+Authority values (`with`, `without`) and its effect-scope checks all answer by
+it, and one normalization table pins its answers.
 
 A bare effect covers every scoped instance of itself and its leaves, so `FS`
 and `FS.Read` both cover `FS.Read("assets/")`. A scoped effect never covers

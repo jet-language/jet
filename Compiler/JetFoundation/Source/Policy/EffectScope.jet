@@ -2,13 +2,17 @@
 // scopes"). An effect argument names a scope from Core's scope kinds: a
 // folder (`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a
 // device (`GPU("npu")`). Rows, run grants (`--allow`) and denials all decide
-// coverage here, from three fixed laws, so coverage is reflexive, transitive
-// and always terminates:
+// coverage here, and here asks the runtime's own rule (jet_authority_covers,
+// Compiler/JetRuntime/Source/Authority.jet), the one a running program's
+// Authority and effect scopes answer by. Its three fixed laws keep coverage
+// reflexive and transitive, and it always terminates:
 // - an `FS` argument is a path; it covers by whole components after
 //   normalization, so `templates/` covers `templates/home.html` but not
-//   `templates2/`, and `templates/../secret.txt` is `secret.txt`;
-// - a `Net` argument is a host; it covers by exact match after lower-casing,
-//   so `api.example.com` never covers `evilapi.example.com`;
+//   `templates2/`, `templates/../secret.txt` is `secret.txt`, and a need that
+//   climbs past the scope with a kept `..` is outside it;
+// - a `Net` argument is a host; it covers by exact match after lower-casing
+//   and dropping one trailing `.`, so `api.example.com` never covers
+//   `evilapi.example.com`; every other byte, whitespace too, is the host's;
 // - any other argument covers by equality.
 // A bare effect (`FS.Read`) covers every scoped instance of itself and of its
 // leaves. A scoped effect never covers the bare one.
@@ -62,82 +66,30 @@ effect_scope_kind: fn(base: String) -> String Never! {
     "value"
 }
 
-// A path's components after normalization: `.` and empty components go, and
-// `..` takes back the component before it. An absolute path starts with
-// `/`; a `..` above the root stays at the root, and a `..` above a relative
-// start is kept, so it never falls inside a relative scope.
-effect_scope_path_parts: fn(path: String) -> [String] Never! {
-    parts := [String]{}
-    if path.starts_with("/") -> parts.push("/")
-    loop segment in path.split("/") {
-        if segment == "" || segment == "." -> next
-        if segment == ".." {
-            if parts.len() == 0 || parts[parts.len() - 1] == ".." {
-                parts.push("..")
-            } else if parts[parts.len() - 1] != "/" {
-                _ := parts.pop()
-            }
-            next
-        }
-        parts.push(segment.copy())
-    }
-    parts
-}
-
-// The path law: `bound` covers `need` when its components are a prefix of
-// the need's and the need does not climb past them with a kept `..` (`..`
-// never covers `../..`, nor `.` covers `../a`).
-effect_scope_path_covers: fn(bound: String, need: String) -> Bool Never! {
-    held: effect_scope_path_parts(bound)
-    asked: effect_scope_path_parts(need)
-    if held.len() > asked.len() -> return false
-    loop index in 0..<held.len() {
-        if held[index] != asked[index] -> return false
-    }
-    held.len() == asked.len() || asked[held.len()] != ".."
-}
-
-// A host lower-cased, with the one trailing `.` of a fully qualified name
-// dropped; any other byte, whitespace too, is part of the host, as the
-// runtime's authority_host_covers reads it.
-effect_scope_host: fn(host: String) -> String Never! {
-    bytes := [U8]{}
-    loop byte in host.bytes() {
-        if byte >= (U8{65}) && byte <= (U8{90}) {
-            bytes.push(byte + (U8{32}))
-        } else {
-            bytes.push(byte)
-        }
-    }
-    if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{46}) -> _ := bytes.pop()
-    String.from_bytes(bytes) ?? host.copy()
-}
-
-// The host law: exact match after lower-casing.
-effect_scope_host_covers: fn(bound: String, need: String) -> Bool Never! {
-    effect_scope_host(bound) == effect_scope_host(need)
-}
-
-// Whether the bare effect `bound` covers the bare effect `need`: itself and
-// every leaf below it (`FS` covers `FS.Read`).
-effect_scope_base_covers: fn(bound: String, need: String) -> Bool Never! {
-    if bound == need -> return true
-    need.starts_with("{bound}.")
-}
+// The runtime's covers rule over two rights' text, which crosses as C
+// strings.
+#[Import(c), Unsafe("the runtime reads the two NUL-terminated rights the call packs and keeps neither")]
+effect_scope_rule_covers: fn(bound: String, need: String) -> Bool = "jet_authority_covers"
 
 // The covers rule: `bound` covers `need` when the bare names cover and, if
-// `bound` names a scope, `need` names one its law covers.
+// `bound` names a scope, `need` names one its law covers. A right holding a
+// NUL byte, which no valid scope argument does (effect_scope_argument_valid)
+// and no C string can carry, covers only itself.
 effect_scope_covers: fn(bound: String, need: String) -> Bool Never! {
     if bound == need -> return true
-    held: effect_scope_split(bound)
-    asked: effect_scope_split(need)
-    if !effect_scope_base_covers(held.base, asked.base) -> return false
-    held_scope: held.scope ?? return true
-    asked_scope: asked.scope ?? return false
-    kind: effect_scope_kind(held.base)
-    if kind == "path" -> return effect_scope_path_covers(held_scope, asked_scope)
-    if kind == "host" -> return effect_scope_host_covers(held_scope, asked_scope)
-    held_scope == asked_scope
+    if effect_scope_has_nul(bound) || effect_scope_has_nul(need) -> return false
+    covered := false
+    #Unsafe("the runtime reads the two NUL-terminated rights the call packs and keeps neither") {
+        covered = effect_scope_rule_covers(bound, need)
+    }
+    covered
+}
+
+effect_scope_has_nul: fn(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        if byte == (U8{0}) -> return true
+    }
+    false
 }
 
 // Core's scope publishers, read off their declarations: a top-level
