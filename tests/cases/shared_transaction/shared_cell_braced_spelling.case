@@ -1,0 +1,16 @@
+# #6281 c130: `Shared{value}` and `Shared<T>{value}` build shared cells. The
+# payload type comes from the value or from `T`; a name in the braces is the
+# value. A cell crosses a task boundary as its handle, and each tier prints
+# the same lines.
+fixture: shared_cell_braced_spelling.fixture
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = shared_cell_braced_spelling.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = shared_cell_braced_spelling.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = shared_cell_braced_spelling.out

@@ -648,6 +648,7 @@ parser_typed_literal_byte_head: fn(head: Type?) -> Bool Never! {
 }
 
 parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: Span, depth: Int) -> ParsedExpr {
+    if parser_shared_cell_head(head) && parser_kind_at(state, 1) != TOKEN_RBRACE -> return parser_parse_shared_cell(state, head, start, depth)
     record_head := if head == {
         None -> true
         Val(ty) -> if ty == {
@@ -830,10 +831,47 @@ parser_try_parse_list_type_static: fn(state: &JetParserState, depth: Int) -> Par
     })
 }
 
-// Rust `starts_shared_operand`: the tokens that open the value of a
+// Rust `starts_shared_operand`: the tokens that open the value of a retired
 // `shared expr` construction. Anything else leaves `shared` a plain name.
 parser_starts_shared_operand: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR || kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_SELF || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_LPAREN
+}
+
+// A typed literal headed `Shared` or `Shared<T>` with a value body builds a
+// shared cell. An empty body stays a typed literal, which sema refuses.
+parser_shared_cell_head: fn(head: Type?) -> Bool Never! {
+    if head == {
+        Val(ty) -> if ty == {
+            .Named(name) -> name == "Shared"
+            .Shared(_) -> true
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        None -> false
+    }
+}
+
+// `Shared{value}` and `Shared<T>{value}`: the cell is the `Shared.new` call
+// shape every tier lowers, with `T` as its owner type argument when written.
+// The cell owns its payload, so the operand moves in.
+parser_parse_shared_cell: fn(state: &JetParserState, head: Type?, start: Span, depth: Int) -> ParsedExpr {
+    parser_expect(state, TOKEN_LBRACE, "`{{` to open a `Shared{{…}}` cell")
+    operand: parser_parse_expression(state, 1, depth + 1)
+    parser_literal_close_terminators(state)
+    close := parser_expect(state, TOKEN_RBRACE, "`}}` to close a `Shared{{…}}` cell")
+    owner_type_args := [Type]{}
+    // copy: `inner` is part of read parameter `head`; the call owns its owner type argument.
+    if head == .Val(.Shared(inner)) -> owner_type_args.push(inner.copy())
+    parser_shared_cell(state, operand.expr, operand.span, owner_type_args, start, parser_cover(start, close.span))
+}
+
+parser_shared_cell: fn(state: &JetParserState, operand: Expr, operand_span: Span, owner_type_args: [Type], head: Span, span: Span) -> ParsedExpr {
+    flags := ast_empty_call_arg_flags()
+    flags.shared_operand = true
+    argument: CallArg{convention: AccessConvention.Move, expr: operand, span: operand_span, flags: flags, label: None, spread: false}
+    ParsedExpr{
+        expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: head, id: parser_node_id(state)}, method: "new", method_span: head, owner_type_args: owner_type_args, type_args: [Type]{}, args: [CallArg]{argument}, id: parser_node_id(state)},
+        span: span,
+    }
 }
 
 parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
@@ -842,21 +880,13 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     kind: token.kind
     word: if kind == TOKEN_IDENT -> parser_value(state, token) else -> ""
     if kind == TOKEN_IDENT && word == "task" && parser_task_surface_ahead(state) -> return parser_parse_task_surface(state, depth + 1)
-    // `shared expr` is the one shared-cell construction
-    // form. `shared` stays an ordinary name unless the next token opens a
-    // value; the cell is the `Shared.new` call shape every tier lowers, and
-    // it owns its payload, so the operand moves in.
+    // `shared expr`, the older spelling of `Shared{expr}`. `shared` stays an
+    // ordinary name unless the next token opens a value.
     if kind == TOKEN_IDENT && word == "shared" && parser_starts_shared_operand(parser_kind_at(state, 1)) {
         parser_bump(state)
         operand: parser_parse_expression_restricted(state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span: parser_cover(token.span, operand.span)
-        flags := ast_empty_call_arg_flags()
-        flags.shared_operand = true
-        argument: CallArg{convention: AccessConvention.Move, expr: operand.expr, span: operand.span, flags: flags, label: None, spread: false}
-        return ParsedExpr{
-            expr: Expr.MethodCall{receiver: Expr.Ident{name: "Shared", span: token.span, id: parser_node_id(state)}, method: "new", method_span: token.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: parser_node_id(state)},
-            span: span,
-        }
+        return parser_shared_cell(state, operand.expr, operand.span, [Type]{}, token.span, span)
     }
     // `comptime { … }` in value position. The block's final
     // expression is its value, but no build-time value fold exists yet, so

@@ -1679,8 +1679,10 @@ not satisfied. See
 
 ### Shared state, local cells, and pools
 
-`Shared<T>` is a lock-guarded, copyable handle. `shared value` constructs it and
-infers `T` from the value. A field read takes one read lock and a field write one
+`Shared<T>` is a lock-guarded, copyable handle. `Shared{value}` constructs it and
+infers `T` from the value; `Shared<T>{value}` names `T`, and the value adapts to
+it like any typed literal's field (#6281 c130). `shared value`, the older
+spelling, builds the same cell. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `&&`
@@ -1689,7 +1691,7 @@ A type may declare strong `Shared` edges back to itself (a linked list, a tree);
 the cycle check runs at the write. A write into a shared cell, its edit guard's
 `.value`, or `try_replace`, whose place can hold a strong edge back to the cell's
 type, is rejected with E0221 unless the stored value is built in place: a
-literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
+literal, a new cell (`Shared{T{…}}`) whose fields are built the same way, a value
 whose type has no strong path back, or a `:` name bound to a new cell in the
 same run of its scope and read nowhere else since. A writing call
 (`cell.kids.push(kid)`) is checked the same way for each argument. Building a
@@ -1718,7 +1720,7 @@ handle: fn(id: Int, config: Shared<AppConfig>) -> String {
 }
 
 run: fn() {
-    config: shared AppConfig{name: "jet-server", hits: 0}
+    config: Shared{AppConfig{name: "jet-server", hits: 0}}
     t1: task handle(1, config)
     print(t1.join() ?? panic("task failed"))
     config.hits += 1
@@ -1729,8 +1731,8 @@ The lock is per statement. When one statement touches a second shared value,
 the ordered shared engine avoids nesting locks and therefore avoids the plain
 access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
 are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
-use `shared x`. A grouped operand uses the same construction, `shared (expr)`;
-for example, a generic optional payload can be `shared (T?{Val(x.move())})`.
+use `Shared{x}`. The braces hold any expression, so a generic optional payload
+is `Shared<T?>{Val(x.move())}`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
