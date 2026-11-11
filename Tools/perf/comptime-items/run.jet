@@ -1,0 +1,370 @@
+// Where compile-time work goes, the twin of comptime-items.mjs: reads a
+// compiler trace (JET_TRACE_FILE) and prints the comptime phase's spans per
+// kind, per source file and per item.
+//
+// The driver (JetDriver Pipeline.jet) opens one span per comptime item step,
+// its `args` naming the item's source `file` and `item`:
+//   comptime.check    the item's own check
+//   comptime.closure  checking the functions it reaches
+//   comptime.stage    staging the declaration rows (once per run)
+//   comptime.build    building a batch's IR (`item` lists the batch's items;
+//                     its time is split evenly among them)
+//   comptime.eval     running the item
+// and per-pass spans without an item: comptime.precheck (the pass's
+// threaded item checks) and comptime.apply (landing values in the graph).
+// Wall and CPU are summed per row; CPU is the span thread's `cpu_ns`. The
+// trace is read the way JavaScript reads it (Tools/perf/kit).
+//
+//   jet Tools/perf/comptime-items TRACE [--top N] [--json]
+package: {
+    name: "comptime_items"
+    version: "0.0.1"
+    deps: {
+        jet_perf_kit: ../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_perf_kit.[field, is_text, items, js_number, js_string, js_trim, json_stringify, map_key, number_from_text, present, same, text_of, to_fixed, to_number]
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    term: core.term
+}
+
+STEPS: [String]{"check", "closure", "stage", "build", "eval"}
+USAGE: "usage: jet Tools/perf/comptime-items TRACE [--top N] [--json]"
+ZERO: Float{0.0}
+MILLION: Float{1000000.0}
+BILLION: Float{1000000000.0}
+
+Options: struct {
+    trace: String
+    top: Float
+    json: Bool
+}
+
+// A closed span: its kind (`cat`, else `name`), the begin's name and args,
+// wall µs and the end's CPU ns, each as JavaScript holds it.
+Span: struct {
+    kind: Dyn?
+    label: Dyn?
+    args: Dyn?
+    wall: Float
+    cpu: Dyn?
+}
+
+Kind: struct {
+    kind: String
+    count: Int
+    wall: Float
+    cpu: Dyn
+}
+
+// A per-file or per-item row: `id` is its Map key, `steps` the wall per STEPS.
+Row: struct {
+    key: Dyn
+    id: String
+    count: Int
+    wall: Float
+    cpu: Float
+    steps: [Float]
+}
+
+usage: fn(message: String) -[Exec, IO]> Never {
+    if message != "" -> term.eprint("comptime-items: {message}")
+    term.eprint(USAGE)
+    process.exit(2)
+}
+
+// An uncaught JavaScript error: the message on stderr and exit 1.
+crash: fn(message: String) -[Exec, IO]> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+parse_args: fn(argv: [String]) -[Exec, IO]> Options {
+    options := Options{trace: "", top: Float{30.0}, json: false}
+    has_trace := false
+    index := 0
+    loop index < argv.len() {
+        arg: argv[index]
+        if {
+            arg == "--json" -> options.json = true
+            arg == "--top" -> {
+                options.top = if index + 1 < argv.len() -> number_from_text(argv[index + 1]) else -> math.NAN
+                index += 1
+                // Number.isInteger and not negative.
+                if !math.is_finite(options.top) || math.floor(options.top) < options.top || options.top < ZERO -> usage("--top takes a count")
+            }
+            arg == "--help" || arg == "-h" -> usage("")
+            has_trace -> usage("unexpected argument {arg}")
+            else -> {
+                options.trace = arg.copy()  // copy: the options outlive the arguments
+                has_trace = true
+            }
+        }
+        index += 1
+    }
+    if !has_trace -> usage("no trace file")
+    options
+}
+
+// The trace is a JSON array the compiler streams, possibly unterminated.
+read_events: fn(path: String) -[Exec, FS, IO]> [Dyn?] {
+    text := js_trim(files.read(path) ?? crash("{err}"))
+    if text.ends_with(",") -> text = text.removesuffix(",")
+    body: if text.ends_with("]") -> text else -> "{text}]"
+    events: json.parse(body) ?? crash("SyntaxError: {err}")
+    if events == {
+        .Array(_) -> items(Val(events))
+        // A string iterates its characters, none of which is an event.
+        .Text(_) -> [Dyn?]{}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> crash("TypeError: events is not iterable")
+    }
+}
+
+kind_of: fn(event: Dyn?) -> Dyn? {
+    cat: field(event, "cat")
+    if present(cat) -> cat else -> field(event, "name")
+}
+
+// Closed spans: each `E` closes the innermost open `B` of its kind on its
+// thread (`tid`, a Map key), dropping the ones opened after it.
+closed_spans: fn(events: [Dyn?]) -[Exec, IO]> [Span] {
+    keys := [String]{}
+    open := [(slot: Int, event: Int)]{}
+    spans := [Span]{}
+    loop index in 0..<events.len() {
+        event: events[index]
+        if !present(event) -> crash("TypeError: Cannot read properties of null (reading 'ph')")
+        begins: is_text(field(event, "ph"), "B")
+        if !begins && !is_text(field(event, "ph"), "E") -> next
+        key: map_key(field(event, "tid"), index)
+        slot := -1
+        loop i in 0..<keys.len() {
+            if keys[i] == key -> slot = i
+        }
+        if slot < 0 {
+            keys.push(key)
+            slot = keys.len() - 1
+        }
+        if begins {
+            open.push((slot: slot, event: index))
+            next
+        }
+        kind: kind_of(event)
+        found := -1
+        at := open.len() - 1
+        loop at >= 0 && found < 0 {
+            if open[at].slot == slot && same(kind_of(events[open[at].event]), kind) -> found = at
+            at -= 1
+        }
+        if found < 0 -> next
+        begin: events[open[found].event]
+        kept := [(slot: Int, event: Int)]{}
+        loop i in 0..<open.len() {
+            if i < found || open[i].slot != slot -> kept.push(open[i])
+        }
+        open = kept
+        args: field(begin, "args")
+        cpu: field(field(event, "args"), "cpu_ns")
+        spans.push(Span{
+            kind: kind
+            label: field(begin, "name")
+            args: if present(args) -> args else -> Val(Dyn.Object([]))
+            wall: to_number(field(event, "ts")) - to_number(field(begin, "ts"))
+            cpu: if present(cpu) -> cpu else -> Val(Dyn.Float(ZERO))
+        })
+    }
+    spans
+}
+
+// JavaScript `total + value` where total is a number or a string: text joins,
+// anything else adds as a number.
+js_add: fn(total: Dyn, value: Dyn?) -> Dyn {
+    joins: if total == {
+        .Text(_) -> true
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
+            inner: value ?? Dyn.Null
+            if inner == {
+                .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> false
+            }
+        }
+    }
+    if joins -> return Dyn.Text("{js_string(Val(total))}{js_string(value)}")
+    Dyn.Float(to_number(Val(total)) + to_number(value))
+}
+
+// `item.split(", ")`.
+split_items: fn(item: String) -> [String] {
+    names := [String]{}
+    rest := item
+    loop rest.contains(", ") {
+        parts: rest.partition(", ")
+        names.push(parts.head.copy())  // copy: the names outlive the rest
+        rest = parts.tail.copy()  // copy: the tail outlives its parts
+    }
+    names.push(rest)
+    names
+}
+
+row_at: fn(rows: [Row], id: String) -> Int {
+    loop i in 0..<rows.len() {
+        if rows[i].id == id -> return i
+    }
+    -1
+}
+
+// Stable descending order of wall time (`b.wall - a.wall`).
+rows_by_wall: fn(rows: [Row]) -> [Row] {
+    out := rows
+    loop i in 1..<out.len() {
+        j := i
+        loop j > 0 && out[j].wall > out[j - 1].wall {
+            moved: out[j]
+            out[j] = out[j - 1]
+            out[j - 1] = moved
+            j -= 1
+        }
+    }
+    out
+}
+
+kinds_by_wall: fn(kinds: [Kind]) -> [Kind] {
+    out := kinds
+    loop i in 1..<out.len() {
+        j := i
+        loop j > 0 && out[j].wall > out[j - 1].wall {
+            moved: out[j]
+            out[j] = out[j - 1]
+            out[j - 1] = moved
+            j -= 1
+        }
+    }
+    out
+}
+
+Summary: struct {
+    phase: Span?
+    kinds: [Kind]
+    files: [Row]
+    items: [Row]
+}
+
+summarize: fn(spans: [Span]) -[Exec, IO]> Summary {
+    phase := Span?{None}
+    loop span in spans {
+        if phase == None && is_text(span.kind, "comptime") && is_text(span.label, "comptime") -> phase = Val(span)
+    }
+    kinds := [Kind]{}
+    by_file := [Row]{}
+    by_item := [Row]{}
+    loop index in 0..<spans.len() {
+        span: spans[index]
+        name: text_of(span.kind) ?? crash("TypeError: span.kind.startsWith is not a function")
+        if !name.starts_with("comptime.") -> next
+        at := -1
+        loop i in 0..<kinds.len() {
+            if kinds[i].kind == name -> at = i
+        }
+        if at < 0 {
+            kinds.push(Kind{kind: name, count: 0, wall: ZERO, cpu: Dyn.Float(ZERO)})
+            at = kinds.len() - 1
+        }
+        kinds[at].count += 1
+        kinds[at].wall += span.wall
+        kinds[at].cpu = js_add(kinds[at].cpu, span.cpu)
+        step: name.removeprefix("comptime.")
+        step_at := -1
+        loop i in 0..<STEPS.len() {
+            if STEPS[i] == step -> step_at = i
+        }
+        item: text_of(field(span.args, "item")) ?? next
+        if step_at < 0 -> next
+        given: field(span.args, "file")
+        file: if present(given) -> given ?? Dyn.Null else -> Dyn.Text("")
+        names: if step == "build" -> split_items(item) else -> [String]{item}
+        share: Float.from_int(names.len())
+        wall: span.wall / share
+        cpu: to_number(span.cpu) / share
+        counted: if step == "check" -> 1 else -> 0
+        file_id: map_key(Val(file), index)
+        loop name_index in 0..<names.len() {
+            row := row_at(by_file, file_id)
+            if row < 0 {
+                by_file.push(Row{key: file, id: file_id, count: 0, wall: ZERO, cpu: ZERO, steps: [ZERO, ZERO, ZERO, ZERO, ZERO]})
+                row = by_file.len() - 1
+            }
+            by_file[row].count += counted
+            by_file[row].wall += wall
+            by_file[row].cpu += cpu
+            by_file[row].steps[step_at] = by_file[row].steps[step_at] + wall
+            label: "{js_string(Val(file))} {names[name_index]}"
+            row = row_at(by_item, label)
+            if row < 0 {
+                by_item.push(Row{key: Dyn.Text(label), id: label, count: 0, wall: ZERO, cpu: ZERO, steps: [ZERO, ZERO, ZERO, ZERO, ZERO]})
+                row = by_item.len() - 1
+            }
+            by_item[row].count += counted
+            by_item[row].wall += wall
+            by_item[row].cpu += cpu
+            by_item[row].steps[step_at] = by_item[row].steps[step_at] + wall
+        }
+    }
+    Summary{phase: phase, kinds: kinds_by_wall(kinds), files: rows_by_wall(by_file), items: rows_by_wall(by_item)}
+}
+
+// ---- Output --------------------------------------------------------------------
+
+pad: fn(text: String, width: Int) -> String {
+    gap: width - text.bytes().len()
+    if gap > 0 -> "{" ".repeat(gap)}{text}" else -> text
+}
+
+seconds: fn(us: Float) -> String { pad(to_fixed(us / MILLION, 2), 7) }
+
+cpu_seconds: fn(ns: Float) -> String { pad(to_fixed(ns / BILLION, 2), 7) }
+
+print_table: fn(title: String, rows: [Row], top: Float) {
+    print("\n{title}")
+    print("{pad("count", 6)} {pad("wall s", 7)} {pad("cpu s", 7)} {STEPS.map(step -> pad(step, 7)).join(" ")}  name")
+    shown: if Float.from_int(rows.len()) > top -> Int.from_float(top) ?? 0 else -> rows.len()
+    loop index in 0..<shown {
+        entry: rows[index]
+        print("{pad("{entry.count}", 6)} {seconds(entry.wall)} {cpu_seconds(entry.cpu)} {entry.steps.map(wall -> seconds(wall)).join(" ")}  {js_string(Val(entry.key))}")
+    }
+    if Float.from_int(rows.len()) > top -> print("  ... {js_number(Float.from_int(rows.len()) - top)} more")
+}
+
+row_json: fn(row: Row) -> Dyn {
+    entries := [(key: String, value: Dyn)]{(key: "key", value: row.key), (key: "count", value: Dyn.Int(row.count)), (key: "wall", value: Dyn.Float(row.wall)), (key: "cpu", value: Dyn.Float(row.cpu))}
+    loop i in 0..<STEPS.len() -> entries.push((key: STEPS[i], value: Dyn.Float(row.steps[i])))
+    Dyn.Object(entries)
+}
+
+summary_json: fn(summary: Summary) -> Dyn {
+    phase: if summary.phase == {
+        .Val(span) -> Dyn.Object([(key: "wall", value: Dyn.Float(span.wall)), (key: "cpu", value: span.cpu ?? Dyn.Null)])
+        .None -> Dyn.Null
+    }
+    // copy: the JSON value outlives the summary's kind name
+    kinds: summary.kinds.map(kind -> Dyn.Object([(key: "kind", value: Dyn.Text(kind.kind.copy())), (key: "count", value: Dyn.Int(kind.count)), (key: "wall", value: Dyn.Float(kind.wall)), (key: "cpu", value: kind.cpu)]))
+    Dyn.Object([(key: "phase", value: phase), (key: "kinds", value: Dyn.Array(kinds)), (key: "files", value: Dyn.Array(summary.files.map(row -> row_json(row)))), (key: "items", value: Dyn.Array(summary.items.map(row -> row_json(row))))])
+}
+
+run: fn() {
+    options: parse_args(process.args())
+    summary: summarize(closed_spans(read_events(options.trace)))
+    if options.json {
+        print(json_stringify(summary_json(summary), 2))
+        return
+    }
+    if summary.phase == .Val(span) -> print("comptime phase {js_trim(seconds(span.wall))} s wall, {js_trim(cpu_seconds(to_number(span.cpu)))} s cpu")
+    print("\n{pad("count", 6)} {pad("wall s", 7)} {pad("cpu s", 7)}  span")
+    loop kind in summary.kinds -> print("{pad("{kind.count}", 6)} {seconds(kind.wall)} {cpu_seconds(to_number(Val(kind.cpu)))}  {kind.kind}")
+    print_table("per file (count = items checked)", summary.files, options.top)
+    print_table("per item", summary.items, options.top)
+}

@@ -1,0 +1,141 @@
+{
+  "name": "comptime-items",
+  "mode": "tool",
+  "description": "The comptime trace breakdown comptime-items.mjs and its Jet twin comptime-items/run.jet, #5072 c7: per span kind, per source file and per item tables and the --json summary of a streamed (unterminated) trace with every comptime step, batch builds split evenly among their items, spans matched per thread (1 and \"1\" are different threads), inner spans dropped by an outer close, items without a file, kinds named by `name` and stable ties; a trace of JavaScript coercions (string and array cpu_ns joined as text, number, array and object files, string timestamps, null and string args, an overflowing wall); --top (hex, 0 and the \"... N more\" line); and the refusals: no trace, --help, a negative, fractional or missing --top and a second trace (exit 2), and an absent, malformed or empty trace, a null event and a span without a kind (exit 1, nothing printed).",
+  "tool": {
+    "original": "Tools/perf/comptime-items.mjs",
+    "jet": "Tools/perf/comptime-items/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": [
+          "full.trace"
+        ],
+        "expected": "expected/full.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "--json"
+        ],
+        "expected": "expected/full-json.out"
+      },
+      {
+        "args": [
+          "--top",
+          "0x2",
+          "full.trace"
+        ],
+        "expected": "expected/full-top.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "--top",
+          "0"
+        ],
+        "expected": "expected/full-top-zero.out"
+      },
+      {
+        "args": [
+          "weird.trace"
+        ],
+        "expected": "expected/weird.out"
+      },
+      {
+        "args": [
+          "--json",
+          "weird.trace"
+        ],
+        "expected": "expected/weird-json.out"
+      },
+      {
+        "args": [
+          "open.trace"
+        ],
+        "expected": "expected/open.out"
+      },
+      {
+        "args": [],
+        "exit": 2,
+        "expected": "expected/no-trace.out"
+      },
+      {
+        "args": [
+          "--help"
+        ],
+        "exit": 2,
+        "expected": "expected/help.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "--top",
+          "-1"
+        ],
+        "exit": 2,
+        "expected": "expected/top-negative.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "--top",
+          "1.5"
+        ],
+        "exit": 2,
+        "expected": "expected/top-fraction.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "--top"
+        ],
+        "exit": 2,
+        "expected": "expected/top-missing.out"
+      },
+      {
+        "args": [
+          "full.trace",
+          "weird.trace"
+        ],
+        "exit": 2,
+        "expected": "expected/two-traces.out"
+      },
+      {
+        "args": [
+          "absent.trace"
+        ],
+        "exit": 1,
+        "expected": "expected/missing-file.out"
+      },
+      {
+        "args": [
+          "bad.trace"
+        ],
+        "exit": 1,
+        "expected": "expected/bad-json.out"
+      },
+      {
+        "args": [
+          "null-event.trace"
+        ],
+        "exit": 1,
+        "expected": "expected/null-event.out"
+      },
+      {
+        "args": [
+          "no-kind.trace"
+        ],
+        "exit": 1,
+        "expected": "expected/no-kind.out"
+      },
+      {
+        "args": [
+          "empty.trace"
+        ],
+        "exit": 1,
+        "expected": "expected/empty.out"
+      }
+    ]
+  }
+}
