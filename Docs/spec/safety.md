@@ -6231,56 +6231,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 140,
+      "line": 141,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 146,
+      "line": 147,
       "column": 5,
       "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 152,
+      "line": 153,
       "column": 5,
       "reason": "read the native IP address discriminant"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 209,
+      "line": 210,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 216,
+      "line": 217,
       "column": 5,
       "reason": "read socket IP representation; formatting stays in Jet"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 219,
+      "line": 220,
       "column": 5,
       "reason": "read native socket port"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 231,
+      "line": 232,
       "column": 5,
       "reason": "read native IPv6 socket scope identifier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 433,
+      "line": 434,
       "column": 5,
       "reason": "read the native UDP packet's socket-address carrier"
     },
@@ -11069,14 +11069,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| Core | Core/Net/Net.jet | 140:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 146:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/Net/Net.jet | 152:5 | "read the native IP address discriminant" |
-| Core | Core/Net/Net.jet | 209:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/Net/Net.jet | 216:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/Net/Net.jet | 219:5 | "read native socket port" |
-| Core | Core/Net/Net.jet | 231:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/Net/Net.jet | 433:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Net/Net.jet | 141:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 147:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| Core | Core/Net/Net.jet | 153:5 | "read the native IP address discriminant" |
+| Core | Core/Net/Net.jet | 210:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 217:5 | "read socket IP representation; formatting stays in Jet" |
+| Core | Core/Net/Net.jet | 220:5 | "read native socket port" |
+| Core | Core/Net/Net.jet | 232:5 | "read native IPv6 socket scope identifier" |
+| Core | Core/Net/Net.jet | 434:5 | "read the native UDP packet's socket-address carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3410:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3412:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3418:1 | "`key` and `iv` are a vector record's, used for that record only" |

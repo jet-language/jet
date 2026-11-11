@@ -12,6 +12,7 @@ package: {
 use {
     core: core
     sys: core.sys
+    rt: jet.runtime.net
 }
 
 // core.net — blocking sockets and name resolution.
@@ -568,9 +569,9 @@ dns_aaaa_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAdd
 dns_txt: fn(name: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_txt", name, "DNS timeout must be non-negative"))
-    if core.net.__dns_txt_lookup(name, ms) == {
+    if rt.dns_txt_lookup(name, ms) == {
         .Ok(texts) -> Ok(texts)
-        .Err(message) -> Err(dns_error(name, message))
+        .Err(error) -> Err(dns_error(name, error.message))
     }
 }
 
@@ -578,18 +579,18 @@ dns_txt_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_txt_at", name, "DNS timeout must be non-negative"))
     _: socket_addr_parse(server) ?? return Err(net_err("dns_txt_at", server, "DNS server must be an IP socket address"))
-    if core.net.__dns_txt_at_lookup(server, name, ms) == {
+    if rt.dns_txt_at_lookup(server, name, ms) == {
         .Ok(texts) -> Ok(texts)
-        .Err(message) -> Err(dns_error(name, message))
+        .Err(error) -> Err(dns_error(name, error.message))
     }
 }
 
 dns_ptr: fn(addr: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(addr) -> return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_ptr", addr, "DNS timeout must be non-negative"))
-    if core.net.__dns_ptr_lookup(addr, ms) == {
+    if rt.dns_ptr_lookup(addr, ms) == {
         .Ok(names) -> Ok(names)
-        .Err(message) -> Err(dns_error(addr, message))
+        .Err(error) -> Err(dns_error(addr, error.message))
     }
 }
 
