@@ -1,0 +1,24 @@
+// A user package calls each jet.runtime.net DNS text lookup where it fails
+// before it reaches the network: a negative timeout, and a server that is no
+// socket address. Each fails with an Err whose message is the reason.
+use net: jet.runtime.net
+
+run: fn() -[IO, Net, Time.Wait]> {
+    if net.dns_txt_lookup("example.com", -1) == {
+        .Ok(texts) -> print("txt {texts.len()} records")
+        .Err(error) -> print("txt failed: {error.message}")
+    }
+    if net.dns_ptr_lookup("1.0.0.127.in-addr.arpa", -1) == {
+        .Ok(names) -> print("ptr {names.len()} records")
+        .Err(error) -> print("ptr failed: {error.message}")
+    }
+    if net.dns_txt_at_lookup("127.0.0.1:53", "example.com", -1) == {
+        .Ok(texts) -> print("txt_at {texts.len()} records")
+        .Err(error) -> print("txt_at failed: {error.message}")
+    }
+    texts: net.dns_txt_at_lookup("not-an-address", "example.com", 100) ?? {
+        print("txt_at failed: {err.message}")
+        return
+    }
+    print("txt_at {texts.len()} records")
+}

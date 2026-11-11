@@ -1,0 +1,19 @@
+// A program reaches the runtime's public DNS text lookups through the
+// jet.runtime.net interface: each call is checked against the member's Jet
+// signature, a fallible `[String] Err!` result, and its `-[Net, Time.Wait]>`
+// row.
+use net: jet.runtime.net
+
+record_count: fn(name: String) -[Net, Time.Wait]> Int Err! {
+    texts: net.dns_txt_lookup(name, 100) ?? return Err(err)
+    names: net.dns_ptr_lookup(name, 100) ?? return Err(err)
+    at: net.dns_txt_at_lookup("127.0.0.1:53", name, 100) ?? return Err(err)
+    Ok(texts.len() + names.len() + at.len())
+}
+
+run: fn() -[IO, Net, Time.Wait]> {
+    if record_count("example.com") == {
+        .Ok(count) -> print(count)
+        .Err(error) -> print(error.message)
+    }
+}

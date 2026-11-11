@@ -6,8 +6,9 @@
 // Core leaf core.M.__X: its `dispatcher_row` in Compiler/Prelude/Core.jet and
 // its CoreCallRecord in Compiler/JetFoundation/Source/Registry/CoreCallRows.jet.
 // While both tables carry that leaf, the member's declared row must be the
-// record's effect: its `effect_leaf` when it has one, else its `effect_kind`,
-// else no effect. A leaf one table carries and the other does not is a
+// effect sema gives a call of the record: its `effect_kind` unless its
+// `effect_leaf` refines that kind, and its `effect_leaf`, sorted; else no
+// effect. A leaf one table carries and the other does not is a
 // half-done cutover and a difference too; a leaf neither carries is cut over
 // (or never existed) and has nothing to compare. The report names each member
 // with its export symbol and the record's runtime symbol.
@@ -122,11 +123,18 @@ dispatcher_keys: fn(text: String) -> [String] Never! {
     keys
 }
 
-// The effect the record gives a call: its leaf, else its kind, else none.
+// The effect sema gives a call of the record (Effects/Checks.jet
+// sema_effect_record_core_row): its kind unless its leaf refines that kind,
+// and its leaf, sorted; else none.
 leaf_effects: fn(leaf: CoreLeaf) -> [String] Never! {
-    if leaf.effect_leaf == .Val(name) -> return [String]{name.copy()}
-    if leaf.effect_kind == .Val(name) -> return [String]{name.copy()}
-    [String]{}
+    effects := [String]{}
+    leaf_name: leaf.effect_leaf ?? ""
+    if leaf.effect_kind == .Val(kind) {
+        if leaf_name == "" || (leaf_name != kind && !leaf_name.starts_with("{kind}.")) -> effects.push(kind.copy())
+    }
+    if leaf_name != "" -> effects.push(leaf_name.copy())
+    effects.sort()
+    effects
 }
 
 row_text: fn(effects: [String]) -> String Never! {
@@ -218,20 +226,24 @@ run: fn() {
     assert_eq(declaration_effects("g: fn(x: Int) -> Int").len(), 0)
 }
 
-#Test("a member joins core.M.__X; its row must be the record's leaf, else its kind") {
+#Test("a member joins core.M.__X; its row must be the record's kind and leaf") {
     members: [InterfaceMember]{
         InterfaceMember{module_name: "jet.runtime.time", member: "sleep_ns", effects: [String]{"Time.Wait"}, symbol: "jet_std_time_sleep_duration_ns"},
         InterfaceMember{module_name: "jet.runtime.time", member: "task_timeout", effects: [String]{"Time.Wait"}, symbol: "jet_task_timeout_duration_ns"},
         InterfaceMember{module_name: "jet.runtime.time", member: "cut", effects: [String]{}, symbol: "jet_time_cut"},
         InterfaceMember{module_name: "jet.runtime.time", member: "half", effects: [String]{}, symbol: "jet_time_half"},
+        InterfaceMember{module_name: "jet.runtime.net", member: "dns_txt_lookup", effects: [String]{"Net", "Time.Wait"}, symbol: "jet_net_dns_txt_lookup"},
+        InterfaceMember{module_name: "jet.runtime.net", member: "dns_ptr_lookup", effects: [String]{"Time.Wait"}, symbol: "jet_net_dns_ptr_lookup"},
     }
     leaves: [CoreLeaf]{
         CoreLeaf{module_name: "core.time", member: "__sleep_ns", effect_kind: Val("Time"), effect_leaf: Val("Time.Wait"), symbol: "jet_std_time_sleep_duration_ns"},
         CoreLeaf{module_name: "core.time", member: "__task_timeout", effect_kind: Val("Time"), effect_leaf: None, symbol: "jet_task_timeout_duration_ns"},
+        CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_txt_lookup"},
+        CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_ptr_lookup"},
     }
-    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half"})
-    assert_eq(report.joined, 2)
-    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord")
+    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"})
+    assert_eq(report.joined, 4)
+    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord|jet.runtime.net.dns_ptr_lookup (jet_net_dns_ptr_lookup): declares -[Time.Wait]>, but core.net.__dns_ptr_lookup (jet_net_dns_ptr_lookup) has -[Net, Time.Wait]>")
 }
 
 #Test("the table rows parse from their generated lines") {

@@ -12,7 +12,7 @@
 // the one body of each.
 use {
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
-    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, type_name]
+    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, Type, type_marked_name, type_name]
 }
 
 JET_DRIVER_RUNTIME_INTERFACE_ROOT: "jet.runtime"
@@ -49,7 +49,8 @@ jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> Runti
 }
 
 // The member's Jet declaration, as the runtime declares it: its parameters,
-// effect row and result. A member without a row is pure.
+// effect row and result. A member without a row is pure, and a unit-fallible
+// one without a row writes its `E!` with no arrow.
 jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) -> String Never! {
     if declaration.type_params.len() > 0 -> return ""
     params := [String]{}
@@ -57,14 +58,26 @@ jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) 
         if param.convention != AccessConvention.Read || param.default != None || param.variadic -> return ""
         params.push("{param.name}: {type_name(param.ty)}")
     }
-    result: if declaration.return_type == .Val(ty) -> type_name(ty) else -> ""
+    result: if declaration.return_type == .Val(ty) -> jet_driver_runtime_interface_result(ty) else -> ""
     if declaration.declared_effects == .Val(entries) {
         names: loop entry in entries -> entry.name
         row: "{member}: fn({params.join(", ")}) -[{names.join(", ")}]>"
         return if result == "" -> row else -> "{row} {result}"
     }
     if result == "" -> return "{member}: fn({params.join(", ")})"
+    if declaration.return_type == .Val(.Result(ok, _)) && ok == (Type.Named{name: "Unit"}) -> return "{member}: fn({params.join(", ")}) {result}"
     "{member}: fn({params.join(", ")}) -> {result}"
+}
+
+// A written result as its declaration spells it. A fallible one keeps its
+// error even when that is the default `Err`, which type_name leaves implicit:
+// a binding's `T Err!` fails, while its plain `T` never does.
+jet_driver_runtime_interface_result: fn(ty: Type) -> String Never! {
+    if ty == .Result(ok, err) {
+        if ok == (Type.Named{name: "Unit"}) -> return "{type_marked_name(err)}!"
+        return "{type_marked_name(ok)} {type_marked_name(err)}!"
+    }
+    type_name(ty)
 }
 
 // A Jet string literal of `value`.

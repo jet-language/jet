@@ -1,0 +1,19 @@
+// `jet.runtime.net` (#6615): the runtime's public DNS text lookups, in Jet
+// types with their declared effect rows. Each member is a runtime binding
+// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its
+// one body (RouteDns.jet). Each answers `[String] Err!`: the records' texts,
+// or an Err whose message is the lookup's failure reason (the export writes
+// that text). `ms` is the lookup's timeout in milliseconds; a negative one
+// fails.
+net: module {
+    // The TXT records of `name` over the host's resolvers: the first that
+    // answers wins, else the last one's failure.
+    #Import(c) dns_txt_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [String] Err! = "jet_net_dns_txt_lookup"
+
+    // The TXT records of `name` from the DNS server at the socket address
+    // `server`.
+    #Import(c) dns_txt_at_lookup: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] Err! = "jet_net_dns_txt_at_lookup"
+
+    // The PTR names of the reverse name `name` over the host's resolvers.
+    #Import(c) dns_ptr_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [String] Err! = "jet_net_dns_ptr_lookup"
+}

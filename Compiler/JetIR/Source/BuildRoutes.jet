@@ -5268,12 +5268,32 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
     // A tuple error's kernel items carry the declared `labels`.
     if err == .Tuple(items) {
         ir_route_store_tuple(m, p, b, boxed, 8, err_ty, items, labels, out, span)
+    } else if err == .Text && ir_default_err(p, err_ty) {
+        ir_route_store_err_message(m, p, b, boxed, 8, err_ty, out, span)
     } else {
         ir_route_store_payload(m, p, b, boxed, 8, err_ty, err, out, span)
     }
     ir_end(b.f, b.line)
     b.fresh[boxed] = true
     boxed
+}
+
+// The default Err a runtime binding's `T Err!` failed with, built from the
+// message text its export wrote to `out`, stored at `offset` of `base`: no
+// code or cause, and the declared default metadata a fresh JetErr holds.
+ir_route_store_err_message: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, err_ty: Type, out: Int, span: Span) Never! {
+    if ir_default_err_drift(p, err_ty) == .Val(drift) -> return ir_fail(b, span, "the default Err declaration against the native JetErr: {drift}")
+    row: ir_value_type(m, p, err_ty) ?? return ir_fail(b, span, "payload type {err_ty}")
+    code_row: ir_value_type(m, p, Type.Option{inner: Type.String}) ?? return ir_fail(b, span, "the default Err code")
+    cause_row: ir_value_type(m, p, Type.Option{inner: err_ty.copy()}) ?? return ir_fail(b, span, "the default Err cause")
+    string_row: ir_string_row(m)
+    message: ir_fresh_temp(m, b, string_row)
+    ir_emit(b.f, IROp.Load, message, out, 0, -1, b.line)
+    code: ir_option_none_temp(m, b, code_row)
+    cause: ir_option_none_temp(m, b, cause_row)
+    error: ir_default_err_new(m, b, row, message, code, cause)
+    b.fresh[error] = false
+    ir_emit(b.f, IROp.Store, -1, base, offset, error, b.line)
 }
 
 // `reflect.of(value, type_name, path, level)`: sema hands the checked names
@@ -5463,9 +5483,11 @@ ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String
 // The route a jet.runtime binding's Jet signature projects onto its runtime
 // export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
 // Float, String as Text, a List of those, and as a result also an Option of
-// one or of a tuple, or a tuple whose items are those or an Option of one (in
-// the checked tuple's member order), as sema admits them (Guest.jet
-// sema_guest_check_runtime_binding). None for a type no carrier holds.
+// one or of a tuple, a tuple whose items are those or an Option of one (in
+// the checked tuple's member order), or a fallible `T Err!` as a Result route
+// (a Unit success writes no out word, the Err its message text), as sema
+// admits them (Guest.jet sema_guest_check_runtime_binding). None for a type
+// no carrier holds.
 ir_route_of_signature: fn(symbol: String, params: [Type], returned: Type?) -> IRRoute? Never! {
     carriers := [IRRouteCarrier]{}
     loop ty in params {
@@ -5479,6 +5501,15 @@ ir_route_of_signature: fn(symbol: String, params: [Type], returned: Type?) -> IR
 ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
     ty: returned ?? return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
     if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_untag(ty) == .Result(ok, err) {
+        if err == (Type.Named{name: "Never"}) -> return ir_route_result_of(Val(ok))
+        // The default Err, the one error a binding names, crosses as its
+        // message text (ir_route_result builds the Err).
+        if err != (Type.Named{name: "Err"}) -> return None
+        if ir_unit_type(ok) -> return Val(IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Text})
+        success: ir_route_carrier_of(ok) ?? return None
+        return Val(IRRouteResult.Result{ok: success, err: IRRouteCarrier.Text})
+    }
     if ir_untag(ty) == .Option(inner) {
         some: ir_route_carrier_of(inner) ?? return None
         return Val(IRRouteResult.Option{some: some})

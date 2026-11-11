@@ -280,7 +280,8 @@ sema_guest_runtime_binding: fn(package_identity: String, function: Func) -> Bool
 }
 
 // A value a runtime route carries: Int and the machine integers as a Word,
-// Float, Bool as a Flag, String as Text, and a List of those scalars.
+// Float, Bool as a Flag, String as Text, and a List of those scalars or of
+// String.
 sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) -> true
@@ -291,7 +292,7 @@ sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
 sema_guest_runtime_value: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String -> true
-        .List(item) -> sema_guest_runtime_scalar(item)
+        .List(item) -> item == Type.String || sema_guest_runtime_scalar(item)
         .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_scalar(ty)
     }
 }
@@ -310,9 +311,11 @@ sema_guest_runtime_tuple: fn(fields: [TypeTupleField]) -> Bool Never! {
     true
 }
 
-// A runtime route result: a carried value, an Option of one or of a tuple,
-// or a tuple of carried values and Options of them (its items cross in the
-// checked tuple's member order).
+// A runtime route result: a carried value, an Option of one or of a tuple, a
+// tuple of carried values and Options of them (its items cross in the checked
+// tuple's member order), or a fallible `T Err!` whose success is a carried
+// value or Unit. Its error is the default `Err`, the one Error type a binding
+// can name, and crosses as its message text.
 sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Option(inner) -> {
@@ -320,7 +323,8 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
             sema_guest_runtime_value(inner)
         }
         .Tuple(fields) -> sema_guest_runtime_tuple(fields)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
+        .Result(ok, err) -> (ok == Type.Named{name: "Unit"} || sema_guest_runtime_value(ok)) && err == Type.Named{name: "Err"}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
     }
 }
 
@@ -329,7 +333,7 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: &[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String or a List of scalars; a result may also be an Option of one or of a tuple, or a tuple of those and Options of them"
+    fix: "use Int, a machine integer, Float, Bool, String or a List of scalars or of String; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T Err!` with a carried or Unit success"
     loop param in function.params {
         if param.convention != AccessConvention.Read || !sema_guest_runtime_value(param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))
