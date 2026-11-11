@@ -94,8 +94,8 @@
 // IR_VERSION_COPIES times the copy limit.
 //
 // A copy is made only when it gains something: a body whose arithmetic the
-// SSA round trip already proves inline without the guards keeps its loops
-// as they are (ir_opt_version_function).
+// SSA round trip proves inline without the guards keeps its loops as they
+// are (ir_opt_version_function).
 
 use jet_foundation.[compiler_threads_single, name_rows_set]
 
@@ -257,40 +257,63 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
 }
 
 // The loop versioning of `f` (ir_opt_version_loops) unless the SSA round
-// trip already makes its loops plain. The guards cost their tests on every
-// pass, and a body whose Int arithmetic OptRange proves inline without
-// them gains nothing from the copy: ScriptBench w14's
+// trip makes its loops plain without it. The guards cost their tests on
+// every pass, and a body whose Int arithmetic OptRange proves inline
+// without them gains nothing from the copy: ScriptBench w14's
 // `sum += i * i %% 7919` is bounded by its trip count, so its head guard on
-// `sum` took 5 of the loop's 23 instructions a pass. With `ssa` (the round
-// trip may run on this body), a body that has a loop to copy goes through
-// the round trip as it is first; when none of its loops' instructions is
-// left for a guard to gain (ir_version_gains), that body is kept and true
-// is returned, its round trip done. Otherwise `f` is the versioned copy
-// taken before, and false is returned, as it is without `ssa`.
-ir_opt_version_function: fn(m: IRModule, f: &IRFunction, body: Int, options: IROptOptions, ssa: Bool, report: &IROptReport) -> Bool Never! {
-    if !ssa || !f.op.contains(IROp.Loop) {
+// `sum` took 5 of the loop's 23 instructions a pass. When the round trip may
+// run on this body (`checking`, or no `options.verify`) and a loop was
+// copied, it runs first on the versioned body. An instruction left there
+// that a guard could make plain in the loops of the body's own slots
+// (ir_version_gains: the loops as they were and those left alone; the
+// slots versioning made hold only its guards' tests and its copies' values)
+// keeps the versioned body, its round trip done: the loop as it was is
+// entered only by the guards' failures and the head guards' exits, which
+// leave no range narrower than the body as it was gives it, so that body
+// keeps the instruction too. With none left, the body as it was takes its
+// own round trip and is kept when none is left in it either; the guards
+// may have proven more than it can, so otherwise the versioned body stays.
+// Either way true is returned, the round trip done; otherwise `f` is
+// versioned and false is returned, the round trip the caller's. With
+// `checking`, IR Lint runs on the versioned body (pass "version"), and an
+// invalid SSA form clears `checking`.
+ir_opt_version_function: fn(m: IRModule, f: &IRFunction, body: Int, options: IROptOptions, lint: IRLintContext, checking: &Bool, report: &IROptReport) -> Bool Never! {
+    if (options.verify && !checking) || !f.op.contains(IROp.Loop) {
         _ := ir_opt_version_loops(m, f, body, report)
+        if checking -> checking = ir_opt_lint(m, lint, f, "version", report)
         return false
     }
-    versioned := f.copy()
-    steps := ir_opt_report(report.level)
-    if ir_opt_version_loops(m, versioned, body, steps) > 0 {
-        trial := ir_opt_report(report.level)
-        ir_opt_ssa(m, f, options, trial)
-        if trial.lint.len() == 0 && ir_version_gains(m, f) == 0 {
-            ir_opt_report_add(report, trial)
-            return true
-        }
+    plain := f.copy()
+    slots: f.slot_type.len()
+    versioned := ir_opt_report(report.level)
+    copies: ir_opt_version_loops(m, f, body, versioned)
+    if checking -> checking = ir_opt_lint(m, lint, f, "version", versioned)
+    if copies == 0 || (options.verify && !checking) {
+        ir_opt_report_add(report, versioned)
+        return false
     }
-    f = versioned.move()
-    ir_opt_report_add(report, steps)
-    false
+    ir_opt_ssa(m, f, options, versioned)
+    if versioned.lint.len() > 0 || ir_version_gains(m, f, slots) > 0 {
+        if versioned.lint.len() > 0 -> checking = false
+        ir_opt_report_add(report, versioned)
+        return true
+    }
+    trial := ir_opt_report(report.level)
+    ir_opt_ssa(m, plain, options, trial)
+    if trial.lint.len() == 0 && ir_version_gains(m, plain, slots) == 0 {
+        f = plain.move()
+        ir_opt_report_add(report, trial)
+    } else {
+        ir_opt_report_add(report, versioned)
+    }
+    true
 }
 
 // How many instructions inside the loops of `f` a guard could still make
-// plain (ir_version_gain). Code outside every loop runs once a call, so
-// what a guard would gain there does not pay for its tests.
-ir_version_gains: fn(m: IRModule, f: IRFunction) -> Int Never! {
+// plain (ir_version_gain), of those that write a slot below `slots` (the
+// body's own, before versioning made more). Code outside every loop runs
+// once a call, so what a guard would gain there does not pay for its tests.
+ir_version_gains: fn(m: IRModule, f: IRFunction, slots: Int) -> Int Never! {
     count := 0
     // The open regions, true for a Loop.
     open := [Bool]{}
@@ -306,7 +329,7 @@ ir_version_gains: fn(m: IRModule, f: IRFunction) -> Int Never! {
                 if (open.pop() ?? false) -> loops -= 1
             }
             .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
-                if loops > 0 && ir_version_gain(m, f, k) -> count += 1
+                if loops > 0 && f.dst[k] < slots && ir_version_gain(m, f, k) -> count += 1
             }
         }
     }

@@ -665,12 +665,12 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     }
     if level >= 1 {
         // The SSA form is built only from a body IR Lint passed. A body
-        // versioning would copy may take its round trip there, unversioned
+        // versioning copies takes its round trip there, once
         // (ir_opt_version_function).
         ssa_done := false
         if !out.cold && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
-            ssa_done = ir_opt_version_function(m, out, if level >= 2 -> IR_VERSION_BODY else -> IR_VERSION_BODY_SMALL, options, checking || !options.verify, report)
-            if checking -> checking = ir_opt_lint(m, lint, out, if ssa_done -> "ssa" else -> "version", report)
+            ssa_done = ir_opt_version_function(m, out, if level >= 2 -> IR_VERSION_BODY else -> IR_VERSION_BODY_SMALL, options, lint, checking, report)
+            if checking && ssa_done -> checking = ir_opt_lint(m, lint, out, "ssa", report)
         }
         if !ssa_done && ir_opt_enabled(options, "ssa") && (checking || !options.verify) {
             before: report.lint.len()
