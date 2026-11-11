@@ -1,0 +1,225 @@
+#!/usr/bin/env jet
+// End-to-end local-file proof for signed, keyless and corrupt self-update
+// inputs, and for the publisher's input and output boundaries. The Ed25519
+// channel key is generated in memory at run time and never written; only its
+// public half goes to the trust file the client reads.
+// Usage (from anywhere inside the checkout):
+//   JET=<admitted native jet> jet Tools/jetpack-infra/TestToolchainUpdate.jet
+// The scratch directory is JET_TEST_SCRATCH, else JET_SCRATCH_ROOT, else
+// JET_STATE_ROOT, else jet-dev in $XDG_CACHE_HOME (~/.cache when unset).
+use {
+    base64: core.encoding.base64
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+TOOL: "/Tools/jetpack-infra/TestToolchainUpdate.jet"
+STAGER: "/Tools/jetpack-infra/StageToolchain.jet"
+KEY_ID: "local-channel-v1"
+TARGET: "x86_64-unknown-linux-gnu"
+SECONDARY_TARGET: "aarch64-unknown-linux-gnu"
+// One byte over the publisher's 512 MiB artifact bound.
+OVERSIZE_BYTES: 536870913
+
+#Error
+ProofError: struct {
+    message: String
+}
+
+// What a child left: its exit status (128 + N for signal N) and its output.
+Ran: struct {
+    code: Int
+    output: String
+    errors: String
+}
+
+// The fixed inputs of one proof run.
+Proof: struct {
+    jet: String
+    stager: String
+    work: String
+    stage: String
+    root: String
+}
+
+run: fn() {
+    jet: sys.get("JET") ?? ""
+    if jet == "" {
+        term.eprint("JET must name the admitted native jet compiler")
+        process.exit(1)
+    }
+    if !files.is_file(jet) || !files.can_execute(jet) {
+        term.eprint("missing {jet}; build jet first")
+        process.exit(1)
+    }
+    repo: repo_root()
+    if repo == "" {
+        term.eprint("TestToolchainUpdate: no checkout holds {TOOL}")
+        process.exit(1)
+    }
+    work: "{scratch_root()}/toolchain-update-{sys.getpid()}"
+    proof: Proof{jet: jet, stager: "{repo}{STAGER}", work: work, stage: "{work}/site", root: "{work}/root"}
+    if prove(proof) == {
+        .Ok(_) -> {
+            clean(work)
+            print("toolchain self-update and publisher boundary proofs passed")
+        }
+        .Err(error) -> {
+            clean(work)
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+clean: fn(work: String) -[FS]> Never! {
+    files.remove_all(work).drop("the scratch tree is removed best-effort, as the shell trap did")
+}
+
+failed: fn(message: String) -> ProofError Never! {
+    ProofError{message: message}
+}
+
+// The checkout holding this script, or else the one around the working directory.
+repo_root: fn() -[Env, FS]> String Never! {
+    script: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? return ""
+    loop {
+        if files.exists("{dir}{TOOL}") -> return dir
+        if dir == "/" || dir == "" -> return ""
+        dir = files.dirname(dir)
+    }
+}
+
+// The roots.sh scratch default: JET_TEST_SCRATCH, then JET_SCRATCH_ROOT,
+// then JET_STATE_ROOT, then the XDG cache's jet-dev.
+scratch_root: fn() -[Env]> String Never! {
+    loop name in ["JET_TEST_SCRATCH", "JET_SCRATCH_ROOT", "JET_STATE_ROOT"] {
+        value: sys.get(name) ?? ""
+        if value != "" -> return value
+    }
+    cache: sys.get("XDG_CACHE_HOME") ?? ""
+    base: if cache != "" -> cache else -> "{sys.get("HOME") ?? ""}/.cache"
+    "{base}/jet-dev"
+}
+
+prove: fn(proof: Proof) -[Env, Exec, FS, Rand, Time, Time.Wait]> ProofError! {
+    files.create_dir_all("{proof.root}/trust") ?? return Err(failed("cannot create {proof.root}/trust: {err}"))
+    key: crypto.SigningKey.new_random() ?? return Err(failed("no Ed25519 key: {err}"))
+    trust: "{proof.work}/toolchain.pub"
+    write(trust, "{KEY_ID}:{base64.encode(key.public_key().bytes)}\n".bytes()) ?? return Err(err)
+    artifact_input: "{proof.work}/jet-artifact"
+    write(artifact_input, "#!/bin/sh\nprintf local-toolchain\\n\n".bytes()) ?? return Err(err)
+    files.set_mode(artifact_input, 0o755) ?? return Err(failed("cannot mark {artifact_input} executable: {err}"))
+    secondary_input: "{proof.work}/jet-artifact-arm"
+    write(secondary_input, "#!/bin/sh\nprintf local-toolchain-arm\\n\n".bytes()) ?? return Err(err)
+    files.set_mode(secondary_input, 0o755) ?? return Err(failed("cannot mark {secondary_input} executable: {err}"))
+    staged: stage_toolchain(proof, [
+        "--version", "1.2.3", "--sequence", "1", "--published-at", "{time.now().to_timestamp()}",
+        "--channel", "stable", "--output", proof.stage,
+        "--artifact", "{TARGET}={artifact_input}", "--artifact", "{SECONDARY_TARGET}={secondary_input}",
+    ]) ?? return Err(err)
+    if staged.code != 0 -> return Err(failed("StageToolchain failed (exit {staged.code}): {staged.errors.trim()}"))
+
+    manifest: "{proof.stage}/v1/stable/manifest.json"
+    artifact: "{proof.stage}/v1/stable/1.2.3/jet-1.2.3-{TARGET}"
+    secondary: "{proof.stage}/v1/stable/1.2.3/jet-1.2.3-{SECONDARY_TARGET}"
+    loop path in [manifest, artifact, secondary] {
+        sign_request(key, "{path}.sig.request", "{path}.sig.json") ?? return Err(err)
+    }
+
+    verified: update(proof, TARGET, ["--trust-key", trust, "--dry-run"]) ?? return Err(err)
+    expect_success(verified, "verified jet 1.2.3 for {TARGET} from file://{proof.stage}", "unexpected self-update proof") ?? return Err(err)
+    cross: update(proof, SECONDARY_TARGET, ["--trust-key", trust, "--dry-run"]) ?? return Err(err)
+    expect_success(cross, "verified jet 1.2.3 for {SECONDARY_TARGET}", "cross-platform dry-run was not accepted") ?? return Err(err)
+    cross_apply: update(proof, SECONDARY_TARGET, ["--trust-key", trust, "--apply"]) ?? return Err(err)
+    expect_refusal(cross_apply, ["exact host platform"], "cross-platform apply was accepted") ?? return Err(err)
+
+    loop path in [manifest, artifact, secondary] {
+        files.remove("{path}.sig.json") ?? return Err(failed("cannot remove {path}.sig.json: {err}"))
+    }
+    unsigned: update(proof, TARGET, ["--trust-key", trust, "--dry-run"]) ?? return Err(err)
+    expect_refusal(unsigned, ["E2105"], "unsigned channel was accepted without an explicit override") ?? return Err(err)
+    keyless: update(proof, TARGET, ["--allow-unofficial", "--dry-run"]) ?? return Err(err)
+    expect_success(keyless, "unofficial keyless source", "explicit keyless proof did not identify its trust tier") ?? return Err(err)
+
+    files.write_at(artifact, 0, "X".bytes()) ?? return Err(failed("cannot corrupt {artifact}: {err}"))
+    corrupt: update(proof, TARGET, ["--allow-unofficial", "--dry-run"]) ?? return Err(err)
+    expect_refusal(corrupt, ["E2105", "digest"], "corrupted artifact was accepted") ?? return Err(err)
+
+    empty_input: "{proof.work}/empty-artifact"
+    write(empty_input, [U8]{}) ?? return Err(err)
+    empty: stage_toolchain(proof, ["--version", "1.2.3", "--sequence", "2", "--output", "{proof.work}/empty-stage", "--artifact", "{TARGET}={empty_input}"]) ?? return Err(err)
+    expect_refusal(empty, ["empty"], "empty publisher input was accepted") ?? return Err(err)
+
+    // A sparse file: one byte written at the bound leaves a hole before it.
+    oversize_input: "{proof.work}/oversize-artifact"
+    write(oversize_input, [U8]{}) ?? return Err(err)
+    files.write_at(oversize_input, OVERSIZE_BYTES - 1, [U8]{U8{0}}) ?? return Err(failed("cannot extend {oversize_input}: {err}"))
+    oversize: stage_toolchain(proof, ["--version", "1.2.3", "--sequence", "3", "--output", "{proof.work}/oversize-stage", "--artifact", "{TARGET}={oversize_input}"]) ?? return Err(err)
+    expect_refusal(oversize, ["bound"], "oversize publisher input was accepted") ?? return Err(err)
+
+    real_input: "{proof.work}/real-input-parent"
+    files.create_dir_all(real_input) ?? return Err(failed("cannot create {real_input}: {err}"))
+    files.copy(artifact_input, "{real_input}/jet-artifact") ?? return Err(failed("cannot copy the artifact input: {err}"))
+    linked_input: "{proof.work}/symlink-input-parent"
+    files.symlink(real_input, linked_input) ?? return Err(failed("cannot link {linked_input}: {err}"))
+    through_input: stage_toolchain(proof, ["--version", "1.2.3", "--sequence", "4", "--output", "{proof.work}/symlink-input-stage", "--artifact", "{TARGET}={linked_input}/jet-artifact"]) ?? return Err(err)
+    expect_refusal(through_input, ["symlink"], "symlinked publisher input ancestor was accepted") ?? return Err(err)
+
+    real_output: "{proof.work}/real-output"
+    files.create_dir_all(real_output) ?? return Err(failed("cannot create {real_output}: {err}"))
+    linked_output: "{proof.work}/symlink-output"
+    files.symlink(real_output, linked_output) ?? return Err(failed("cannot link {linked_output}: {err}"))
+    through_output: stage_toolchain(proof, ["--version", "1.2.3", "--sequence", "5", "--output", linked_output, "--artifact", "{TARGET}={artifact_input}"]) ?? return Err(err)
+    expect_refusal(through_output, ["symlink"], "symlinked publisher output ancestor was accepted") ?? return Err(err)
+
+    version: invoke([proof.jet.copy(), "--version"], proof.root) ?? return Err(err)
+    if version.code != 0 -> return Err(failed("{proof.jet} --version failed (exit {version.code})"))
+    Ok()
+}
+
+write: fn(path: String, bytes: [U8]) -[FS]> ProofError! {
+    files.write_bytes(path, bytes) ?? return Err(failed("cannot write {path}: {err}"))
+    Ok()
+}
+
+// The release signer's job for one request: an Ed25519 signature over the
+// request's bytes, as the signature JSON the client reads.
+sign_request: fn(key: crypto.SigningKey, request: String, signature: String) -[FS]> ProofError! {
+    bytes: files.read_bytes(request) ?? return Err(failed("cannot read {request}: {err}"))
+    signed: crypto.sign(key, bytes) ?? return Err(failed("cannot sign {request}: {err}"))
+    write(signature, "{{\"schema\":1,\"key_id\":\"{KEY_ID}\",\"algorithm\":\"ed25519\",\"signature\":\"{base64.encode(signed.bytes)}\"}}".bytes())
+}
+
+invoke: fn(argv: [String], root: String) -[Exec, Time.Wait]> Ran ProofError! {
+    receipt: process.cmd(argv.copy()).env("JETPACK_ROOT", root).run() ?? return Err(failed("cannot run {argv[0]}: {err}"))
+    code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+    Ok(Ran{code: code, output: receipt.output, errors: receipt.errors})
+}
+
+stage_toolchain: fn(proof: Proof, args: [String]) -[Exec, Time.Wait]> Ran ProofError! {
+    invoke([proof.jet.copy(), proof.stager.copy()].concat(args), proof.root)
+}
+
+update: fn(proof: Proof, platform: String, args: [String]) -[Exec, Time.Wait]> Ran ProofError! {
+    invoke([proof.jet.copy(), "self", "update", "--endpoint", "file://{proof.stage}", "--channel", "stable", "--platform", platform].concat(args), proof.root)
+}
+
+expect_success: fn(ran: Ran, needle: String, complaint: String) ProofError! {
+    if ran.code != 0 || !ran.output.contains(needle) -> return Err(failed("{complaint}: {ran.output.trim()}{ran.errors.trim()}"))
+    Ok()
+}
+
+expect_refusal: fn(ran: Ran, needles: [String], complaint: String) ProofError! {
+    if ran.code == 0 -> return Err(failed(complaint))
+    loop needle in needles {
+        if !ran.errors.contains(needle) -> return Err(failed("{complaint}: the refusal does not name {needle}: {ran.errors.trim()}"))
+    }
+    Ok()
+}

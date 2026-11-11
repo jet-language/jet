@@ -109,7 +109,7 @@ evidence rows marked **keep**.
 | 61 | `Jetpack/*/Tests/*.jet` (10) | test scratch roots | test | `JET_STATE_ROOT` |
 | 62 | `Tools/ci/{AgentWorkloads,CompiledWorkloadPeerLauncher}.jet`, 3 `Tools/ci/*.sh` | scratch default | tooling | `JET_STATE_ROOT` |
 | 63 | `Tools/perf/**` (about 30) | scratch and targets | tooling/evidence | root vars; recorded results **keep** |
-| 64 | `Tools/canvas-test/{native-lifecycle,scenario}.mjs`, `Tools/compiler-modules/{inventory,migrate-examples}.mjs`, `Tools/jetpack-infra/test-toolchain-update.sh`, `Tools/agent-eval/run-cold-context.mjs` | scratch/cache default | tooling | `JET_STATE_ROOT` |
+| 64 | `Tools/canvas-test/{native-lifecycle,scenario}.mjs`, `Tools/compiler-modules/{inventory,migrate-examples}.mjs`, `Tools/jetpack-infra/TestToolchainUpdate.jet`, `Tools/agent-eval/run-cold-context.mjs` | scratch/cache default | tooling | `JET_STATE_ROOT` |
 | 65 | `Tools/agent-eval/ffi-assurance/manifest.json` | `resume-implementation/ffi-ratified.json` input | config | commit the input or cite the Tower decision |
 | 66 | `Tools/tower/.tower/{tower.json,history.json}` | board text quoting paths | evidence | **keep** (board data; Tower-owned) |
 | 67 | `Tools/agent-eval/domain-foundations/**` (about 170) | recorded probe transcripts | evidence | **keep** |

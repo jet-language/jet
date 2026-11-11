@@ -6,8 +6,8 @@ The executable contract is the
 the verifier is in
 [`Jetpack/Recipe/Source/Toolchain/`](../../../Jetpack/Recipe/Source/Toolchain/), and the
 staging and update checks are
-[`stage-toolchain.mjs`](../../../Tools/jetpack-infra/stage-toolchain.mjs) and
-[`test-toolchain-update.sh`](../../../Tools/jetpack-infra/test-toolchain-update.sh).
+[`StageToolchain.jet`](../../../Tools/jetpack-infra/StageToolchain.jet) and
+[`TestToolchainUpdate.jet`](../../../Tools/jetpack-infra/TestToolchainUpdate.jet).
 The production endpoint is `https://dl.jet-lang.dev`; a checked-in unsigned
 tree is only a local fixture.
 
@@ -90,7 +90,7 @@ Stage one or more artifacts. This command writes artifacts and external signing
 requests; it never reads a private key:
 
 ```sh
-Tools/jetpack-infra/stage-toolchain.sh \
+jet Tools/jetpack-infra/StageToolchain.jet \
   --version <version> \
   --sequence <release-counter> \
   --channel stable \
