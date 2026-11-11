@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99075,
+    "rev": 99083,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69246,8 +69246,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-11T02:21:53.614Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-11T02:26:24.868Z",
+      "updatedBy": "owner",
       "goals": [
         "G10"
       ],
@@ -76230,8 +76230,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T02:10:48.424Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-11T02:26:44.290Z",
+      "updatedBy": "Main",
       "criteriaLastN": 172
     },
     {
@@ -77246,7 +77246,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T02:21:58.928Z",
+      "updated": "2026-11-11T02:26:47.267Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -185589,7 +185589,7 @@
         }
       },
       "draft": false,
-      "status": "open",
+      "status": "ratified",
       "created": "2026-11-10T03:46:53.621Z",
       "designAway": [
         {
@@ -185687,48 +185687,46 @@
           "title": "Zig allocation guide",
           "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
         }
-      ]
+      ],
+      "outcome": "C",
+      "ratifiedAt": "2026-11-11"
     },
     {
       "id": "D-API-SURFACE1",
       "cardId": "c0oev2ib",
       "group": "tooling",
-      "title": "Every jet check compares a package's public surface, effects and errors included, with its committed API file, and publish computes the version",
-      "situation": "Jet works out effects and errors from function bodies, so an edit inside a body can change what a package promises. Today that is checked only when a release is published, against the last release. The author picks the version number, and the check only refuses a wrong one.\n\nAn ordinary check says nothing when a public function starts reading the clock. A separate review command reports it, but only when someone runs it. This ballot moves the comparison into every check and lets publish compute the version.",
-      "gist": "Should every jet check compare a package's public surface with a committed API file, and should publish compute the version?",
-      "lesson": "A library's public functions are a promise to everyone who uses it. In Jet, a change inside a function can quietly change that promise, for example by making it use the network. This vote decides whether every check catches that and whether Jet picks the version number.",
+      "title": "Show library promise changes during ordinary checks, and calculate the minimum release version",
+      "situation": "A library makes promises to programs that use it. Those promises include what its functions need permission to do, not just their argument types. Adding a clock read inside a greeting function can change that promise without changing its written signature. The probe runs that function successfully; it does not demonstrate an early API-change gate. Choose whether ordinary checks should show such changes and whether publishing should calculate the version. We recommend a generated promise file checked during development, with a calculated minimum release version.",
+      "gist": "Should ordinary checks show library promise changes and calculate the minimum release version?",
+      "lesson": "An API is the part of a library other programs use. Think of package.api as its generated promise sheet. A source edit can change that sheet. Reviewing the difference makes the change visible before a release surprises users.",
       "explainer": "Words used here. The public surface is everything another package can call or name. A version bump is how a library signals change: major means breaking, minor means added, patch means fixed. An effect is a power like reading the clock.",
-      "story": "Ana edits a helper that her library's public greeting calls, and it starts reading the clock. Under A, her next jet check shows the changed line in package.api, and publish names the release 2.0.0.",
-      "inWild": "// Elm computes the version from the API diff:\n$ elm bump\nThis is a MAJOR change. Bumping from 1.0.0 to 2.0.0.",
-      "detail": "This vote chooses when library API drift is reported and how the minimum release version is chosen. A is proposed, not implemented.\n\nA stores package.api as a rendered view of the canonical API receipt, not a second hand-maintained contract. Scope follows public library outputs, including workspace members and multiple library entries. Public-by-default functions inside an executable do not by themselves turn it into a library.\n\nA check renders rows from its checked items. Added or proven compatible changes update the view with a note. Breaking changes need --accept-api. Locked checks are read-only and refuse missing, stale or mismatched views. Concurrent checks must not truncate each other's output; failed or partial checks never replace the last complete receipt.\n\nPublish rechecks the actual source and compares it against the immutable last released receipt. Accepting a local baseline cannot erase an unpublished breaking change. The rendered file must match the fresh receipt before publication. Compute the minimum bump relative to the selected release line; the author may raise it for behavior changes the rows cannot detect. The first release uses the package's declared starting version.\n\nInclude all public names, types, solved effects and errors, relevant markers and layout contracts. Adding an enum or error variant is breaking when callers can exhaustively match it. Narrowing a row is compatible only where the language's assignability and observable contracts prove it; never promise that every exact-type or reflected use survives.\n\nA native check does not prove other targets. The receipt records target and configuration coverage. A complete publish check gathers the declared supported matrix into the canonical view and refuses missing coverage. Merely printing an #if condition cannot prove unchecked target-specific bodies.\n\nCompiler upgrades record compiler identity and row-format identity. Compare releases with a common understood schema; an uncomparable old receipt is not silently classified as patch. Retired syntax gets no teaching diagnostic or jet fix rewrite.\n\nThe existing row builder shares solved effects between functions and methods. The check-versus-doc timing is not A's incremental cost: doc does different work, and A does not exist yet. Actual per-check and multi-target costs remain unmeasured.\n\nC is a strong alternative: the same early drift gate with an author-selected version and an enforced minimum at publish. It supports release planning without allowing a too-small bump. D lacks a committed view but can still produce a review report against the released receipt. None of these choices proves compatibility for behavior omitted from API rows.",
+      "story": "Ana publishes greeting as 1.0.0, then adds a clock read. Every option runs the same greeting. They differ in when Ana sees the changed promise and who chooses the next version.",
+      "inWild": "TypeScript API Extractor generates a committed API report and distinguishes local updates from read-only validation. It makes public changes reviewable, but does not claim that a signature report proves every behavioral promise.",
+      "detail": "A beginner writes ordinary library functions and runs jet check. For a declared library output, A derives package.api from the compiler's existing public API rows. A harmless internal edit changes no rows. An added public function appears as an addition. A newly required clock effect is shown as a breaking promise change, including the path through helpers. Executable-only packages need no promise file merely because functions default to public.\n\nConcrete proposed sequence: start at released 1.0.0; change greeting from a fixed message to a clock-stamped message; jet check shows that greeting now needs Time. A breaking change fails until jet check --accept-api records the new generated baseline. Commit source and package.api together. Later jet registry publish compares fresh checked source against the immutable released 1.0.0 receipt and calculates a minimum of 2.0.0. Accepting the local baseline never resets release history.\n\nFor compatible additions, a successful local check updates the generated view with a visible note. jet check --locked is always read-only and refuses missing or stale views. Failed or partial checks never replace the last complete file. Use atomic replacement and one deterministic row order so concurrent checks cannot corrupt the view. The file is generated, not a second authored contract.\n\nExperts can raise the calculated minimum for behavior the rows cannot detect. C has the same early gate but retains deliberate author version selection, with the calculated minimum enforced at publish. This is a real release-planning benefit, not permission to choose an invalid version. The first release uses the declared starting version. Pre-release and supported release-line selection keep their existing version semantics; the calculation compares against the selected released line.\n\nInclude public types, names, solved effects, error sets, layout and checked ownership contracts. Adding a publicly exhaustible enum or error case can break callers. A narrower effect is compatible only where actual type and reflection rules prove it. Record compiler/schema identity and supported target/configuration coverage. Publication refuses missing coverage or incomparable old receipts, rather than guessing patch compatibility. Runtime behavior not represented by the rows still needs human review.\n\nEvidence: t17a a0.0.43, jet run - on the clock-stamped greeting, exits 0 and prints a clock-stamped hello. Compiler/JetSema/Source/Sema/PublicApi.jet:49-79 gathers public functions; its canonical sorter is at 32-44. This source establishes a reusable row mechanism, not that A's commands or file policy already work. Old check-versus-doc timing claims were removed: they do not measure the proposed gate.\n\nAdversarial verdict: A holds for reviewable static promises, not complete compatibility. First remove extra compilation by reusing the check's own rows. Second remove needless manual edits by generating compatible changes and accepting breaking ones explicitly. Comparing rows and checking a target matrix still costs time; measure that cost rather than call it free. An author can still approve a harmful API change, and behavior-only breakage still needs an intentional larger version.",
       "options": [
         {
           "key": "A",
-          "name": "Committed API file and computed version",
-          "detail": "jet check compares the surface with package.api; publish computes the version from the difference.",
-          "technical": "Render package.api from the one API receipt for library outputs. Locked checks are read-only; partial checks never update it. Publish compares freshly checked source with the immutable last release, not the accepted local baseline. Include the declared target matrix and reject missing coverage. Compute a minimum bump; authors may raise it for behavior changes.",
-          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (A): jet check stops: greeting's row changed, breaking.\n//   fn greeting(name: String) String -[Time]>   (jet inspect rights: inferred Time)\n// jet check --accept-api updates package.api; publish names it 2.0.0.\n// Today (probe v2): jet check prints ok."
+          "name": "Early promise file; computed version",
+          "detail": "Check the generated promise sheet during development. Publish calculates the minimum version; the author may raise it.",
+          "code": "use time: core.time\ngreeting: fn(name: String) -> String {\n    stamp: time.now()\n    \"hello {name} at {stamp}\"\n}\n// Proposed workflow from released 1.0.0:\n// jet check: greeting now needs Time; accept required.\n// jet check --accept-api: records package.api.\n// jet registry publish: minimum 2.0.0."
         },
         {
           "key": "B",
-          "name": "Keep the publish gate",
-          "detail": "The surface is compared only at publish; the author picks the version.",
-          "technical": "No change: E1218 at publish; jet review on request.",
-          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Today (B): jet check prints ok; jet review prints authority widened;\n// publishing 1.1.0 is E1218."
+          "name": "Check the promise only at publish",
+          "detail": "No new ordinary-check gate or committed view. The author selects a version, checked against release evidence at publish.",
+          "code": "use time: core.time\ngreeting: fn(name: String) -> String {\n    stamp: time.now()\n    \"hello {name} at {stamp}\"\n}\n// Policy B, same library change:\n// jet check: no promise-baseline comparison.\n// Author selects 2.0.0 before publishing.\n// Publish refuses an insufficient bump."
         },
         {
           "key": "C",
-          "name": "Committed file, chosen version",
-          "detail": "package.api is checked by jet check; the author still writes the version.",
-          "technical": "The same receipt, committed view and early drift gate as A. Authors select release timing and version; publish enforces the computed minimum. This is a real release-planning benefit, not permission to ship a wrong bump.",
-          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (C): jet check stops as in A; the author writes 2.0.0."
+          "name": "Early promise file; chosen version",
+          "detail": "Same early gate as A. The author deliberately selects the release version; publish enforces the minimum.",
+          "code": "use time: core.time\ngreeting: fn(name: String) -> String {\n    stamp: time.now()\n    \"hello {name} at {stamp}\"\n}\n// Proposed workflow from released 1.0.0:\n// jet check --accept-api: records changed promise.\n// Author writes version: \"2.0.0\".\n// Publish checks that it meets the minimum."
         },
         {
           "key": "D",
-          "name": "Computed version only",
-          "detail": "No committed file; publish computes the version from the registry snapshot.",
-          "technical": "A's rows and bump rule at publish; jet check unchanged.",
-          "code": "use time: core.time\n\ngreeting: fn(name: String) -> String {     // public: Jet items are public unless priv\n    stamp: time.now()                      // version 2 starts reading the clock\n    \"hello {name} at {stamp}\"\n}\n// Proposed (D): jet check prints ok; publish names it 2.0.0."
+          "name": "Computed version only at publish",
+          "detail": "Publish computes the minimum, without an ordinary-check promise file. An on-demand review can still show a source-to-release difference.",
+          "code": "use time: core.time\ngreeting: fn(name: String) -> String {\n    stamp: time.now()\n    \"hello {name} at {stamp}\"\n}\n// Proposed workflow from released 1.0.0:\n// jet check: no promise-baseline comparison.\n// jet registry publish: minimum 2.0.0.\n// No generated promise sheet is committed."
         }
       ],
       "comparisons": [
@@ -185756,151 +185754,141 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A makes declared API changes visible during editing and computes a minimum version from released evidence. Behavior outside those rows still requires author review.",
+        "why": "Show changes when editing and reviewing, then calculate the minimum from actual release evidence. Authors retain control over larger behavioral bumps.",
         "gains": [
-          "Promise changes show at the edit.",
-          "Effects and errors are part of the promise.",
-          "The version is computed."
+          "Visible permission and type changes",
+          "Less manual version bookkeeping"
         ],
         "losses": [
           {
-            "loss": "Each breaking surface edit needs an accept step.",
-            "mitigation": "The error lists the breaking rows and names jet check --accept-api; added rows are written without a step."
-          },
-          {
-            "loss": "Some bumps are larger than an author would pick.",
-            "mitigation": "Classify compatibility by actual language rules, including exhaustive enums and exact types. Authors may raise the minimum for behavior changes; no compatibility shim is added."
-          },
-          {
-            "loss": "Every check renders and compares the public rows.",
-            "mitigation": "Rows come from the check's own items, one pass; no second compile as publish does today."
+            "loss": "Breaking edits need acceptance; comparisons cost time.",
+            "mitigation": "Generate the view from existing rows and accept only intentional breaking edits."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B finds a widened effect only at publish."
+            "reason": "Smallest workflow change, but the mandatory comparison arrives late."
           },
           {
             "key": "C",
-            "reason": "C preserves deliberate version selection with the same enforced minimum; A automates that selection unless the author raises it."
+            "reason": "Strong release-planning option; A automates the minimum while allowing deliberate increases."
           },
           {
             "key": "D",
-            "reason": "D can generate review diffs, but has no committed API view checked during ordinary edits."
+            "reason": "Automates release arithmetic without the committed early review record."
           }
         ],
-        "tradeoff": "An accept step for breaking API edits, with behavior outside the rows still requiring review."
+        "tradeoff": "A review checkpoint for static promises, not proof of all behavior."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Corrected local-versus-release baselines, target coverage, executable scope, enum/narrowing compatibility, unmatched timing claims and C's release-planning benefit."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran the greeting, read the public-row implementation and API Extractor source documentation, and separated generated baselines from immutable release history and behavioral compatibility."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). In D-API-SURFACE1/probes run jet check v2.jet and jet review v1.jet v2.jet. Time check against jet doc with gen_lib.mjs and $JET_SCRATCH_ROOT/lanes/BallotLead/out/timeit.sh. Run jet check --locked on any file. The census uses git ls-files.",
+      "checkInstructions": "Test local versus locked checks, partial failure, atomic writes, target coverage, schema upgrades, accepted unpublished breaking edits and release-line calculation. No incremental performance or publish execution is claimed here.",
       "surface": {
-        "gist": "Should every jet check compare a package's public surface with a committed API file, and should publish compute the version?",
-        "lesson": "A library's public functions are a promise to everyone who uses it. In Jet, a change inside a function can quietly change that promise, for example by making it use the network. This vote decides whether every check catches that and whether Jet picks the version number.",
+        "gist": "Should ordinary checks show library promise changes and calculate the minimum release version?",
+        "lesson": "package.api is a generated promise sheet for a library. It shows public types, errors and permissions. Editing a helper can change those promises. A makes that visible before publishing.",
         "trio": {
           "current": {
-            "note": "The body now reads the clock; check is silent.",
-            "code": "stamp: time.now()   // jet check: ok"
+            "note": "The clock-stamped greeting runs; the proposed promise gate is not demonstrated.",
+            "code": "greeting: fn(name: String) -> String {\n    stamp: time.now()\n    \"hello {name} at {stamp}\"\n}"
           },
           "wild": {
-            "lang": "Elm",
-            "note": "The tool computes the bump.",
-            "code": "$ elm bump   // MAJOR: 1.0.0 -> 2.0.0"
+            "lang": "TypeScript API Extractor",
+            "note": "A generated API report is committed and checked during review.",
+            "code": "api-extractor run"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "File and computed",
-            "gist": "Checked every time; version computed.",
+            "name": "Early file and calculated version",
+            "gist": "Review promises early; calculate the release minimum.",
             "gains": [
-              "Seen at the edit.",
-              "No version argument."
+              "Early visibility",
+              "Less version arithmetic"
             ],
             "losses": [
-              "An accept step."
+              "Acceptance step for breaking changes"
             ],
             "proposed": {
-              "code": "jet check --accept-api"
+              "code": "jet check --accept-api\njet registry publish // minimum 2.0.0"
             }
           },
           {
             "key": "B",
-            "name": "Publish gate",
-            "gist": "Checked at publish only.",
+            "name": "Publish gate only",
+            "gist": "Author chooses; publish checks.",
             "gains": [
-              "Nothing new."
+              "Smallest workflow change"
             ],
             "losses": [
-              "Found late."
+              "Mandatory comparison arrives late."
             ],
             "proposed": {
-              "code": "jet registry publish   // E1218"
+              "code": "// Choose 2.0.0, then publish."
             }
           },
           {
             "key": "C",
-            "name": "File only",
-            "gist": "Checked every time; version chosen.",
+            "name": "Early file and chosen version",
+            "gist": "Review early; author selects above the minimum.",
             "gains": [
-              "Seen in review."
+              "Deliberate release planning"
             ],
             "losses": [
-              "Version argument stays."
+              "Manual version selection"
             ],
             "proposed": {
-              "code": "version: \"2.0.0\""
+              "code": "jet check --accept-api\n// Set version to 2.0.0."
             }
           },
           {
             "key": "D",
-            "name": "Computed only",
-            "gist": "Version computed at publish.",
+            "name": "Calculated version only",
+            "gist": "Calculate at publish without a committed view.",
             "gains": [
-              "No version argument."
+              "Less version arithmetic"
             ],
             "losses": [
-              "No committed API view."
+              "No mandatory early promise review"
             ],
             "proposed": {
-              "code": "jet registry publish   // 2.0.0"
+              "code": "jet registry publish // minimum 2.0.0"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Promise changes show at the edit and in review, and Jet computes the version.",
+          "why": "Catch static promise changes during editing, not just at release.",
           "gains": [
-            "Seen at the edit.",
-            "No version argument."
+            "Earlier review"
           ],
           "losses": [
             {
-              "loss": "An accept step.",
-              "mitigation": "The error names the one command."
+              "loss": "A deliberate acceptance step.",
+              "mitigation": "Show exact changed promises and generate the accepted file."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Found late."
+              "reason": "Late mandatory comparison."
             },
             {
               "key": "C",
-              "reason": "Version argument stays."
+              "reason": "Strong, but requires manual minimum selection."
             },
             {
               "key": "D",
-              "reason": "No committed view, though review reports remain possible."
+              "reason": "No committed early review sheet."
             }
           ],
-          "tradeoff": "Visible API edits; behavior outside the rows still needs review."
+          "tradeoff": "Reviewable static promises; behavior still needs human judgment."
         }
       },
       "draft": false,
@@ -185964,25 +185952,8 @@
       ],
       "reports": [
         {
-          "title": "API surface in every check: row audit, cost measurement and adversarial review",
-          "path": "Docs/audits/2026-11-10-api-surface-review.md",
-          "note": "Independent check/review/locked probes and row-source review; corrected receipt authority, release baseline, target matrix, compatibility edges and unmeasured incremental cost."
-        },
-        {
-          "title": "Elm: elm bump and enforced semantic versioning",
-          "url": "https://github.com/elm/compiler/blob/master/docs/elm.json/package.md"
-        },
-        {
-          "title": "Kotlin binary-compatibility-validator",
-          "url": "https://github.com/Kotlin/binary-compatibility-validator"
-        },
-        {
-          "title": "TypeScript API Extractor: API report",
+          "title": "API Extractor: generated report and local versus validation behavior",
           "url": "https://api-extractor.com/pages/overview/demo_api_report/"
-        },
-        {
-          "title": "cargo-semver-checks",
-          "url": "https://github.com/obi1kenobi/cargo-semver-checks"
         }
       ]
     },
@@ -188405,42 +188376,32 @@
       "id": "D-FILE-STATEMENTS1",
       "cardId": "c0oev2ib",
       "group": "entry",
-      "title": "A file of top-level statements is a program, and its statements run in order",
-      "situation": "A one-line file already runs on the probe compiler, while the earlier entry decision requires an explicit run except in script mode. A keeps top-level application bodies and lowers them through the existing run mechanism.\n\nThe scope and cleanup rules still matter: bindings alone do not select an entry, imported application bodies remain errors, and top-level defer is not yet accepted.",
-      "gist": "Should a file whose top level holds statements run them in order as its program, with no run function and no #! line?",
-      "lesson": "A Jet program starts at its entry. The ratified rule says a loose application file needs a function named run, so a file holding only print(\"hi\") is an error, though the dev compiler already runs it. This vote decides whether the statements at the top of a file can be the entry, running from top to bottom like a Python or shell script. Imported files would still never run statements.",
+      "title": "One entry per file: implicit script body or explicit run, with ordinary lexical helpers",
+      "situation": "A program needs one place to start. A script can omit the run wrapper, but mixing loose work with an explicit run would create two possible starts. The tested compiler already rejects that mixture. It also refuses a function reading a script variable, although a closure inside an explicit run can read one. Choose how helpers in the implicit body should see that body's variables. We recommend the owner's either-or entry rule, with script helpers using the same capture rules as ordinary closures.",
+      "gist": "Should script helpers see their surrounding locals through ordinary closure rules?",
+      "lesson": "Omitting run should remove a wrapper, not change what local helpers mean. A helper can use a surrounding variable through a checked capture, just as a closure does. That does not turn the variable into global state or make it live forever.",
       "explainer": "Words used here. A statement is a line that does something when reached, such as print(\"hi\") or total += 1. A declaration names something, such as a function, a type or an ALL_CAPS constant. The entry is where a program starts.\n\nA library is a file that only declares things for other files to use. An import is a use line that loads another file.",
-      "story": "Ada writes print(\"hi\") in hello.jet and types jet run hello.jet. Under the ratified rule Jet says the program has no run function, and jet check names a different error for the same file. She wraps one line in run: fn() { } to see hi. She would rather add that wrapper only when her program needs arguments.",
-      "inWild": "# Python: a file's statements run in order, on the first uncached import, not again for an ordinary cached import.\nprint(\"hi\")\n\n// Swift: in a multi-file executable, main.swift hosts top-level code.\nprint(\"hi\")\n\n// Go: every program needs func main.\npackage main\nfunc main() { fmt.Println(\"hi\") }",
-      "detail": "This vote selects top-level statements as an application entry, lowering through the existing run body. A is partly implemented on a0.0.43, not proved complete.\n\nReran the supplied file probes. Bare print and shebang scripts run. Statements beside run fail with E0621. Declaration-only and binding-only files pass check but run fails with E0101. Functions cannot read body locals (E0107); forward function calls work. The three tally forms print the same output. Imported statement files fail with E0620 and use cycles with E0604.\n\nA top-level-body file has at least one non-binding statement outside declarations. Binding-only files do not become applications. In a body file, lower-case bindings are ordered locals; declarations and legal constants retain their declaration scope. An explicit run alone does not reclassify surrounding module bindings. Adding a statement may reclassify bindings; diagnostics must name both the local and the statement responsible.\n\nOnly the selected ordinary application source may supply this body. Mixed explicit and implicit entries are errors. Typed CLI entries, pinned error contracts, build/dev sources, imports, test discovery, REPL and notebook hosts retain their ratified roles. This vote does not authorize new module-variable initialization or change the separate module-state decision.\n\nReran test discovery on f17: its test passes without BODY RAN; direct run prints BODY RAN. Early return and automatic cleanup run in order. Both panic probes exit 70 with E3001, but their source locations differ as they should. Equal binary size is not proof of equal semantics and is not an optimization claim.\n\nThe committed f19 probe uses close(^b) and fails with E0003; it does not prove defer works in run. New review6-defer-run uses defer close(b) and prints closed 4 then closed 3 on early return. Top-level defer remains E0003 in f13. A must accept the same valid resource-close statement in both entry forms; do not add a retired-spelling teaching fix.\n\nFiles, stdin and one-liners share the checked body and source-map rules. Reran -e print and value forms: they print hi and 3. Piped print runs. The final-value echo is specific to -e; files do not implicitly print expression results. Shebang launch flags confer no extra authority beyond the same explicit command-line policy.\n\nImports never execute an application statement body. That does not mean imports or libraries have no initialization effects: ratified build-time work and D-FFI-COMPTIME2's startup fallback remain. No open module-build proposal is treated as approval to remove that fallback.\n\nThe beginner path is a file containing print. The expert path adds an explicit run for typed inputs or a declared contract. Converting between two current legal entry organizations may be offered only when scope, effects, cleanup, comments and source locations are preserved. Never wrap an imported file or reinterpret module state as a migration shortcut.\n\nB's strongest case is visible script intent with a shebang. A's advantage is removing that mandatory line, not that dev already happens to accept its design. C's strongest case is ordered module setup; it adds initialization effects and lifecycle rules. D permits functions to use file variables but its proposed footprint restrictions must cover indirect calls and task isolation.\n\nUnder C, initialize in checked import order, with one state machine per library and published completion/failure. Do not hold a global lock across arbitrary foreign calls. Reentrant or concurrent entry before completion returns a registered initialization-in-progress failure rather than waiting on itself. Save failures without retry; run ordinary cleanup on failed initialization. Reject initializer calls with unproved foreign callback/blocking behavior. These restrictions remove the draft's acknowledged native callback deadlock but remain a real cost of C.\n\nA keeps one entry mechanism and inert application imports. Its remaining costs are accidental direct execution and binding reclassification; those are behavior changes, not solved by merely documenting them.",
+      "story": "Ada sets total to 3 and asks a helper to describe it. Every option prints 3 with one entry. The difference is whether the helper captures total, receives it explicitly, or reads file state.",
+      "inWild": "C# generates an entry method for top-level statements. Its local functions can use surrounding locals. C# allows an explicit Main to coexist but not act as the entry; Jet's proposed either-or error is deliberately stricter.",
+      "detail": "The owner's proposal is sound: an application source has either loose executable statements or one explicit run, never both. With loose statements, lower one implicit run; with explicit run, put executable work there. Imports, types, pure build-time constants and independent helpers remain declarations. A file with neither entry is a library; absence of run must not launch every library. Imported application bodies remain refused and never execute as import side effects.\n\nA extends that rule to scope. A named helper referring to an implicit-body local is a lexical helper, lowered by the existing closure mechanism. Give explicit run bodies the same named-helper organization. No new global-variable lifetime or script-only capture engine. Independent helpers can remain lifted declarations. This is a proposed capture/organization extension, not a claim that local named fn syntax currently parses.\n\nInitialization order remains visible. A helper may be declared before a variable, but cannot be invoked or materialized until every captured value it needs is initialized. Check this transitively through helpers, recursion and function values. Reading a mutable capture observes the current permitted value; borrowing and overlapping writes use ordinary closure rules. Escaping helpers must own valid captures. Task crossing uses the existing sendability, loan and touch-set rules, never a script exception.\n\nA runtime binding outside an explicit run counts as loose work and is refused beside that run. Module-variable APIs in separate library modules remain governed by D-MODULE-VAR1=A. This entry-file restriction narrows that decision where its example placed initialized mutable state beside run; it is an explicit amendment, not an unnoticed second initialization path. Build-time constants remain declarations. Binding-only files with no executable use remain non-entry libraries; unused local-looking bindings must not silently select a program.\n\nB uses the same either-or entry rule but keeps script functions as module declarations. Locals must be parameters; the author can write a closure explicitly. C keeps script bindings as main-task file state and uses the already ratified module touch-set checks. It supports reads and writes directly but is not literal lexical wrapping. No callback ban is invented: higher-order uses retain their checked touch or capture facts.\n\nObserved on t17a a0.0.43 through jet run -: print(42) prints 42. Loose print beside run gets E0621. A script's describe function reading total gets E0107 with the local-scope explanation. Inside explicit run, total := 3; describe: () -> total; print(describe()) prints 3. A nested describe: fn declaration gets E0003. These establish the current gap and a working capture mechanism, not A's implementation or all exit behavior.\n\nAdversarial verdict: A holds as lexical organization, with a real new checking obligation for early calls. First remove surprising invisibility by reusing captures. Second avoid a blanket forward-call ban by checking the specific captured initialization dependencies. Genuine uninitialized access remains an error. Preserve source locations, cleanup, early returns, typed entry arguments and effects across both organizations. Files and piped source share one lowering. Apply D-LANG-MIGRATE1=A to any actual breaking cutover; no retired-entry teaching parser is added.",
       "options": [
         {
           "key": "A",
-          "name": "A file of statements runs them in order",
-          "detail": "Non-binding statements select a program body. Lower-case bindings then become ordered locals; legal declarations keep their scope. Binding-only files stay non-entry files. Mixed entries and imported bodies are errors.",
-          "technical": "Amends the explicit-entry and shebang-switch rules only. Reuse one checked run lowering, source-map, cleanup and effect path. Keep typed CLI, build/dev, imports, tests and interactive host roles. Fix top-level defer close(resource) acceptance to match run; no retired-spelling teaching diagnostic.",
-          "code": "LIMIT: 3\n\ndescribe: fn(value: Int) -> String { \"{value} of {LIMIT * LIMIT}\" }\n\nprint(\"start\")\ntotal := 0\nloop n in 0..<LIMIT -> total += n + 1\nprint(\"total {total}\")\nprint(describe(total))"
+          "name": "Either entry; lexical helpers capture locals",
+          "detail": "Implicit body helpers see surrounding locals through ordinary captures. Explicit run can organize the same work with a closure or named local helper.",
+          "code": "// Proposed A: implicit run, print 3.\ntotal := 3\ndescribe: fn() -> Int { total }\nprint(describe())\n// Expert equivalent, a separate file, not appended above:\n// run: fn() {\n//     total := 3\n//     describe: () -> total\n//     print(describe())\n// }\n// An explicit run beside the script is an error."
         },
         {
           "key": "B",
-          "name": "Keep the ratified rule: a #! line marks a script",
-          "detail": "Require a shebang to select script mode. It makes intent visible and carries ordinary launch flags, not implicit permission grants. Without it, an application needs an explicit run entry.",
-          "technical": "No decision changes, but dev must narrow. The seed reported E0101 and E0621 for every loose file, #! or not. Dev now runs every top-level-body file, so B means refusing a file without #! again, with one code from both jet check and jet run. Imports stay inert and script locals stay local, as in A.",
-          "code": "#!/usr/bin/env jet\nLIMIT: 3\n\ndescribe: fn(value: Int) -> String { \"{value} of {LIMIT * LIMIT}\" }\n\nprint(\"start\")\ntotal := 0\nloop n in 0..<LIMIT -> total += n + 1\nprint(\"total {total}\")\nprint(describe(total))"
+          "name": "Either entry; pass locals explicitly",
+          "detail": "The same wrapper rule, but declared functions stay outside the body. Pass total, or write an explicit closure inside run.",
+          "code": "// B: implicit run, print 3.\ntotal := 3\ndescribe: fn(value: Int) -> Int { value }\nprint(describe(total))\n// Expert equivalent, a separate file:\n// describe: fn(value: Int) -> Int { value }\n// run: fn() { total := 3\n//     print(describe(total)) }\n// An explicit run beside the script is an error."
         },
         {
           "key": "C",
-          "name": "Every file's statements run, once, when it is first imported",
-          "detail": "Any file may hold statements. An imported file's statements run once per program, the first time it is imported, before the importer's own statements. That makes setup and registration code easy to write in the file that owns it, as in Python.",
-          "technical": "Explicitly replaces inert imports with checked ordered initialization. Use a per-library not-started/running/done/failed state machine, not a global lock across foreign calls. Reentrant or concurrent incomplete entry returns a registered initialization failure rather than waiting. Reject unproved callback/blocking initializer edges; preserve cleanup and saved failure without retries. Initialization effects join required program authority.",
-          "code": "// tally.jet: the same text as A.\nLIMIT: 3\n\ndescribe: fn(value: Int) -> String { \"{value} of {LIMIT * LIMIT}\" }\n\nprint(\"start\")\ntotal := 0\nloop n in 0..<LIMIT -> total += n + 1\nprint(\"total {total}\")\nprint(describe(total))\n\n// report.jet: under C, use tally runs tally's statements once, first.\nuse tally\n\nrun: fn() { print(tally.describe(1)) }"
-        },
-        {
-          "key": "D",
-          "name": "Entry-file bindings are file variables, as in Swift's main.swift",
-          "detail": "As A, but in the entry top-level-body file a top-level binding is a file variable, so functions in the file can read it and write a := one. Here describe reads total directly. This reverses Main's ruling that such bindings are locals.",
-          "technical": "A file variable is created when its line runs. Each function gets a checked footprint of the file variables it reaches through the file's direct calls, with recursion solved to a fixed point. A direct call is allowed only after its footprint's lines. A function or closure with a footprint may not become a value, a parameter, a trait method, an export or a foreign callback. File variables belong to the main task. This decides part of D-MODULE-VAR1 inside this ballot.",
-          "code": "LIMIT: 3\n\n// D: total is a file variable, so describe reads it directly.\ndescribe: fn() -> String { \"{total} of {LIMIT * LIMIT}\" }\n\nprint(\"start\")\ntotal := 0\nloop n in 0..<LIMIT -> total += n + 1\nprint(\"total {total}\")\nprint(describe())"
+          "name": "Either entry; script bindings are file state",
+          "detail": "Script helpers read main-task file state through the existing module-state checks. Easy direct access, but not the same scope as local variables in a wrapped function.",
+          "code": "// Proposed C: script state, print 3.\ntotal := 3\ndescribe: fn() -> Int { total }\nprint(describe())\n// Expert organization in a separate file:\n// run: fn() { total := 3\n//     describe: () -> total\n//     print(describe()) }\n// Script state cannot be touched from an independent task."
         }
       ],
       "comparisons": [
@@ -188473,160 +188434,119 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A gives one-line programs the same checked run body without executing application bodies on import. Body locals remain explicit function inputs; module initialization is a separate contract.",
+        "why": "The owner's implicit wrapper should behave like a wrapper. Ordinary capture rules let helpers see locals without inventing global script state.",
         "gains": [
-          "print(\"hi\") in a file runs with jet run, as it does with jet -e.",
-          "jet run FILE, jet run - and jet -e check a body with the same rules.",
-          "Explicit run entries remain supported without mandatory conversion.",
-          "An import never launches a file statement body; module initialization is a separate contract."
+          "Exactly one entry",
+          "Helpers can read surrounding locals"
         ],
         "losses": [
           {
-            "loss": "A stray statement in a file now runs when the file is run directly, instead of failing.",
-            "mitigation": "Importing such a file is still E0620 and jet check names it as a program, but direct runs remain a real change."
-          },
-          {
-            "loss": "A function cannot read a lower-case top-level binding of a top-level-body file, which surprises Python users.",
-            "mitigation": "E0107 names the binding and the statement that made the file a program, and offers a parameter or a legal constant."
-          },
-          {
-            "loss": "Adding one statement to a file with a module variable turns that variable into a local.",
-            "mitigation": "Functions that read it get E0107 at once, naming the new statement, when they refer to the reclassified binding."
+            "loss": "Early helper calls can use uninitialized captures.",
+            "mitigation": "Check captured initialization through calls and function values, and name the required earlier binding."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B makes script intent visible, but requires a shebang for the shortest file program; A removes that ceremony. Today's implementation is not an argument against B's design."
+            "reason": "Smallest scope change, but moving a helper out of an explicit closure needs parameter plumbing."
           },
           {
             "key": "C",
-            "reason": "C gives every import and every foreign load a hidden start-up step whose order and failures the importer must reason about."
-          },
-          {
-            "key": "D",
-            "reason": "D reverses the local-scope ruling, decides module variables inside this ballot, and bars file-variable code from callbacks, trait methods and exports."
+            "reason": "Fits existing module-state checks, but makes script locals file state rather than ordinary wrapped locals."
           }
         ],
-        "tradeoff": "Two accepted costs. A direct run of a file that holds a stray statement now runs it, and a function cannot read a top-level local. They buy one-line programs and one rule for files, pipes and one-liners; imports still refuse the stray line, and E0107 offers a parameter."
+        "tradeoff": "A general lexical-helper extension, not a script-only global-state exception."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview6. Reran the file probes and test/CLI paths, corrected f19's invalid caret claim and source citations, rejected binary-size proof, and repaired C's callback deadlock."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran bare, mixed-entry, inaccessible-helper and explicit-capture programs, and added lexical capture as the strongest literal-wrapper option with initialization and module-state amendments stated."
       },
-      "checkInstructions": "Use the a0.0.43 compiler (dev c460ba91e5). Run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on D-FILE-STATEMENTS1/probes with run, then check, then on probes/imp and probes/cyc. Run jet test on f17. The census is git grep -c on dev.",
+      "checkInstructions": "Prove direct and indirect early calls, recursion, mutable and escaping captures, task crossing, imports, binding-only libraries, typed entries, cleanup and source maps. These proposed lexical helpers have not been executed.",
       "surface": {
-        "gist": "Should a file of top-level statements run them in order, with no run function and no #! line?",
-        "lesson": "A Jet program starts at its entry. The ratified rule says a loose application file needs a function named run, though the dev compiler already runs print(\"hi\") alone. This vote decides whether a file's top-level statements can be the entry. Imported files would still never run statements.",
+        "gist": "Should script helpers see their surrounding locals through ordinary closure rules?",
+        "lesson": "Choose one start: loose script work or explicit run. A treats script locals like ordinary wrapped locals. Helpers may capture them safely; they are not globals. Libraries without either start remain libraries.",
         "trio": {
           "current": {
-            "note": "The ratified rule needs a wrapper; dev already runs the bare line.",
-            "code": "run: fn() {\n    print(\"hi\")\n}"
+            "note": "The script helper gets E0107; the explicit closure prints 3.",
+            "code": "run: fn() { total := 3\n    describe: () -> total\n    print(describe()) }"
           },
           "wild": {
-            "lang": "Python",
-            "note": "Statements run in order, and also on import.",
-            "code": "print(\"hi\")"
+            "lang": "C#",
+            "note": "Top-level work gets a generated entry method; local helpers use lexical scope.",
+            "code": "int total = 3;\nint Describe() => total;\nConsole.WriteLine(Describe());"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Statements run in order",
-            "gist": "A file of statements is a program; imports still never run statements.",
+            "name": "Lexical helpers",
+            "gist": "Helpers capture surrounding locals using closure rules.",
             "gains": [
-              "One-line programs.",
-              "One rule for files, pipes and one-liners."
+              "Literal wrapper behavior",
+              "No global script state"
             ],
             "losses": [
-              "A stray statement runs on a direct run.",
-              "Functions cannot read top-level locals."
+              "Initialization dependencies need checking."
             ],
             "proposed": {
-              "code": "LIMIT: 3\n\nprint(\"start\")\ntotal := 0\nloop n in 0..<LIMIT -> total += n + 1\nprint(\"total {total}\")"
+              "code": "total := 3\ndescribe: fn() -> Int { total }\nprint(describe()) // 3"
             }
           },
           {
             "key": "B",
-            "name": "A #! line marks a script",
-            "gist": "Keep and build the ratified script mode.",
+            "name": "Explicit inputs",
+            "gist": "Pass each script local to declared helpers.",
             "gains": [
-              "Visible script intent.",
-              "No decision changes."
+              "Smallest scope change"
             ],
             "losses": [
-              "A required line for one-line programs.",
-              "Dev must start refusing files it runs today."
+              "More parameter plumbing"
             ],
             "proposed": {
-              "code": "#!/usr/bin/env jet\nprint(\"start\")\ntotal := 0\nprint(\"total {total}\")"
+              "code": "total := 3\ndescribe: fn(n: Int) -> Int { n }\nprint(describe(total)) // 3"
             }
           },
           {
             "key": "C",
-            "name": "Statements run once on import",
-            "gist": "Every file's statements run the first time it is imported.",
+            "name": "File state",
+            "gist": "Helpers read main-task file variables.",
             "gains": [
-              "Setup code lives with its file."
+              "Direct state access"
             ],
             "losses": [
-              "Every import and foreign load gains a start-up step."
+              "Not literal local scope"
             ],
             "proposed": {
-              "code": "// tally.jet\nprint(\"start\")\n\n// report.jet: runs tally first\nuse tally"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Entry-file variables",
-            "gist": "As A, but functions in the entry file see its bindings.",
-            "gains": [
-              "Functions reach script state directly."
-            ],
-            "losses": [
-              "Decides module variables early.",
-              "Code using file variables cannot be a callback."
-            ],
-            "proposed": {
-              "code": "total := 0\ndescribe: fn() -> String { \"{total}\" }\nprint(describe())"
+              "code": "total := 3 // file state\ndescribe: fn() -> Int { total }\nprint(describe()) // 3"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One-line programs use the same run body. Imports do not execute application bodies; functions receive body locals through parameters.",
+          "why": "Omitting the wrapper should not make local helpers mysteriously lose access to locals.",
           "gains": [
-            "One-line programs.",
-            "Explicit run entries stay supported."
+            "One entry and one capture mechanism"
           ],
           "losses": [
             {
-              "loss": "A stray statement runs on a direct run.",
-              "mitigation": "Imports still refuse it, and jet check names the file as a program."
-            },
-            {
-              "loss": "Functions cannot read top-level locals.",
-              "mitigation": "E0107 names the cause and offers a parameter."
+              "loss": "Some calls are too early.",
+              "mitigation": "Name the uninitialized capture and its required binding."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A required line for one-line programs."
+              "reason": "Explicit but adds plumbing."
             },
             {
               "key": "C",
-              "reason": "Imports gain a start-up step."
-            },
-            {
-              "key": "D",
-              "reason": "Decides module variables early."
+              "reason": "Changes locals into file state."
             }
           ],
-          "tradeoff": "Stray statements run on a direct run, and functions cannot read top-level locals, for one-line programs and one rule."
+          "tradeoff": "General lexical-helper checking, not hidden startup work."
         }
       },
       "draft": false,
@@ -188690,25 +188610,8 @@
       ],
       "reports": [
         {
-          "title": "File statements: a0.0.43 probes, body-versus-run measurements and adversarial review",
-          "path": "Docs/audits/2026-11-10-file-statements-review.md",
-          "note": "Independent file, import, cycle, test and CLI probes; valid defer body/run pair, corrected parser citations, qualified semantic parity and repaired C initialization reentry."
-        },
-        {
-          "title": "C#: top-level statements",
+          "title": "C# top-level entry generation and explicit Main interaction",
           "url": "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/program-structure/top-level-statements"
-        },
-        {
-          "title": "Python: the import system",
-          "url": "https://docs.python.org/3/reference/import.html"
-        },
-        {
-          "title": "Swift SE-0343: concurrency in top-level code",
-          "url": "https://github.com/apple/swift-evolution/blob/main/proposals/0343-top-level-concurrency.md"
-        },
-        {
-          "title": "Go specification: program execution",
-          "url": "https://go.dev/ref/spec#Program_execution"
         }
       ]
     },
@@ -192146,49 +192049,41 @@
       "id": "D-REGION-ALLOC1",
       "cardId": "c0ct4a0i",
       "group": "memory",
-      "title": "Arena escapes: explicit deep copies or ratified automatic relocation",
-      "situation": "The ratified context rule sends ordinary allocations, including synchronous library calls, through the selected allocator. It rewinds arena blocks and automatically relocates values that leave. The allocator block is still ignored by the tested native lowering. This ballot proposes changing the escape policy, not merely implementing an approved block. A requires visible copies for escaping arena-owned storage; E keeps automatic relocation. Both need complete ownership and region checks.",
-      "gist": "Should escaping arena-owned storage require an explicit copy instead of automatic relocation?",
-      "lesson": "An arena reclaims a phase's storage together. Any value that still depends on reclaimed bytes is invalid. A rejects those escapes unless an explicit deep copy makes them independent. E relocates escaping owned storage automatically. Neither policy is implemented by these probes.",
+      "title": "Put surviving results in their final memory from the start; do not require a copy just to leave scratch",
+      "situation": "Scratch memory lets a program clear many temporary values together. A result that survives cannot still depend on bytes that were just cleared. That does not mean the result must first be built in scratch and then copied. The tested allocator block produces the expected text, but its lowering does not install an allocator. Choose whether surviving results need explicit copies, automatic relocation, or correct initial placement. We recommend final-destination placement first, with no mandatory copy for crossing a block.",
+      "gist": "Should surviving results be built in their final storage instead of copied out of scratch?",
+      "lesson": "Scratch is a temporary workbench. Keep temporary pieces there, but build the finished item in the place that will keep it. A copy is needed only if incompatible storage was genuinely required earlier, not because the item crossed a brace.",
       "explainer": "An escape is a surviving dependency on arena storage, not every value created during a block. Scalars, old values and stable resource handles can leave when their owned graph contains no arena dependency. Copying bytes cannot duplicate a resource's identity or finishing duty.",
-      "story": "Noor builds the same response, ada=3;lin=3, through a helper. A puts an explicit copy at the response store. E performs relocation there automatically. A caching dependency may need its own change under A; the caller cannot always repair it.",
-      "inWild": "// Zig allocator-parameter illustration, not executed here:\nconst rows = try buildRows(arena.allocator(), names);\n// Odin instead supplies a context allocator to ordinary calls.",
-      "detail": "Scope. A amends D-CONTEXT1=A's automatic relocation clause. E keeps it. D-ALLOC-SITE1=A's canonical selector, remembered collection allocator and expression lifetime remain, except where B or D removes ambient selection. Copy placement and escape summaries are build work, not current guarantees.\n\nEvidence on a0.0.43. Independent r1 prints ada=3;lin=3; r4 prints 3 and frame 2. Origin/dev BuildTransact.jet:250-275 installs deadline but releases other guard values, so these outputs do not prove arena allocation. r2 rejects the expression form; r3 rejects context.scratch. r6 rejects a direct arena-view return with E0631. r8 and r8b accept closure capture and print 5 and text. These reveal inconsistent static coverage, not observed use-after-free.\n\nA retargets ordinary synchronous allocations, including callees, into the installed arena. Older collections still grow with their own allocator. Existing values do not acquire arena provenance because a block reads them. Reachable owned storage, views, closures, trait values, erased carriers and containers determine whether an escape is safe.\n\nExplicit copy. At an escaping store or return, .copy() deep-copies copyable owned buffers into the destination allocator. This extends canonical copy placement, not its value meaning. Infer destination through the use graph; a temporary alone selects no outer allocator. Reject conflicting or unknown destinations rather than silently choosing the heap. Non-escaping copies retain ordinary allocation context.\n\nCopies preserve required graph sharing and do not convert loans into ownership. Tags and protected storage remain protected. Partial allocation failure drops only constructed destination values and leaves source ownership defined. Copying cannot settle or duplicate a finishing duty. Identity-bearing resources need valid ownership paths, not byte cloning.\n\nShared cells use program storage under CONTEXT1, but their contents must be independent of the block before escape. A persistent cell around arena data is still an escape. A new Pool cannot promise copied IDs remain valid in another pool. Older stable pool references may leave. New arena-dependent pools need a valid copy contract or are refused. An independent resource handle may move out without copying.\n\nLibrary summaries cover argument-to-result, retained-store and capture provenance, including fresh storage made inside the callee. Carry them through interfaces, generic instances, function values and trait methods. Keeps arguments alone misses internally cached text. Overrides cannot retain more than their contract permits. Unknown foreign or indirect calls remain conservative unless an audited contract proves safety.\n\nComplete callable summaries are required before shipping. r15's fn(&Mobj) rejection proves one stored-type grammar gap, not absence of every callable fact. Copying a caller argument cannot repair fresh storage cached internally. Name both call and retaining store. Repair editable code, move the call outside, or update the dependency; no universal one-line caller fix exists.\n\nSummaries belong in the canonical checked interface. If D-API-SURFACE1 passes, its rendered receipt includes them; otherwise caller checking still enforces safety. A new retaining edge is a compatibility change. Introduce no second hand-maintained summary file.\n\nExits. Drop resources and settle duties before rewind; join arena borrowers first. Restore context and rewind each nested mark once on normal exit, return, error, break, panic unwinding and cancellation. Abort and kill are excluded. Reject reset or close while installed storage or borrowers remain live.\n\nNewer CONTEXT1=A already gives spawned tasks the program allocator and their own scratch. This ballot does not newly reverse JAI-CONTEXT1. Arena borrowing requires a join before rewind; otherwise reject or explicitly copy transferable data. The lexical block does not retarget an independent child's storage.\n\nThe expression form retains allocation until close/reset under ALLOC-SITE1, unlike block rewind. Existing views never relocate. Occurrence counts prove neither complete migration nor unchanged output after retargeting starts.\n\nB replaces ambient selection with allocator parameters, not a second selector. It makes allocation dependencies explicit and supports allocator-polymorphic libraries; only participating APIs use the selected allocator. D keeps ordinary user allocation on the heap while internal libraries use public safe region primitives. Core gains no private memory powers.\n\nC permits unchecked escape inside audited #Unsafe code. Manually copying the response can preserve the same workload; omitting it can dangle. Removing checks proves neither safety nor speed. E safely supports unchanged caching libraries through automatic graph relocation. Elide checks using provenance and report remaining sites. No measurement establishes a test or copy at every store.\n\nNo speed claim. The request, frame and parser probes exercise heap behavior, not arena implementation or tier parity. Compare A and E on identical output and cleanup, counting copies, failures, memory peak and check costs before any performance claim. Beginners keep heap defaults. Experts choose arena blocks and inspect actual escape costs.",
+      "story": "Noor joins ada and lin into ada;lin. The list is temporary; the final text survives. Every option produces that text, but they choose different storage paths.",
+      "inWild": "MLKit infers allocation and deallocation from lifetimes. Rust bumpalo checks that arena collections cannot outlive the arena. Zig exposes allocator parameters. These are strong, different solutions; none establishes that Jet already avoids copies.",
+      "detail": "Recommendation changes from A to added F. Use lifetime and destination facts to place survivors directly in final storage. Proven temporaries still use the selected scratch arena, including in synchronous callees. Keep one allocator selector. No .copy() is required merely for escape. This explicitly amends D-CONTEXT1=A's every-allocation retargeting and copy-on-escape reading while preserving safe lifetimes.\n\nHere words uses scratch; response's joined buffer uses its longer-lived destination. Helpers receive inferred destinations through ordinary checked allocation contracts, not Core-only powers. Interfaces carry argument, result, retaining-store and capture provenance. Older collections retain their remembered allocator under D-ALLOC-SITE1=A. Reading a value never changes its provenance.\n\nFor runtime-selected destinations, pass the destination capability when allocating, or use a proved common longer-lived allocator. Potential survivors may then live longer even when later discarded. Never silently retain an entire scratch arena. If no compatible lifetime is proved, name the conflicting ownership path. Move creation outside the block or keep an explicit owner alive.\n\nZero-copy transfer requires a transferable owner and allocator-supported detachment. Arbitrary interior slices do not qualify. Exact rewind cannot reclaim bytes while leaving a surviving alias into them. A stable address inside non-detachable scratch may require copying independent data or explicitly extending the owner's lifetime. Pinned and identity-bearing resources cannot be byte-relocated. F inserts no silent deep-copy fallback.\n\nThis is not universal optimal placement. Aliasing, callbacks and separately compiled libraries can reduce precision. Check whole graphs, closures, erased carriers, views, pools and shared-cell contents. A longer-lived wrapper cannot legalize an inner scratch pointer. Unknown foreign retention stays unknown without accepted evidence. Cleanup, duties and borrowing tasks finish before rewind on ordinary exits, stop unwind and cancellation. Kill and power loss cannot promise cleanup.\n\nObserved on t17a a0.0.43 with jet run -: the arena-block join into an outer response prints ada;lin, exit 0. Compiler/JetIR/Source/BuildTransact.jet:244-257 releases non-deadline guards instead of installing them. Output proves computation, not arena placement, copying, safety or performance.\n\nAdversarial verdict: F holds within proved placement limits. First eliminate copy-out through destination construction. Then transfer ownership where the allocator permits it. Packed borrowed bytes cannot survive exact reclamation; expose that conflict and permit explicit lifetime restructuring. E remains a strong transparent option and can optimize to the same placement. F additionally forbids hidden copy fallback.\n\nMeasure retention, allocation count, copies and peak bytes on two matched programs before claiming superiority. None of those measurements has established F's performance.",
       "options": [
         {
           "key": "A",
-          "name": "Explicit escape copies",
-          "detail": "Reject surviving arena dependencies unless an explicit deep copy allocates in the proven destination.",
-          "technical": "Amends automatic relocation. Require complete graph and callable provenance, destination inference, cleanup-before-rewind and failure-safe copying. No temporary all-indirect-calls workaround is sold as complete delivery.",
-          "code": "// Proposed A; same render_row helper as r1.\nhandle: fn(names: [String]) -> String {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        rows := [String]{}\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\").copy()\n    }\n    close(arena)\n    response\n}\n// Destination is response's allocator. Intended output: ada=3;lin=3."
+          "name": "Require an explicit escape copy",
+          "detail": "Place ordinary allocations in scratch. The author writes a deep copy when a result must survive. Predictable visible copies, even when better placement could have avoided them.",
+          "code": "// Proposed A; print ada;lin.\nuse mem: core.mem\nrun: fn() {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        words: [\"ada\", \"lin\"]\n        response = words.join(\";\").copy()\n    }\n    close(arena)\n    print(response)\n}",
+          "technical": "Copy into the proved destination allocator, preserve graph sharing and duties, and refuse ambiguous or uncopyable escapes."
         },
         {
           "key": "B",
-          "name": "Explicit allocator parameters",
-          "detail": "Replace ambient retargeting with allocator-aware APIs. Allocation dependencies appear in signatures.",
-          "technical": "Amends ALLOC-SITE1's selector. Use the ratified safe allocator trait. One generic API can accept many allocators without generating twins. Libraries not taking an allocator keep their ordinary allocation behavior.",
-          "code": "// Proposed B, same names and response:\nrender_row: fn<A: mem.Allocator>(alloc: A, name: String, hits: Int) -> String {\n    parts := [String].new_in(alloc)\n    parts.push(name.copy_in(alloc))\n    parts.push(format_in(alloc, \"{hits}\"))\n    parts.join_in(alloc, \"=\")\n}\n// Build rows through render_row(arena, name, name.len()).\n// Build the final joined response with the program allocator, then close arena.\n// Intended output: ada=3;lin=3. APIs proposed, not executed."
-        },
-        {
-          "key": "C",
-          "name": "Unchecked region under #Unsafe",
-          "detail": "Retarget the block but leave escape management to audited unsafe code.",
-          "technical": "No automatic escape protection. Manual deep copy can preserve the workload; omitting it risks dangling storage. Safe code cannot obtain unchecked arena-dependent survivors.",
-          "code": "// Proposed C, inside the same handler:\n#Unsafe(\"audited response ownership before arena rewind\") {\n    #Context(allocator: arena) {\n        rows := [String]{}\n        loop name in names -> rows.push(render_row(name, name.len()))\n        response = rows.join(\";\").copy()\n    }\n}\n// Same intended response. Removing copy can dangle; no automatic proof."
-        },
-        {
-          "key": "D",
-          "name": "No ambient user retargeting",
-          "detail": "Ordinary user and dependency allocations stay on the heap. Libraries may use public safe arena primitives internally.",
-          "technical": "Removes the user allocator context selector. Does not reserve private allocator powers for Core. Users retain the same safe region primitives that internal libraries use, but ordinary list APIs are not retargeted.",
-          "code": "// Proposed D: no arena or #Context line in this handler.\nhandle: fn(names: [String]) -> String {\n    rows := [String]{}\n    loop name in names -> rows.push(render_row(name, name.len()))\n    rows.join(\";\")\n}\n// Same intended output: ada=3;lin=3, ordinary heap storage."
+          "name": "Pass allocators explicitly",
+          "detail": "Libraries receive allocators as normal parameters. The author chooses temporary versus final storage at calls. Not all ordinary dependencies participate without API changes.",
+          "code": "// Proposed B APIs; print ada;lin.\nuse mem: core.mem\nrun: fn() {\n    arena: mem.Arena.new()\n    words: [String].new_in(arena)\n    words.push(\"ada\")\n    words.push(\"lin\")\n    response: words.join_in(mem.heap, \";\")\n    close(arena)\n    print(response)\n}",
+          "technical": "These new_in/join_in/heap spellings are proposed, not available API claims. They replace ambient selection, not add a second selector beside it."
         },
         {
           "key": "E",
-          "name": "Keep ratified automatic relocation",
-          "detail": "Owned arena storage relocates into its destination when it escapes, including from libraries.",
-          "technical": "Keep CONTEXT1=A and ALLOC-SITE1=A. Preserve graph identity, duties and failure safety. Provenance can elide unnecessary checks; report actual relocation sites. No every-store overhead or zero-cost promise is established.",
-          "code": "// Ratified E, not built: same handler and helper as A.\n#Context(allocator: arena) {\n    rows := [String]{}\n    loop name in names -> rows.push(render_row(name, name.len()))\n    response = rows.join(\";\")\n}\n// Relocate owned response storage before rewind. Same intended output."
+          "name": "Automatic relocation when necessary",
+          "detail": "Keep the approved escape policy. Owned survivors move into destination memory automatically; placement optimization may avoid that move, but a hidden relocation fallback is allowed.",
+          "code": "// Ratified E policy; arena implementation not demonstrated.\nuse mem: core.mem\nrun: fn() {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        words: [\"ada\", \"lin\"]\n        response = words.join(\";\")\n    }\n    close(arena)\n    print(response)\n}\n// ada;lin, with any actual relocation reported."
+        },
+        {
+          "key": "F",
+          "name": "Final placement; no hidden copy fallback",
+          "detail": "Infer where surviving storage belongs and construct it there. Transfer compatible owned storage without copying. Refuse genuine lifetime conflicts instead of inserting a hidden deep copy.",
+          "code": "// Proposed F; print ada;lin with no escape copy.\nuse mem: core.mem\nrun: fn() {\n    arena: mem.Arena.new()\n    response := \"\"\n    #Context(allocator: arena) {\n        words: [\"ada\", \"lin\"] // temporary storage\n        response = words.join(\";\") // final storage directly\n    }\n    close(arena)\n    print(response)\n}",
+          "technical": "One region/destination analysis and allocator contract. No implicit arena lifetime extension, identity-changing move or unproved no-copy promise."
         }
       ],
       "comparisons": [
@@ -192208,175 +192103,143 @@
           "code": "let mut rows = bumpalo::collections::Vec::new_in(&bump);"
         }
       ],
-      "rec": "A",
+      "rec": "F",
       "recommendation": {
-        "rec": "A",
-        "why": "A makes an escaping copy visible while keeping context allocation for synchronous libraries. This is an explicit policy amendment, not proof that automatic relocation is unsafe or slower.",
+        "rec": "F",
+        "why": "Crossing a block is not a physical reason to copy. Build survivors in their final storage and expose genuine lifetime conflicts instead.",
         "gains": [
-          "Visible copying at surviving arena edges.",
-          "One allocator selector and shared region checking."
+          "No mandatory escape copies",
+          "Safe scratch cleanup remains explicit"
         ],
         "losses": [
           {
-            "loss": "Caching dependencies may need changes that callers cannot make.",
-            "mitigation": "Name the retaining store; move calls outside, change editable code or update the dependency."
-          },
-          {
-            "loss": "Destination-directed copying and callable provenance require substantial new checks.",
-            "mitigation": "Ship complete graph summaries and failure-safe copies; reject ambiguous destinations."
-          },
-          {
-            "loss": "Some identity-bearing graphs cannot be copied.",
-            "mitigation": "Move only independent storage, retain older identities, or keep that work outside the block."
+            "loss": "Uncertain lifetimes may retain storage longer or be refused.",
+            "mitigation": "Use a proved destination, transfer compatible ownership, or move creation outside scratch."
           }
         ],
         "whyNot": [
           {
+            "key": "A",
+            "reason": "Visible copying is not a reason to require avoidable copying."
+          },
+          {
             "key": "B",
-            "reason": "B is explicit and composable, but only allocator-aware APIs participate."
-          },
-          {
-            "key": "C",
-            "reason": "C allows expert manual management but provides no automatic escape proof."
-          },
-          {
-            "key": "D",
-            "reason": "D avoids ambient complexity but does not retarget ordinary library allocations."
+            "reason": "Strong explicit control, but changes allocator-aware library APIs throughout the call chain."
           },
           {
             "key": "E",
-            "reason": "E preserves unchanged caching libraries; A instead chooses visible copy sites. Neither has a measured performance advantage."
+            "reason": "Strong transparent reuse, but still allows an unrequested relocation fallback."
           }
         ],
-        "tradeoff": "Visible escape costs versus E's more transparent library reuse; both require complete safety machinery."
+        "tradeoff": "Stronger no-hidden-copy guarantee with honest refusal of incompatible storage lifetimes."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview7. Reran all r probes and read the ratified context contracts. Fixed copy destination, pool/Shared graphs, task-policy history, unsafe examples and unfair E overhead claims; A remains conditional."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Ran the join computation, inspected the ignored guard, and added destination-first placement with explicit limits for packed storage, stable addresses, unknown lifetimes and whole-graph escape."
       },
-      "checkInstructions": "Independent logs are probes/review7-*.run.txt. Read origin/dev BuildTransact.jet:250-275 and live CONTEXT1, ALLOC-SITE1, FNVAL-WRITE1 and ALLOC-TRAIT1. These probes establish current heap outputs and diagnostic coverage, not proposed arena behavior or tier parity.",
+      "checkInstructions": "Prove actual allocator routing, destination passing through separately compiled helpers, no-copy escape, uncertain destination, interior aliases, stable resources, failure cleanup, task joins and all exits. Compare copy counts and peak memory against E on two matched programs before claiming a performance win.",
       "surface": {
-        "gist": "Should escaping arena-owned storage require an explicit copy instead of automatic relocation?",
-        "lesson": "A makes escaping copies visible; E relocates owned storage automatically. Both need complete region checks. Current native probes still allocate ordinary collections on the heap.",
+        "gist": "Should surviving results be built in their final storage instead of copied out of scratch?",
+        "lesson": "A scratch workbench should hold temporary pieces, not force the finished result to be copied. F builds survivors in final storage. Some physically incompatible lifetimes still need an explicit change.",
         "trio": {
           "current": {
-            "note": "The allocator guard is released by current lowering; output does not prove arena behavior.",
-            "code": "#Context(allocator: arena) { response = rows.join(\";\") }"
+            "note": "The text prints correctly, but inspected lowering ignores the allocator guard.",
+            "code": "#Context(allocator: arena) { response = words.join(\";\") }"
           },
           "wild": {
-            "lang": "Zig",
-            "note": "Explicit allocator dependencies; illustration not executed.",
-            "code": "try buildRows(arena.allocator(), names)"
+            "lang": "MLKit",
+            "note": "Allocation and deallocation are inferred from lifetimes.",
+            "code": "(* Region placement is inferred, not an explicit copy at every return. *)"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "Explicit copies",
-            "gist": "Reject surviving arena dependencies without a proven deep copy.",
+            "gist": "Require the author to copy escaping storage.",
             "gains": [
-              "Visible escape costs."
+              "Visible copy sites"
             ],
             "losses": [
-              "Caching dependencies may need changes.",
-              "Ambiguous destinations are refused."
+              "Can require avoidable copies."
             ],
             "proposed": {
-              "code": "response = rows.join(\";\").copy()"
+              "code": "response = words.join(\";\").copy()"
             }
           },
           {
             "key": "B",
-            "name": "Allocator parameters",
-            "gist": "Replace ambient selection with explicit APIs.",
+            "name": "Explicit allocators",
+            "gist": "Choose storage through allocator-aware APIs.",
             "gains": [
-              "Visible, composable dependencies."
+              "Direct expert control"
             ],
             "losses": [
-              "Allocator-aware APIs required."
+              "Library API changes"
             ],
             "proposed": {
-              "code": "render_row(arena, name, name.len())"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Audited unchecked",
-            "gist": "Manual escape management under #Unsafe.",
-            "gains": [
-              "Expert control."
-            ],
-            "losses": [
-              "No automatic escape proof."
-            ],
-            "proposed": {
-              "code": "#Unsafe(\"audited region ownership\") {\n    #Context(allocator: arena) { response = rows.join(\";\").copy() }\n}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "No ambient retargeting",
-            "gist": "Heap defaults; public safe regions remain.",
-            "gains": [
-              "No ambient rule.",
-              "No private Core powers."
-            ],
-            "losses": [
-              "Ordinary library allocations not retargeted."
-            ],
-            "proposed": {
-              "code": "response = rows.join(\";\") // heap"
+              "code": "response: words.join_in(mem.heap, \";\")"
             }
           },
           {
             "key": "E",
-            "name": "Keep ratified relocation",
-            "gist": "Relocate escaping owned storage automatically.",
+            "name": "Automatic relocation",
+            "gist": "Copy or relocate survivors automatically when needed.",
             "gains": [
-              "Caching libraries need fewer edits."
+              "Transparent library reuse"
             ],
             "losses": [
-              "Implicit relocation costs."
+              "Hidden relocation fallback"
             ],
             "proposed": {
-              "code": "response = rows.join(\";\") // relocate before rewind"
+              "code": "response = words.join(\";\") // relocation allowed"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Final placement first",
+            "gist": "Construct survivors directly; no hidden copy fallback.",
+            "gains": [
+              "Avoidable copies forbidden"
+            ],
+            "losses": [
+              "Unknown lifetimes can retain storage or fail."
+            ],
+            "proposed": {
+              "code": "response = words.join(\";\") // destination allocation"
             }
           }
         ],
         "recommendation": {
-          "rec": "A",
-          "why": "Choose visible escape copies, while acknowledging E's unchanged-library benefit and unmeasured relative cost.",
+          "rec": "F",
+          "why": "A brace is not a physical reason to copy a result.",
           "gains": [
-            "Visible copies."
+            "No mandatory escape copy"
           ],
           "losses": [
             {
-              "loss": "Dependency edits and complex graph proof remain.",
-              "mitigation": "Name retaining edges; move unsuitable calls outside the arena."
+              "loss": "Some lifetimes conflict.",
+              "mitigation": "Name the conflict; select final storage or keep its owner explicitly alive."
             }
           ],
           "whyNot": [
             {
+              "key": "A",
+              "reason": "Requires copies too broadly."
+            },
+            {
               "key": "B",
-              "reason": "Strong explicit alternative, requiring API adoption."
-            },
-            {
-              "key": "C",
-              "reason": "Manual safety proof."
-            },
-            {
-              "key": "D",
-              "reason": "No ambient library retargeting."
+              "reason": "Strong control, broader API adoption."
             },
             {
               "key": "E",
-              "reason": "Strong unchanged-library alternative, with implicit relocation."
+              "reason": "Permits hidden copy fallback."
             }
           ],
-          "tradeoff": "Explicit costs versus transparent reuse, not a measured speed ranking."
+          "tradeoff": "No hidden copies; honest lifetime limits."
         }
       },
       "draft": false,
@@ -192445,21 +192308,16 @@
       ],
       "reports": [
         {
-          "title": "Arena escapes: independent probes and different-family review",
-          "path": "Docs/audits/2026-11-10-region-alloc-review.md",
-          "note": "All r probes rerun; destination copies, fresh library retention, Shared/Pool graphs and actual ratified task policy corrected. No arena speed or tier-parity proof."
+          "title": "MLKit: lifetime-based region inference",
+          "url": "https://github.com/melsman/mlkit/blob/master/README.md"
         },
         {
-          "title": "Odin implicit context",
-          "url": "https://odin-lang.org/docs/overview/#implicit-context-system"
+          "title": "bumpalo: arena lifetime and cleanup limits",
+          "url": "https://docs.rs/bumpalo/latest/bumpalo/"
         },
         {
           "title": "Zig allocator guide",
           "url": "https://ziglang.org/documentation/master/#Choosing-an-Allocator"
-        },
-        {
-          "title": "bumpalo arena collections",
-          "url": "https://docs.rs/bumpalo/latest/bumpalo/"
         }
       ]
     },
@@ -193534,7 +193392,7 @@
         }
       },
       "draft": false,
-      "status": "open",
+      "status": "ratified",
       "created": "2026-11-10T03:48:00.063Z",
       "designAway": [
         {
@@ -193600,7 +193458,9 @@
           "title": "Rust: reference cycles and weak links",
           "url": "https://doc.rust-lang.org/book/ch15-06-reference-cycles.html"
         }
-      ]
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-11"
     },
     {
       "id": "D-SHARED-TYPE1",
@@ -199348,9 +199208,11 @@
       "by": "owner",
       "kind": "question",
       "text": "based just on the tradeoffs I am inclined to go with option a, but i dont understand fully. what is the context, what does this actually mean, what does it look like in practice? i dont understand",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T01:59:56.278Z"
+      "status": "answered",
+      "answer": "Imagine your library has a generated promise sheet, package.api. It lists what other programs may call, what errors they must handle, and what permissions those calls require.\n\nYou publish greeting as 1.0.0. Later you add a clock read inside it. Its written parameters stay the same, but callers now need a new permission. Under A, your next check shows that exact promise change. You intentionally accept it, then commit the updated generated sheet with the source.\n\nWhen publishing, Jet compares against the last released promise, not the newly accepted local sheet. It calculates the minimum version: 2.0.0 for this breaking change. You may choose something larger for behavioral changes the sheet cannot detect.\n\nI still recommend A. It brings important changes into normal editing and review. It does not prove every compatibility promise: behavior, target coverage and release planning still need attention.",
+      "created": "2026-11-11T01:59:56.278Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q49g5xy6",
@@ -199359,9 +199221,11 @@
       "by": "owner",
       "kind": "question",
       "text": "why would functions not be able to read top level locals, that doesnt seem to make sense the way you present it. also I lean toward accepting this BUT if there is a fn run in the file, it errors. you must have EITHER top level scripting OR put all logic in the fn run entry point. if there is no fn run entry point, the file implicitly \"wraps\" the file with a run fn. do you understand? this way we either have a \"scripting\" mode or we have a clear mode. we cannot mix them, if you have an entry point explicitly defined, you cannot implicilty wrap in an entry point. if you dont, then you can. do you understand?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T02:05:09.980Z"
+      "status": "answered",
+      "answer": "Yes. A file gets exactly one entry: either its loose executable lines form an implicit run, or it declares run explicitly. Both together are an error. Files with neither remain libraries; imports do not launch script bodies.\n\nYou are also right about helpers. Their inability to see script locals is a consequence of the current compiler treating them as separate module functions, not a physical limitation.\n\nI added and recommend lexical helpers: when a helper uses an implicit body's local, use the same checked captures as an ordinary closure inside explicit run. A helper can read total without making total global. Calls before initialization, escaping captures and task crossings still receive the normal safety checks.\n\nThis needs a general named-local-helper extension, not special script globals. The ballot states that scope clearly and contrasts it with passing parameters or using main-task file state.",
+      "created": "2026-11-11T02:05:09.980Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q5w1a2fd",
@@ -199370,9 +199234,11 @@
       "by": "owner",
       "kind": "question",
       "text": "i really dont want to require copies unless it is PHYSICALLY necessary. is this really required or just the path of least resistance? we want the best way, the right way, and we have room to innovate & trailblaze. is this the best we can do?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T02:06:42.771Z"
+      "status": "answered",
+      "answer": "No: leaving a scratch block does not physically require copying.\n\nThe stronger option is to build surviving storage in its final destination from the start. Temporary pieces still use scratch. Compatible owned allocations may also transfer ownership without moving their bytes. I added and recommend F, rather than requiring .copy() on every escape.\n\nThere is a genuine physical limit: bytes cannot be reclaimed while a surviving pointer still uses them. A slice inside a packed, non-detachable arena cannot survive exact rewind. Either preserve its owner explicitly, choose final storage earlier, or copy independent data when that is genuinely necessary.\n\nF does not hide that conflict behind an automatic deep copy. It reports incompatible lifetimes and lets the author restructure ownership. Uncertain lifetimes may need longer-lived allocation, so this is not a universal peak-memory or speed claim. The available compiler's successful text output does not prove allocator routing or copy elimination.",
+      "created": "2026-11-11T02:06:42.771Z",
+      "answeredAt": "2026-11-11",
+      "answeredBy": "Main"
     },
     {
       "id": "q6bf18n9",
@@ -200273,6 +200139,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:26:47.267Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q5w1a2fd",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:45.828Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-REGION-ALLOC1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:44.290Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q49g5xy6",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:42.861Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-FILE-STATEMENTS1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:41.630Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q35dtfmx",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:40.398Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-API-SURFACE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-11T02:26:24.868Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SHARED-CYCLE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-11T02:26:09.041Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ALLOC-FAIL1",
+      "note": "C"
+    },
     {
       "at": "2026-11-11T02:22:00.348Z",
       "by": "Main",
