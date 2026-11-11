@@ -26,11 +26,12 @@ stderr: ~ "`write` writes a cell through `c`" # O2 refuses it
 stdout: !~ "1" # nothing runs
 step: jet check held.jet
 exit: 1
-stderr: count "Error [" = 5 # bump, alias, leased, hidden and relay
+stderr: count "Error [" = 6 # bump, alias, leased, hidden (the write and the call of the lambda) and relay
 stderr: ~ "writes a cell through `self`" # a read receiver's cell
 stderr: ~ "`alias` writes a cell through `held`" # a local alias of a module cell
 stderr: ~ "`leased` writes a cell through `c`" # an edit lease is the write
 stderr: ~ "`hidden` writes module state `HITS`" # a lambda's write is its function's
+stderr: ~ "`hidden` calls the impure function `indirect call`" # a lambda with effects has no row, so its call is impure too
 stderr: ~ "`relay` reaches a write of a cell through `c`" # through an inferred helper
 stderr: ~ "Call chain: relay → write_back" # the chain names the helper
 step: jet check trait.jet
