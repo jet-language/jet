@@ -151,3 +151,10 @@ runs and one 39-minute full test pass. These rules bind every train:
     stays at most one train behind `dev`. A failed admit reports every lost
     row in one pass, routes each root to its owner and leaves `dev` and the
     previous release untouched; it never holds the next train.
+12. **Never retest what passed.** Every train carries the next JET_VERSION
+    bump as its first submission, and its census writes the `Land.jet
+    receipt`, so the landed train commit is the release commit and admit
+    needs no extra preflight. Admit always runs with `--reuse` naming the
+    previous admit's work directory: only rows whose files changed run again.
+    Admit's own new work is the fixed point, the pack and the pinned tool
+    checks.
