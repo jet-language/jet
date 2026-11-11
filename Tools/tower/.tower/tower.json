@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99158,
+    "rev": 99168,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25919,6 +25919,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "G6Decl-1's notes: c12 (a web require breach) is blocked on the #5201 web stop path (a failed assert or panic traps \"unreachable\" with exit 134 on wasm), and c14 is the D-PREPOST-STRIP1 ballot."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "c12 is partly done by G1Lead-3-contracts (landed 973d760c89): a #Pre breach reports the call site and a #Post breach the body, with E3005 on every tier. No `require` surface exists to pin, so c12 stays open for that part."
@@ -26076,11 +26081,11 @@
         {
           "n": 11,
           "text": "(was #1531 c1) #Pre and #Post lower through one contract node in the checked IR; no tier-specific contract path remains. (was #5201 c13)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:16:34.075Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-1. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). The checked IR's .Contract and .ContractScope statements are lowered only by JetIR BuildContracts.jet ir_contract/ir_contract_scope. Native O0/O1/O2, the built binary and wasm all compile that one IR, and no other backend matches a contract node. contract_breach_output_matches_aot_jit_and_interpreter and web_contracts_execute_with_canonical_e3005_on_js_and_wasm (now built with --target web and run under node, exiting 70 with the E3005 report; its known-failing row is removed) both pass.",
+          "at": "2026-11-11T04:40:46.483Z"
         },
         {
           "n": 12,
@@ -26094,11 +26099,11 @@
         {
           "n": 13,
           "text": "(was #1531 c3) A condition proved by an interval fact emits no runtime check; a targeted test compares emitted code with and without the proof [precut audit: failing on 9c7ddf1359: C:web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…] (was #5201 c15)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:16:43.567Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-1. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). contract_interval_proof_erases_only_the_runtime_check compares `jet emit --ir --fn run`: an unproved #Pre keeps the gt and the jet_rt_require_stop, while #Pre(value.raw() > 0) on Positive: distinct Int(1..10) emits neither, and both print 1 at O0 and O2.",
+          "at": "2026-11-11T04:40:47.745Z"
         },
         {
           "n": 14,
@@ -26144,7 +26149,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-11-11T02:58:28.132Z",
+      "updated": "2026-11-11T04:40:53.659Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -34883,11 +34888,11 @@
         {
           "n": 22,
           "text": "Docs/spec/syntax-decisions.md has a D-META-LADDER1=A entry (ratified 2026-11-09) stating the Meta effect family, root-only `b.compiler`, delegation with recorded handoffs, and no macros.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T02:44:16.410Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-2. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). Docs/spec/syntax-decisions.md has the D-META-LADDER1=A entry (the flat Meta effect family, root-only b.compiler(app), delegation with recorded handoffs, no macros), placed after the OPTIN2 and CONTROL2 supersession notes.",
+          "at": "2026-11-11T04:40:49.020Z"
         }
       ],
       "refs": [
@@ -34910,7 +34915,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-11T03:57:43.526Z",
+      "updated": "2026-11-11T04:40:49.020Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -45651,11 +45656,11 @@
         {
           "n": 5,
           "text": "{\"decisionId\": \"D-MEMO1\", \"text\": \"You write one marker above a pure function. Jet keeps one store for that function and answers repeat calls from it.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_memo1_contract\", \"suite\": \"tests/ratified/P12.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P12/d_memo1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"generated marker members relex/reparse/check as source and malformed generated text has located error; no injected AST\", \"comptime eligibility from effects for pure/recorded/Impure+permission tiers; recorded inputs hashed\", \"computed -> field #Memo parses, first read evaluates once, repeat hits, dependency write invalidates\", \"pure function memo store per function including recursion/eviction/bounded-unbounded limits and observable hit counters; impure memo rejected\", \"plain fmt byte/shape stable; simplify flag deliberate full corpus cutover\", \"six structural automatic traits, nominal recursion, signed refusal and handwritten precedence; named auto_derive lint rather than boolean\", \"marker direct members/control flow and one named parameter/$ metadata form; old derive-provider declaration rejected\", \"generic module qualified type members retain canonical full instance key/arguments/provenance/rule applications\", \"one registry substrate with lifetime-separated schema/program/run typed query\", \"configuration $NAME environment reads typed/checked/listed; ordinary $ compiler facts allowed but prefix @ comptime meaning retired\"]}}",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-02T18:25:13.897Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Meta-1. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). D-MEMO1: tests/cases/ratified_p12/d_memo1_contract.case, with its fixture and stdout golden, proves that one marker above a pure function keeps one store and answers repeat calls from it.",
+          "at": "2026-11-11T04:40:45.196Z"
         },
         {
           "n": 6,
@@ -46326,7 +46331,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-11T02:58:25.979Z",
+      "updated": "2026-11-11T04:40:45.196Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -55447,6 +55452,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t19 landed G6Decl-3 (0efcf91a49..97462b6d92): #Specified makes every case of a numbered enum state its number (Prelude marker, a registered diagnostic, UI snapshot, golden O0/O1/O2). c5 stays open for its four-forms sentence, which closes with c1-c3."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -55505,7 +55515,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:46.152Z",
-      "updated": "2026-11-09T19:01:28.946Z",
+      "updated": "2026-11-11T04:40:51.354Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -56444,6 +56454,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "t19 landed ScriptAPI-9 (0efcf91a49..97462b6d92): a Never call (process.fail, process.exit, user fns) fills a ?? fallback of any success type on O0/O1/O2, and CensusSnap2 and IntegLand4 use the form. c43 (the seed-bump half: converting the eprint+exit workarounds) can now be built on integ/seed-t19."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "t17a landed ScriptAPI-4/5/6 (c36, c39, c31, c32 and c40 met), G8Fix-7b and 8b (the seed-tool halves of c37 and c38) and ScriptAPI-7 (c26b) (e75850d064..c2cecce162). c26 stays open: ScriptAPI-7's toolchain: embed breaks 4 selfhost_terminators jet_lexer cases (E0945 once a case copies JetFoundation out of the tree); ScriptAPI stages the fix-forward. c29, c37 and c38 close with the twins-adoption SUB."
         },
         {
@@ -57047,7 +57062,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T04:11:37.548Z",
+      "updated": "2026-11-11T04:40:52.495Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -74625,11 +74640,11 @@
         {
           "n": 132,
           "text": "Owner ruling 2026-11-09 (language review): a module-level `name: value` is a guarantee, not a try. It is always evaluated while building; one that fails while building, or that cannot run then because it has effects, is a build error with a registered diagnostic and UI snapshot whose fix names the three ways out (move it into `run`, make it lazy explicitly, or use a pinned build input such as embed_file). No code runs before `run`. Today `BAD: 10 / zero()` at module level passes jet check and jet build and stops at first use with E3010 (probe, seed a0_042). Inside a function a plain `name: value` still only tries to fold; in a file of top-level statements the lines are the program and run in order. Cases prove the same meaning on O0, O1 and O2, and every module-level binding in Core, Compiler, Jetpack, Tools, Examples and tests is clean under the rule in the same cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:52:50.280Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G8Fix-12. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). D-MODULE-BUILD1=A: a module-level `name: value` is always computed while building. One that fails or has effects is E0643 ModuleValueNotBuilt (UI snapshots, explain page), whose fix names the three ways out. The startup path and E0627 are deleted. Module `shared X` cells start from the literal the build stores. The meaning is the same on O0, O1 and O2 (golden Comptime/ModuleSharedCell, the module_state and run_entry cases). Core, Compiler, Jetpack, Tools, Examples and tests are clean under the rule.",
+          "at": "2026-11-11T04:40:42.310Z"
         },
         {
           "n": 133,
@@ -75001,7 +75016,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T03:24:18.930Z",
+      "updated": "2026-11-11T04:40:42.310Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -88840,6 +88855,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "t19 landed TlsLead-6615c4 (0efcf91a49..97462b6d92), the c4 mechanism. A jet.runtime call lowers to the runtime export its interface row names at O0/O1/O2 and in a built binary, and Tools/agent/RuntimeEffectRows.jet --check (in VerifyFull) joins each interface function to its Core leaf by name with 0 differences. c4 stays open until every runtime function Core calls is bound this way (S3 onward)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "Main ruling 2026-11-10 on S3, the time cutover (TlsLead3). Under D1 (the carrier projection ABI), each jet.runtime.<module> member is a body-less binding onto the runtime export that holds its one body. The binding is generated from the runtime export rows (the c3 interface), never hand-written, and lowered through a route derived from its Jet signature, so the hand IRRoute rows go. Sema admits carrier types (Option, tuple, List) only for bindings of the generated interface, keyed on its identity, not on a module name; a user `jet.runtime.*` module gets the ordinary C-law errors. The raw exports stay as each function's one far-side body, so they are not a twin, and c8 deletes the dispatcher rows and the compiler twin, not these exports."
         },
         {
@@ -88880,11 +88900,11 @@
         {
           "n": 3,
           "text": "Building the runtime pack also generates the jet_runtime interface (each pub function's Jet signature and effect row) from the runtime source and embeds it in jet. A check fails the pack build when the interface and the source disagree. No hand-written copy exists. The measured compile time of a hello-world jet check with the interface loaded is recorded and no slower than before the change.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:43:29.088Z"
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB TlsLead-6615c3 + TlsLead-6615c3fix. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). The runtime pack build renders the jet.runtime interface (each public runtime function's Jet signature and effect row) from the runtime source into Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet, which jet embeds and loads. The pack build's interface check fails on disagreement, and no hand-written copy exists. c3fix keys kept `jet run` records of the supplied interface sources by SHA-256, so program reuse holds (case run_rerun_reuses_the_kept_program_of_a_jet_runtime_import).",
+          "at": "2026-11-11T04:40:43.821Z"
         },
         {
           "n": 4,
@@ -88946,7 +88966,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-11T02:59:49.716Z",
+      "updated": "2026-11-11T04:40:50.248Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -198559,6 +198579,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T04:40:53.659Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T04:40:52.496Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T04:40:51.355Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qrom2s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T04:40:50.248Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bbj6h3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T04:40:49.020Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02m1p02",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-11T04:40:47.745Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cshs43",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-11T04:40:46.483Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cshs43",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-11T04:40:45.196Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-11T04:40:43.821Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-11T04:40:42.311Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#132"
+    },
     {
       "at": "2026-11-11T04:11:37.548Z",
       "by": "Main",
