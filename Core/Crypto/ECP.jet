@@ -974,7 +974,7 @@ fe_sub_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
 }
 
 /// x = -x when cond is 1, in constant time (MPI_ECP_COND_NEG).
-fe_cond_neg: fn(f: Field, w: &FeWork, x: &[U64], cond: U64) Never! {
+fe_cond_neg: fn(f: Field, w: &FeWork, x: &[U64], cond: #Secret U64) Never! {
     nz: bn.core_check_zero_ct(x, f.n)
     _: bn.core_sub(w.m, f.p, x, f.n)
     bn.core_cond_assign(x, w.m, f.n, nz.bit_and(cond))
@@ -1169,14 +1169,14 @@ jac_add_mixed: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, q: JacPoint) ->
 }
 
 /// r = q when cond is 1, in constant time.
-jac_cond_assign: fn(f: Field, r: &JacPoint, q: JacPoint, cond: U64) Never! {
+jac_cond_assign: fn(f: Field, r: &JacPoint, q: JacPoint, cond: #Secret U64) Never! {
     bn.core_cond_assign(r.x, q.x, f.n, cond)
     bn.core_cond_assign(r.y, q.y, f.n, cond)
     bn.core_cond_assign(r.z, q.z, f.n, cond)
 }
 
 /// r = infinity, as (1, 1, 0), when cond is 1, in constant time.
-jac_cond_set_zero: fn(f: Field, r: &JacPoint, cond: U64) Never! {
+jac_cond_set_zero: fn(f: Field, r: &JacPoint, cond: #Secret U64) Never! {
     bn.core_cond_assign(r.x, f.one, f.n, cond)
     bn.core_cond_assign(r.y, f.one, f.n, cond)
     keep: bn.ct_mask(cond.bit_xor(U64{1}))
@@ -1250,7 +1250,8 @@ jac_add_affine: fn(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, qx: [U64], qy:
 /// (w-1)^2 + 5w), and 2c ± T_i is not 0 mod N: R is never ±T, nor
 /// infinity. The last step (i = 0) is not covered (R = T when m' = N - 2
 /// T_0 with a negative last digit), so comb_core runs it complete.
-comb_meets_t: fn(f: Field, t0: [U64]) -> Bool Never! { fe_is_zero(f, t0) }
+#Scrub(Secret)
+comb_meets_t: fn(f: Field, t0: [#Secret U64]) -> Bool Never! { fe_is_zero(f, t0) }
 
 /// r = (X/Z^2, Y/Z^3, 1) unless r is infinity (ecp_normalize_jac), with no
 /// test of Z: the inverse runs on Z whatever it is, and an infinite r is
@@ -1413,7 +1414,7 @@ comb_precompute: fn(f: Field, w: &FeWork, t: &FeTmp, px: [U64], py: [U64], wnd: 
 
 /// (rx, ry) = the table entry digit i names, negated for its sign bit, read
 /// in constant time from every entry (ecp_select_comb).
-comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: U64, rx: &[U64], ry: &[U64]) Never! {
+comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: #Secret U64, rx: &[U64], ry: &[U64]) Never! {
     n: f.n
     ii: i.bit_and(U64{0x7f}) >> 1
     loop j in 0..<ts {
@@ -1478,7 +1479,7 @@ comb_recode_scalar: fn(grp: EcpGroup, m: bn.Mpi, d: Int, wnd: Int) -> (k: [U64],
 /// jac_add_affine's one declassified branch, which comb_meets_t's invariant
 /// keeps untaken; the last runs complete. The result counts the times the
 /// branch ran: 0 for every m in [1, N).
-comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64], ts: Int, k: [U64], d: Int, rng: &R, blind: Bool{true}) -> Int EcpError! {
+comb_core: fn<R: RNG>(f: Field, w: &FeWork, t: &FeTmp, r: &JacPoint, table: [U64], ts: Int, k: [#Secret U64], d: Int, rng: &R, blind: Bool{true}) -> Int EcpError! {
     txi := jac_new(f.n)
     spare := jac_new(f.n)
     comb_select(f, w, table, ts, k[d], r.x, r.y)

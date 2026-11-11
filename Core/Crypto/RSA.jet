@@ -692,7 +692,8 @@ private_core: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) -> [U8] RSAErro
 /// public, since s^e mod n gives it back from the output, but it is read the
 /// same way as the rest (mbedtls_mpi_cmp_mpi in mbedtls): the private
 /// operation's input, and the signature that rsa_pkcs1_sign checks.
-below_modulus: fn(t: [U64], n: [U64], limbs: Int) -> Bool Never! { bn.core_lt_ct(t, n, limbs) == U64{1} }
+#Scrub(Secret)
+below_modulus: fn(t: [#Secret U64], n: [#Secret U64], limbs: Int) -> Bool Never! { bn.core_lt_ct(t, n, limbs) == U64{1} }
 
 /// d + (p - 1) r for a fresh EXPONENT_BLINDING-byte r, over fixed limb
 /// counts: the exponent blinding of mbedtls_rsa_private, where
@@ -839,7 +840,8 @@ rsa_rsaes_pkcs1_v15_encrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8]) 
 /// Whether a padding byte drawn for PKCS#1 v1.5 encryption is zero, which
 /// the padding cannot hold: that draw is thrown away and redrawn, so the
 /// answer tells nothing of the padding kept or the message.
-pad_draw_rejected: fn(b: U8) -> Bool Never! { b == (U8{0}) }
+#Scrub(Secret)
+pad_draw_rejected: fn(b: #Secret U8) -> Bool Never! { b == (U8{0}) }
 
 /// Encrypt with the context's padding (mbedtls_rsa_pkcs1_encrypt); OAEP
 /// with an empty label.

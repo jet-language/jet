@@ -127,7 +127,7 @@ core_bitlen: fn(a: [U64], limbs: Int) -> Int Never! {
 }
 
 /// 1 when min <= a, in constant time; `limbs` must be at least 1.
-core_uint_le_mpi: fn(min: U64, a: [U64], limbs: Int) -> U64 Never! {
+core_uint_le_mpi: fn(min: U64, a: [#Secret U64], limbs: Int) -> U64 Never! {
     min_le_lsl: ct_lt(a[0], min).bit_xor(U64{1})
     msll := U64{0}
     loop i in 1..<limbs -> msll = msll.bit_or(ct_bool(a[i]))
@@ -135,7 +135,7 @@ core_uint_le_mpi: fn(min: U64, a: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// 1 when a < b, both of `limbs` limbs, in constant time.
-core_lt_ct: fn(a: [U64], b: [U64], limbs: Int) -> U64 Never! {
+core_lt_ct: fn(a: [#Secret U64], b: [#Secret U64], limbs: Int) -> U64 Never! {
     ret := U64{0}
     done := U64{0}
     i := limbs
@@ -151,7 +151,7 @@ core_lt_ct: fn(a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// 1 when a has a bit set above bit `pos`, in constant time.
-core_bits_above: fn(a: [U64], pos: Int) -> U64 Never! {
+core_bits_above: fn(a: [#Secret U64], pos: Int) -> U64 Never! {
     seen := U64{0}
     loop i in 0..<a.len() {
         low: i * LIMB_BITS
@@ -165,13 +165,13 @@ core_bits_above: fn(a: [U64], pos: Int) -> U64 Never! {
 }
 
 /// x = a when `assign` is 1, in constant time.
-core_cond_assign: fn(x: &[U64], a: [U64], limbs: Int, assign: U64) Never! {
+core_cond_assign: fn(x: &[U64], a: [U64], limbs: Int, assign: #Secret U64) Never! {
     mask: ct_mask(assign)
     loop i in 0..<limbs -> x[i] = ct_select(mask, a[i], x[i])
 }
 
 /// Swap x and y when `swap` is 1, in constant time.
-core_cond_swap: fn(x: &[U64], y: &[U64], limbs: Int, swap: U64) Never! {
+core_cond_swap: fn(x: &[U64], y: &[U64], limbs: Int, swap: #Secret U64) Never! {
     mask: ct_mask(swap)
     loop i in 0..<limbs {
         t: x[i]
@@ -223,7 +223,8 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
 /// read in constant time. Callers write a value below a modulus of that many
 /// bytes, so the verdict is fixed by construction; a larger value gets
 /// BufferTooSmall, as from mbedtls.
-core_fits: fn(a: [U64], a_limbs: Int, out_len: Int) -> Bool Never! {
+#Scrub(Secret)
+core_fits: fn(a: [#Secret U64], a_limbs: Int, out_len: Int) -> Bool Never! {
     stored: a_limbs * LIMB_BYTES
     if stored <= out_len -> return true
     extra := U8{0}
@@ -407,7 +408,7 @@ core_get_mont_r2_unsafe: fn(n: Mpi) -> Mpi MpiError! {
 
 /// dest = table[index] of `count` entries of `limbs` limbs, reading every
 /// entry so the index never shows in the access pattern.
-core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int, index: U64) Never! {
+core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int, index: #Secret U64) Never! {
     loop i in 0..<count {
         mask: ct_mask(ct_bool(U64{i}.bit_xor(index)).bit_xor(U64{1}))
         loop j in 0..<limbs -> dest[j] = ct_select(mask, table[i * limbs + j], dest[j])
@@ -460,7 +461,8 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
 /// Whether a rejection-sampling draw is in [min, n), read in constant time.
 /// A rejected draw is thrown away and an accepted one says only that it is
 /// in range, so the verdict is public.
-draw_in_range: fn(x: [U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
+#Scrub(Secret)
+draw_in_range: fn(x: [#Secret U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
     core_uint_le_mpi(min, x, limbs).bit_and(core_lt_ct(x, n, limbs)) == U64{1}
 }
 
@@ -474,7 +476,7 @@ exp_mod_window: fn(ebits: Int) -> Int Never! { if ebits > 79 -> WINDOW_SIZE else
 /// is processed. Each window is chosen by a full table scan, so the time
 /// and access pattern depend only on the start. Left-to-right k-ary
 /// exponentiation, one bit per step (HAC 14.82).
-core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
+core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64], start_limb: Int, start_bit: Int, rr: [U64]) Never! {
     limb_index := start_limb
     bit_index := start_bit
     wsize: exp_mod_window(limb_index * LIMB_BITS)
@@ -529,7 +531,7 @@ core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [U64], start_l
 }
 
 /// 1 when any of a's first `limbs` limbs is not zero, in constant time.
-core_check_zero_ct: fn(a: [U64], limbs: Int) -> U64 Never! {
+core_check_zero_ct: fn(a: [#Secret U64], limbs: Int) -> U64 Never! {
     bits := U64{0}
     loop i in 0..<limbs -> bits = bits.bit_or(a[i])
     ct_bool(bits)
@@ -600,7 +602,7 @@ core_to_mont_rep_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs:
 /// x = a mod n for any a of a_limbs limbs, in n's an_limbs limbs, given
 /// rr = R^2 mod n: into Montgomery form by core_to_mont_rep_wide and out
 /// again, with no division.
-core_mod_wide: fn(x: &[U64], a: [U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
+core_mod_wide: fn(x: &[U64], a: [#Secret U64], a_limbs: Int, n: [U64], an_limbs: Int, mm: U64, rr: [U64], t: &[U64]) Never! {
     m := cipher.words(an_limbs)
     core_to_mont_rep_wide(m, a, a_limbs, n, an_limbs, mm, rr, t)
     core_from_mont_rep(x, m, n, an_limbs, mm, t)
@@ -642,7 +644,7 @@ core_div2_mod_odd: fn(x: &[U64], n: [U64], limbs: Int) Never! {
 /// 8 made readable): each step keeps one of u, v and v - u, halves another
 /// and drops the third, mirroring the moves on the cofactors q and r mod n;
 /// bitlen(a) + bitlen(n) steps reach the fixed point u = 0, v = gcd.
-core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [U64], a_limbs: Int, n: [U64], n_limbs: Int) Never! {
+core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [#Secret U64], a_limbs: Int, n: [#Secret U64], n_limbs: Int) Never! {
     an: if a_limbs > n_limbs -> n_limbs else -> a_limbs
     u := cipher.words(n_limbs)
     copy_limbs(u, a, an)
@@ -1402,7 +1404,7 @@ limbs_of: fn(x: Mpi, limbs: Int) -> [U64] Never! {
 /// |a| of any length enters Montgomery form by core_to_mont_rep_wide, so an
 /// a at or above n is reduced with no division; the result has n's limb
 /// count.
-exp_mod_from: fn(a: Mpi, ep: [U64], start_limb: Int, start_bit: Int, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
+exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: Mpi, rr: &Mpi) -> Mpi MpiError! {
     an: n.p.len()
     mont_r2(rr, n) ?? return Err(err)
     x := zeros(an) ?? return Err(err)
