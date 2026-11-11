@@ -368,16 +368,30 @@ parser_parse_code_module_after_name: fn(state: &JetParserState, modifiers: Parse
 // module's cap reaches its file through the module graph.
 parser_module_apply_cap: fn(state: &JetParserState, item: &&Item) -> Item {
     if item == .CodeModule(definition) {
-        loop marker in definition.markers {
-            if marker.name != MARKER_FX -> next
-            cap: parser_module_fx_cap(state, marker, definition.name) ?? return item.move()
-            updated := definition
-            updated.cap = Val(cap)
-            if definition.body == .Val(body) -> updated.body = Val(parser_module_body_caps(body.copy(), cap))
-            return Item.CodeModule{value: updated}
-        }
+        marker: parser_fx_cap_marker(state, definition.markers, "module") ?? return item.move()
+        cap: parser_module_fx_cap(state, marker, definition.name) ?? return item.move()
+        updated := definition
+        updated.cap = Val(cap)
+        if definition.body == .Val(body) -> updated.body = Val(parser_module_body_caps(body.copy(), cap))
+        return Item.CodeModule{value: updated}
     }
     item.move()
+}
+
+// The one `#FX` cap marker of a module, type or trait. A cap is one list: a
+// second `#FX` marker, written above the declaration or as an in-body `#FX:`
+// line, is E0999 as a repeated file cap is, so neither list drops silently.
+parser_fx_cap_marker: fn(state: &JetParserState, markers: [Marker], noun: String) -> Marker? {
+    found := Marker?{None}
+    loop marker in markers {
+        if marker.name != MARKER_FX -> next
+        if found == None {
+            found = Val(marker.copy())
+            next
+        }
+        parser_add_error_code(state, "E0999", marker.span, "`#FX` is already applied to this {noun}", "a cap is one list, so a second `#FX` marker can only repeat or disagree with the first", "merge both lists into one `#FX(…)` marker")
+    }
+    found
 }
 
 parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) -> ModuleCap? {
@@ -410,14 +424,11 @@ parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) 
 // (…)` line in the type's body, caps every method of the type. The parser
 // reads the cap; sema binds it to the methods, including trait impls written
 // apart from the type body, and a trait's cap to every impl of its methods.
-parser_type_fx_cap: fn(state: &JetParserState, markers: [Marker], type_name: String) -> ModuleCap? {
-    loop marker in markers {
-        if marker.name != MARKER_FX -> next
-        cap := parser_module_fx_cap(state, marker, type_name) ?? return None
-        cap.scope = "type"
-        return Val(cap)
-    }
-    None
+parser_type_fx_cap: fn(state: &JetParserState, markers: [Marker], type_name: String, noun: String) -> ModuleCap? {
+    marker: parser_fx_cap_marker(state, markers, noun) ?? return None
+    cap := parser_module_fx_cap(state, marker, type_name) ?? return None
+    cap.scope = "type"
+    Val(cap)
 }
 
 // Every function under the module takes `cap` ahead of the caps of the
@@ -696,12 +707,11 @@ parser_parse_generic_module_after_name: fn(state: &JetParserState, modifiers: Pa
     // An `#FX(…)` above the template caps every function of each instance,
     // as it does a code module's.
     generic := GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span), markers: modifiers.markers.copy()}
-    loop marker in modifiers.markers {
-        if marker.name != MARKER_FX -> next
-        cap: parser_module_fx_cap(state, marker, name_head.name) ?? break
-        generic.body = parser_module_body_caps(generic.body.copy(), cap)
-        generic.cap = Val(cap)
-        break
+    if parser_fx_cap_marker(state, modifiers.markers, "module") == .Val(marker) {
+        if parser_module_fx_cap(state, marker, name_head.name) == .Val(cap) {
+            generic.body = parser_module_body_caps(generic.body.copy(), cap)
+            generic.cap = Val(cap)
+        }
     }
     Item.GenericModule{value: generic}
 }

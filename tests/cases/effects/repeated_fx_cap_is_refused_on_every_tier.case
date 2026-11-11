@@ -1,0 +1,61 @@
+# A module's, type's or trait's cap is one `#FX` list. A second `#FX` marker
+# on the same declaration, written above it or as an in-body `#FX:` line, is
+# E0999 at the second marker on every tier, so its denial is never dropped
+# silently. One list holding both entries checks and runs the same on every
+# tier. type.jet is the G8 review's duplicate-cap probe.
+fixture: repeated_fx_cap_is_refused_on_every_tier/input
+env: NO_COLOR=1
+step: jet check type.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`#FX` is already applied to this type" # the second marker is refused
+stderr: ~ "type.jet:2:1" # at the second marker
+step: jet run --optimize=none type.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this type" # O0 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=basic type.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this type" # O1 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=full type.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this type" # O2 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet check module.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`#FX` is already applied to this module" # a module's cap is one list
+step: jet check inbody.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`#FX` is already applied to this type" # two in-body lines are two markers
+stderr: ~ "inbody.jet:3:5" # at the second line
+step: jet check trait.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`#FX` is already applied to this trait" # a trait's cap is one list
+step: jet check generic.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`#FX` is already applied to this module" # a generic module's cap is one list
+step: jet run --optimize=none module.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this module" # O0 refuses it
+step: jet run --optimize=basic module.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this module" # O1 refuses it
+step: jet run --optimize=full module.jet
+exit: 1
+stderr: ~ "`#FX` is already applied to this module" # O2 refuses it
+step: jet check within.jet
+exit: 0
+step: jet run --optimize=none within.jet
+exit: 0
+stdout: = "one list\n"
+step: jet run --optimize=basic within.jet
+exit: 0
+stdout: = "one list\n"
+step: jet run --optimize=full within.jet
+exit: 0
+stdout: = "one list\n"

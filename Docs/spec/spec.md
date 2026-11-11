@@ -2414,10 +2414,11 @@ cap also binds the lambdas written in its methods, the trait default bodies it
 inherits, its `Close` impl, its function-typed fields and calls through its
 trait-value fields. A function-typed field whose row reaches outside the cap
 is E0755 at the field, and each method that calls it is E0749. An
-`#FX: (...)` line in the body is the same cap. A type without `#FX` keeps its
-inferred rows unchanged. A public type's, trait's or module's cap is part of
-its package's published API: widening or removing it under a non-major
-release is E1218, and narrowing or adding one is compatible.
+`#FX: (...)` line in the body is the same cap. A declaration takes one cap:
+a second `#FX` marker on it, above it or in its body, is E0999. A type without
+`#FX` keeps its inferred rows unchanged. A public type's, trait's or module's
+cap is part of its package's published API: widening or removing it under a
+non-major release is E1218, and narrowing or adding one is compatible.
 
 A type's inferred row is everything a value of it can reach: its methods'
 solved rows, the rows written on its function-typed fields, and the inferred
