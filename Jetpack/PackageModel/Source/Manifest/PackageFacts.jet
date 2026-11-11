@@ -460,6 +460,11 @@ PackageFacts: struct {
     authority: PackageAuthority
     policy: PackagePolicy
     settings: [String: SettingDecl]
+    // `commands: { "fmt.check": true }`: the remembered `jet` flags, each
+    // a quoted `<command>.<flag>` key (unquoted here) and its value as
+    // written, in declaration order. The CLI checks them against its flag
+    // registry (Compiler/JetCli CommandSettings.jet).
+    commands: [ManifestEntry]{[ManifestEntry]{}}
     configs: [String]
     // Resolved file-backed Config paths, relative to the Package root.
     resolved_config_paths: [String]

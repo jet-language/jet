@@ -119,18 +119,31 @@ jet_cli_control: fn(name: String) -> JetCLIControlValue Never! {
     jet_cli_control_given(name, jet_cli_control_words())
 }
 
-// The control `name` given the command line `words` and this process's
-// environment.
-jet_cli_control_given: fn(name: String, words: [String]) -[Env]> JetCLIControlValue Never! {
+// The control `name` given the jet-owned command line `words` (its command
+// word included), this process's environment, and the settings files'
+// settings for that command.
+jet_cli_control_given: fn(name: String, words: [String]) -[FS, Env]> JetCLIControlValue Never! {
     control: jet_cli_control_named(name) ?? panic("`{name}` is not a compiler control")
-    jet_cli_control_resolve(control, words, [String]{}, controls_sys.get(control.variable))
+    jet_cli_control_resolve(control, words, jet_cli_control_settings(words), controls_sys.get(control.variable))
 }
 
-// The file the Value or Optional control `name` names given the command
-// line `words`, else `fallback` (its default file; an Optional control on
-// alone names it too).
-jet_cli_control_path: fn(name: String, words: [String], fallback: String) -[Env]> String Never! {
-    if jet_cli_control_given(name, words).value == .Text(path) -> return path.copy() // copy: the value is dropped here.
+// The words the settings files write for the compiler controls of the
+// command the command line `words` runs (CommandLayers.jet); none when they
+// hold none, or when they have a problem, which the front door refused that
+// command line for already.
+jet_cli_control_settings: fn(words: [String]) -[FS, Env]> [String] Never! {
+    command: jet_cli_settings_word(words) ?? return [String]{}
+    if jet_cli_command_flag_words(command, words, true) == .Words(found) -> return found
+    [String]{}
+}
+
+// The file the Value or Optional control `name` names for the command
+// `command` (`gc report`) given the words typed after it, else `fallback`
+// (its default file; an Optional control on alone names it too).
+jet_cli_control_path: fn(name: String, command: String, words: [String], fallback: String) -[FS, Env]> String Never! {
+    line := command.split(" ").to_list()
+    loop word in words -> line.push(word.copy()) // copy: the caller keeps its words.
+    if jet_cli_control_given(name, line).value == .Text(path) -> return path.copy() // copy: the value is dropped here.
     fallback.copy() // copy: the caller keeps its default.
 }
 
@@ -199,9 +212,10 @@ jet_cli_control_choices: fn(control: JetCLIControlSpec) -> [String] Never! {
 // `jet env vars [--command=COMMAND] [--json] [-- FLAGS]`: each compiler
 // control with its variable, its setting key, its value and the source that
 // gave it. With `--command`, only the controls COMMAND takes, as COMMAND
-// sees them with FLAGS typed on its command line; without it, every control
-// with no flag typed. A URL's user and password are never shown.
-jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, json: Bool) -[Env]> JetCLIPlan Never! {
+// sees them with FLAGS typed on its command line and the settings files
+// remembered for it; without it, every control with no flag or setting. A
+// URL's user and password are never shown.
+jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     usage: "write `jet env vars [--command=COMMAND] [--json] [-- FLAGS]`"
     command := String?{None}
     named := false
@@ -247,12 +261,17 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
     } else if flags.len() > 0 {
         return jet_cli_fail("E2104", "the flags after `--` are a command's, and `jet env vars` names no command", jet_cli_why("E2104"), "add `--command=COMMAND`", color, JET_DRIVER_EXIT_USAGE)
     }
+    // The front door refused a settings file's problem already.
+    settings := [String]{}
+    if command == .Val(word) {
+        if jet_cli_command_flag_words(word, flags, true) == .Words(words) -> settings = words
+    }
     values := [JetCLIControlValue]{}
     loop control in JET_CLI_CONTROLS {
         if command == .Val(word) {
             if !jet_cli_flag_takes(jet_cli_control_flag_row(control), word) -> next
         }
-        values.push(jet_cli_control_resolve(control, flags, [String]{}, controls_sys.get(control.variable)))
+        values.push(jet_cli_control_resolve(control, flags, settings, controls_sys.get(control.variable)))
     }
     if json -> return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, values))}\n", "", JET_DRIVER_EXIT_OK)
     jet_cli_done(jet_cli_env_vars_table(command, values), "", JET_DRIVER_EXIT_OK)

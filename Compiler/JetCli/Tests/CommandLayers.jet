@@ -1,0 +1,139 @@
+// The settings files (#6606): the user settings file and the nearest
+// package.jet's `commands:` block are read as layers, the user's first; a
+// relative control path resolves against its file's directory; a missing
+// file holds nothing; a malformed one is refused with its location.
+use {
+    layers_test_files: core.files
+    layers_test_process: core.process
+    layers_test_sys: core.sys
+    core.encoding.[Dyn]
+    jet_cli.[
+        JetCLICommandSettingLayer,
+        jet_cli_command_layers_at, jet_cli_command_settings_words, jet_cli_settings_controls,
+        jet_cli_settings_word, jet_cli_user_settings_file,
+    ]
+    jet_foundation.[Diagnostic]
+}
+
+// A fresh scratch directory for one test.
+command_layers_scratch: fn(name: String) -> String Never! {
+    root: "{layers_test_sys.temp_dir()}/jet-command-layers-{layers_test_process.current_pid()}-{name}"
+    if layers_test_files.exists(root) -> layers_test_files.remove_all(root) ?? panic("clear {root}: {err}")
+    layers_test_files.create_dir_all(root) ?? panic("command-layers scratch {root}: {err}")
+    root
+}
+
+// A setting's value as the test compares it: its text, its list joined with
+// commas, `true`/`false`, or `?` for anything else.
+command_layers_shown: fn(value: Dyn) -> String Never! {
+    if value == {
+        .Bool(on) -> if on -> "true" else -> "false"
+        .Text(text) -> text.copy() // copy: the value keeps its text.
+        .Array(items) -> {
+            shown := [String]{}
+            loop item in items -> shown.push(command_layers_shown(item))
+            shown.join(",")
+        }
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> "?"
+    }
+}
+
+command_layers_write: fn(path: String, text: String) Never! {
+    layers_test_files.create_dir_all(layers_test_files.dirname(path)) ?? panic("create the directory of {path}: {err}")
+    layers_test_files.write(path, text) ?? panic("write {path}: {err}")
+}
+
+// The layers `directory` and `config` give; a refusal fails the test.
+command_layers_read: fn(directory: String, config: String?) -> [JetCLICommandSettingLayer] Never! {
+    if jet_cli_command_layers_at(directory, config) == {
+        .Layers(layers) -> layers
+        .Refused(reports) -> panic("the settings files were refused with {reports.len()} reports: {reports[0].what}")
+    }
+}
+
+// The reports `directory` and `config` are refused with; layers fail the test.
+command_layers_refused: fn(directory: String, config: String?) -> [Diagnostic] Never! {
+    if jet_cli_command_layers_at(directory, config) == {
+        .Layers(layers) -> panic("the settings files were not refused: {layers.len()} layers")
+        .Refused(reports) -> reports
+    }
+}
+
+#Test("no settings file holds no settings") {
+    root: command_layers_scratch("none")
+    assert_eq(command_layers_read(root, Val("{root}/config")).len(), 0)
+    assert_eq(jet_cli_user_settings_file("/home/me/.config"), "/home/me/.config/jet/settings.jet")
+}
+
+#Test("the user file comes first, the nearest package wins, and a relative path is its file's") {
+    root: command_layers_scratch("both")
+    config: "{root}/config"
+    command_layers_write(jet_cli_user_settings_file(config), "// my defaults\ncommands: {{\n    \"fmt.check\": true,\n    \"check.trace\": \"user-trace.json\",\n}}\n")
+    command_layers_write("{root}/shop/package.jet", "name: \"shop\"\nversion: \"0.1.0\"\ncommands: {{\n    \"check.trace\": \"out/trace.json\",\n    \"run.deny\": [\"net\", \"exec\"],\n}}\n")
+    layers_test_files.create_dir_all("{root}/shop/src/deep") ?? panic("create {root}/shop/src/deep: {err}")
+    layers: command_layers_read("{root}/shop/src/deep", Val(config))
+    assert_eq(layers.len(), 2)
+    assert_eq(layers[0].source, jet_cli_user_settings_file(config))
+    assert_eq(layers[1].source, "{root}/shop/package.jet")
+    assert_eq(command_layers_shown(layers[0].settings[0].value), "true")
+    assert_eq(layers[0].settings[0].line, 3)
+    // A relative path is under its file's directory.
+    assert_eq(command_layers_shown(layers[0].settings[1].value), "{config}/jet/user-trace.json")
+    assert_eq(command_layers_shown(layers[1].settings[0].value), "{root}/shop/out/trace.json")
+    assert_eq(layers[1].settings[0].line, 4)
+    assert_eq(command_layers_shown(layers[1].settings[1].value), "net,exec")
+    // The package's trace replaces the user's; a list is never merged.
+    if jet_cli_command_settings_words("check", [String]{"check"}, layers) == {
+        .Words(words) -> assert_eq(words, [String]{"--trace={root}/shop/out/trace.json"})
+        .Refused(reports) -> panic("refused: {reports[0].what}")
+    }
+    if jet_cli_command_settings_words("fmt", [String]{"fmt"}, layers) == {
+        .Words(words) -> assert_eq(words, [String]{"--check"})
+        .Refused(reports) -> panic("refused: {reports[0].what}")
+    }
+}
+
+#Test("an off trace stays off, and an absolute path stays as written") {
+    root: command_layers_scratch("off")
+    command_layers_write("{root}/package.jet", "name: \"shop\"\ncommands: {{ \"check.trace\": \"off\", \"build.trace\": \"/var/trace.json\" }}\n")
+    layers: command_layers_read(root, None)
+    assert_eq(command_layers_shown(layers[0].settings[0].value), "off")
+    assert_eq(command_layers_shown(layers[0].settings[1].value), "/var/trace.json")
+}
+
+#Test("a package's other fields don't stop its commands block, and only the nearest package counts") {
+    root: command_layers_scratch("nearest")
+    command_layers_write("{root}/package.jet", "name: \"outer\"\ncommands: {{ \"fmt.check\": true }}\n")
+    command_layers_write("{root}/inner/package.jet", "name: \"inner\"\nnot_a_field: 1\n")
+    assert_eq(command_layers_read("{root}/inner", None).len(), 0)
+    assert_eq(command_layers_read(root, None).len(), 1)
+}
+
+#Test("a malformed settings file is refused with its place") {
+    root: command_layers_scratch("bad")
+    config: "{root}/config"
+    command_layers_write(jet_cli_user_settings_file(config), "colors: {{ \"fmt.check\": true }}\n")
+    command_layers_write("{root}/package.jet", "name: \"shop\"\ncommands: {{ fmt.check: true }}\n")
+    reports: command_layers_refused(root, Val(config))
+    assert_eq(reports.len(), 2)
+    assert_eq(reports[0].code, "E2104")
+    assert_eq(reports[0].what, "`colors:` in `{jet_cli_user_settings_file(config)}` isn't a settings field")
+    assert_eq(reports[1].code, "E1215")
+    assert_eq(reports[1].source_path ?? "-", "{root}/package.jet")
+    assert(reports[1].why.contains("commands"), "the package report names the commands block: {reports[1].why}")
+    relative: command_layers_refused(root, Val("relative/config"))
+    assert_eq(relative[0].what, "The user configuration directory `relative/config` is a relative path")
+}
+
+#Test("the settings word is the command a command line dispatches") {
+    assert_eq(jet_cli_settings_word([String]{"check", "--json", "main.jet"}) ?? "-", "check")
+    assert_eq(jet_cli_settings_word([String]{"--color=never", "fmt"}) ?? "-", "fmt")
+    assert_eq(jet_cli_settings_word([String]{"no-such-command"}) ?? "-", "-")
+    assert_eq(jet_cli_settings_word([String]{}) ?? "-", "-")
+}
+
+#Test("a compiler control's setting words are its reader's, the rest the front door's") {
+    words: [String]{"--trace=t.json", "--release", "-p", "server", "--keep-going"}
+    assert_eq(jet_cli_settings_controls(words, true), [String]{"--trace=t.json", "--keep-going"})
+    assert_eq(jet_cli_settings_controls(words, false), [String]{"--release", "-p", "server"})
+}

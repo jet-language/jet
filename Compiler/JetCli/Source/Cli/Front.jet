@@ -2501,7 +2501,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     // The program's words: everything after the first standalone `--`, or
     // every word after the file of the `jet <file>` shorthand (a `--` right
     // after that file still only separates).
-    separator: jet_cli_owned_end(argv)
+    separator := jet_cli_owned_end(argv)
     jet_argv := jet_cli_prefix(argv, separator)
     passthrough := [String]?{None}
     if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, if argv[separator] == "--" -> separator + 1 else -> separator))
@@ -2535,6 +2535,25 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     if jet_cli_takes_level_words(command) {
         argv = jet_cli_level_words(argv, separator)
         jet_argv = jet_cli_prefix(argv, separator)
+    }
+    // The flags the settings files remember for this command
+    // (CommandLayers.jet), after the words typed, or before the file of the
+    // `jet <file>` shorthand, whose later words are the program's. A compiler
+    // control's setting is left to its reader, which ranks it below the
+    // environment variable (Controls.jet).
+    if jet_cli_settings_word(jet_argv) == .Val(word) {
+        if jet_cli_command_flag_words(word, jet_argv, false) == {
+            .Refused(reports) -> return JetCLIPlan.Done{output: jet_cli_command_settings_output(reports, color)}
+            .Words(words) -> if words.len() > 0 {
+                at: jet_cli_shorthand_file(argv) ?? separator
+                remembered := jet_cli_prefix(argv, at)
+                loop item in words -> remembered.push(item.copy()) // copy: the settings keep their words.
+                loop item in jet_cli_tail(argv, at) -> remembered.push(item)
+                argv = remembered
+                separator = separator + words.len()
+                jet_argv = jet_cli_prefix(argv, separator)
+            }
+        }
     }
 
     // `--lib` and `--output` belong to the commands that produce those artifacts.

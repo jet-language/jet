@@ -10,7 +10,9 @@
 // `value` is how the flag is written: Bool the bare flag or `=off`; Value one
 // `=VALUE`; Optional the bare flag, `=off` or `=VALUE`; Repeated one `=VALUE`
 // per flag, appended within one command line. `choices` lists the values a
-// Value or Repeated control accepts; empty accepts any nonempty value.
+// Value or Repeated control accepts; empty accepts any nonempty value. `path`
+// marks a value that is a file path: a settings file's relative path is
+// resolved against the directory of the file that declares it.
 JetCLIControlSpec: struct {
     name: String
     variable: String
@@ -18,6 +20,7 @@ JetCLIControlSpec: struct {
     scope: String
     help: String
     choices: [String]{[String]{}}
+    path: Bool{false}
 }
 
 // The commands that compile a program, as a flag's `With` scope.
@@ -28,17 +31,17 @@ JET_CLI_CONTROL_OPTIMIZE_SCOPE: "build/run/test/inspect decisions"
 
 JET_CLI_CONTROLS: comptime { [JetCLIControlSpec]{
     {name: "keep_going", variable: "JET_KEEP_GOING", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Go on past the first failure through every phase, and report every failure"},
-    {name: "keep_going_report", variable: "JET_KEEP_GOING_REPORT", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Write the --keep-going failure census, one TSV row per failure, to PATH"},
+    {name: "keep_going_report", variable: "JET_KEEP_GOING_REPORT", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Write the --keep-going failure census, one TSV row per failure, to PATH", path: true},
     {name: "keep_going_skip", variable: "JET_KEEP_GOING_SKIP", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Leave ITEM out of the --keep-going collector; repeat for more"},
-    {name: "trace", variable: "JET_TRACE_FILE", value: JetCLIFlagValue.Optional, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing"},
+    {name: "trace", variable: "JET_TRACE_FILE", value: JetCLIFlagValue.Optional, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE; --trace=off streams nothing", path: true},
     {name: "trace_detail", variable: "JET_TRACE_DETAIL", value: JetCLIFlagValue.Value, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "What the trace shows: phases, or each function as well with functions", choices: [String]{"functions", "phases"}},
     {name: "phase_counters", variable: "JET_PHASE_COUNTERS", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_COMPILE_SCOPE, help: "Also print each trace counter on stderr"},
     {name: "opt_dump", variable: "JET_OPT_DUMP", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Show FUNCTION's IR before and after the optimizer's passes; repeat for more"},
     {name: "opt_disable", variable: "JET_OPT_DISABLE", value: JetCLIFlagValue.Repeated, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Skip the optimizer pass PASS; repeat for more"},
     {name: "opt_verify", variable: "JET_OPT_VERIFY", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Check each function with IR Lint after every optimizer pass"},
     {name: "opt_ssa_stress", variable: "JET_OPT_SSA_STRESS", value: JetCLIFlagValue.Bool, scope: JET_CLI_CONTROL_OPTIMIZE_SCOPE, help: "Move every SSA value out of SSA through a fresh slot"},
-    {name: "gc_trace", variable: "JET_GC_TRACE", value: JetCLIFlagValue.Optional, scope: "run/dev", help: "Record bounded automatic GC-promotion evidence; with gc report: Read the GC trace at PATH with --gc-trace=PATH"},
-    {name: "memory_ledger", variable: "JET_MEMORY_LEDGER", value: JetCLIFlagValue.Value, scope: "audit memory/fix memory", help: "Read the memory ledger at PATH"},
+    {name: "gc_trace", variable: "JET_GC_TRACE", value: JetCLIFlagValue.Optional, scope: "run/dev", help: "Record bounded automatic GC-promotion evidence; with gc report: Read the GC trace at PATH with --gc-trace=PATH", path: true},
+    {name: "memory_ledger", variable: "JET_MEMORY_LEDGER", value: JetCLIFlagValue.Value, scope: "audit memory/fix memory", help: "Read the memory ledger at PATH", path: true},
 } }
 
 // A control's flag: `--` and its name with dashes.

@@ -55,8 +55,11 @@ one exists instead of adding another spelling for the same job.
 Each compiler control is one flag, one setting and one variable, spelled once
 in [`CLIControls.jet`](../../../Compiler/JetFoundation/Source/Registry/CLIControls.jet).
 Its value is its default, then the command settings
-(`<command>.<name>`, such as `build.keep_going`), then its variable, then its
-flag typed on the command line: each replaces the one before. A repeated flag
+(`<command>.<name>`, such as `build.keep_going`, in the user settings file or
+the package's `commands:` block, as the CLI reference's "Remembered flags"
+section says), then its variable, then its
+flag typed on the command line: each replaces the one before. A relative path
+in a settings file is under that file's directory. A repeated flag
 adds its values within the one place that wins. A boolean variable is on with
 `1` or `true` and off with any other value; a boolean flag is on bare or with
 `=true`, off with `=off` or `=false`. A list variable separates its values with

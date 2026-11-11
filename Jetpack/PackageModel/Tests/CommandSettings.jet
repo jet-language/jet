@@ -1,0 +1,49 @@
+// The remembered `jet` flags of a package.jet `commands:` block and of the
+// user settings file (#6606): the keys and values as written, in order.
+use jet_pkg_model.[ManifestEntry, PackageFacts, pkg_package_command_settings, pkg_parse_user_settings]
+
+command_settings_shown: fn(entries: [ManifestEntry]) -> [String] Never! {
+    loop entry in entries -> "{entry.key} = {entry.value}"
+}
+
+#Test("a package's commands block keeps each quoted key and its value in order") {
+    text: "name: \"shop\"\nsettings: {{ cache_slots: Int = 1 }}\ncommands: {{\n    \"fmt.check\": true,\n    \"run.deny\": [\"Net\", \"FS\"]\n    \"test.color\": \"always\", // the CI log\n}}\n"
+    facts: PackageFacts.parse(text, "package.jet") ?? panic("the manifest parses: {err}")
+    assert_eq(command_settings_shown(facts.commands), [String]{"fmt.check = true", "run.deny = [\"Net\", \"FS\"]", "test.color = \"always\""})
+    assert(facts.settings.has_key("cache_slots"))
+    plain: PackageFacts.parse("name: \"shop\"\n", "package.jet") ?? panic("the manifest parses: {err}")
+    assert_eq(plain.commands.len(), 0)
+}
+
+#Test("a commands key must be quoted and written once") {
+    if PackageFacts.parse("name: \"shop\"\ncommands: {{ fmt.check: true }}\n", "package.jet") == {
+        .Ok(_) -> panic("an unquoted key was accepted")
+        .Err(error) -> assert(error == .InvalidValue(_, _))
+    }
+    if PackageFacts.parse("name: \"shop\"\ncommands: {{ \"fmt.check\": true, \"fmt.check\": false }}\n", "package.jet") == {
+        .Ok(_) -> panic("a repeated key was accepted")
+        .Err(error) -> assert(error == .Composition(_))
+    }
+}
+
+#Test("a package's commands block reads alone, whatever else the manifest holds") {
+    entries: pkg_package_command_settings("name: \"shop\"\nnot_a_field: 1\ncommands: {{ \"check.trace\": \"trace.json\" }}\n") ?? panic("the block reads: {err}")
+    assert_eq(command_settings_shown(entries), [String]{"check.trace = \"trace.json\""})
+    none: pkg_package_command_settings("name: \"shop\"\n") ?? panic("a manifest without the block reads: {err}")
+    assert_eq(none.len(), 0)
+}
+
+#Test("the user settings file holds only a commands block") {
+    entries: pkg_parse_user_settings("// my defaults\ncommands: {{ \"test.color\": \"always\" }}\n") ?? panic("the file parses: {err}")
+    assert_eq(command_settings_shown(entries), [String]{"test.color = \"always\""})
+    empty: pkg_parse_user_settings("// nothing yet\n") ?? panic("an empty file parses: {err}")
+    assert_eq(empty.len(), 0)
+    if pkg_parse_user_settings("name: \"shop\"\n") == {
+        .Ok(_) -> panic("a package field was accepted")
+        .Err(error) -> assert(error == .UnknownField(_))
+    }
+    if pkg_parse_user_settings("commands: {{ \"fmt.check\": true }}\ncommands: {{ \"fmt.check\": false }}\n") == {
+        .Ok(_) -> panic("a second commands block was accepted")
+        .Err(error) -> assert(error == .Composition(_))
+    }
+}

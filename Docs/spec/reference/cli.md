@@ -598,6 +598,41 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
+## Remembered flags
+
+A flag a command takes can be remembered, so it applies to every run of that
+command without being typed. Its setting key is the command's dispatch form
+with a dot for each space and the flag without its dashes, `-` written `_`:
+`fmt.check`, `test.serial`, `registry.publish.no_sign`, `check.trace`. Two
+files hold settings, both data only, in one `commands:` block of quoted keys:
+
+```jet
+commands: {
+    "fmt.check": true,
+    "check.trace": "out/trace.json",
+    "run.deny": ["net"],
+}
+```
+
+- The user settings file, `$XDG_CONFIG_HOME/jet/settings.jet` (else
+  `~/.config/jet/settings.jet`), holds only `commands:`. A relative
+  `XDG_CONFIG_HOME` is refused (E2104).
+- The `commands:` block of the selected package's `package.jet`: the
+  workspace member a typed `-p NAME` picks, else the nearest one at or above
+  the working directory. The packages above it are not merged in.
+
+A package's setting replaces the user's, and a flag typed on the command line
+replaces both; a list replaces a list, never merging with it. A setting is
+`true` or `false` for a switch, a string for a flag with a value, and a list
+of strings for a flag that repeats. A relative path a compiler control takes
+(`trace`, `keep_going_report`, `gc_trace`, `memory_ledger`) is resolved
+against the directory of the file that declares it. A compiler control's
+setting ranks below its environment variable, as `jet env vars --command=C`
+shows. A missing file holds no settings. A malformed file, an unknown key, a
+value of the wrong shape, or a flag that is typed each time (a permission, a
+destructive flag, or one that names what one run works on, E2117) is refused
+before the command does anything, each problem with its file and line.
+
 ## Jet-hosted `check`, `build`, `run`, `test`, `new`, and `fmt`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs

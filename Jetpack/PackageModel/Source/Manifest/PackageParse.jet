@@ -195,6 +195,7 @@ impl PackageFacts {
             "test" -> self.test_profiles = pkg_parse_test_profiles(pkg_record_body(value, "test"))
             "suites" -> self.test_suites = pkg_parse_test_suites(pkg_record_body(value, "suites"))
             MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
+            "commands" -> self.commands = pkg_parse_command_settings(value)
             "services" -> self.services = pkg_parse_services(value)
             MANIFEST_BLOCK_OUTPUTS -> {
                 parsed: pkg_parse_outputs(value)
@@ -239,7 +240,7 @@ pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
     Ok(if field == {
         "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
-        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "test" | "suites" -> true
+        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "test" | "suites" -> true
         else -> false
     })
 }
@@ -478,6 +479,53 @@ pkg_parse_settings: fn(value: String) -> [String: SettingDecl] PackageParseError
         if !pkg_is_ascii_identifier(key) -> return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
         if out.has_key(key) -> return Err(PackageParseError.Composition("`settings.{key}` is declared more than once"))
         out[key] = SettingDecl{ty: ty, default: default}
+    }
+    Ok(out)
+}
+
+// `commands: { "fmt.check": true, "run.deny": ["Net"] }`: each key is a
+// quoted `<command>.<flag>` name, kept unquoted, and each value is kept as
+// written; the CLI reads and checks both against its flag registry.
+pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseError! {
+    out := [ManifestEntry]{}
+    loop entry in pkg_record_entries(value, "commands") {
+        quoted: entry.key.len() >= 2 && entry.key.starts_with("\"") && entry.key.ends_with("\"")
+        if !quoted -> return Err(PackageParseError.InvalidValue{field: "commands", value: entry.key})
+        key: pkg_scalar(entry.key)
+        if key == "" || entry.value == "" -> return Err(PackageParseError.InvalidValue{field: "commands.{key}", value: entry.value})
+        out.push(ManifestEntry{key: key, value: entry.value.copy()}) // copy: the entry list is dropped here.
+    }
+    Ok(out)
+}
+
+// The user settings file (`settings.jet` in the user's Jet configuration
+// directory): data only, whose one field is `commands:`, read as
+// pkg_parse_command_settings reads it. A file without it holds no settings.
+pkg_parse_user_settings: fn(text: String) -> [ManifestEntry] PackageParseError! {
+    out := [ManifestEntry]{}
+    seen := false
+    loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
+        found: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField(entry))
+        if found.key != "commands" -> return Err(PackageParseError.UnknownField(found.key))
+        if seen -> return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        seen = true
+        out = pkg_parse_command_settings(found.value)
+    }
+    Ok(out)
+}
+
+// The `commands:` block of a `package.jet` text alone, the rest of the
+// manifest unread, so a command's remembered flags apply (or are refused)
+// whatever else the manifest holds; none when it has no such block.
+pkg_package_command_settings: fn(text: String) -> [ManifestEntry] PackageParseError! {
+    out := [ManifestEntry]{}
+    seen := false
+    loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
+        found: pkg_split_field(entry) ?? next
+        if found.key != "commands" -> next
+        if seen -> return Err(PackageParseError.Composition("`commands` is declared more than once"))
+        seen = true
+        out = pkg_parse_command_settings(found.value)
     }
     Ok(out)
 }

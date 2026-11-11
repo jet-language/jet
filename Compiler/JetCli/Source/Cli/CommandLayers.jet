@@ -1,0 +1,177 @@
+// The places that hold remembered flags (#6606), lowest first: the user
+// settings file, `settings.jet` in the user's Jet configuration directory,
+// then the `commands:` block of the selected package's `package.jet`: the
+// workspace member a typed `-p` names, else the nearest one at or above the
+// working directory, with no merge of the packages above it. A later place
+// wins, and a flag typed on the command line wins over both
+// (CommandSettings.jet). Both files are data only, read with the package
+// model's manifest reader: a missing file holds nothing, and one that is
+// present but unreadable or malformed is refused with its location.
+use {
+    layers_files: core.files
+    layers_json: core.encoding.json
+    layers_sys: core.sys
+    core.encoding.[Dyn]
+    jet_foundation.[Diagnostic, JET_CLI_COMMANDS, JET_CLI_HANDLERS, diagnostic_from_registry, jet_cli_control_of_flag]
+    jet_pkg_model.[ManifestEntry, PackageParseError, pkg_manifest_parse_diagnostic, pkg_package_command_settings, pkg_parse_user_settings]
+}
+
+// The settings layers of one command line, or every problem their files have.
+JetCLICommandLayers: enum {
+    Layers(layers: [JetCLICommandSettingLayer])
+    Refused(reports: [Diagnostic])
+}
+
+// The user settings file under the configuration directory `config`
+// (core.sys `config_dir`: $XDG_CONFIG_HOME, else `.config` in the home
+// directory).
+jet_cli_user_settings_file: fn(config: String) -> String Never! {
+    layers_files.join_all([String]{config, "jet", "settings.jet"})
+}
+
+// This process's settings layers for the typed command line `written`: the
+// user file and the selected package's.
+jet_cli_command_layers: fn(written: [String]) -[FS, Env]> JetCLICommandLayers Never! {
+    cwd: layers_files.cwd() ?? "."
+    directory: if jet_cli_option_value(written, "-p") == .Val(name) -> jet_cli_settings_member(cwd, name) ?? cwd else -> cwd
+    jet_cli_command_layers_at(directory, layers_sys.config_dir())
+}
+
+// The directory of the workspace member `name` that the workspace at
+// `directory` lists, if one does; the command itself refuses a name it
+// doesn't list.
+jet_cli_settings_member: fn(directory: String, name: String) -[FS, Env]> String? Never! {
+    root: layers_files.realpath(directory) ?? return None
+    if jet_cli_workspace_source(root, false) == .Index(index_path) {
+        if jet_cli_workspace_members(root, index_path, "settings", false) == .Members(members) {
+            loop member in members {
+                if member.name == name -> return Val(jet_cli_entry_join(root, member.path))
+            }
+        }
+    }
+    None
+}
+
+// The settings layers seen from `directory`, with the user configuration
+// directory `config` (None: there is no user file).
+jet_cli_command_layers_at: fn(directory: String, config: String?) -[FS]> JetCLICommandLayers Never! {
+    layers := [JetCLICommandSettingLayer]{}
+    reports := [Diagnostic]{}
+    if config == .Val(base) {
+        if !layers_files.is_absolute(base) {
+            reports.push(diagnostic_from_registry("E2104", None, "the user configuration directory `{base}` is a relative path", jet_cli_why("E2104"), "Set XDG_CONFIG_HOME to an absolute path, or unset it to use `~/.config`."))
+        } else {
+            file: jet_cli_user_settings_file(base)
+            if layers_files.is_file(file) {
+                if layers_files.read(file) == {
+                    .Err(error) -> reports.push(jet_cli_command_layer_unread(file, "{error}"))
+                    .Ok(text) -> if pkg_parse_user_settings(text) == {
+                        .Ok(entries) -> layers.push(jet_cli_command_layer(file, layers_files.dirname(file), text, entries))
+                        .Err(error) -> reports.push(jet_cli_user_settings_refused(file, error))
+                    }
+                }
+            }
+        }
+    }
+    if jet_cli_manifest_root(directory) == .Val(root) {
+        file: layers_files.join(root, "package.jet")
+        if layers_files.read(file) == {
+            .Err(error) -> reports.push(jet_cli_command_layer_unread(file, "{error}"))
+            .Ok(text) -> if pkg_package_command_settings(text) == {
+                .Ok(entries) -> if entries.len() > 0 -> layers.push(jet_cli_command_layer(file, root, text, entries))
+                .Err(error) -> {
+                    report := pkg_manifest_parse_diagnostic(file, error)
+                    report.source_path = Val(file.copy()) // copy: the report outlives this read.
+                    reports.push(report)
+                }
+            }
+        }
+    }
+    if reports.len() > 0 -> return JetCLICommandLayers.Refused{reports: reports}
+    JetCLICommandLayers.Layers{layers: layers}
+}
+
+// A settings file that is present but can't be read.
+jet_cli_command_layer_unread: fn(file: String, problem: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E2105", None, "couldn't read the settings in `{file}`: {problem}", jet_cli_why("E2105"), "Make `{file}` readable, or remove it.")
+}
+
+// The user settings file's own problem: it holds only `commands:`.
+jet_cli_user_settings_refused: fn(file: String, error: PackageParseError) -> Diagnostic Never! {
+    what: if error == .UnknownField(field) -> "`{field}:` in `{file}` isn't a settings field" else -> "`{file}` is malformed: {error.message()}"
+    diagnostic_from_registry("E2104", None, what, jet_cli_why("E2104"), "Write the remembered flags as `commands: {{ \"<command>.<flag>\": value }}`, the only field `{file}` holds.")
+}
+
+// One file's settings as a layer named by `file`: each value read as data
+// (true or false, a string, or a list of strings; anything else is kept as
+// null, which the resolver refuses), on the line its key is written. A
+// relative path a control takes is resolved against `base`, the directory of
+// the file that declares it.
+jet_cli_command_layer: fn(file: String, base: String, text: String, entries: [ManifestEntry]) -> JetCLICommandSettingLayer Never! {
+    settings := [JetCLICommandSetting]{}
+    loop entry in entries {
+        value := layers_json.parse(entry.value) ?? Dyn.Null
+        if jet_cli_command_setting_path(entry.key) && value == .Text(path) && path != "" && path != "off" && !layers_files.is_absolute(path) {
+            value = Dyn.Text(layers_files.join(base, path))
+        }
+        settings.push(JetCLICommandSetting{key: entry.key.copy(), value: value, line: jet_cli_command_setting_line(text, entry.key)}) // copy: the entry list keeps its key.
+    }
+    JetCLICommandSettingLayer{source: file.copy(), settings: settings} // copy: the caller keeps its file name.
+}
+
+// Whether the setting `key` (`<command>.<flag>`) names a compiler control
+// whose value is a path.
+jet_cli_command_setting_path: fn(key: String) -> Bool Never! {
+    parts: key.split(".").to_list()
+    control: jet_cli_control_of_flag("--{parts[parts.len() - 1].replace("_", "-")}") ?? return false
+    control.path
+}
+
+// The 1-based line of the quoted `key` in `text`, 0 when it isn't found.
+jet_cli_command_setting_line: fn(text: String, key: String) -> Int Never! {
+    at: text.find("\"{key}\"")
+    if at < 0 -> return 0
+    text.slice(0..<at).split("\n").to_list().len()
+}
+
+// The word that dispatches the command the jet-owned words `argv` (the
+// program name left out) run, whose settings apply: a group action's own
+// word (`publish`), `run` for the `jet <file>` shorthand; None for no command,
+// or a word no jet command has.
+jet_cli_settings_word: fn(argv: [String]) -[FS]> String? Never! {
+    if jet_cli_shorthand_file(argv) != None -> return Val("run")
+    positionals: jet_cli_positionals(argv)
+    if positionals.len() == 0 || !jet_cli_is_builtin(positionals[0]) -> return None
+    if positionals.len() > 1 && jet_cli_nested_command(positionals[0], positionals[1]) == .Val(found) {
+        handler: jet_cli_handler_index(JET_CLI_COMMANDS[found.group].actions[found.action].handler) ?? return Val(positionals[0].copy()) // copy: the argv keeps its word.
+        if !JET_CLI_HANDLERS[handler].keeps_group -> return Val(JET_CLI_HANDLERS[handler].dispatch_word.copy()) // copy: the registry keeps its word.
+    }
+    Val(positionals[0].copy()) // copy: the argv keeps its word.
+}
+
+// The words of `words` that are compiler control flags (`controls`), or the
+// rest. A control is always one `--flag` or `--flag=VALUE` word.
+jet_cli_settings_controls: fn(words: [String], controls: Bool) -> [String] Never! {
+    out := [String]{}
+    loop word in words {
+        if (jet_cli_control_of_flag(word.split("=").to_list()[0]) != None) == controls -> out.push(word.copy()) // copy: the caller keeps its words.
+    }
+    out
+}
+
+// The words this process's settings add to the command line of the command
+// `word` dispatches, given the words typed (`written`), or every problem the
+// settings have. With `controls`, only the compiler controls' words, which
+// their reader places below the environment (Controls.jet); without, every
+// other flag's, which the front door adds to the command line.
+jet_cli_command_flag_words: fn(word: String, written: [String], controls: Bool) -[FS, Env]> JetCLICommandSettingWords Never! {
+    layers: if jet_cli_command_layers(written) == {
+        .Refused(reports) -> return JetCLICommandSettingWords.Refused{reports: reports}
+        .Layers(found) -> found
+    }
+    if layers.len() == 0 -> return JetCLICommandSettingWords.Words{words: [String]{}}
+    if jet_cli_command_settings_words(word, written, layers) == {
+        .Refused(reports) -> JetCLICommandSettingWords.Refused{reports: reports}
+        .Words(words) -> JetCLICommandSettingWords.Words{words: jet_cli_settings_controls(words, controls)}
+    }
+}
