@@ -9183,6 +9183,33 @@ TargetDeniedEffect: struct {
     }
 }
 
+SpecifiedCaseUnnumbered: struct {
+    case_name: String
+    enum_name: String
+
+    impl Diagnostic {
+        code: "E1124"
+        meaning: "A case of a `#Specified` enum states no number"
+        detail: true
+        what: fn(self) -> String { "Case `{self.case_name}` of `{self.enum_name}` states no number." }
+        why: fn(self) -> String { "`#Specified` makes every case of `{self.enum_name}` state its number, so adding or moving a case renumbers no other." }
+        fix: fn(self) -> String { "Write the case's number, such as `{self.case_name} = 0`." }
+    }
+}
+
+SpecifiedWithoutNumbers: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1125"
+        meaning: "`#Specified` on a type whose cases have no numbers"
+        detail: true
+        what: fn(self) -> String { "`#Specified` is on `{self.name}`, whose cases have no numbers." }
+        why: fn(self) -> String { "`#Specified` makes every case of a numbered enum state its number, and only a `#Layout(U8)`-style or `#Layout(c)` enum numbers its cases." }
+        fix: fn(self) -> String { "Number the cases with a backing such as `#Layout(U8)`, or remove `#Specified`." }
+    }
+}
+
 RetiredKernelCrossing: struct {
     impl Diagnostic {
         code: "E1130"

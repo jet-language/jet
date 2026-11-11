@@ -99,7 +99,7 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Allow Arg Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Equatable Error FFI FX Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename Replayable Root SQL Scalar Scrub Shared Shield SingleUse Skip State Static Target Test Todo Track Transact Undo UnitFamily Unsafe Untagged
+; marker.rule: ABI Allow Arg Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Equatable Error FFI FX Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename Replayable Root SQL Scalar Scrub Shared Shield SingleUse Skip Specified State Static Target Test Todo Track Transact Undo UnitFamily Unsafe Untagged
 ; take: &&
 ; sigil: # $ & ... : := :> <:
 ; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> <> == > >= >> >>= ? ?. ?? | |> ||

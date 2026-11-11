@@ -3872,6 +3872,16 @@ are the site values `#here` and `#caller`; D-META-HASH1=A's `#line` and
 `#file` are the fields `#here.line` and `#here.file`. A `#here` parameter
 default is E2428, whose fix is `#caller`.
 
+**D-JAI-SMALL1=A — Four small checked conveniences** *(ratified 2026-10-17, card #5028)*:
+a `Set` of a small fieldless enum is stored as bits, with `.bits()` and a
+fallible `from_bits(n)`; `#Through` after a match arm's body runs the next
+arm's body too; `#As` on one field lets the struct pass where that field's
+type is expected; and `#Specified` makes every case of a numbered enum state
+its number: `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A case
+without a number is E1124, and `#Specified` on a struct or on an enum whose
+cases have no numbers is E1125. `#Specified` is built; the Set bits, `#Through`
+and `#As` are ratified and not yet implemented (card #5028).
+
 
 ### Low-level tier
 

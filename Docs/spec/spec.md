@@ -997,6 +997,12 @@ two cases with one number are E1122, and a case number that is not an integer
 literal is E0035. `#Layout(U8)` on a struct is E1105; `#Layout(c, U8)` remains
 the C ABI tag width of a `#Layout(c)` enum.
 
+`#Specified` on a numbered enum (`#Layout(U8)` … or `#Layout(c)`) makes every
+case state its number, so adding or moving a case renumbers no other
+(D-JAI-SMALL1=A): `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A
+case without a number is E1124, and `#Specified` on a struct or on an enum
+whose cases have no numbers is E1125.
+
 ## Fixed-size lists
 
 `[T#N]` refines a list to exactly `N` elements of type `T`. Destructuring must

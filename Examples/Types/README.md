@@ -15,6 +15,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [EnumBacking](EnumBacking.jet) — A payload-free enum names its backing integer with `#Layout(U8)`.
 - [EnumDerivedOrder](EnumDerivedOrder.jet) — Derived enum equality and ordering: different variants order by declaration position; the same variant compares its payload fields in order, recursing…
 - [EnumDot](EnumDot.jet) — leading-dot enum variant `.Variant`.
+- [EnumSpecified](EnumSpecified.jet) — `#Specified` makes every case of a numbered enum state its number, so a case added or moved later renumbers no other: these are on-disk values.
 - [Enums](Enums.jet) — Enums and exhaustive when.
 - [FloatToF32](FloatToF32.jet) — `F32{x}` narrows a Float to the nearest F32 and stops when `x` is out of F32's range; `F32.from_float(x)` reports that case as an Err instead.
 - [InBodyMarkers](InBodyMarkers.jet) — A declaration's markers may be written as lines inside its body: `#X: value` is the same marker as `#X(value)` above the declaration.

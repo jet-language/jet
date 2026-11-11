@@ -9,6 +9,10 @@
 // A case payload (E1120), a number outside the backing type (E1121) and a
 // number two cases share (E1122) are refused; a case number is an integer
 // literal (E0035), so the checks see every number.
+//
+// `#[Specified, Layout(U8)]` makes every case of a numbered enum state its
+// number, so adding or moving a case renumbers no other: a case without one
+// is E1124, and `#Specified` on a type without case numbers is E1125.
 use {
     jet_foundation.[
         Diagnostic,
@@ -22,6 +26,7 @@ use {
         jet_layout_integer_backing_max,
         jet_layout_integer_backing_min,
         jet_target_layout_enum_backing,
+        jet_target_layout_enum_c_tag,
     ]
     jet_parser.[
         parse_source,
@@ -30,7 +35,11 @@ use {
 
 sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     loop index in 0..<items.len() {
+        if items[index] == .Struct(definition) {
+            if sema_enum_numbers_marker(definition.type_markers, "Specified") == .Val(specified) -> diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "struct `{definition.name}`, which has no cases"))
+        }
         if items[index] == .Enum(definition) {
+            sema_enum_numbers_check_specified(definition, diagnostics)
             backing: jet_target_layout_enum_backing(definition) ?? next
             numbers: sema_enum_numbers_checked(definition, backing, diagnostics) ?? next
             methods: sema_enum_numbers_methods(definition, numbers, diagnostics) ?? next
@@ -39,6 +48,36 @@ sema_enum_numbers_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
             items[index] = Item.Enum{value: updated}
         }
     }
+}
+
+// E1124 for each case of a `#Specified` enum that states no number, E1125
+// when the enum numbers no case.
+sema_enum_numbers_check_specified: fn(definition: EnumDef, diagnostics: &[Diagnostic]) {
+    specified: sema_enum_numbers_marker(definition.type_markers, "Specified") ?? return
+    if jet_target_layout_enum_backing(definition) == None && jet_target_layout_enum_c_tag(definition) == None {
+        diagnostics.push(sema_enum_numbers_unnumbered_specified(specified, "enum `{definition.name}`, whose cases have no numbers"))
+        return
+    }
+    next_number := 0
+    loop variant in definition.variants {
+        if variant.discriminant_expr == .Val(expression) {
+            if sema_enum_numbers_literal(expression) == .Val(written) -> next_number = if written == 9223372036854775807 -> written else -> written + 1
+            next
+        }
+        diagnostics.push(sema_error("E1124", variant.name_span, "case `{variant.name}` of `{definition.name}` states no number", "`#Specified` makes every case of `{definition.name}` state its number, so adding or moving a case renumbers no other", "write the number: `{variant.name} = {next_number}`"))
+        next_number = if next_number == 9223372036854775807 -> next_number else -> next_number + 1
+    }
+}
+
+sema_enum_numbers_unnumbered_specified: fn(specified: Marker, subject: String) -> Diagnostic {
+    sema_error("E1125", specified.span, "`#Specified` is on {subject}", "`#Specified` makes every case of a numbered enum state its number, and only a `#Layout(U8)`-style or `#Layout(c)` enum numbers its cases", "number the cases with a backing such as `#Layout(U8)`, or remove `#Specified`")
+}
+
+sema_enum_numbers_marker: fn(markers: [Marker], name: String) -> Marker? {
+    loop candidate in markers {
+        if candidate.name == name -> return Val(candidate.copy())
+    }
+    None
 }
 
 // Every case's number in declaration order, or None after a diagnostic.
