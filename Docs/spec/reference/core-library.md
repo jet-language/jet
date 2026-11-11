@@ -309,12 +309,14 @@ failure as an item: `terminal8_line` is
 `(h: Int, w: Int)?`. `jet.runtime.log` holds the calling thread's logging
 cells (`level_load`, `filter_store`, …), `flush`, `process_exit` and
 `span_allocate` (`(id: Int, name: String)`), each `-[Log]>`, and the pure
-`metric_publish`. `jet.runtime.encoding` holds the pure codec-scope reads
-`coerce_now`, `coerce_emit` and the `text_cells_*` and `etf_strings_*` scopes.
+`metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
+`text_cells_*` and `etf_strings_*`.
 `jet.runtime.process` holds the signal subscription calls `signal_open`,
 `signal_close` and `signal_disposition` (`-[Exec]>`). Any package can call a
 binding, so a leaf whose caller must first prove a bound or a UTF-8 encoding
-(`core.encoding.__string_byte`, `__bytes_into_text`) has none and stays Core's.
+(`core.encoding.__string_byte`, `__bytes_into_text`), or that reads the clock
+or writes stderr outside the effect rows (the JSON coercion audit's
+`__coerce_now`, `__coerce_emit`), has none and stays Core's.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in

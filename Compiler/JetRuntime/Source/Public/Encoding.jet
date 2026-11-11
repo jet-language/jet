@@ -1,15 +1,8 @@
-// `jet.runtime.encoding` (#6615): the runtime's public clock and codec scope
-// functions the encoding modules are built on, in Jet types. Each member is a
-// runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime export
-// that is its one body. A member with no row is pure.
+// `jet.runtime.encoding` (#6615): the runtime's public codec scope functions
+// the encoding modules are built on, in Jet types. Each member is a runtime
+// binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
+// its one body. A member with no row is pure.
 encoding: module {
-    // The wall clock in milliseconds since the epoch (0 before it), as the
-    // JSON coercion audit reads it.
-    #Import(c) coerce_now: fn() -> Int = "jet_raw_json_coerce_now"
-
-    // Writes the coercion audit `line` to stderr.
-    #Import(c) coerce_emit: fn(line: String) = "jet_raw_json_coerce_emit"
-
     // Enters the thread's text-cells scope, answering the previous one,
     // which leaving restores.
     #Import(c) text_cells_enter: fn() -> Bool = "jet_rt_codec_text_cells_enter"

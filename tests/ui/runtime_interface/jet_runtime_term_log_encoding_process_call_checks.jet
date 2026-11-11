@@ -39,13 +39,12 @@ log_cells: fn(path: String) -[Log]> String {
 
 pure_reads: fn() -> Int {
     log.metric_publish("reads", 1)
-    enc.coerce_emit("audit")
     previous: enc.text_cells_enter()
     enc.text_cells_leave(previous)
     mode: enc.etf_strings_enter(2)
     enc.etf_strings_leave(mode)
     if term.stdio_fault("write") || term.stdout_terminal() || term.stderr_terminal() -> return 1
-    enc.coerce_now()
+    mode
 }
 
 signals: fn() -[Exec]> Int {
