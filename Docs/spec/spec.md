@@ -103,6 +103,12 @@ vocabulary](vocabulary.md).
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
+  `expand` runs at each site its `sites` names, and `target` is the record a
+  derive reads there: a struct's or enum's TypeInfo, a field's or variant's
+  FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
+  TypeInfo, a code module's ModuleInfo (PackageInfo's `name`, `identity`,
+  `types` and `functions` for that module), and a `.Block`'s text
+  (Examples/Metaprogramming/Reflection/MarkerSites.jet).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,

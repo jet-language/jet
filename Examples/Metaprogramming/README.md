@@ -73,6 +73,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.
 - [GeneratingMarker](Reflection/GeneratingMarker.jet) — A marker that writes code types its template `-[Meta.Generate]>`, the row of `Marker.expand`.
 - [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct without `#Layout` reports the bytes the compiler chose for it.
+- [MarkerSites](Reflection/MarkerSites.jet) — A marker's `expand` body runs at every site its `sites` names.
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.
 - [ReadOnlyLint](Reflection/ReadOnlyLint.jet) — A read-only lint is a marker whose `expand` row is `-[]>`: it reads the marked type and may warn, but writes no code.
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.

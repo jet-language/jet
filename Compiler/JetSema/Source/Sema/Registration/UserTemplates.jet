@@ -6,6 +6,7 @@
 // `expand_item_template_loops`.
 use jet_foundation.[
     CallLabel,
+    CodeModule,
     CtEnumArg,
     CtFloat,
     CtKey,
@@ -564,17 +565,31 @@ sema_user_rule_accept: fn(items: [Item], rule: String, expanded: [Item], generat
 sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
     items: graph.modules[module_index].program.items
     loop item in items {
-        if item == .Struct(definition) {
-            type_info := CtValue?{None}
-            loop marker in definition.type_markers {
-                if marker.negated -> next
-                rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-                if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
-                info: type_info ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
-                if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
-                sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
+        if item == {
+            .Struct(definition) -> {
+                type_info := CtValue?{None}
+                sema_user_rule_collect_type(graph, module_index, definition.name, definition.type_markers, type_info, generated, diagnostics)
+                loop field in definition.fields -> sema_user_rule_collect_member(graph, module_index, definition.name, "fields", field.name, "FieldInfo", field.serde_markers, type_info, generated, diagnostics)
+                loop method in definition.methods -> sema_user_rule_collect_member(graph, module_index, definition.name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> sema_user_rule_collect_member(graph, module_index, definition.name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
+                }
             }
+            .Enum(definition) -> {
+                type_info := CtValue?{None}
+                sema_user_rule_collect_type(graph, module_index, definition.name, definition.type_markers, type_info, generated, diagnostics)
+                loop variant in definition.variants -> sema_user_rule_collect_member(graph, module_index, definition.name, "fields", variant.name, "FieldInfo", variant.serde_markers, type_info, generated, diagnostics)
+                loop method in definition.methods -> sema_user_rule_collect_member(graph, module_index, definition.name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> sema_user_rule_collect_member(graph, module_index, definition.name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
+                }
+            }
+            .Impl(implementation) -> {
+                type_info := CtValue?{None}
+                loop method in implementation.methods -> sema_user_rule_collect_member(graph, module_index, implementation.type_name, "methods", method.name, "MethodInfo", method.markers, type_info, generated, diagnostics)
+            }
+            .CodeModule(code_module) -> sema_user_rule_collect_code_module(graph, module_index, code_module, generated, diagnostics)
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     // Function-site rules see a FunctionInfo and may emit any top-level item.
@@ -633,6 +648,104 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
     }
 }
 
+// A struct's or enum's own rules see its TypeInfo, built once for the type
+// and the rules on its members (`type_info`).
+sema_user_rule_collect_type: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, markers: [Marker], type_info: &CtValue?, generated: &[Item], diagnostics: &[Diagnostic]) {
+    items: graph.modules[module_index].program.items
+    loop marker in markers {
+        if marker.negated -> next
+        rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+        if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
+        info: type_info ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
+        sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
+    }
+}
+
+// A member's rules (a field, a variant or a method) see the member's own
+// record in its owner's TypeInfo, the one a derive reads: a FieldInfo for a
+// field or a variant, a MethodInfo for a method. A member the TypeInfo leaves
+// out (a computed field, a method of a trait impl) sees a handle naming it.
+sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String, list: String, member: String, kind: String, markers: [Marker], type_info: &CtValue?, generated: &[Item], diagnostics: &[Diagnostic]) {
+    items: graph.modules[module_index].program.items
+    loop marker in markers {
+        if marker.negated -> next
+        rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+        if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
+        info: sema_user_template_member_info(type_info, list, member) ?? sema_user_template_handle(kind, member)
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
+        sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
+    }
+}
+
+// A code module's rules see a ModuleInfo, PackageInfo's shape for one
+// module: its name and identity, the TypeInfo of each struct and enum and
+// the FunctionInfo of each function written in its body.
+sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule, generated: &[Item], diagnostics: &[Diagnostic]) {
+    items: graph.modules[module_index].program.items
+    module_info := CtValue?{None}
+    loop marker in code_module.markers {
+        if marker.negated -> next
+        rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+        if module_info == None -> module_info = Val(sema_user_template_module_info(graph, module_index, code_module))
+        info: module_info ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
+        sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
+    }
+}
+
+sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule) -> CtValue {
+    types := [CtValue]{}
+    functions := [CtValue]{}
+    if code_module.body == .Val(body) {
+        loop item in body {
+            if item == {
+                .Struct(definition) -> types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
+                .Enum(definition) -> types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
+                .Func(function) -> {
+                    if sema_user_template_function_info(function) == .Val(info) -> functions.push(info)
+                }
+                .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+    }
+    CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
+        NamedCtValue{name: "name", value: CtValue.Str{value: code_module.name}},
+        NamedCtValue{name: "identity", value: CtValue.Str{value: "{graph.modules[module_index].module_name}::{code_module.name}"}},
+        NamedCtValue{name: "types", value: CtValue.List{values: types}},
+        NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
+    }}
+}
+
+// The record named `member` in the `list` field ("fields" or "methods") of
+// a TypeInfo.
+sema_user_template_member_info: fn(type_info: CtValue?, list: String, member: String) -> CtValue? Never! {
+    info: type_info ?? return None
+    if info == .Struct(_, fields) {
+        loop field in fields {
+            if field.name != list -> next
+            if field.value == .List(values) {
+                loop value in values {
+                    if value == .Struct(_, entries) {
+                        loop entry in entries {
+                            if entry.name == "name" && entry.value == .Str(name) && name == member -> return Val(value.copy())
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// A reflection handle that carries only a name.
+sema_user_template_handle: fn(kind: String, name: String) -> CtValue Never! {
+    CtValue.Struct{type_name: kind, fields: [NamedCtValue]{NamedCtValue{name: "name", value: CtValue.Str{value: name}}}}
+}
+
 // One impl's markers: each rule body runs over the implementing type's
 // TypeInfo, or over a handle naming the type when the type has no
 // registered declaration here (`impl String -> Err`).
@@ -644,7 +757,7 @@ sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int,
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         if type_info == None {
             type_info = sema_user_template_type_info(graph, module_index, type_name)
-            if type_info == None -> type_info = Val(CtValue.Struct{type_name: "TypeInfo", fields: [NamedCtValue]{NamedCtValue{name: "name", value: CtValue.Str{value: type_name}}}})
+            if type_info == None -> type_info = Val(sema_user_template_handle("TypeInfo", type_name))
         }
         info: type_info ?? next
         expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
