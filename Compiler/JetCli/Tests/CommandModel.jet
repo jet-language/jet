@@ -10,8 +10,8 @@ use {
         jet_cli_not_built_page, jet_cli_plan, jet_cli_usage_page,
     ]
     jet_foundation.[
-        JET_BUILD_OPTIONS, JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_FORMS, JET_TEST_SETTINGS,
-        build_option_flag, test_setting_flag,
+        JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_FORMS, JET_TEST_SETTINGS,
+        build_option_flag_row, build_option_level_spelling, test_setting_flag,
     ]
     model_sys: core.sys
     model_files: core.files
@@ -83,8 +83,10 @@ command_model_listed_refusals: fn() -> [String] Never! {
     }
     loop spec in JET_CLI_FLAGS {
         if JET_CLI_RUN_PORTED_FLAGS.contains(spec.long) -> next
-        option_flag: spec.long.copy() // copy: the build-option lambda's own name.
-        if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
+        // A build option is ported on every command that takes it, and so is
+        // its short level spelling: the front door reads `-O2` as
+        // `--optimize=full` (jet_cli_level_words).
+        if build_option_flag_row(spec.long) != None || build_option_level_spelling(spec.long) != None -> next
         commands := [String]{}
         if jet_cli_flag_takes(spec, "run") -> commands.push("run")
         // `jet dev` watches by itself: `--watch` (`=on`/`=off`) is its own switch.
