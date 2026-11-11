@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99628,
+    "rev": 99634,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71325,6 +71325,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T20:20:51.501Z"
+        },
+        {
+          "n": 71,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). Denials are truthful beyond TLS. An inventory lists every host read that runtime or Core code performs under an effect other than its own: resolver reads such as /etc/hosts, pure runtime clock access, FFI and loader boundaries. Each one is classified (declared, ruled exempt by an owner decision, or fixed). No doc or diagnostic claims universal truthful denial until the inventory is complete. This does not wait on D-NET-HOSTREADS1's TLS fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T21:49:48.758Z"
         }
       ],
       "refs": [],
@@ -71335,9 +71344,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-11T21:49:12.575Z",
+      "updated": "2026-11-11T21:49:48.758Z",
       "updatedBy": "Main",
-      "criteriaLastN": 70
+      "criteriaLastN": 71
     },
     {
       "id": "c0q31aks",
@@ -89382,6 +89391,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T12:36:32.591Z"
+        },
+        {
+          "n": 12,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). After D-NET-HOSTREADS1 is ratified, the chosen option is built for all seven TLS host-ingress leaves (wall clock, OS entropy, CA bundle files and directories, and the rest the review lists). It covers propagation through TLS and HTTP errors, a denied override that never falls back to another bundle, callbacks and tasks, intersections with dependency sandboxes, and the caller, registry and docs cutover in one change. Seed-b5 shows today's gap: a local HTTPS client that denies FS, Rand and Env, or a scoped denial covering its CA file, still checks clean and returns 200. A server that denies Rand still draws entropy. The proof is that each of those probes is refused per the ratified option.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T21:49:44.360Z"
+        },
+        {
+          "n": 13,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). Before the chosen D-NET-HOSTREADS1 option is built or described as better, a dated adversarial design audit in Docs/audits checks the complete design with exercised or measured claims, and passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T21:49:45.513Z"
+        },
+        {
+          "n": 14,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). The D-NET-HOSTREADS1 implementation names its applicable-tier proof (O0, O1, O2, and web where applicable) and the outcome on targets with no clock, no entropy source or no filesystem, each proven by a case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T21:49:46.596Z"
+        },
+        {
+          "n": 15,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). If file-free sandboxed or embedded TLS is required, a scoped design proves separate precise entry paths or a complete provider API and lifetime design. A configuration value alone does not remove the conservative effects.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T21:49:47.688Z"
         }
       ],
       "refs": [
@@ -89398,9 +89443,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-11T20:51:56.744Z",
+      "updated": "2026-11-11T21:49:47.688Z",
       "updatedBy": "Main",
-      "criteriaLastN": 11
+      "criteriaLastN": 15
     },
     {
       "id": "c078tv7g",
@@ -194898,6 +194943,306 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T17:49:41.037Z"
+    },
+    {
+      "id": "D-NET-HOSTREADS1",
+      "cardId": "c0bbj6h3",
+      "group": "effects",
+      "title": "Which permission covers the host reads used by TLS?",
+      "situation": "HTTPS uses TLS to protect a connection. Jet's TLS code samples the clock, gets OS entropy, and can read environment variables and certificate files. Its host calls currently report Net, so denying FS, Rand or Env does not reject those TLS operations. This is a choice about the meaning of declared program effects, not a promise that the whole process makes no file or clock calls. The original draft recommended treating grants and denials differently inside the engine. This review instead recommends declaring the host effects normally. Beginners can still omit an authority list and use inference. Written ceilings become longer, but they do not need an engine-only permission rule. The alternatives below retain the same client and server workload.",
+      "gist": "Should TLS declare its host reads, or should Net cover them?",
+      "lesson": "An effect describes an operation the program may reach. A grant permits it; a denial prohibits it. TLS uses more than sockets: its default client also reads trust settings and certificates. We must decide whether Net includes those operations. Effect checking is not itself an OS sandbox or a ban on runtime housekeeping.",
+      "explainer": "",
+      "story": "Mia downloads a price list over HTTPS. Her package permits Net but denies files. She needs to know whether that excludes certificate files too, and how to limit secret paths without disabling certificate verification.",
+      "inWild": "// Deno documentation example, not executed in this review.\n// deno run --no-prompt --allow-net=example.com fetch.ts\nconst page = await fetch(\"https://example.com/\");\nconsole.log(page.status);\n// Network access is host-scoped; success and status depend on the server.\n// Deno's default roots can be embedded, not read from system files.\n// Source: https://docs.deno.com/runtime/reference/permissions/\n// Source: https://raw.githubusercontent.com/denoland/deno/main/ext/tls/lib.rs",
+      "detail": "Source scope is origin/dev plus the staged TlsLead-3rows patch to RuntimeEffectRows.jet. Initial source reads used origin/dev at 0d9e4b845ffd6d6afb8a7a7b910b72804911c472. During review it advanced to 5142789ba45286ed2c54763832210193c1bd7030, adding the split table. The staged patch adds removed_when; it was read, not applied or executed. Seed-b5 is the published probe compiler, not a compiler rebuilt from either revision. Future-option outcomes are proposed contracts, not implementation receipts.\n\nCore/Net/Tls.jet:836-855 reads SSL_CERT_FILE and SSL_CERT_DIR. Nonempty overrides replace distribution defaults. Otherwise six bundle paths are tried until roots load, then /etc/ssl/certs if none loaded. The directory loader at 810-828 enumerates files, not only hash names. CustomOnly PEM avoids this loader at runtime; path-based custom roots still read files. Static inference can include both branches.\n\nCore/Net/Tls.jet:620-628 seeds a context from 48 bytes of OS entropy. Client and server contexts use it. Core/Net/SSL/Defs.jet ssl_time samples the wall clock through the TLS host leaf. Generated CoreCallRows.jet:703-709 classifies seven TLS host leaves as Net: wall sample, entropy, file read, directory open/list/close, and environment read.\n\nThe later origin/dev row_splits table has five TLS-related symbols. The staged patch gives all five one removal condition, but some also encode non-TLS differences. Removing the TLS classification does not justify deleting wall-clock Time/pure, entropy Rand/pure or directory-close Read/Write splits. The rowSplitOutcomes table specifies all five symbols for each option. The staged condition also omits Env; the TLS inventory includes it.\n\nSeed-b5 checked Net-only clients, including deny FS and deny Rand/Env. Controlled localhost HTTPS runs returned 200 under those policies. Combining deny FS/Rand/Env with a function denial covering the actual CA file also returned 200. scoped-denied-live.trace:384-385 shows a 48-byte getrandom and that CA content open. These connections used certificate verification, not an insecure bypass. No example.com status was used as proof.\n\nThe server checked with Net, FS.Read and Time, including deny Rand. A live server under that denial served hello to curl trusting its generated certificate. server-live.trace:361-363 shows 48-byte entropy requests. The application read its certificate and key before passing text to server.tls. This current server path loads no client trust store; that says nothing about future mutual TLS.\n\nControls distinguish the meanings. An ordinary files.read under allow Net fails E0749. Reserved __host_read_bytes access fails E0067. A DB-row function can read a file, but its caller's !FS rejects it. Core's service declarations and Effects/Checks.jet:1803-1815 support that library rule, not an existing privileged kernel Net boundary. The original recommendation therefore needs more than a claim of reuse.\n\nPackage scoped denials fail E1221 today, so path examples use function rows. A dynamic files.read under !FS.Read(\"server.pem\") returned PermissionDenied. The equivalent TLS CA open succeeded. Runtime Authority.jet arms resource checks through scope publishers; TLS wiring and permission-error propagation are required work. Existing path checks document a check/open race needing kernel confinement.\n\nWritten allow acknowledges effects. The Net-only live client printed no notice; the no-authority client printed the network notice. Time.Wait needs no grant, but deny Time also denies Time.Wait and already fails E0749 today. Do not mistake that wait rejection for newly enforced certificate-clock authority.\n\nEvery option concerns this named TLS inventory, not all process syscalls. The trace also opened /etc/hosts during networking. Compiler, loader, allocator, resolver and native FFI boundaries need separate treatment before claiming complete confinement. Parsing a secret only as certificates does not make access, timing, errors or resource use harmless. This review does not certify secret erasure: no memory-lifetime proof ran.\n\nEach option shows the same GET and server in separate files, with a controlled matching certificate. Only E adds configuration arguments. Production URLs do not guarantee status 200. Denied CA overrides must not fall back silently; preserve permission errors through TLS and HTTP. Test directories, links, relative paths, working-directory changes, callbacks and task inheritance. No option may disable hostname/date checks or substitute deterministic production entropy.\n\nIn-memory roots can avoid runtime file and environment reads without proving a file-free static row. A server key remains an ordinary file read unless supplied in memory. Embedded targets missing trustworthy time, entropy or files need explicit inputs or honest unsupported-capability errors, never invented clocks or skipped verification. These Linux seed probes establish no applicable-tier parity.\n\nMigration for A touches TLS host leaves, declared TLS/HTTP rows and callers. It also affects service dependency lists, generated registries, split conditions, authority fixtures, diagnostics, examples and notices. Exact additions follow the call graph, not a blanket requirement for Env on every server. Beginners can still omit allow lists. No speed result or counted repository-wide migration estimate is claimed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Declare the host effects normally",
+          "detail": "This was option C in the author draft. The default client's written ceiling lists Net, Time, Rand, Env and FS.Read. Beginners can omit the ceiling and let inference report unacknowledged effects. Experts get ordinary grant and denial rules, with no TLS-only privilege. Proposed: Net alone fails E0749 for the default client; denied FS, Rand or Env rejects it. Scoped file denials build when not statically covered and are enforced on the actual TLS paths.",
+          "code": "// PROPOSED A: fetch.jet; run against a trusted localhost TLS endpoint.\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: allow Net alone or add deny FS/Rand/Env -> E0749.\n// A !FS.Read(\"secrets/\") function row builds for a dynamic CA path.\n// SSL_CERT_FILE inside secrets/ -> permission refusal before content read.\n// Written allow acknowledges effects; no default notice is promised.\n\n// PROPOSED A: serve.jet, a separate file.\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand -> E0749, not a running server.\n// The current server path loads no system CA bundle.\n",
+          "technical": "Reclassify actual TLS host ingress under ordinary Time, Rand.Draw, Env and FS.Read. Propagate the solved rows through Core rather than special-casing Net. Preserve Time.Wait separately. Route TLS file and directory ingress through the existing scope-publisher checks and preserve permission errors through HTTP.\n\nCost: more written grants and a full caller/registry/test cutover. A file-free configuration can still inherit a conservative FS row; precision requires separate entry paths or existing effect-polymorphic machinery, not pretending runtime branch choice is a static proof. Review new host-read dependencies when Core changes.\n\nI8: one effect mechanism for grants, denials, inference and scopes. Service-effect declarations remain the existing library abstraction; update their listed machine dependencies where needed. No engine-exclusive authority exemption is introduced."
+        },
+        {
+          "key": "B",
+          "name": "Cover engine reads for grants, not denials",
+          "detail": "This is the original recommendation, now an alternative. Net alone admits the engine reads, but FS/Rand/Env denials still reject them. Beginner grants stay short. Experts must understand two views of the same call: a covering root for ceilings and actual leaves for denials. These are proposed semantics, not today's service-effect behavior for Net.",
+          "code": "// PROPOSED B: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: add deny FS/Rand/Env -> E0749.\n// Ordinary user files.read still requires FS.Read.\n// Scoped denial covering SSL_CERT_FILE -> permission refusal.\n\n// PROPOSED B: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: add deny Rand -> E0749.\n",
+          "technical": "Retain both the protocol permission and actual host-effect provenance at each covered boundary. Denials, nested scopes and dependency sandbox checks must keep the latter through wrappers, callbacks and tasks. Explain output must show that provenance, even when Net acknowledges the grant. The read set must be bounded to protocol work; no arbitrary user read can borrow that coverage.\n\nCost is not established as one checker rule. Kernel roots and library service effects have different declaration paths today. This needs an owner-approved, generally expressible rule rather than a Core-only hook; its exact public boundary contract remains a pre-build review gate. Scoped enforcement and error propagation cost the same work as A. No performance advantage has been measured."
+        },
+        {
+          "key": "C",
+          "name": "Treat the reads as Net completely",
+          "detail": "This retains current TLS classification. Net permits the engine reads, and FS/Rand/Env denials do not apply to them. Beginner and explicit-grant paths stay short. Experts must accept that FS means declared program file operations, excluding this trust-store work. That is a coherent narrower contract if stated plainly, not proof of zero host file reads.",
+          "code": "// C: fetch.jet; today's authority behavior on seed-b5\npackage: { name: \"fetch\", authority: { allow: [Net], deny: [FS, Rand, Env] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Observed 200 with SSL_CERT_FILE pointing at the test CA.\n// A scoped denial covering that CA file also did not stop the open.\n\n// C: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time], deny: [Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Live variant served hello despite deny Rand; trace shows OS entropy.\n",
+          "technical": "Specify the exclusion explicitly and keep TLS host rows under Net. Retain the five TLS-related splits and replace the staged removal condition with an explicit retained-policy rationale. rowSplitOutcomes gives this option's action for every symbol. Low implementation cost is not zero work: document the boundary, add regressions and expose protocol-internal reads in tools.\n\nBest case: a narrow network service consumes a trust source without exposing arbitrary raw bytes to its caller. Cost: Net still permits reads of paths selected by CA environment variables. Parsing may fail after a secret file was read. FS and Rand denials cannot certify absence of these TLS operations."
+        },
+        {
+          "key": "D",
+          "name": "Expand Net into an inspectable grant set",
+          "detail": "Add a named Net host-read set that explain output expands. It contains Time, Rand.Draw, Env and FS.Read, and Net grants those rights normally throughout the package. This avoids an engine-only exception and keeps one-word grants. Denials still win. The price is broader authority: code holding Net can now read ordinary files too.",
+          "code": "// PROPOSED D: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed explain: Net includes Time, Rand.Draw, Env, FS.Read.\n// Add deny FS/Rand/Env -> E0749. Ordinary file reads are also granted.\n\n// PROPOSED D: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand -> E0749; !FS.Read on a key path also refuses it.\n",
+          "technical": "The named set is declaration metadata, not an extra grant or second runtime policy. Extend the canonical effect dependency relation to kernel protocol grants and display the transitive set in jet explain effects and machine-readable authority facts. Dependencies are fixed and reviewed, never inferred into a silently growing grant from an arbitrary implementation change. Denials inspect actual solved leaves using A's classification and scoped ingress.\n\nExpert ceilings cannot use Net while excluding its ordinary positive host rights except by explicit denials. A host-scoped Net grant must not turn into an unexplained unrestricted FS grant: explain output must expose that widening. This option deliberately chooses broad implied grants, unlike B's engine-only coverage. It requires owner approval for that changed meaning and the shared dependency relation."
+        },
+        {
+          "key": "E",
+          "name": "Declare a host-read ceiling on TLS configuration",
+          "detail": "Use A's actual effect rows and add a TLS configuration ceiling. A default System setting permits the standard host-read set within the caller's authority. An explicit list can narrow it, never grant rights the caller lacks. Beginners keep defaults; experts review each connection's settings. This is extra configuration, not a substitute for package denials. The API below is proposed, not present on seed-b5.",
+          "code": "// PROPOSED E: fetch.jet; new TLS ceiling argument, same GET\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http, tls: core.net.tls }\nrun: fn() {\n    cfg: tls.ClientConfig{host_reads: .Only([String]{\"Time\", \"Rand.Draw\", \"Env\", \"FS.Read\"})}\n    page: http.get(\"https://localhost:18443/\", tls: cfg) ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: package deny FS/Rand/Env -> E0749.\n// Remove FS.Read from cfg: trust-store access is refused at runtime.\n// !FS.Read on SSL_CERT_FILE also refuses it; neither list bypasses the other.\n\n// PROPOSED E: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key, host_reads: .Only([String]{\"Time\", \"Rand.Draw\"}))) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: package deny Rand -> E0749; config excluding Rand.Draw refuses setup.\n",
+          "technical": "Proposed TLSHostReads is an enum System or Only([String]); ClientConfig.host_reads defaults to System. Only entries are checked using canonical authority-right parsing and intersection, not a new permission matcher. Unknown or nongrantable entries are configuration errors before connection setup. Strings here describe existing rights; they are not code-level decision IDs.\n\nSystem resolves the fixed TLS host inventory; it never overrides package, task or function restrictions. Both modes keep conservative actual effect rows, so changing a value does not silently remove static obligations. Propagate the ceiling to every deferred handshake operation, including entropy and clocks, and to server context creation at bind. Key-file reads in the application remain outside this TLS ceiling.\n\nThis materially extends HTTP/TLS APIs and adds a per-connection restriction carrier. The existing config has trust selection but not this host-read field. It does not itself supply a missing embedded clock or entropy source. A capability-provider version would need a separately complete API and lifetime review; merely putting an Authority handle in an escaping config would conflict with today's scoped-handle rules. I8 requires this to remain an explicit narrower view of the one authority mechanism."
+        },
+        {
+          "key": "F",
+          "name": "Name TLS separately under Net",
+          "detail": "Add Net.TLS to the secure-operation rows, while retaining A's actual host leaves. Net still covers its descendant, so existing Net grants cover the protocol but not unrelated host reads. Beginners infer effects; experts may deny Net.TLS while keeping plaintext networking. This makes TLS visible but does not by itself solve the host-read question.",
+          "code": "// PROPOSED F: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: explain includes Net.TLS and actual host leaves.\n// Deny Net.TLS, FS, Rand or Env -> E0749.\n\n// PROPOSED F: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand or Net.TLS -> E0749; scoped CA policy is A's.\n",
+          "technical": "Register the protocol leaf and report it on TLS handshakes and stream operations. TCP transport still requires Net; granting only Net.TLS does not grant all sockets. Keeping Net plus Net.TLS is not two authorization mechanisms: ordinary ancestor/descendant coverage applies. Host reads retain their ordinary leaves and scope checks from A.\n\nA generic HTTP entry that can reach HTTPS conservatively carries Net.TLS even when a particular runtime URL is HTTP. Exact separation would require separate entry paths or a proven existing static specialization. This option adds useful protocol denial vocabulary but does not shorten the host grant list. Making Net.TLS imply host reads instead would choose B or D's additional coverage policy, not solve it by naming a leaf."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno offers runtime host/path permissions, explicit deny precedence, prompts, query APIs and permission audit logs. These are real deployment controls that static rows alone do not provide. Its documented permission boundary excludes some runtime-internal I/O, and its default Rust TLS root store is embedded Mozilla roots. Thus HTTPS is not evidence that Deno secretly reads an OS CA directory.",
+          "sources": [
+            "https://docs.deno.com/runtime/fundamentals/security/",
+            "https://docs.deno.com/runtime/reference/permissions/",
+            "https://raw.githubusercontent.com/denoland/deno/main/ext/tls/lib.rs"
+          ]
+        },
+        {
+          "lang": "WASI / Wasmtime",
+          "note": "A Wasm guest can use only linked host imports; WASI filesystem access is capability-based and restricts the files and directories supplied to it. This is stronger isolation than a source row by itself. TLS implemented inside the guest needs suitable imports; TLS supplied as a host service puts internal reads across that trust boundary. WASI does not settle Jet's naming policy.",
+          "sources": [
+            "https://docs.wasmtime.dev/security.html"
+          ]
+        },
+        {
+          "lang": "Pony / Austral",
+          "note": "Pony passes unforgeable object references as authority rather than relying on permission lists. Austral describes linear capability values, granular directory access and a root capability at entry. Their best case is explicit delegation to a narrow service or resource, including no access without a capability. Their trusted FFI wrappers still need auditing; reference capabilities for concurrency are not the same as object authority.",
+          "sources": [
+            "https://tutorial.ponylang.io/object-capabilities/object-capabilities.html",
+            "https://austral-lang.org/spec/spec.html#capability-based-security"
+          ]
+        },
+        {
+          "lang": "Koka / Effekt",
+          "note": "Koka infers effects and supports polymorphic rows and handlers, keeping much annotation out of ordinary code. Effekt offers contextual effect polymorphism with effects handled at the call site's lexical scope. Neither cited model is itself a filesystem deny-list sandbox. Their lesson is that a concise higher-level operation need not force every caller to handwrite a long list.",
+          "sources": [
+            "https://koka-lang.github.io/koka/doc/book.html#sec-effect-types",
+            "https://effekt-lang.org/docs/concepts/effect-polymorphism"
+          ]
+        },
+        {
+          "lang": "Java SecurityManager",
+          "note": "Historically it offered least-privilege checks with privileged library regions, allowing internal reads without granting callers arbitrary files. JEP 486 documents both that benefit's mechanism and its maintenance burden; it disabled the Security Manager in JDK 24. This is a warning about boundary complexity, not proof that permissions or B cannot work.",
+          "sources": [
+            "https://openjdk.org/jeps/486"
+          ]
+        },
+        {
+          "lang": "OCaml 5",
+          "note": "Effect handlers express modular control flow, concurrency and asynchronous I/O without requiring effect annotations everywhere. OCaml explicitly does not statically guarantee that all performed effects are handled; an unmatched operation raises Effect.Unhandled. These handlers are neither Jet denial rows nor an OS capability policy. Do not compare them as a failed attempt at the same sandbox.",
+          "sources": [
+            "https://ocaml.org/manual/5.3/effects.html#s:effects-unhandled"
+          ]
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Use ordinary host-effect rows first. Inference keeps the unwritten beginner path short, while explicit ceilings and denials share one meaning. The service-effect analogy does not justify privileged kernel Net boundaries. Explain output should expose actual TLS host dependencies under every option, not hide them to keep a notice short.",
+        "gains": [
+          "One grant and denial mechanism",
+          "TLS host dependencies remain visible",
+          "No engine-only authority privilege"
+        ],
+        "losses": [
+          {
+            "loss": "Explicit HTTPS ceilings need more rights.",
+            "mitigation": "Keep inference for beginners and show the missing rights with the call chain; do not recommend granting all rights to silence an error."
+          },
+          {
+            "loss": "Conservative rows can reject a file-free TLS configuration under deny FS.",
+            "mitigation": "State that limit; use separately checked file-free entry paths when required, without disabling verification or pretending a runtime branch is a static proof."
+          },
+          {
+            "loss": "Scoped TLS reads and permission errors need a real cutover.",
+            "mitigation": "Reuse the ordinary scope checks, preserve refusals through TLS and HTTP, and gate the implementation on focused runtime and tier evidence."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves concise grants and meaningful denials, but its engine-only privilege rule is not already implemented by kernel Net. A general boundary contract is missing."
+          },
+          {
+            "key": "C",
+            "reason": "It has the lowest code-change cost and a coherent service boundary, but excludes actual TLS reads from the denials reviewers want to enforce."
+          },
+          {
+            "key": "D",
+            "reason": "Inspectable implied grants are stronger than invisible exceptions, but Net would also authorize ordinary file and environment reads throughout the package."
+          },
+          {
+            "key": "E",
+            "reason": "A useful expert restriction, but it adds API and runtime state without replacing the actual effect rows or supplying embedded capabilities."
+          },
+          {
+            "key": "F",
+            "reason": "A useful protocol distinction, but it adds a name rather than resolving how host reads are authorized."
+          }
+        ],
+        "tradeoff": "This changes the original recommendation and lettering: original C is A, original A is B, and original B is C. It favors one checkable meaning over minimal explicit permission lists. No claim of performance superiority, complete sandboxing or completed implementation is approved."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude (Opus). Adversarial model family: GPT. Fresh agent: BallotHostReads. Fresh review: yes; claimReviews records each verdict and evidence, correcting stale exceptions, notice behavior and the service-effect analogy. Recommend ordinary rows, not the original engine privilege; future contracts remain unbuilt and require a passing audit."
+      },
+      "checkInstructions": "Validate this payload without writing Tower. A passing schema is not a passing implementation or an adversarial design audit. Post it only as an open policy choice with the evidence limits intact. AGENTS requires the chosen build direction to name a passing dated audit before construction.\n\nFor A, prove client failures under Net-only and deny FS/Rand/Env, and server failure under deny Rand. Exercise an in-memory trust path separately from the default system path. Test !Time carefully because it already rejects Time.Wait. Keep ordinary Net-only file reads rejected.\n\nFor scope enforcement, use a real CA under the denied path, require no content open, and retain the permission error through TLS and HTTP. Cover CA overrides, directories, symlinks, nested tasks and denial precedence without silent fallback. Test notices both with and without explicit allow; test explain output's actual dependencies.\n\nFor B or D, first approve and review the shared coverage contract under I8, including scopes and dependency sandbox intersection. For E, first review its exact API and carrier lifetime. For F, test plaintext versus TLS denial and conservative URL branches. For C, document and test the explicit internal-I/O exclusion.\n\nFor every selected option, update all affected Core rows, generated registries, authority examples, tests and docs in one cutover. Exercise every applicable tier and honest missing-capability outcomes. Do not build this review's proposed semantics merely because the ballot validator has no gaps.",
+      "surface": {
+        "gist": "Should TLS declare its host reads, or should Net cover them?",
+        "lesson": "TLS reads clocks, entropy and sometimes certificate files. Today those operations report Net, so file and random denials miss them. This is about program effects, not banning every process syscall. Beginners can omit permission lists and use inference. We recommend ordinary host-effect rows rather than an engine-only privilege rule.",
+        "trio": {
+          "current": {
+            "note": "Observed on a trusted local endpoint: the client still returned 200.",
+            "code": "authority: { allow: [Net], deny: [FS, Rand, Env] }\n// TLS still opened the test CA and obtained OS entropy.\n// Explicit allow acknowledged Net; no notice was printed."
+          },
+          "wild": {
+            "lang": "TypeScript / Deno",
+            "note": "Deno has host-scoped runtime permissions; its default CA roots can be embedded.",
+            "code": "// Documentation illustration, not executed here.\n// deno run --no-prompt --allow-net=example.com fetch.ts\nconst page = await fetch(\"https://example.com/\");\nconsole.log(page.status);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Ordinary host effects",
+            "gist": "Declare the reads; infer unwritten lists.",
+            "gains": [
+              "One checking rule"
+            ],
+            "losses": [
+              "Longer explicit ceilings"
+            ],
+            "proposed": {
+              "code": "// Proposed client ceiling\nauthority: { allow: [Net, Time, Rand, Env, FS.Read] }\n// deny FS/Rand/Env refuses the default client.\n// Server: Net, FS.Read, Time, Rand; deny Rand refuses it."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Engine-only coverage",
+            "gist": "Net grants reads; denials still see them.",
+            "gains": [
+              "Short grants"
+            ],
+            "losses": [
+              "New boundary rule"
+            ],
+            "proposed": {
+              "code": "// Proposed client\nauthority: { allow: [Net] }\n// deny FS/Rand/Env refuses TLS.\n// Server: Net, FS.Read, Time; deny Rand refuses it."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Complete coverage",
+            "gist": "Keep internal reads outside those denials.",
+            "gains": [
+              "Lowest migration cost"
+            ],
+            "losses": [
+              "Denials exclude TLS reads"
+            ],
+            "proposed": {
+              "code": "authority: { allow: [Net], deny: [FS, Rand, Env] }\n// Client runs today; internal reads still happen.\n// Server: Net, FS.Read, Time; deny Rand still runs."
+            }
+          },
+          {
+            "key": "D",
+            "name": "Inspectable implied grants",
+            "gist": "Net visibly grants host rights everywhere.",
+            "gains": [
+              "Short, inspectable grants"
+            ],
+            "losses": [
+              "Also grants ordinary file reads"
+            ],
+            "proposed": {
+              "code": "// Proposed client and server\nauthority: { allow: [Net] }\n// explain expands Time, Rand.Draw, Env, FS.Read.\n// Denials win, including on engine reads."
+            }
+          },
+          {
+            "key": "E",
+            "name": "Configuration ceiling",
+            "gist": "Narrow host reads per TLS configuration.",
+            "gains": [
+              "Connection-local control"
+            ],
+            "losses": [
+              "Extra API and state"
+            ],
+            "proposed": {
+              "code": "// Proposed, not today's API\ntls.ClientConfig{host_reads: .Only([String]{\"Time\", \"Rand.Draw\", \"Env\", \"FS.Read\"})}\n// Client/server package grants remain A's.\n// This ceiling narrows; it never overrides denials."
+            }
+          },
+          {
+            "key": "F",
+            "name": "Separate TLS leaf",
+            "gist": "Name TLS; keep actual host reads.",
+            "gains": [
+              "Can deny TLS specifically"
+            ],
+            "losses": [
+              "Does not simplify host grants"
+            ],
+            "proposed": {
+              "code": "// Proposed: A's client/server grants, plus a new denial\nauthority: { deny: [Net.TLS] }\n// Rejects TLS; does not promise plaintext-only specialization."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Inference keeps beginners' code short. Ordinary rows keep written permissions honest without an engine-only privilege. This changes the original recommendation.",
+          "gains": [
+            "One authority mechanism"
+          ],
+          "losses": [
+            {
+              "loss": "More explicit rights and conservative rows.",
+              "mitigation": "Use inference, explain missing rights, and separately check file-free paths when required."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Needs a general boundary contract, not a Core exemption."
+            },
+            {
+              "key": "C",
+              "reason": "Coherent internal-I/O exclusion, but weaker denials."
+            },
+            {
+              "key": "D",
+              "reason": "Net also grants ordinary file access."
+            },
+            {
+              "key": "E",
+              "reason": "Useful narrowing, but extra API does not replace rows."
+            },
+            {
+              "key": "F",
+              "reason": "Names the protocol, not its host authority."
+            }
+          ],
+          "tradeoff": "A longer written ceiling buys one checking rule; runtime scope enforcement still needs implementation."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T21:49:26.127Z"
     }
   ],
   "questions": [
@@ -198092,6 +198437,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T21:49:48.758Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#71 From the adversarial review of D-NET-HOSTREADS1 (sol-reviewe"
+    },
+    {
+      "at": "2026-11-11T21:49:47.688Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#15 From the adversarial review of D-NET-HOSTREADS1 (sol-reviewe"
+    },
+    {
+      "at": "2026-11-11T21:49:46.597Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#14 From the adversarial review of D-NET-HOSTREADS1 (sol-reviewe"
+    },
+    {
+      "at": "2026-11-11T21:49:45.513Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#13 From the adversarial review of D-NET-HOSTREADS1 (sol-reviewe"
+    },
+    {
+      "at": "2026-11-11T21:49:44.360Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#12 From the adversarial review of D-NET-HOSTREADS1 (sol-reviewe"
+    },
+    {
+      "at": "2026-11-11T21:49:26.127Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-NET-HOSTREADS1",
+      "note": "Which permission covers the host reads used by TLS?"
+    },
     {
       "at": "2026-11-11T21:49:13.877Z",
       "by": "Main",
