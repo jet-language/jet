@@ -285,7 +285,7 @@ class Host {
       host.dom = true;
       host.enter(() => host.rt.jet_ui_web_attach());
     }
-    const [argc, argv, envp] = host.place(args, environment);
+    const [argc, argv, envp] = host.place(args, hostZoneEnvironment(environment));
     host.enter(() => host.rt.jet_rt_host_arguments(BigInt(argc), BigInt(argv), BigInt(envp)));
     return host;
   }
@@ -1011,6 +1011,15 @@ function processArguments() {
 
 function processEnvironment() {
   return nodeProcess ? Object.entries(nodeProcess.env).map(([name, value]) => name + "=" + value) : [];
+}
+
+// The environment with `TZ` set to the host's time zone, Intl's resolved
+// zone, when it sets none: a page has no /etc/localtime, so this is how
+// core.time.host_zone means on the web what it means on Linux.
+function hostZoneEnvironment(environment) {
+  if (environment.some((item) => item.startsWith("TZ="))) return environment;
+  const zone = globalThis.Intl?.DateTimeFormat().resolvedOptions().timeZone;
+  return zone ? [...environment, "TZ=" + zone] : environment;
 }
 
 // Runs the program at `url` with the process's arguments and environment:

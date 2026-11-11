@@ -3453,7 +3453,11 @@ not match the zone return `TimeError`.
 `host_zone()` is the host's zone, by the rule glibc, Go and JavaScript follow:
 `TZ` without a leading `:` (a zone name or the path of a TZif file), else the
 zone file /etc/localtime (named `Local`), else UTC. An empty `TZ`, or one that
-does not load, is UTC.
+does not load, is UTC. On the web target the host sets `TZ` to the browser's
+or node's zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`, when the
+environment sets none, so `host_zone()` means the same there; the named zone
+loads from the zone database as on Linux, so a page with no file system gets
+UTC, as Linux does without one.
 `DateTime.in_host_zone()` is `in_zone(host_zone())`: the clock on the host's
 wall. The format patterns' no-pad flag (`%-H`, `%-I`, `%-M`, `%-S`, `%-d`,
 `%-m`, `%-j`) writes the field without its leading zeros, so

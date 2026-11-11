@@ -170,7 +170,8 @@ vocabulary](vocabulary.md).
   views, sub-second fields, `Duration` and `Period` arithmetic, rounding,
   replacement, checked formatting, and `until`/`since`; `in_zone` changes its
   view without changing the instant, and `in_host_zone` views it in
-  `time.host_zone()`: the zone `TZ` names, else /etc/localtime, else UTC
+  `time.host_zone()`: the zone `TZ` names, else /etc/localtime, else UTC; on
+  the web target the host's `Intl` zone stands in for an unset `TZ`
   (D-SCRIPT-LOCAL-CLOCK1). The format patterns' no-pad flag `%-H %-I %-M %-S
   %-d %-m %-j` drops the leading zero. `ZonedDateTime` adds explicit DST
   disambiguation, RFC 9557 round trips, transition queries, `start_of_day`,
