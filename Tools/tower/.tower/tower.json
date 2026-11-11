@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99506,
+    "rev": 99508,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -87162,7 +87162,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Parity: nested impl blocks accept everything a top-level impl does that a type body can hold (assoc types, constants, operator right-hand types, #Commutative, and `using` delegation if feasible). 2. Lint: a registered lint code with what/why/fix text and a UI snapshot. It is off by default and on under `jet check --style`, and it flags an `impl T` or `impl T.Trait` in the same file as `struct T` or `enum T` outside its body, unless an exception rule applies. 3. Fix: `jet fix --style` moves each flagged impl into the type body. Inherent methods become `fn` members and trait impls become nested `impl Trait { … }`, keeping comments and order. Re-check after the move, and skip it with a reason if checking fails. 4. Formatter keeps nested impls in place. 5. Sweep the whole tree with `jet fix --style` in collect-all mode, one commit per top-level tree. 6. One line of style guidance in Docs/spec/contributing/agent-engineering.md.",
       "checkSteps": null,
@@ -87171,6 +87171,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Every criterion met. The last was c6: the a0.0.44 admit compare showed golden and ui lost 0, and the one cases loss is rooted elsewhere (cf7dbdb374, fixed by G8Scope-18 under #6530 c7). c7 was removed as a paste-error duplicate of #6066 c11."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -87244,15 +87249,6 @@
           "at": "2026-11-11T16:15:32.727Z"
         },
         {
-          "n": 7,
-          "text": "D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main 2026-11-04 paste error: c7 holds a copy of #6066 c11 (D-TASK-WINDOW1), which my script picked up by mistake. That work is owned and tracked by #6066 c11. The intended #6561 criterion is c8.",
-          "at": "2026-11-04T17:31:08.285Z"
-        },
-        {
           "n": 8,
           "text": "An inherent impl that carries its own markers is not flattened into the type body, because its markers would become the type's markers. This covers markers above the impl, and #X: value lines inside it once #6562 lands. The lint's named exception rule (g) skips such an impl. A trait impl moves as a nested impl Trait { ... } that keeps its own markers where they were written, above it or inside it. A fixture covers both. Today the only marked impls are 18 #Target(OS.*) sites, already covered by exception rule (d); rule (g) applies to future code only. (D-MARKER-INBODY1 A, owner 2026-11-04: markers anywhere in the body.)",
           "status": "met",
@@ -87275,9 +87271,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T11:57:35.608Z",
-      "updated": "2026-11-11T16:15:32.727Z",
+      "updated": "2026-11-11T16:16:04.483Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 8,
+      "completedAt": "2026-11-11T16:16:04.483Z"
     },
     {
       "id": "c0gelll3",
@@ -197556,6 +197553,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T16:16:04.483Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ewbkcj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-11T16:16:01.248Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ewbkcj",
+      "note": "#7: Paste error from 2026-11-04: a copy of #6066 c11 (D-TASK-WINDOW1), which is owned and tracked there.; was [met]: D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks hold"
+    },
     {
       "at": "2026-11-11T16:15:32.727Z",
       "by": "Main",
