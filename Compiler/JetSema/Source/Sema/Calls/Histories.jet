@@ -90,9 +90,10 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     if type_args.len() != 1 -> return call_args
     // Core's `__variants` and `__make` have no default: a default of the
     // generic `__make` type would not specialize. An explicit strategy, or a
-    // command type with no derived strategy, passes both empty.
+    // command type with no derived strategy, passes both empty. A derived
+    // constructor is pure, as Core's `__make` row says.
     variants_text := "[String]{{}}"
-    make_text := "[fn(Int, [Int], [Bool], [String]) -> {type_name(type_args[0])} Never!]{{}}"
+    make_text := "[fn(Int, [Int], [Bool], [String]) -[]> {type_name(type_args[0])} Never!]{{}}"
     if !has_strategy {
         derived: sema_call_histories_derive(written, command_type, environment, program)
         if derived.unsupported != "" {

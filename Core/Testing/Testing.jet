@@ -581,11 +581,13 @@ HistoryDistribution: struct {
 
 // An explicit strategy: one immutable value with all five fields. `generate`
 // receives the HistoryRNG, `case_index` and `max_steps`; `rebuild` and
-// `valid` see the canonical case.
+// `valid` see the canonical case. The three callbacks are pure: a replayed
+// case draws only from the HistoryRNG, so every target that runs the
+// campaign runs them.
 HistoryStrategy: struct<Command> {
-    generate: fn(HistoryRNG, Int, Int) -> TypedHistoryCase<Command>?
-    rebuild: fn(HistoryCase) -> TypedHistoryCase<Command>?
-    valid: fn(TypedHistoryCase<Command>) -> Bool
+    generate: fn(HistoryRNG, Int, Int) -[]> TypedHistoryCase<Command>?
+    rebuild: fn(HistoryCase) -[]> TypedHistoryCase<Command>?
+    valid: fn(TypedHistoryCase<Command>) -[]> Bool
     bounds: HistoryBounds
     distributions: [HistoryDistribution]
 }
@@ -610,7 +612,7 @@ histories: fn<T>(
     __target: String{""},
     __unsupported: String{""},
     __variants: [String],
-    __make: [fn(Int, [Int], [Bool], [String]) -> T Never!],
+    __make: [fn(Int, [Int], [Bool], [String]) -[]> T Never!],
 ) -> TestComparison Err! {
     if seed < 0 -> return Err(testing_history_err("history seed is invalid"))
     if cases < 0 -> return Err(testing_history_err("history case bound is invalid"))
@@ -1239,7 +1241,7 @@ testing_history_artifact_id: fn(failure: Err) -> String Never! {
 // followed by one `:i`, `:b` or `:s` per payload field; `make` builds the
 // command from the row position and the payload values grouped by kind.
 // Every variant has weight 1.
-testing_history_derived: fn<T>(&&command_type: String, variants: [String], &&make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> HistoryStrategy<T> {
+testing_history_derived: fn<T>(&&command_type: String, variants: [String], &&make: fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> HistoryStrategy<T> {
     names := [String]{}
     kinds := [[String]]{}
     distributions := [HistoryDistribution]{}
@@ -1265,7 +1267,7 @@ testing_history_derived: fn<T>(&&command_type: String, variants: [String], &&mak
 // a uniformly chosen variant whose payload draws Int as -8 + below(17), Bool
 // as below(2) != 0 and String as "history-{below(17)}". Every operation after
 // the first depends on its predecessor.
-testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_steps: Int, command_type: String, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> TypedHistoryCase<T>? {
+testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_steps: Int, command_type: String, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> TypedHistoryCase<T>? {
     if max_steps <= 0 || names.len() == 0 -> return None
     case_seed: __history_rng_next(rng)
     local: __history_rng_new(case_seed)
@@ -1306,7 +1308,7 @@ testing_history_derived_generate: fn<T>(rng: HistoryRNG, case_index: Int, max_st
     testing_history_derived_rebuild<T>(case, names, kinds, make)
 }
 
-testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> TypedHistoryCase<T>? {
+testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -[]> T Never!) -> TypedHistoryCase<T>? {
     commands := [T]{}
     loop operation in case.operations {
         choice := -1
