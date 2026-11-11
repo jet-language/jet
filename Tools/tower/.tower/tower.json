@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99518,
+    "rev": 99519,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63373,6 +63373,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T16:05:40.141Z"
+        },
+        {
+          "n": 115,
+          "text": "Derived codecs work across modules. Found by G1Lead4 porting scaling tools on 2026-11-11 (a0.0.44): (1) a derived encode() is private to its declaring module (E0605 when another module calls it), so Tools write tree-building workarounds (receipt_tree/config_tree in the scaling Gate); (2) derivation fails for a field whose type is declared in another file (enqueue's Planned{config: Dyn}); (3) encode drops None fields with no way to keep them as null. Fix: a derived codec has the visibility of its type; field types from any imported module derive; and the None policy is one documented rule (omit or null) with a typed option for the other where JSON needs it. Proof: a multi-module example with a golden at O0, O1 and O2 that encodes and decodes a type whose fields come from two other modules, and UI snapshots for any refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:27:10.971Z"
         }
       ],
       "refs": [],
@@ -63383,12 +63392,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-11T16:05:40.142Z",
+      "updated": "2026-11-11T17:27:10.971Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 114
+      "criteriaLastN": 115
     },
     {
       "id": "c0h4r83r",
@@ -197600,6 +197609,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:27:10.971Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iuv3zr",
+      "note": "#115 Derived codecs work across modules. Found by G1Lead4 porting"
+    },
     {
       "at": "2026-11-11T17:27:00.305Z",
       "by": "Main",
