@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99031,
+    "rev": 99045,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56554,6 +56554,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed ScriptAPI-4/5/6 (c36, c39, c31, c32 and c40 met), G8Fix-7b and 8b (the seed-tool halves of c37 and c38) and ScriptAPI-7 (c26b) (e75850d064..c2cecce162). c26 stays open: ScriptAPI-7's toolchain: embed breaks 4 selfhost_terminators jet_lexer cases (E0945 once a case copies JetFoundation out of the tree); ScriptAPI stages the fix-forward. c29, c37 and c38 close with the twins-adoption SUB."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "t16a landed ScriptAPI-1 (c34), ScriptAPI-2 (c35), and the Core halves of G8Fix-7r (c37 and c29: String trim_newlines, first_lines, last_lines, has_line_prefix, has_line, tsv_records) and G8Fix-8 (c38: core.files list_dir(matching:), canonicalize, symlink(replace:), append and the rest) (8327f5ae47..e75850d064). c29, c37 and c38 stay open until the twins use them (the twins SUB after t17)."
@@ -57020,20 +57025,20 @@
         {
           "n": 31,
           "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. File operations a script can call without per-call failure handling where the original keeps going (copy, copy_dir, remove_all, create_dir_all, symlink, canonicalize). 3 tokens per call, 18 on streamb10. The design must square this with the reasoning bar's rule that every failure path is visible at the call (for example, a scoped best-effort mode that reports what failed), because a silent ignore would lose that bar.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T18:18:18.808Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). Scripts call the file operations without per-call failure handling, and the twins use them.",
+          "at": "2026-11-11T01:09:50.130Z"
         },
         {
           "n": 32,
           "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. `process.fail(code, message)`: print the message to stderr and exit with the code in one call. It saves 3 tokens per use.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T18:18:22.068Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). process.fail(code, message) prints to stderr and exits; the twins use it.",
+          "at": "2026-11-11T01:09:51.823Z"
         },
         {
           "n": 33,
@@ -57065,11 +57070,11 @@
         {
           "n": 36,
           "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): running a command and using its output costs 1224 tokens in 20 hand-written wrapper fns (git, runs, runs_quiet, output, quiet_output, status, into…), plus argv list literals at every call. Core gains one command spelling that takes the whole command line as a checked text value with `{…}` holes (each hole one argv element, never shell-split; a D-TEXTHEAD-HOLES1 text kind), with the result giving status, stdout with the trailing newline trimmed, and stdout lines, and a plain-call form for inherited stdio. Each twin drops its wrappers and argv lists. Measured by PortBars on all nine entries, with no parity loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T18:28:08.994Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-4. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). Core gains the command-and-output calls the twins hand-wrote (git/run/output wrappers); the twins use them, and the PortBars checks pass.",
+          "at": "2026-11-11T01:09:46.771Z"
         },
         {
           "n": 37,
@@ -57092,20 +57097,20 @@
         {
           "n": 39,
           "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): failure handling costs 2583 tokens: 228 `??` arms (1368), 78 term.eprint calls (483) and 20 print-and-exit fns (732). The API half, with c31 and c32: process.fail, and read/list/stat forms that take the default in the call (`files.read_or(path, \"\")`), so a script states its fallback once per call without an arm. Automatic propagation already covers the rest (c35).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T18:34:42.413Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). process.fail and the failure-handling half are built and used by the twins in place of the print-and-exit fns.",
+          "at": "2026-11-11T01:09:48.334Z"
         },
         {
           "n": 40,
           "text": "Owner instruction 2026-11-10 ~13:35 (\"provide excellent APIs that cover most use cases so when syntax can't get shorter maybe logic can so that a long script could become a minor call to a corelib function\"): find the multi-line blocks that recur across the nine twins and the in-repo scripts (git status, diff, apply and commit sequences; the patch-and-land flow; tree comparison; TSV and report emission; lock and slot handling; retries with timeouts) and give each common one a Core call that does it whole, with a #Test, docs and a golden on O0/O1/O2. Each twin replaces its block with the call. Report, per entry, the tokens the block cost and what the call costs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T18:34:43.974Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-6. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). The multi-line blocks that recur across the twins and the in-repo scripts are single Core calls, and the twins use them.",
+          "at": "2026-11-11T01:09:53.479Z"
         },
         {
           "n": 42,
@@ -57127,7 +57132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-10T23:56:43.659Z",
+      "updated": "2026-11-11T01:10:02.022Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -62519,6 +62524,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed G8Fix-6 (e75850d064..c2cecce162): the c112 consumer half (HTTP server, HTTP client and the TLS record reader read through read_into). c112 stays open for its paired two-program cell (read(4096) loop against read_into) in the measurement manifest, with read_into strictly winning. The memory.mjs tool was left out (ScriptPairing) and needs a Jet twin or a Jet-only measurement."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "t16a landed G8Fix-5 (8327f5ae47..e75850d064): c112 first half, read_into(buffer, limit) on TCPStream, UnixStream, TLS streams and FileReader, with golden Examples/Network/ReadInto. Tools/perf/read-into/memory.mjs was left out (ScriptPairing); it is saved unlanded in G8Fix's lane. c112 stays open for its second half."
@@ -63565,7 +63575,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:18:41.600Z",
-      "updated": "2026-11-10T23:56:44.720Z",
+      "updated": "2026-11-11T01:10:03.251Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -72774,6 +72784,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed TlsLead-6151c17 (c17 met), TlsLead-6151c23 (c24 met; c23 stays open: the Calls/Core.jet E0510 host-leaf gates remain until #6615 c5) and TlsLead-6151c52 (e75850d064..c2cecce162). c52 isn't met yet: its ffi and export case lines had red rows. Lander2 traced them to 4 selfhost_terminators jet_lexer cases broken by ScriptAPI-7 (EffectVocabulary's embed_file of toolchain:Compiler/Prelude/Effects.jet gives E0945 when a case copies JetFoundation out of the tree) and a musl race in cffi concurrent-bridges that passes alone. c52 is met when ScriptAPI's fix-forward lands and both lines pass."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-FLOAT-INT1 was ratified A on 2026-11-08, so c46 (Type{value} conversions) and c51 are unblocked. Owner gate (2026-11-06): c14, c15, c17, c18, c29, c30, c35, c36 wait for one plain owner question per feature (package-private helpers, layout and lazy lowering, trait-bound format and decode, declaration facts); none is drafted yet."
@@ -72974,11 +72989,11 @@
         {
           "n": 17,
           "text": "(from #6156 Give every package the lazy-lowering and layout rules Core g) A user package's unreached function is not lowered (a build-trace or IR test).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:51:20.357Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB TlsLead-6151c17. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). build_entry/dependency_bodies_lower_only_when_reached shows with JET_TRACE_DETAIL=functions ir.function events that a dependency's unreached function is not lowered, for jet build at O0 and jet run at O2.",
+          "at": "2026-11-11T01:09:43.305Z"
         },
         {
           "n": 18,
@@ -73019,11 +73034,11 @@
         {
           "n": 24,
           "text": "(from #6158 Core follows the same #Unsafe and secret rules as packages) The #Unsafe audit list (UnsafeObligations) includes the new Core regions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-30T07:57:38.583Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB TlsLead-6151c23. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). The new Core regions (expert byte projections, argon2id, the vault unlock helpers) are #Unsafe functions that the unsafe ratchet (UnsafeObligations) lists.",
+          "at": "2026-11-11T01:09:45.023Z"
         },
         {
           "n": 26,
@@ -73196,7 +73211,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-10T22:17:35.074Z",
+      "updated": "2026-11-11T01:10:00.343Z",
       "updatedBy": "Main",
       "criteriaLastN": 52
     },
@@ -74212,7 +74227,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Make Prelude Effects.jet the single source. Generate every other view from it (or delete it), with a generator check that fails on drift. Migrate the callers of the removed copies.",
       "checkSteps": null,
@@ -74547,11 +74562,11 @@
         {
           "n": 35,
           "text": "(split from c6) D-ROUTE-METHOD1=A: a route with a Custom HTTP method checks and serves through `mux.custom(token, path, handler)`, `router.custom(token, path, handler)` and the `#Server.Custom(token, path)` member mark, all lowered through the existing route table from Method.Custom. Static tokens are checked while building and dynamic mux tokens at registration, by one shared token validator; the exact case is kept, and only exact standard tokens are refused, each refusal with a registered code and a UI snapshot. Extension methods and CONNECT render under OpenAPI 3.2 additionalOperations. Proof: the ballot's example (GET and PURGE on /cache/:key, by mux and by #Server.Custom) runs with golden output on o0, o1 and o2, and its tests cover the refused standard token, an invalid token and case preservation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T21:20:17.622Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB G8Fix-10. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). mux.custom, router.custom and #Server.Custom(token, path) serve custom methods through the route table. One token validator gives E2808 jet.RouteMethodTokenRefused (UI snapshots). Route paths accept String or Path through one conversion. Examples/Network/HTTP/HTTPCustomMethods passes on o0/o1/o2.",
+          "at": "2026-11-11T01:09:39.505Z"
         },
         {
           "n": 36,
@@ -74589,9 +74604,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-10T23:56:29.520Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 38
+      "updated": "2026-11-11T01:09:57.070Z",
+      "updatedBy": "agent",
+      "criteriaLastN": 38,
+      "completedAt": "2026-11-11T01:09:57.070Z"
     },
     {
       "id": "c0rqt0kq",
@@ -75419,11 +75435,11 @@
         {
           "n": 38,
           "text": "(was #4381) [#4355] Source-qualified Core web/browser types unify with their builtin twins, and WebFormActionError carries #Error. The web/browser corpus passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:23:06.003Z"
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB G8Fix-11. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). Source-qualified Core web types unify with their builtin twins (tests/run/Web/WebSourceQualifiedTwins on o0/o1/o2), and WebFormActionError carries #Error. tests/conformance/corpus/core/web checks clean on 230 of 230 files (base: 105).",
+          "at": "2026-11-11T01:09:41.465Z"
         },
         {
           "n": 39,
@@ -76362,7 +76378,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T00:43:44.530Z",
+      "updated": "2026-11-11T01:09:41.465Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -95811,6 +95827,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed TlsLead-72 (e75850d064..c2cecce162): B5 part 1, the timing admission (jet_rt_timing_admit before entry, refusal with the reason on unconfirmed hosts), __timing_host, E0744 jet.FixedTimingUnconfirmedTarget and the inspect plan row. c10 closes with TlsLead-72b (core.sys.timing_host() and the c10 proof) on t18b, built on integ/seed-t17a."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "t16a landed TlsLead-68 and 69 (+69fix) (D-SECRET-CT1 B2b/B2c), TlsLead-70 (B3: the IR fixed bit and the timing.fixed lint after every pass) and TlsLead-71 (B4: the final-instruction validator for x86-64 DOIT and wasm32 CT-Wasm tables) (8327f5ae47..e75850d064). c10 stays open for B5: TlsLead-72 rides t17, and 72b follows the reseed."
@@ -96095,7 +96116,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-10T23:56:41.288Z",
+      "updated": "2026-11-11T01:09:58.694Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -200382,6 +200403,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T01:10:03.251Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iuv3zr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T01:10:02.022Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T01:10:00.344Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w1wcfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T01:09:58.694Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bnp1zw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T01:09:57.071Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-11T01:09:53.479Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#40"
+    },
+    {
+      "at": "2026-11-11T01:09:51.823Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-11T01:09:50.130Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-11T01:09:48.334Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-11T01:09:46.771Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-11T01:09:45.023Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1wcfc",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-11T01:09:43.306Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1wcfc",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-11T01:09:41.465Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-11T01:09:39.505Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0scf8mn",
+      "note": "#35"
+    },
     {
       "at": "2026-11-11T00:47:32.339Z",
       "by": "Main",
