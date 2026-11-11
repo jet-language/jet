@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99252,
+    "rev": 99254,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57313,6 +57313,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T10:50:16.829Z"
+        },
+        {
+          "n": 60,
+          "text": "Core API gap from the port bars (G1Lead4, 2026-11-11, runtime-allocator twin: 6760 tokens vs 1292, of which 3994 is a hand emulation of JSON.stringify and most of the rest is Dyn.Object pair lists standing in for JS object literals). core.encoding.json writes a value as JSON.stringify(value, null, indent) does: ECMAScript Number-to-String text (shortest round-trip, no trailing .0, the same exponent thresholds), objects in insertion order, and the same escapes and indentation. It also has a literal way to build an ordered Dyn object, extending the existing Dyn and JSON surface rather than adding a second JSON mechanism. New public names go to the batch Core API ballot first. Proof: a Core #Test compares the output with node's on a fixture set covering integers, fractions, 1e21, -0, NaN and nested objects, and the runtime-allocator twin names this criterion in tool.token_gaps until it lands.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T11:31:03.363Z"
         }
       ],
       "refs": [],
@@ -57325,12 +57334,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T10:52:25.272Z",
+      "updated": "2026-11-11T11:31:03.363Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
       ],
-      "criteriaLastN": 59
+      "criteriaLastN": 60
     },
     {
       "id": "c022g7qw",
@@ -92232,6 +92241,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T10:57:03.472Z"
+        },
+        {
+          "n": 8,
+          "text": "Child-process-bound workloads (found 2026-11-11 by G1Lead4's runtime-allocator twin: wall 0.92 inconclusive and peak memory 1.03 against node, with the same child processes run in sequence on both sides). Jet's spawn, wait and pipe path and its script start cost no more wall time or peak memory than node's child_process.spawnSync. A paired gauntlet cell that spawns 200 short children in sequence shows Jet below node and python on wall time and peak memory, live and uncached, and a second program that pipes a child's output proves the gain. This is a general runtime fix (process spawn, the runtime baseline), with nothing in the twin.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T11:31:05.341Z"
         }
       ],
       "refs": [],
@@ -92242,9 +92260,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:23:24.506Z",
-      "updated": "2026-11-11T11:05:13.540Z",
+      "updated": "2026-11-11T11:31:05.342Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c01paimh",
@@ -199755,6 +199773,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T11:31:05.342Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0g6fxb9",
+      "note": "#8 Child-process-bound workloads (found 2026-11-11 by G1Lead4's"
+    },
+    {
+      "at": "2026-11-11T11:31:03.363Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#60 Core API gap from the port bars (G1Lead4, 2026-11-11, runtim"
+    },
     {
       "at": "2026-11-11T11:20:44.236Z",
       "by": "Main",
