@@ -62,10 +62,8 @@ sub: fn(t: String, from: String, to: String, place: String) -> String Err! {
 
 // The index of criterion `n` in `crit`.
 by_n: fn(crit: [Dyn], n: Dyn?, num: String) -> Int Err! {
-    loop at in 0..<crit.len() {
-        if label(crit[at].get("n")) == label(n) -> return Ok(at)
-    }
-    Err("#{num} no c{label(n)}")
+    want: label(n)
+    Ok(crit.position(k -> label(k.get("n")) == want) ?? return Err("#{num} no c{label(n)}"))
 }
 
 apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}) Err! {
@@ -85,12 +83,9 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
         p: if step == .Array(l) -> l.concat([Dyn.Null, Dyn.Null, Dyn.Null]) else -> [Dyn.Null, Dyn.Null, Dyn.Null]
         from: str(p[1])
         to: str(p[2])
-        every: p[0] == Dyn.Text("*")
-        targets := [Int]{}
-        if !every -> targets.push(by_n(crit, p[0], num) ?? return Err(err))
-        loop at in 0..<crit.len() {
-            if every && text(crit[at], "status") == "open" && text(crit[at], "text").contains(from) -> targets.push(at)
-        }
+        // The criteria a step names: one by number, or with `*` every open one holding `from`.
+        held: from.copy()
+        targets: if p[0] == Dyn.Text("*") -> crit.indexed().filter(k -> text(k.item, "status") == "open" && text(k.item, "text").contains(held)).map(k -> k.idx).to_list() else -> [by_n(crit, p[0], num) ?? return Err(err)]
         if targets.len() == 0 -> return Err("#{num} *: no open criterion has {from}")
         loop at in targets {
             n: label(crit[at].get("n"))
@@ -104,13 +99,9 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
         if text(crit[at], "status") != "open" -> return Err("#{num} c{label(n)} is {text(crit[at], "status")}, not removable")
         removed.push(at)
     }
-    next := 0
-    kept := [Dyn]{}
-    loop at in 0..<crit.len() {
-        n: label(crit[at].get("n")).to_int() ?? 0
-        if n > next -> next = n
-        if !removed.contains(at) -> kept.push(crit[at].copy())
-    }
+    next := crit.map(k -> label(k.get("n")).to_int() ?? 0).max() ?? 0
+    gone: removed.copy()
+    kept := crit.indexed().filter(k -> !gone.contains(k.idx)).map(k -> k.item.copy()).to_list()
     loop added in list(s, "add") {
         next += 1
         kept.push(Dyn.Object(["n": Dyn.Int(next), "text": added.copy(), "status": Dyn.Text("open")]))

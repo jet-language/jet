@@ -29,6 +29,11 @@ GENERATED_HEADER: Regex{"[Gg]enerated by Tools/[^ ;]+.*do not edit"}
 GENERATOR_NAME: Regex{"[Gg]enerated by Tools/[^ ;]+"}
 // A conflict marker line a three-way merge leaves.
 CONFLICT_MARKER: Regex{"^(<<<<<<<|=======|>>>>>>>)( |$)"}
+// The lines that open and close a region a generator writes.
+REGION_BEGIN: Regex{"unsafe-ratchet:begin|BEGIN GENERATED"}
+REGION_END: Regex{"unsafe-ratchet:end|END GENERATED"}
+// The CPUs a generator runs on.
+REGEN_CPUS: [Int]{16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
 
 // Ends the run with `code` after `line`.
 stop: fn(line: String, code: Int) -> Never {
@@ -55,12 +60,9 @@ based: fn(tree: String, worktree: String) -> Bool {
 // The generator a file's header names in its first 40 lines, one trailing `.`
 // dropped; "" when none does.
 generator_of: fn(path: String) -> String {
-    loop line in files.read_or(path, "").first_lines(40) {
-        if !GENERATED_HEADER.is_match(line) -> next
-        found: GENERATOR_NAME.find(line) ?? ""
-        return found.slice(13, found.len()).removesuffix(".")
-    }
-    ""
+    header: files.read_or(path, "").first_lines(40).find(line -> GENERATED_HEADER.is_match(line)) ?? return ""
+    found: GENERATOR_NAME.find(header) ?? ""
+    found.slice(13, found.len()).removesuffix(".")
 }
 
 // A SUB's lead: its name up to the last `-`.
@@ -73,17 +75,14 @@ lead: fn(name: String) -> String {
 // ("ours"); any other conflict is "none".
 marker_mode: fn(path: String) -> String {
     generated := false
-    bad := false
-    seen := false
+    // For each conflict marker line, whether it lies inside a generated region.
+    inside := [Bool]{}
     loop line in files.read_or(path, "").lines() {
-        if line.contains("unsafe-ratchet:begin") || line.contains("BEGIN GENERATED") -> generated = true
-        if CONFLICT_MARKER.is_match(line) {
-            bad = bad || !generated
-            seen = true
-        }
-        if line.contains("unsafe-ratchet:end") || line.contains("END GENERATED") -> generated = false
+        if REGION_BEGIN.is_match(line) -> generated = true
+        if CONFLICT_MARKER.is_match(line) -> inside.push(generated)
+        if REGION_END.is_match(line) -> generated = false
     }
-    if seen && !bad -> "ours" else -> "none"
+    if inside.len() > 0 && !inside.contains(false) -> "ours" else -> "none"
 }
 
 // A scratch directory holding the base, ours and theirs of an unmerged `path` as `b`, `o` and `t`.
@@ -102,26 +101,11 @@ stages: fn(tree: String, path: String) -> String {
 // I/linemerge.tmp; else "none".
 staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String {
     work: stages(tree, path)
-    open := false
-    hunks := 0
-    in_base := false
-    bad := false
-    loop line in (Sh{"git merge-file --diff3 -p {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run().output.lines()) {
-        if {
-            line.starts_with("<<<<<<< ") -> {
-                open = true
-                hunks += 1
-            }
-            line.starts_with("||||||| ") -> in_base = open
-            line == "=======" -> in_base = false
-            line.starts_with(">>>>>>> ") -> {
-                open = false
-                in_base = false
-            }
-            in_base -> bad = true
-        }
-    }
-    mode := if hunks > 0 && !bad -> "union" else -> "none"
+    diff3: Sh{"git merge-file --diff3 -p {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run().output.lines()
+    hunks: diff3.count_where(line -> line.starts_with("<<<<<<< "))
+    // A hunk's base part holds a line when its `|||||||` marker is not followed at once by `=======`.
+    filled_base: diff3.windows(2).any(pair -> pair[0].starts_with("||||||| ") && pair[1] != "=======")
+    mode := if hunks > 0 && !filled_base -> "union" else -> "none"
     if mode == "none" {
         merged: Sh{"node {"{g}/linemerge.mjs"} {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run()
         files.write("{integ}/linemerge.tmp", merged.output)
@@ -142,8 +126,8 @@ failed: fn(integ: String, name: String, note: String{""}) {
 apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
-    listed: (loop cells in (Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records()) -> cells.get(2) ?? "")
-    files.write("{integ}/{n}.files", (loop path in listed -> "{path}\n").join(""))
+    listed: Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records().map(cells -> cells.get(2) ?? "")
+    files.write("{integ}/{n}.files", listed.map(path -> "{path}\n").join(""))
     excluded := [String]{}
     loop f in listed.filter(f -> f != "") {
         path: "{tree}/{f}"
@@ -158,7 +142,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
             next
         }
         // Agent policy and skill prose may quote the generated-file header; it is never generated.
-        if !files.is_file(path) || f == "AGENTS.md" || f.starts_with(".agents/") -> next
+        if !files.is_file(path) || ["AGENTS.md", ".agents"].contains(f.partition("/").head) -> next
         // The safety ledger is written whole by UnsafeRatchet --update (its regions move with every source line).
         generator: if f == "Docs/spec/safety.md" -> "Tools/agent/UnsafeRatchet.jet" else -> generator_of(path)
         if generator == "" -> next
@@ -249,7 +233,7 @@ regenerate: fn(tree: String, integ: String) {
     // The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/agent/RuntimeGenerators.jet\tall\n")
-    names := loop line in files.read("{integ}/generators").lines() -> line.partition("\t").head
+    names := files.read("{integ}/generators").lines().map(line -> line.partition("\t").head)
     names.sort()
     identity: files.read("{seed}/IDENTITY").trim()
     loop gen in names.dedup().to_list() {
@@ -263,7 +247,7 @@ regenerate: fn(tree: String, integ: String) {
                     else -> [String]{}
                 }
                 run: Sh{"nice -n 19 {"{seed}/jet"} {gen}"}.extend(flag).spec().cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
-                    .timeout(time.duration_seconds(900)).cpu_affinity(loop cpu in 16..<32 -> cpu).stderr(.Stdout).run()
+                    .timeout(time.duration_seconds(900)).cpu_affinity(REGEN_CPUS).stderr(.Stdout).run()
                 files.write("{integ}/regen.{files.basename(gen)}.out", run.output)
                 print((["REGEN", gen].concat(flag).concat(["rc={if run.timed_out -> 124 else -> run.code}"])).join(" "))
             }
@@ -288,12 +272,12 @@ run: fn() {
     }
     // INTEG_POST="patch ...": Main's fixups that must apply plainly (no three-way, no keep-ours) to the composed
     // tree after every SUB, such as deleting ledger proof rows a merge kept. They land inside regen.patch.
-    loop patch in (process.env_nonempty("INTEG_POST") ?? "").words() {
+    loop patch in process.env_get_or("INTEG_POST", "").words() {
         print("{if (Sh{"git -C {tree} apply -p1 {patch}"}.ok()) -> "POST" else -> "POST-FAIL"} {patch}")
     }
     regenerate(tree, integ)
     if (Sh{"git -C {tree} add -A"}.ok()) -> files.write("{integ}/regen.patch", Sh{"git -C {tree} diff --cached --binary HEAD"}.run().output)
     files.remove_all("{tree}/.git")
     print("--applied--")
-    loop path in applied -> print(path)
+    applied.each(path -> print(path))
 }
