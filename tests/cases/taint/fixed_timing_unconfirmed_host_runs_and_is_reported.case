@@ -1,11 +1,11 @@
 # Without `policy.harden`, a program that holds `timing: .Fixed` values runs
-# on every host, and `jet inspect decisions` says what the build does about
-# an unconfirmed one.
+# on every host, and core.sys.timing_host() reports the host's admission.
+# `jet inspect decisions` says what the build does about an unconfirmed host.
 fixture: fixed_timing_unconfirmed_host_runs_and_is_reported.fixture
 env: NO_COLOR=1
 step: jet run main.jet
 exit: 0
-stdout: = fixed_timing_unconfirmed_host_runs_and_is_reported.out
+stdout: ~any "timing host: confirmed, pick 7" "timing host: unconfirmed, pick 7" # which one depends on the host's processor
 step: jet inspect decisions main.jet
 exit: 0
 stdout: ~ "timing host: an unconfirmed host runs it; policy.harden would refuse one at start" # the rest of the report is the optimizer's

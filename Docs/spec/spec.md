@@ -829,7 +829,8 @@ Intel's guidance does for a processor without `IA32_ARCH_CAPABILITIES`; one
 with it holds only while the operating system sets DOITM, which a program
 cannot read. AMD and other vendors publish no such statement, and a
 WebAssembly engine picks its own instructions. So a program with fixed values
-runs on any host by default, and `jet inspect decisions` prints its
+runs on any host by default: `core.sys.timing_host()` says whether the host
+it runs on is confirmed, and `jet inspect decisions` prints the build's
 `timing host:` row. A package that sets `policy.harden` admits only a
 confirmed host: its native entry checks the host before `run` and refuses to
 start anywhere else, giving the reason. A build of such a package for web or

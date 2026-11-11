@@ -411,6 +411,20 @@ cpu_count: fn() -[Env]> Int Never! {
     count
 }
 
+// Whether this host's processor vendor confirms that the instructions
+// `timing: .Fixed` values meet run in the same time for every value
+// (JetRuntime HostTiming.jet). A program holding such values runs on an
+// unconfirmed host, unless its package sets `policy.harden`: then its entry
+// refuses to start there.
+TimingHost: enum {
+    Confirmed
+    Unconfirmed
+}
+
+timing_host: fn() -[Env]> TimingHost Never! {
+    if core.sys.__timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
+}
+
 getppid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
 
 getuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }

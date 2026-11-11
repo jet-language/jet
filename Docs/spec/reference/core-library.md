@@ -2198,6 +2198,7 @@ run: fn() {
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
+| `timing_host()` | `TimingHost -[Env]>` | `.Confirmed` when this host's processor vendor confirms that the instructions `timing: .Fixed` values meet run in the same time for every value, else `.Unconfirmed`. Under `policy.harden` a program holding such values refuses to start on an unconfirmed host. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
 | `user_ids()` / `group_ids()` | `Ids !IOError -[Env]>` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
