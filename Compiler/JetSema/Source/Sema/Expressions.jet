@@ -98,6 +98,8 @@ use {
         core_module_has_type,
         diagnostic_with_edit,
         TextEdit,
+        IR_RUNTIME_HANDLES,
+        ir_runtime_handle_row,
     ]
 }
 
@@ -3388,8 +3390,22 @@ sema_expr_try_explicit_unit_method: fn(receiver: Expr, method: String, method_sp
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
+// Whether a `take_pattern` receiver is the `Cursor` handle (Val(true)) or the
+// `Reader` handle (Val(false)), by the runtime handle its type names. A
+// constructor gives the bare `Reader`; a written `Reader` annotation names its
+// Core declaration `<corelib>/core.term::Reader`. Both are one handle.
+sema_expr_take_pattern_cursor: fn(ty: Type) -> Bool? {
+    if ty == .Named(name) {
+        row: ir_runtime_handle_row(name) ?? return None
+        if IR_RUNTIME_HANDLES[row].runtime == "JetCursor" -> return Val(true)
+        if IR_RUNTIME_HANDLES[row].runtime == "JetReader" -> return Val(false)
+    }
+    None
+}
+
 sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "take_pattern" || (receiver_value.ty != Type.Named{name: "Cursor"} && receiver_value.ty != Type.Named{name: "Reader"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "take_pattern" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    is_cursor: sema_expr_take_pattern_cursor(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     // The Rust original resolves `take_pattern` beside `Arena.alloc` with no
     // receiver gate: the cursor's position is runtime-owned handle state, so
     // the unmarked receiver of a `:` Cursor or Reader binding is read here.
@@ -3398,7 +3414,7 @@ sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, m
         diagnostics.push(sema_error("E0104", span, "`take_pattern` expects one literal pattern, got {args.len()} arguments", "a pattern is a compile-time literal and is the whole argument list", "write exactly one string or `[U8]` pattern literal"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if receiver_value.ty == (Type.Named{name: "Cursor"}) {
+    if is_cursor {
         if args[0].expr == {
             .StrMatchLit(parts, lit_span, _) -> {
                 validation := sema_pattern_text(Type.String, parts, lit_span, diagnostics, false, scopes, false)
