@@ -732,6 +732,15 @@ slice_clamped: fn<T>(items: [T], start: Int, end: Int) -> [T] Never! {
     items.slice(from, to)
 }
 
+/// One bound of `slice_clamped` for a list of `len` items: a negative one
+/// counts from the end, and one past either end stops there.
+///
+/// ```jet
+/// clamped_bound(-2, 5) // => 3
+/// clamped_bound(-9, 5) // => 0
+/// clamped_bound(7, 5) // => 5
+/// clamped_bound(2, 5) // => 2
+/// ```
 clamped_bound: fn(at: Int, len: Int) -> Int Never! {
     if {
         at < 0 -> if len + at < 0 -> 0 else -> len + at

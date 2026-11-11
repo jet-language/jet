@@ -208,6 +208,12 @@ canonical: fn(value: Dyn) -> String EncodingError! {
 /// `[]` and `{}`. A JavaScript object lists integer-like keys first; a `Dyn`
 /// object keeps the order its keys were added. An ordered object literal is
 /// `Dyn{[String: Dyn]{"name": "jet", "sizes": [1, 2], "inner": ["ok": true]}}`.
+///
+/// ```jet
+/// tree: Dyn{[String: Dyn]{"name": "jet", "sizes": [1, 2]}}
+/// stringify(tree) == "{{\"name\":\"jet\",\"sizes\":[1,2]}}" // => true
+/// stringify(Dyn.Array([Dyn]{Dyn.Float(0.5)}), 2) == "[\n  0.5\n]" // => true
+/// ```
 stringify: fn<T: Encode>(value: T, indent: Int{0}) -> String Never! {
     out := [U8]{}
     step: if indent > 10 -> 10 else if indent < 0 -> 0 else -> indent
@@ -280,6 +286,13 @@ pointer: fn(tree: Dyn, path: String) -> Dyn EncodingError! {
 /// with the element inside it for a list (`tags[1]`), and whose reason names
 /// the missing step or the expected and actual types; displayed, a failure
 /// reads: at `metrics/name`: expected Int, found text "cold".
+///
+/// ```jet
+/// tree: parse("{{\"metrics\": {{\"p50\": 12}}, \"tags\": [\"a\", \"b\"]}}") ?? panic("{err}")
+/// at<Int>(tree, "metrics/p50") ?? -1 // => 12
+/// (at<[String]>(tree, "/tags") ?? [String]{}).len() // => 2
+/// at<Int>(tree, "tags/0") ?? -1 // => -1
+/// ```
 at: fn<T: Decode>(tree: Dyn, path: String) -> T [FieldError]! {
     pointer_path: if path == "" || path.starts_with("/") -> path.copy() else -> "/{path}"
     segments: pointer_segments(pointer_path) ?? return Err([FieldError]{FieldError{path: path.copy(), reason: err.reason}})
@@ -291,7 +304,12 @@ at: fn<T: Decode>(tree: Dyn, path: String) -> T [FieldError]! {
     Ok(value)
 }
 
-// A path decode reported inside the value read at `path`, joined to it.
+/// A path decode reported inside the value read at `path`, joined to it.
+///
+/// ```jet
+/// at_path("tags", "[1]") == "tags[1]" && at_path("a", "b") == "a/b" // => true
+/// at_path("", "b") == "b" && at_path("a", "") == "a" // => true
+/// ```
 at_path: fn(path: String, inner: String) -> String Never! {
     if inner == "" -> return path.copy()
     if path == "" -> return inner.copy()
@@ -1527,8 +1545,14 @@ write_json_float: fn(out: &[U8], n: Float) EncodingError! {
     Ok()
 }
 
-// One value as JSON.stringify writes it, `step` spaces per level and `depth`
-// levels in (`step` 0 is the compact form).
+/// One value as JSON.stringify writes it, `step` spaces per level and `depth`
+/// levels in (`step` 0 is the compact form).
+///
+/// ```jet
+/// out := [U8]{}
+/// write_stringify(out, Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Null, Dyn.Int(3)}), 0, 0)
+/// String.from_bytes_lossy(out) == "[true,null,3]" // => true
+/// ```
 write_stringify: fn(out: &[U8], value: Dyn, step: Int, depth: Int) Never! {
     if value == {
         .Null -> write_ascii(out, "null")
@@ -1568,12 +1592,27 @@ write_stringify: fn(out: &[U8], value: Dyn, step: Int, depth: Int) Never! {
     }
 }
 
-// A finite number in ECMAScript spelling; NaN and the infinities are null.
+/// A finite number in ECMAScript spelling; NaN and the infinities are null.
+///
+/// ```jet
+/// out := [U8]{}
+/// write_stringify_number(out, 1e21)
+/// write_stringify_number(out, math.NAN)
+/// String.from_bytes_lossy(out) == "1e+21null" // => true
+/// ```
 write_stringify_number: fn(out: &[U8], n: Float) Never! {
     if math.is_finite(n) -> write_ascii(out, stream.jcs_number(n)) else -> write_ascii(out, "null")
 }
 
-// A line break and `step * depth` spaces; nothing in the compact form.
+/// A line break and `step * depth` spaces; nothing in the compact form.
+///
+/// ```jet
+/// out := [U8]{}
+/// write_stringify_break(out, 2, 2)
+/// out.len() // => 5
+/// write_stringify_break(out, 0, 3)
+/// out.len() // => 5
+/// ```
 write_stringify_break: fn(out: &[U8], step: Int, depth: Int) Never! {
     if step == 0 -> return
     out.push(U8{10})

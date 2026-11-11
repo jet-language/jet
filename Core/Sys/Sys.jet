@@ -80,6 +80,11 @@ vars: fn() -[Env]> [String] EnvError! {
 
 /// The process environment as a map: every variable whose name and value are
 /// UTF-8 text (one that is not is left out, as `get` reads it as unset).
+///
+/// ```jet
+/// set("JET_DOCTEST_ENVIRONMENT", "on")
+/// environment().get("JET_DOCTEST_ENVIRONMENT") == Val("on") // => true
+/// ```
 environment: fn() -[Env]> [String: String] Never! {
     found := [String: String]{}
     loop entry in __env_snapshot() {
@@ -311,8 +316,23 @@ data_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_DATA_HOME", ".loc
 
 /// The XDG base directory for user configuration: $XDG_CONFIG_HOME, else
 /// `.config` under the home directory, read as `cache_dir` reads its own.
+///
+/// ```jet
+/// config_dir() == base_dir("XDG_CONFIG_HOME", ".config") // => true
+/// ```
 config_dir: fn() -[Env, FS.Read]> String? Never! { base_dir("XDG_CONFIG_HOME", ".config") }
 
+/// The directory `variable` names when it is set and not empty, else `under`
+/// joined to the home directory: $HOME, else `account_home`. None when there
+/// is no home directory.
+///
+/// ```jet
+/// set("JET_DOCTEST_BASE_DIR", "/srv/jet")
+/// base_dir("JET_DOCTEST_BASE_DIR", ".cache") == Val("/srv/jet") // => true
+/// set("JET_DOCTEST_BASE_DIR", "")
+/// home: get("HOME") ?? account_home() ?? ""
+/// home == "" || base_dir("JET_DOCTEST_BASE_DIR", ".cache") == Val(files.join_all([String]{home, ".cache"})) // => true
+/// ```
 base_dir: fn(variable: String, under: String) -[Env, FS.Read]> String? Never! {
     chosen: get(variable) ?? ""
     if chosen != "" -> return Val(chosen)
@@ -320,6 +340,13 @@ base_dir: fn(variable: String, under: String) -[Env, FS.Read]> String? Never! {
     Val(files.join_all([String]{home, under}))
 }
 
+/// The account's home directory: its /etc/passwd entry's (on Windows
+/// %USERPROFILE%), whatever $HOME says. None when the account has none.
+///
+/// ```jet
+/// home: account_home() ?? ""
+/// home == "" || home.starts_with("/") || family() == "windows" // => true
+/// ```
 account_home: fn() -[Env, FS.Read]> String? Never! {
     if family() == "windows" -> return get("USERPROFILE")
     Val((user_by_id(getuid()) ?? return None).home)
@@ -467,6 +494,13 @@ env_file: fn(path: String) -[Env, FS.Read]> [String: String] IOError! {
 /// nothing. What else the shell would run or expand (`$(…)`, backticks, `~`,
 /// `$1`, `;`, `|`, `&`, `<`, `>`, `(`, `)`, other `${…}` forms, `+=`, an
 /// unquoted space) is an `IOError.InvalidInput` naming `source:line`.
+///
+/// ```jet
+/// vars: [String: String]{"HOME": "/home/ada"}
+/// read: env_text("export A='x y'\nB=\"$A/z\" # a note\nC=${{UNSET:-$HOME}}\n", vars) ?? panic("{err}")
+/// read.get("B") == Val("x y/z") && read.get("C") == Val("/home/ada") // => true
+/// (env_text("A=$(date)", vars) ?? [String: String]{"failed": "yes"}).get("failed") == Val("yes") // => true
+/// ```
 env_text: fn(text: String, vars: [String: String], source: String{"env text"}) -> [String: String] IOError! {
     assigned := [String: String]{}
     number := 0
@@ -481,14 +515,22 @@ env_text: fn(text: String, vars: [String: String], source: String{"env text"}) -
     Ok(assigned)
 }
 
-// An env file line being read: its bytes and the index of the next one.
+/// An env file line being read: its bytes and the index of the next one.
 EnvLine: struct {
     raw: [U8]
     at: Int
 }
 
-// Reads one line into `assigned`: None for a blank line, a comment or an
-// assignment, else what keeps the line from being read.
+/// Reads one line into `assigned`: None for a blank line, a comment or an
+/// assignment, else what keeps the line from being read.
+///
+/// ```jet
+/// line := EnvLine{raw: "export NAME='a b'".bytes(), at: 0}
+/// assigned := [String: String]{}
+/// env_line(line, [String: String]{}, assigned) == None && assigned.get("NAME") == Val("a b") // => true
+/// bad := EnvLine{raw: "1X=y".bytes(), at: 0}
+/// env_line(bad, [String: String]{}, assigned) != None // => true
+/// ```
 env_line: fn(line: &EnvLine, vars: [String: String], assigned: &[String: String]) -> String? Never! {
     env_blanks(line)
     if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
@@ -512,9 +554,16 @@ env_line: fn(line: &EnvLine, vars: [String: String], assigned: &[String: String]
     None
 }
 
-// Reads a word onto `out`: up to a blank, or with `braced` up to the `}` that
-// ends a `${NAME:-word}`, left unread. Expansions push their value only when
-// `live`, as the shell expands a default only when it takes it.
+/// Reads a word onto `out`: up to a blank, or with `braced` up to the `}` that
+/// ends a `${NAME:-word}`, left unread. Expansions push their value only when
+/// `live`, as the shell expands a default only when it takes it.
+///
+/// ```jet
+/// line := EnvLine{raw: "a\\ b'c d'\"$X\" rest".bytes(), at: 0}
+/// out := [U8]{}
+/// env_word(line, [String: String]{"X": "1"}, [String: String]{}, out, true, false) == None // => true
+/// String.from_bytes_lossy(out) == "a bc d1" && line.at == 13 // => true
+/// ```
 env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool, braced: Bool) -> String? Never! {
     first: line.at
     loop line.at < line.raw.len() {
@@ -555,7 +604,16 @@ env_word: fn(line: &EnvLine, vars: [String: String], assigned: [String: String],
     None
 }
 
-// Reads a `"…"` word part after its opening quote, through the closing one.
+/// Reads a `"…"` word part after its opening quote, through the closing one.
+///
+/// ```jet
+/// line := EnvLine{raw: "a\\\"b\"rest".bytes(), at: 0}
+/// out := [U8]{}
+/// env_double(line, [String: String]{}, [String: String]{}, out, true) == None // => true
+/// String.from_bytes_lossy(out) == "a\"b" && line.at == 5 // => true
+/// open := EnvLine{raw: "no end".bytes(), at: 0}
+/// env_double(open, [String: String]{}, [String: String]{}, out, true) != None // => true
+/// ```
 env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
@@ -576,8 +634,17 @@ env_double: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
     Val("a `\"` quote is not closed")
 }
 
-// Reads the expansion at a `$`, pushing its value onto `out` when `live`; a
-// `$` that starts none is itself.
+/// Reads the expansion at a `$`, pushing its value onto `out` when `live`; a
+/// `$` that starts none is itself.
+///
+/// ```jet
+/// line := EnvLine{raw: "$NAME/x".bytes(), at: 0}
+/// out := [U8]{}
+/// env_dollar(line, [String: String]{"NAME": "v"}, [String: String]{}, out, true) == None // => true
+/// String.from_bytes_lossy(out) == "v" && line.at == 5 // => true
+/// command := EnvLine{raw: "$(date)".bytes(), at: 0}
+/// env_dollar(command, [String: String]{}, [String: String]{}, out, true) != None // => true
+/// ```
 env_dollar: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
     after: if line.at + 1 < line.raw.len() -> line.raw[line.at + 1] else -> U8{32}
     if after == (U8{123}) {
@@ -598,7 +665,16 @@ env_dollar: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
     None
 }
 
-// Reads a `${…}` after its `${`, through its `}`.
+/// Reads a `${…}` after its `${`, through its `}`.
+///
+/// ```jet
+/// line := EnvLine{raw: "NAME:-fallback}}".bytes(), at: 0}
+/// out := [U8]{}
+/// env_braced(line, [String: String]{}, [String: String]{"NAME": ""}, out, true) == None // => true
+/// String.from_bytes_lossy(out) == "fallback" && line.at == 15 // => true
+/// required := EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
+/// env_braced(required, [String: String]{}, [String: String]{}, out, true) == Val("MISSING: is required") // => true
+/// ```
 env_braced: fn(line: &EnvLine, vars: [String: String], assigned: [String: String], out: &[U8], live: Bool) -> String? Never! {
     forms: "only `${{NAME}}`, `${{NAME:-word}}`, `${{NAME-word}}`, `${{NAME:?word}}` and `${{NAME?word}}` expand here"
     start: line.at
@@ -633,19 +709,42 @@ env_braced: fn(line: &EnvLine, vars: [String: String], assigned: [String: String
     None
 }
 
-// `name`'s value: an earlier line's, else `vars`'s; None when it is unset.
+/// `name`'s value: an earlier line's, else `vars`'s; None when it is unset.
+///
+/// ```jet
+/// env_lookup("A", [String: String]{"A": "env"}, [String: String]{"A": "file"}) == Val("file") // => true
+/// env_lookup("B", [String: String]{"B": "env"}, [String: String]{}) == Val("env") // => true
+/// env_lookup("C", [String: String]{}, [String: String]{}) == None // => true
+/// ```
 env_lookup: fn(name: String, vars: [String: String], assigned: [String: String]) -> String? Never! {
     if assigned.get(name) == .Val(value) -> return Val(value.copy())
     if vars.get(name) == .Val(value) -> return Val(value.copy())
     None
 }
 
+/// Steps `line` past blanks: spaces, tabs and carriage returns.
+///
+/// ```jet
+/// line := EnvLine{raw: " \t x".bytes(), at: 0}
+/// env_blanks(line)
+/// line.at // => 3
+/// ```
 env_blanks: fn(line: &EnvLine) Never! {
     loop line.at < line.raw.len() && env_blank(line.raw[line.at]) -> line.at += 1
 }
 
+/// Whether `byte` is a blank between words: a space, a tab or a carriage return.
+///
+/// ```jet
+/// env_blank(U8{9}) && env_blank(U8{32}) && !env_blank(U8{10}) // => true
+/// ```
 env_blank: fn(byte: U8) -> Bool { byte == (U8{32}) || byte == (U8{9}) || byte == (U8{13}) }
 
+/// Whether `byte` is an ASCII digit.
+///
+/// ```jet
+/// env_digit(U8{48}) && env_digit(U8{57}) && !env_digit(U8{97}) // => true
+/// ```
 env_digit: fn(byte: U8) -> Bool { byte >= (U8{48}) && byte <= (U8{57}) }
 
 pid: fn() -[Env]> Int Never! { getpid() }
