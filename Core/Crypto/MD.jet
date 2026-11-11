@@ -128,6 +128,21 @@ HashCtx: struct {
     }
 }
 
+/// What a context has taken in: its algorithm, the bytes pending in its
+/// block and the bytes absorbed. These follow the input's lengths and never
+/// its bytes, so a context keyed with a secret still steers on them.
+HashShape: struct {
+    md: Md
+    used: Int
+    total: Int
+}
+
+/// `ctx`'s shape, public whatever its state holds.
+#Scrub(Secret)
+hash_shape: fn(ctx: #Secret HashCtx) -> HashShape Never! { hash_shape_of(ctx) }
+
+hash_shape_of: fn(ctx: HashCtx) -> HashShape Never! { HashShape{md: ctx.md, used: ctx.used, total: ctx.total} }
+
 /// A fresh context for `md`.
 hash_start: fn(md: Md) -> HashCtx Never! {
     s32 := [U32]{}
@@ -156,22 +171,26 @@ hash_update: fn(ctx: &HashCtx, data: [U8]) Never! { hash_update_range(ctx, data,
 
 /// Absorb `data[start..<start + len]`.
 hash_update_range: fn(ctx: &HashCtx, data: [U8], start: Int, len: Int) Never! {
+    shape: hash_shape(ctx)
     block: ctx.buf.len()
-    ctx.total += len
+    ctx.total = shape.total + len
+    used := shape.used
     at := start
     end: start + len
-    if ctx.used > 0 {
-        fill: if block - ctx.used < len -> block - ctx.used else -> len
-        loop i in 0..<fill -> ctx.buf[ctx.used + i] = data[at + i]
-        ctx.used += fill
+    if used > 0 {
+        fill: if block - used < len -> block - used else -> len
+        loop i in 0..<fill -> ctx.buf[used + i] = data[at + i]
+        used += fill
         at += fill
-        if ctx.used < block -> return
-        compress(ctx.md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
-        ctx.used = 0
+        if used < block {
+            ctx.used = used
+            return
+        }
+        compress(shape.md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
     }
     whole: (end - at) /% block
     if whole > 0 {
-        compress(ctx.md, ctx.s32, ctx.s64, data, at, whole)
+        compress(shape.md, ctx.s32, ctx.s64, data, at, whole)
         at += whole * block
     }
     loop i in 0..<end - at -> ctx.buf[i] = data[at + i]
@@ -180,25 +199,29 @@ hash_update_range: fn(ctx: &HashCtx, data: [U8], start: Int, len: Int) Never! {
 
 /// Absorb one byte.
 hash_update_byte: fn(ctx: &HashCtx, byte: U8) Never! {
-    ctx.total += 1
-    ctx.buf[ctx.used] = byte
-    ctx.used += 1
-    if ctx.used == ctx.buf.len() {
-        compress(ctx.md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
+    shape: hash_shape(ctx)
+    ctx.total = shape.total + 1
+    ctx.buf[shape.used] = byte
+    if shape.used + 1 == ctx.buf.len() {
+        compress(shape.md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
         ctx.used = 0
+    } else {
+        ctx.used = shape.used + 1
     }
 }
 
 /// The digest of everything absorbed. The context's state and pending input
 /// are wiped; start a new context (or keep a copy) to hash again.
 hash_finish: fn(ctx: &HashCtx) -> [U8] Never! {
+    shape: hash_shape(ctx)
     block: ctx.buf.len()
-    md: ctx.md
+    md: shape.md
+    used := shape.used
     if md == {
         .SHA3x224 | .SHA3x256 | .SHA3x384 | .SHA3x512 -> {
             // FIPS 202 section 6.1: the SHA-3 suffix 01, then pad10*1.
-            loop i in ctx.used..<block -> ctx.buf[i] = U8{0}
-            ctx.buf[ctx.used] = U8{0x06}
+            loop i in used..<block -> ctx.buf[i] = U8{0}
+            ctx.buf[used] = U8{0x06}
             ctx.buf[block - 1] = ctx.buf[block - 1].bit_or(U8{0x80})
             compress(md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
         }
@@ -207,15 +230,15 @@ hash_finish: fn(ctx: &HashCtx) -> [U8] Never! {
             // big-endian in the last 8 (64-byte blocks) or 16 (128-byte
             // blocks) bytes. MD5 and RIPEMD-160 store it little-endian.
             length_bytes: if block == 64 -> 8 else -> 16
-            ctx.buf[ctx.used] = U8{0x80}
-            ctx.used += 1
-            if ctx.used > block - length_bytes {
-                loop i in ctx.used..<block -> ctx.buf[i] = U8{0}
+            ctx.buf[used] = U8{0x80}
+            used += 1
+            if used > block - length_bytes {
+                loop i in used..<block -> ctx.buf[i] = U8{0}
                 compress(md, ctx.s32, ctx.s64, ctx.buf, 0, 1)
-                ctx.used = 0
+                used = 0
             }
-            loop i in ctx.used..<block -> ctx.buf[i] = U8{0}
-            bits: ctx.total * 8
+            loop i in used..<block -> ctx.buf[i] = U8{0}
+            bits: shape.total * 8
             little: md == .MD5 || md == .RIPEMD160
             loop k in 0..<8 {
                 at: if little -> block - 8 + k else -> block - 1 - k
@@ -253,13 +276,18 @@ compress: fn(md: Md, s32: &[U32], s64: &[U64], msg: [U8], off: Int, count: Int) 
         .RIPEMD160 -> ripemd160_blocks(s32, msg, off, count)
         .SHA1 -> sha1_blocks(s32, msg, off, count)
         .SHA224 | .SHA256 -> {
-            if core.crypto.__sha256_blocks(s32, msg, off, count) -> return
+            if host_sha256_blocks(s32, msg, off, count) -> return
             sha256_blocks(s32, msg, off, count)
         }
         .SHA384 | .SHA512 -> sha512_blocks(s64, msg, off, count)
         .SHA3x224 | .SHA3x256 | .SHA3x384 | .SHA3x512 -> keccak_absorb(s64, msg, off, count, md_block(md))
     }
 }
+
+/// Whether the host's SHA extensions compressed the blocks. The answer
+/// follows the host's instructions, never the state or the message.
+#Scrub(Secret)
+host_sha256_blocks: fn(s32: &[U32], msg: [#Secret U8], off: Int, count: Int) -> Bool Never! { core.crypto.__sha256_blocks(s32, msg, off, count) }
 
 /// Little-endian 64-bit word at `bytes[off]`.
 le64: fn(bytes: [U8], off: Int) -> U64 Never! {
@@ -498,7 +526,7 @@ HMACKey: struct {
     outer: HashCtx
 }
 
-hmac_key: fn(md: Md, key: [U8]) -> HMACKey Never! {
+hmac_key: fn(md: Md, key: [#Secret U8]) -> HMACKey Never! {
     block: md_block(md)
     // Section 2 of RFC 2104: a key longer than the block is hashed first.
     k := if key.len() > block -> hash(md, key) else -> key.copy()
@@ -532,7 +560,7 @@ hmac_mac: fn(key: HMACKey, data: [U8]) -> [U8] Never! {
 }
 
 /// HMAC-`md` of `data` under `key`.
-hmac: fn(md: Md, key: [U8], data: [U8]) -> [U8] Never! {
+hmac: fn(md: Md, key: [#Secret U8], data: [#Secret U8]) -> [U8] Never! {
     // The key serves one message: absorb into its contexts, no clones.
     k := hmac_key(md, key)
     hash_update(k.inner, data)
@@ -546,13 +574,23 @@ hmac: fn(md: Md, key: [U8], data: [U8]) -> [U8] Never! {
 
 /// HKDF-Extract: the pseudorandom key. An empty salt is HashLen zero bytes
 /// (section 2.2), which HMAC's zero key padding already gives.
-hkdf_extract: fn(md: Md, salt: [U8], ikm: [U8]) -> [U8] Never! { hmac(md, salt, ikm) }
+hkdf_extract: fn(md: Md, salt: [U8], ikm: [#Secret U8]) -> [U8] Never! { hmac(md, salt, ikm) }
 
 /// HKDF-Expand: `len` bytes of output keying material, or None when `len`
 /// exceeds 255 * HashLen or the PRK is shorter than HashLen (section 2.3).
-hkdf_expand: fn(md: Md, prk: [U8], info: [U8], len: Int) -> [U8]? Never! {
+/// The verdict reads public lengths only; a caller holding a secret PRK
+/// checks them itself and calls hkdf_expand_bytes, because the Option a call
+/// returns carries its arguments' tags.
+hkdf_expand: fn(md: Md, prk: [#Secret U8], info: [U8], len: Int) -> [U8]? Never! {
     size: md_size(md)
     if len < 0 || len > 255 * size || prk.len() < size -> return None
+    Val(hkdf_expand_bytes(md, prk, info, len))
+}
+
+/// HKDF-Expand's output keying material, for a `len` from 0 to 255 * HashLen
+/// and a PRK of at least HashLen bytes (the caller checks both).
+hkdf_expand_bytes: fn(md: Md, prk: [#Secret U8], info: [U8], len: Int) -> [U8] Never! {
+    size: md_size(md)
     key: hmac_key(md, prk)
     out := [U8]{}
     last := [U8]{}
@@ -571,7 +609,7 @@ hkdf_expand: fn(md: Md, prk: [U8], info: [U8], len: Int) -> [U8]? Never! {
         counter += 1
     }
     core.crypto.wipe(last)
-    Val(out)
+    out
 }
 
 /// HKDF (extract then expand), or None when `len` is out of range.
@@ -606,7 +644,7 @@ digest_block: fn(block: Int, size: Int) -> [U8] Never! {
 
 /// PBKDF2 with HMAC-`md`: `key_len` bytes. The caller bounds `iterations`
 /// (at least 1) and `key_len` (at least 0).
-pbkdf2: fn(md: Md, password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] Never! {
+pbkdf2: fn(md: Md, password: [#Secret U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] Never! {
     size: md_size(md)
     block: md_block(md)
     // The two-compression shortcut below is written for SHA-1 and SHA-2's

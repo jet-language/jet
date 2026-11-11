@@ -42,8 +42,9 @@ store_be64: fn(b: &[U8], off: Int, x: U64) Never! {
 }
 
 /// The constant-time tag check: true when the first `n` bytes of `a` and
-/// `b` agree, from the OR of their differences only.
-tags_equal: fn(a: [U8], b: [U8], n: Int) -> Bool Never! {
+/// `b` agree, from the OR of their differences only. The verdict is public.
+#Scrub(Secret)
+tags_equal: fn(a: [#Secret U8], b: [#Secret U8], n: Int) -> Bool Never! {
     diff := U8{0}
     loop i in 0..<n -> diff = diff.bit_or(a[i].bit_xor(b[i]))
     diff == (U8{0})
@@ -60,7 +61,7 @@ min_int: fn(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
 /// split into four masks with three zero bits between set bits, so the
 /// integer products cannot carry into a kept bit.
 #Policy(arithmetic: .Wrapping)
-bmul64: fn(x: U64, y: U64) -> U64 Never! {
+bmul64: fn(x: #Secret U64, y: #Secret U64) -> U64 Never! {
     m1: U64{0x1111111111111111}
     m2: U64{0x2222222222222222}
     m4: U64{0x4444444444444444}
@@ -144,7 +145,7 @@ ghash: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
 
 /// `ghash` on the Jet carry-less multiply alone.
 #Policy(arithmetic: .Wrapping)
-ghash_portable: fn(k: GHASHKey, y: &[U8], data: [U8], off: Int, count: Int) Never! {
+ghash_portable: fn(k: GHASHKey, y: &[U8], data: [#Secret U8], off: Int, count: Int) Never! {
     if count <= 0 -> return
     h0: k.hw[0]
     h1: k.hw[1]
@@ -812,7 +813,7 @@ chacha20_core: fn(s: [U32], ks: &[U8], feed: Bool) Never! {
 
 /// The constants "expand 32-byte k" and the eight key words: state words
 /// 0 to 11 of RFC 8439 section 2.3.
-chacha20_key_state: fn(key: [U8]) -> [U32] Never! {
+chacha20_key_state: fn(key: [#Secret U8]) -> [U32] Never! {
     s := [U32]{U32{0x61707865}, U32{0x3320646e}, U32{0x79622d32}, U32{0x6b206574}}
     loop i in 0..<8 -> s.push(word32(key, 4 * i))
     loop _ in 0..<4 -> s.push(U32{0})
@@ -843,9 +844,15 @@ ChaCha20: struct {
 
 /// A context for a 32-byte key (mbedtls_chacha20_setkey); None for any
 /// other length. It needs chacha20_starts before use.
-chacha20_key: fn(key: [U8]) -> ChaCha20? Never! {
+chacha20_key: fn(key: [#Secret U8]) -> ChaCha20? Never! {
     if key.len() != 32 -> return None
-    Val(ChaCha20{state: chacha20_key_state(key), stream: cipher.zero_bytes(64), used: 64, blocks_left: 0})
+    Val(chacha20_context(key))
+}
+
+/// chacha20_key's context for a 32-byte key. It returns no Option, so a
+/// caller holding a secret key needs no `??` on it.
+chacha20_context: fn(key: [#Secret U8]) -> ChaCha20 Never! {
+    ChaCha20{state: chacha20_key_state(key), stream: cipher.zero_bytes(64), used: 64, blocks_left: 0}
 }
 
 /// Set the 12-byte nonce and the initial block counter, 0 to 2^32 - 1
@@ -919,7 +926,7 @@ chacha20_crypt: fn(key: [U8], nonce: [U8], counter: Int, src: [U8]) -> [U8]? Nev
 /// HChaCha20 (draft-irtf-cfrg-xchacha-03 section 2.2): the 32-byte subkey
 /// of a 32-byte key and a 16-byte nonce, words 0 to 3 and 12 to 15 of the
 /// rounds without the final addition.
-hchacha20: fn(key: [U8], nonce: [U8]) -> [U8]? Never! {
+hchacha20: fn(key: [#Secret U8], nonce: [U8]) -> [U8]? Never! {
     if key.len() != 32 || nonce.len() != 16 -> return None
     s := chacha20_key_state(key)
     loop i in 0..<4 -> s[12 + i] = word32(nonce, 4 * i)
@@ -966,9 +973,15 @@ Poly1305: struct {
 
 /// A context for the 32-byte one-time key r || s, with r clamped (RFC 8439
 /// section 2.5.1; mbedtls_poly1305_starts). None for any other length.
-#Policy(arithmetic: .Wrapping)
-poly1305_key: fn(key: [U8]) -> Poly1305? Never! {
+poly1305_key: fn(key: [#Secret U8]) -> Poly1305? Never! {
     if key.len() != 32 -> return None
+    Val(poly1305_context(key))
+}
+
+/// poly1305_key's context for a 32-byte key. It returns no Option, so a
+/// caller holding a secret key needs no `??` on it.
+#Policy(arithmetic: .Wrapping)
+poly1305_context: fn(key: [#Secret U8]) -> Poly1305 Never! {
     r := cipher.words(9)
     r[0] = cipher.le32(key, 0).bit_and(U64{0x3ffffff})
     r[1] = (cipher.le32(key, 3) >> 2).bit_and(U64{0x3ffff03})
@@ -978,14 +991,14 @@ poly1305_key: fn(key: [U8]) -> Poly1305? Never! {
     loop i in 1..<5 -> r[4 + i] = r[i] * U64{5}
     pad := cipher.words(4)
     loop i in 0..<4 -> pad[i] = cipher.le32(key, 16 + 4 * i)
-    Val(Poly1305{r: r, h: cipher.words(5), pad: pad, buf: cipher.zero_bytes(16), fill: 0})
+    Poly1305{r: r, h: cipher.words(5), pad: pad, buf: cipher.zero_bytes(16), fill: 0}
 }
 
 /// h = (h + m_i + hibit 2^128) r mod 2^130 - 5 over `count` 16-byte blocks
 /// of `m` from `off`. `hibit` is 2^24 in limb 4 for a whole block, zero for
 /// the padded last one.
 #Policy(arithmetic: .Wrapping)
-poly1305_blocks: fn(r: [U64], h: &[U64], m: [U8], off: Int, count: Int, hibit: U64) Never! {
+poly1305_blocks: fn(r: [#Secret U64], h: &[U64], m: [#Secret U8], off: Int, count: Int, hibit: U64) Never! {
     mask: U64{0x3ffffff}
     five: U64{5}
     r0: r[0]
@@ -1033,37 +1046,50 @@ poly1305_blocks: fn(r: [U64], h: &[U64], m: [U8], off: Int, count: Int, hibit: U
     h[4] = h4
 }
 
+/// The bytes pending in `p`'s partial block. The count follows the input's
+/// length and never its bytes, so a keyed context still steers on it.
+#Scrub(Secret)
+poly1305_pending: fn(p: #Secret Poly1305) -> Int Never! { poly1305_fill_of(p) }
+
+poly1305_fill_of: fn(p: Poly1305) -> Int Never! { p.fill }
+
 /// Feed `len` bytes of `m` from `off` (mbedtls_poly1305_update).
 poly1305_update: fn(p: &Poly1305, m: [U8], off: Int, len: Int) Never! {
     at := off
     end: off + len
-    if p.fill > 0 {
-        loop at < end && p.fill < 16 {
-            p.buf[p.fill] = m[at]
-            p.fill += 1
+    fill := poly1305_pending(p)
+    if fill > 0 {
+        loop at < end && fill < 16 {
+            p.buf[fill] = m[at]
+            fill += 1
             at += 1
         }
-        if p.fill < 16 -> return
+        if fill < 16 {
+            p.fill = fill
+            return
+        }
         poly1305_blocks(p.r, p.h, p.buf, 0, 1, U64{0x1000000})
-        p.fill = 0
+        fill = 0
     }
     whole: (end - at) /% 16
     poly1305_blocks(p.r, p.h, m, at, whole, U64{0x1000000})
     at += whole * 16
     loop at < end {
-        p.buf[p.fill] = m[at]
-        p.fill += 1
+        p.buf[fill] = m[at]
+        fill += 1
         at += 1
     }
+    p.fill = fill
 }
 
 /// The 16-byte tag (h + s) mod 2^128, with h fully reduced mod 2^130 - 5
 /// by a masked select (mbedtls_poly1305_finish).
 #Policy(arithmetic: .Wrapping)
 poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
-    if p.fill > 0 {
-        p.buf[p.fill] = U8{1}
-        loop i in p.fill + 1..<16 -> p.buf[i] = U8{0}
+    fill: poly1305_pending(p)
+    if fill > 0 {
+        p.buf[fill] = U8{1}
+        loop i in fill + 1..<16 -> p.buf[i] = U8{0}
         poly1305_blocks(p.r, p.h, p.buf, 0, 1, U64{0})
         p.fill = 0
     }
@@ -1129,8 +1155,9 @@ poly1305_finish: fn(p: &Poly1305) -> [U8] Never! {
 
 /// The Poly1305 tag of `msg` under a 32-byte one-time key
 /// (mbedtls_poly1305_mac).
-poly1305_mac: fn(key: [U8], msg: [U8]) -> [U8]? Never! {
-    p := poly1305_key(key) ?? return None
+poly1305_mac: fn(key: [#Secret U8], msg: [U8]) -> [U8]? Never! {
+    if key.len() != 32 -> return None
+    p := poly1305_context(key)
     poly1305_update(p, msg, 0, msg.len())
     Val(poly1305_finish(p))
 }
@@ -1155,8 +1182,9 @@ ChaChaPoly: struct {
 
 /// A context for a 32-byte key (mbedtls_chachapoly_setkey); None for any
 /// other length.
-chachapoly_key: fn(key: [U8]) -> ChaChaPoly? Never! {
-    c: chacha20_key(key) ?? return None
+chachapoly_key: fn(key: [#Secret U8]) -> ChaChaPoly? Never! {
+    if key.len() != 32 -> return None
+    c: chacha20_context(key)
     p: poly1305_key(cipher.zero_bytes(32)) ?? return None
     Val(ChaChaPoly{chacha: c, poly: p, ad_len: 0, len: 0, stage: CHACHAPOLY_INIT, decrypt: false})
 }

@@ -202,7 +202,7 @@ aria_rot128: fn(rk: &[U32], r: Int, w: [U32], a: Int, b: Int, n: Int) Never! {
 }
 
 /// An ARIA key schedule for encryption (mbedtls_aria_setkey_enc).
-aria_setkey_enc: fn(key: [U8]) -> ARIAKey BlockError! {
+aria_setkey_enc: fn(key: [#Secret U8]) -> ARIAKey BlockError! {
     bits: 8 * key.len()
     if bits != 128 && bits != 192 && bits != 256 -> return Err(.BadInputData)
     w := des.subkeys(16)
@@ -348,7 +348,7 @@ camellia_feistel: fn(s: &[U32], x: Int, k0: U32, k1: U32, z: Int) Never! {
 sigma: fn(i: Int) -> U32 Never! { des.get_be32(CAMELLIA_SIGMA, 4 * i) }
 
 /// A Camellia key schedule for encryption (mbedtls_camellia_setkey_enc).
-camellia_setkey_enc: fn(key: [U8]) -> CamelliaKey BlockError! {
+camellia_setkey_enc: fn(key: [#Secret U8]) -> CamelliaKey BlockError! {
     bits: 8 * key.len()
     if bits != 128 && bits != 192 && bits != 256 -> return Err(.BadInputData)
     nr: if bits == 128 -> 3 else -> 4

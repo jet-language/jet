@@ -545,17 +545,30 @@ inv_mix_key: fn(rk: [U8], off: Int, out: &[U8], at: Int) Never! {
     }
 }
 
-/// The FIPS 197 section 5.2 KeyExpansion of a 16-, 24- or 32-byte key;
-/// `decrypt` also derives the equivalent inverse cipher's keys. None for
-/// any other key length. The schedule's branches test only public word
-/// indices.
-aes_key: fn(key: [U8], decrypt: Bool) -> AESKey? Never! {
-    rounds: if key.len() == {
+/// The AES round count for a key of `len` bytes: 10, 12 or 14 for 16, 24
+/// or 32 bytes, else None.
+aes_rounds: fn(len: Int) -> Int? Never! {
+    rounds: if len == {
         16 -> 10
         24 -> 12
         32 -> 14
         else -> return None
     }
+    Val(rounds)
+}
+
+/// The FIPS 197 section 5.2 KeyExpansion of a 16-, 24- or 32-byte key;
+/// `decrypt` also derives the equivalent inverse cipher's keys. None for
+/// any other key length.
+aes_key: fn(key: [#Secret U8], decrypt: Bool) -> AESKey? Never! {
+    rounds: aes_rounds(key.len()) ?? return None
+    Val(aes_expand(key, rounds, decrypt))
+}
+
+/// aes_key's schedule, for a key whose length gives `rounds` (aes_rounds).
+/// It returns no Option, so a caller holding a secret key needs no `??` on
+/// it. Its branches test only public word indices.
+aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
     nk: key.len() /% 4
     total: (rounds + 1) * 4
     q := words(8)
@@ -602,7 +615,7 @@ aes_key: fn(key: [U8], decrypt: Bool) -> AESKey? Never! {
     }
     wipe_words(q)
     wipe_words(w)
-    Val(AESKey{rounds: rounds, sk: sk, rk: rk, dk: dk})
+    AESKey{rounds: rounds, sk: sk, rk: rk, dk: dk}
 }
 
 // ---------------------------------------------------------------------------
@@ -654,7 +667,7 @@ blocks: fn(k: AESKey, op: Int, iv: &[U8], src: [U8], off: Int, count: Int, out: 
 }
 
 /// `blocks` on the bitsliced rounds alone.
-blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [#Secret U8], off: Int, count: Int, out: &[U8]) Never! {
     if count <= 0 -> return
     base: out.len()
     loop _ in 0..<count * 16 -> out.push(U8{0})
@@ -900,13 +913,14 @@ XTSKey: struct {
 
 /// The two halves of a 32- or 64-byte XTS key: the first encrypts the
 /// data, the second the tweak. None for any other length.
-xts_key: fn(key: [U8], decrypt: Bool) -> XTSKey? Never! {
+xts_key: fn(key: [#Secret U8], decrypt: Bool) -> XTSKey? Never! {
     if key.len() != 32 && key.len() != 64 -> return None
     half: key.len() /% 2
     data_half := bytes_of(key, 0, half)
     tweak_half := bytes_of(key, half, half)
-    crypt: aes_key(data_half, decrypt) ?? return None
-    tweak: aes_key(tweak_half, false) ?? return None
+    rounds: aes_rounds(half) ?? return None
+    crypt: aes_expand(data_half, rounds, decrypt)
+    tweak: aes_expand(tweak_half, rounds, false)
     core.crypto.wipe(data_half)
     core.crypto.wipe(tweak_half)
     Val(XTSKey{crypt: crypt, tweak: tweak})
@@ -1003,7 +1017,7 @@ cmac_prf_128: fn(key: [U8], msg: [U8]) -> [U8] Never! {
         zero_key: aes_key(zero_bytes(16), false) ?? panic("AES-128 key")
         cmac(zero_key, key)
     }
-    k: aes_key(derived, false) ?? panic("AES-128 key")
+    k: aes_expand(derived, 10, false)
     core.crypto.wipe(derived)
     cmac(k, msg)
 }
