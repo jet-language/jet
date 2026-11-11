@@ -1,7 +1,7 @@
 # Card #3173 c23 and c20: the backend starter's deployment builds its service,
 # runs the produced artifact (not `jet run`), probes it until it reports ready,
-# serves a client built from the same workspace, and interrupts it: the
-# service stops accepting, answers what it accepted and exits 0. The starter
+# serves a client built from the same workspace, and stops it with SIGTERM:
+# the service stops accepting, answers what it accepted and exits 0. The starter
 # ships no credential, so without one the artifact refuses to start; a
 # restart on the same state directory keeps its data, because migrations
 # only add.
@@ -39,7 +39,7 @@ env: BACKEND_URL=http://127.0.0.1:{free-port:service}
 env: BACKEND_PASSWORD=not-the-credential-0123456789
 exit: 1
 stderr: ~ "login refused: 401" # a wrong credential gets no session
-signal service: INT
+signal service: TERM
 wait: service timeout 30s
 exit: 0
 file: service.stdout ~ "migrations: orders-v1 applied=1\nready orders/v1 http://127.0.0.1:" # the first start applies the migration, then reports ready
@@ -58,7 +58,7 @@ env: BACKEND_URL=http://127.0.0.1:{free-port:service}
 env: BACKEND_PASSWORD=case-credential-0123456789
 exit: 0
 stdout: ~ "order 2: 2 x book under orders/v1 (201)" # the order from the first run survived the restart
-signal restarted: INT
+signal restarted: TERM
 wait: restarted timeout 30s
 exit: 0
 file: restarted.stdout ~ "migrations: orders-v1 applied=0" # a restart applies nothing again

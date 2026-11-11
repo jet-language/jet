@@ -9,9 +9,9 @@
 // The starter ships no credential: without one the service refuses to
 // start. The password lives in memory only as its Argon2id hash, sessions are
 // opaque random tokens, and the schema changes only through named, additive
-// migrations. `ready` is printed once the listener is bound; an interrupt
-// stops accepting, lets the request in progress finish and ends with a drain
-// report.
+// migrations. `ready` is printed once the listener is bound; SIGTERM, the
+// deployment's stop signal, stops accepting, lets the request in progress
+// finish and ends with a drain report.
 use {
     backend
     contract
@@ -21,7 +21,6 @@ use {
     files: core.files
     http_server: core.http.server
     process: core.process
-    sys: core.sys
     time: core.time
 }
 
@@ -93,12 +92,9 @@ run: fn() {
 
     bound: http_server.bind(config.address, mux, deadline: 5s) ?? process.fail(CONFIG_ERROR, "listen on {config.address}: {err}")
     address: bound.local_addr() ?? process.fail(CONFIG_ERROR, "listener address: {err}")
-    // An interrupt stops new connections; `serve` returns once the request in
-    // progress has been answered.
-    stopper: bound.copy()
-    sys.on_interrupt(() -> {
-        _report: stopper.shutdown(5s) ?? return
-    })
+    // SIGTERM cancels the process: `serve` stops accepting new connections and
+    // returns its report once the request in progress has been answered.
+    process.on_signal(.Term)
     print("ready {contract.API_VERSION} http://{address}")
     report: bound.serve() ?? process.fail(1, "serve: {err}")
     if !conn.close() -> process.fail(1, "database close failed")
