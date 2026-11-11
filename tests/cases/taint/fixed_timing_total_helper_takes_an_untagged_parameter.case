@@ -1,0 +1,16 @@
+# A `timing: .Fixed` value passed to an untagged parameter of a total helper
+# (bit and wrapping methods only) is checked through the helper and accepted,
+# and every tier prints the same result, inlined or not.
+fixture: fixed_timing_total_helper_takes_an_untagged_parameter.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fixed_timing_total_helper_takes_an_untagged_parameter.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fixed_timing_total_helper_takes_an_untagged_parameter.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fixed_timing_total_helper_takes_an_untagged_parameter.out

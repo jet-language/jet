@@ -813,6 +813,20 @@ a Map's value tag and a tuple field's tag reach every read out of the value,
 a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
 value secret too: `opt ?? d` on it is E0737.
 
+A `.Fixed` value keeps its meaning across calls, so the check gives the same
+answer at every optimization level, before any inlining. A call that passes
+one to a parameter with no `.Fixed` tag is checked as if the parameter had
+the tag: the callee's body is walked with it, and through every call that
+body makes. If the body would decide a branch or an early return on it,
+divide by it, index with it, or do anything else above, the call is E0737 at
+the argument. The report's why gives the chain of callees down to the code
+that steers. A total helper, one that only combines the value with
+operators that cannot stop, takes it with no tag and no report. A parameter
+written with a `.Fixed` tag is checked in its own body instead. A call
+through a value with no known body cannot be checked, so a `.Fixed` argument
+to one is E0737. That covers a local function value and any other callee
+expression. A foreign import keeps the C rules (D-SECRET-CT1).
+
 The compiler keeps this check after its own lowering too. In the IR, a
 fixed-width integer, `Bool` or `Char` whose type carries a `.Fixed` tag holds a
 fixed bit. So does every value computed from one without a call. Before code

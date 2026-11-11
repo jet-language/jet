@@ -1,0 +1,17 @@
+// A total helper takes a `timing: .Fixed` value in an untagged parameter: its
+// body only combines the value with operators that cannot stop, so the call
+// is checked through it, accepted, and runs the same at every tier.
+Key: tag { deny: [Exec], timing: .Fixed }
+
+#Scrub(Key)
+reveal: fn(value: #Key U64) -> U64 { value }
+
+mix: fn(k: U64, salt: U64) -> U64 {
+    k.bit_xor(salt).wrapping_mul(U64{3}).wrapping_add(U64{1})
+}
+
+forward: fn(k: #Key U64) -> #Key U64 { mix(k, U64{5}) }
+
+run: fn() {
+    print("mixed {reveal(forward(#Key U64{9}))} {reveal(forward(#Key U64{2}))}")
+}

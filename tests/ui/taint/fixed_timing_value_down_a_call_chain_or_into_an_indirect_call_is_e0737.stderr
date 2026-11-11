@@ -1,0 +1,17 @@
+Error [jet.FixedTimingSteer]: A `Key` value decides how `mid` runs (its parameter `x` is untagged)
+  --> tests/ui/taint/fixed_timing_value_down_a_call_chain_or_into_an_indirect_call_is_e0737.jet:4:37
+    |
+  4 | chain: fn(k: #Key U64) -> U64 { mid(k) }
+    |                                     ^
+ Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it, and this call carries it into `mid`, then `low`, where a `Key` value decides a division (its time depends on its operands)
+ Fix: Tag the parameter `#Key` and keep that code in fixed time, or reveal the value through a `#Scrub(Key)` function first
+More: jet-lang.dev/e/E0737
+
+Error [jet.FixedTimingSteer]: A `Key` value decides what an indirect call runs (the value it calls has no known body to check)
+  --> tests/ui/taint/fixed_timing_value_down_a_call_chain_or_into_an_indirect_call_is_e0737.jet:5:56
+    |
+  5 | through: fn(f: fn(U64) -> U64, k: #Key U64) -> U64 { f(k) }
+    |                                                        ^
+ Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it
+ Fix: Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub(Key)` function first
+More: jet-lang.dev/e/E0737

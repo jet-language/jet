@@ -9,6 +9,7 @@ use jet_foundation.[
     BinOp,
     BindPattern,
     BUILTIN_METHOD_ROWS,
+    Call,
     CallArg,
     CompilerThreads,
     Diagnostic,
@@ -187,6 +188,16 @@ SemaTaintFlowState: struct {
     // The read list parameters of the body being settled: the only lists
     // whose `xs[i]` a tail loop proves in bounds.
     tail_lists: [String]{[String]{}}
+    // A fixed value a call carries into an untagged parameter
+    // (sema_taint_check_crossing): each crossed parameter's key
+    // ("module|owner|name|index|tag") and the path on which the callee's
+    // body steers on it ("": none, also while that body is being walked).
+    crossed: [String]{[String]{}}
+    crossed_paths: [String]{[String]{}}
+    // The current walk's first crossing report: its index in `diagnostics`
+    // (-1: none yet) and its path, which a caller's path continues.
+    cross_at: Int{-1}
+    cross_path: String{""}
 }
 
 // The E0307 reports of `diagnostics`: all that settles switch coverage for
@@ -1710,6 +1721,267 @@ sema_taint_check_size: fn(state: &SemaTaintFlowState, method: String, args: [Cal
     sema_taint_check_steer(state, args[0].expr, "an allocation size")
 }
 
+// Fixed values across calls. A call that passes a fixed value to an
+// untagged parameter keeps the value's meaning: the callee's body runs on
+// it exactly as if the parameter carried the tag, at every optimization
+// level, so it is checked that way here, before any inlining. The body is
+// walked again with the tag on that parameter (sema_taint_crossing_path),
+// and when it would steer on the value (E0737, E0738 or E0739 there, a
+// branch it would have to mask, or an early return) the call is E0737 at
+// the argument, its why naming the path of callees down to that report. A
+// parameter written with a fixed tag is checked by its own body's walk. A
+// call through a value with no known body (a local function value, any
+// other callee expression) cannot be checked, so a fixed argument there is
+// E0737. A callee with no Jet body (a foreign import) and the builtins keep
+// their own rules.
+
+// The body of `name` in module `module_identity`: a function (`owner` "")
+// or a method of the type `owner`.
+sema_taint_body_of: fn(graph: SemaRegistrationGraph, module_identity: String, owner: String, name: String) -> Func? {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return None
+    loop item in graph.modules[module_index].program.items {
+        if item == {
+            .Func(function) -> {
+                if owner == "" && function.name == name -> return Val(function)
+            }
+            .Struct(definition) -> {
+                if definition.name != owner -> next
+                loop method in definition.methods {
+                    if method.name == name -> return Val(method)
+                }
+                loop trait_impl in definition.trait_impls {
+                    loop method in trait_impl.methods {
+                        if method.name == name -> return Val(method)
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                if definition.name != owner -> next
+                loop method in definition.methods {
+                    if method.name == name -> return Val(method)
+                }
+            }
+            .Impl(definition) -> {
+                if definition.type_name != owner -> next
+                loop method in definition.methods {
+                    if method.name == name -> return Val(method)
+                }
+            }
+            .Test(_) | .ErrorConv(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    None
+}
+
+// A diagnostic's sentence-cased `what` spliced mid-sentence: its leading
+// capital lowered back ("A `Key` value …" reads "a `Key` value …"), unless
+// it starts an acronym such as `IO`.
+sema_taint_clause: fn(what: String) -> String Never! {
+    bytes: what.bytes()
+    if bytes.len() < 2 -> return what.copy()
+    first: Int.from_u8(bytes[0])
+    second: Int.from_u8(bytes[1])
+    if first < 65 || first > 90 || (second >= 65 && second <= 90) -> return what.copy()
+    "{what.slice(0, 1).lower()}{what.slice(1, what.len())}"
+}
+
+// The path on which `callee` (of `owner`, in module `module_identity`)
+// steers on a `tag_value` value in its parameter `index`, or "" when it
+// does not: its body walked with the tag on that parameter. Each key is
+// walked once per module walk; a recursive call meets the key while its
+// body is being walked and adds nothing, since that walk covers the body.
+sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, index: Int, tag_value: String) -> String {
+    key: "{module_identity}|{owner}|{callee.name}|{index}|{tag_value}"
+    loop (seen, crossed) in state.crossed {
+        if crossed == key -> return state.crossed_paths[seen].copy()
+    }
+    state.crossed.push(key.copy())
+    state.crossed_paths.push("")
+    slot: state.crossed.len() - 1
+    saved_module: state.module_identity.copy()
+    saved_imports: state.imports.copy()
+    saved_fixed: state.fixed_tags.copy()
+    saved_bindings: state.bindings.copy()
+    saved_diagnostics: state.diagnostics.copy()
+    saved_wrapping: state.wrapping
+    saved_masked: state.masked.copy()
+    saved_under: state.under.copy()
+    saved_exits: state.exits.copy()
+    saved_exit_tests: state.exit_tests.copy()
+    saved_exit_tags: state.exit_tags.copy()
+    saved_exit_marks: state.exit_marks.copy()
+    saved_cross_at: state.cross_at
+    saved_cross_path: state.cross_path.copy()
+    state.module_identity = module_identity.copy()
+    state.imports = sema_taint_collect_imports(graph, module_identity)
+    state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, module_identity)
+    sema_taint_add(state.fixed_tags, tag_value)
+    state.bindings = [SemaTaintBindingFact]{}
+    state.diagnostics = [Diagnostic]{}
+    state.wrapping = false
+    if sema_function_arithmetic_policy(callee.markers) == .Val(policy) -> state.wrapping = sema_taint_mode_wraps(Val(policy.mode))
+    state.masked = [Span]{}
+    state.under = [String]{}
+    state.exits = [Span]{}
+    state.exit_tests = [Span]{}
+    state.exit_tags = [String]{}
+    state.exit_marks = [Int]{}
+    state.cross_at = -1
+    state.cross_path = ""
+    loop (parameter_index, parameter) in callee.params {
+        tags := sema_taint_type_tags(parameter.ty)
+        if parameter_index == index -> sema_taint_add(tags, tag_value)
+        type_name := sema_taint_type_name(parameter.ty)
+        if parameter.name == "self" && owner != "" -> type_name = Val(owner)
+        sema_taint_set_binding(state.bindings, parameter.name, tags, type_name)
+    }
+    sema_taint_check_block(graph, state, callee.body)
+    marker: "`{tag_value}`"
+    path := ""
+    loop (at, diagnostic) in state.diagnostics {
+        if diagnostic.code != "E0737" && diagnostic.code != "E0738" && diagnostic.code != "E0739" -> next
+        if !diagnostic.what.contains(marker) -> next
+        path = if at == state.cross_at -> "`{callee.name}`, then {state.cross_path}" else -> "`{callee.name}`, where {sema_taint_clause(diagnostic.what)}"
+        break
+    }
+    if path == "" && (state.masked.len() > 0 || state.exits.len() > 0) -> path = "`{callee.name}`, where a `{tag_value}` value decides a branch or an early return"
+    state.module_identity = saved_module
+    state.imports = saved_imports
+    state.fixed_tags = saved_fixed
+    state.bindings = saved_bindings
+    state.diagnostics = saved_diagnostics
+    state.wrapping = saved_wrapping
+    state.masked = saved_masked
+    state.under = saved_under
+    state.exits = saved_exits
+    state.exit_tests = saved_exit_tests
+    state.exit_tags = saved_exit_tags
+    state.exit_marks = saved_exit_marks
+    state.cross_at = saved_cross_at
+    state.cross_path = saved_cross_path
+    state.crossed_paths[slot] = path.copy()
+    path
+}
+
+// E0737 at `span` when the `tag_value` value passed there to the untagged
+// parameter `index` of `callee` is steered on in its body.
+sema_taint_check_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, index: Int, tag_value: String, span: Span) {
+    if index >= callee.params.len() || callee.body.len() == 0 -> return
+    parameter: callee.params[index]
+    loop declared in sema_taint_type_tags(parameter.ty) {
+        if declared == tag_value || sema_taint_has(state.fixed_tags, declared) -> return
+    }
+    path: sema_taint_crossing_path(graph, state, module_identity, owner, callee, index, tag_value)
+    if path == "" -> return
+    if state.cross_at < 0 {
+        state.cross_at = state.diagnostics.len()
+        state.cross_path = path.copy()
+    }
+    state.diagnostics.push(sema_error("E0737", span, "a `{tag_value}` value decides how `{callee.name}` runs (its parameter `{parameter.name}` is untagged)", "`{tag_value}` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it, and this call carries it into {path}", "tag the parameter `#{tag_value}` and keep that code in fixed time, or reveal the value through a `#Scrub({tag_value})` function first"))
+}
+
+// The crossing checks of a call's arguments into `callee`, whose
+// parameter `offset + i` takes positional argument `i` (a labeled argument
+// takes the parameter of its label).
+sema_taint_check_crossings: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, args: [CallArg], offset: Int) {
+    loop (position, argument) in args {
+        if argument.spread -> return
+        tag_value: sema_taint_fixed_in(state, argument.expr) ?? next
+        index := position + offset
+        if argument.label == .Val(label) {
+            index = -1
+            loop (parameter_index, parameter) in callee.params {
+                if parameter.name == label.name -> index = parameter_index
+                if parameter.public_label == .Val(written) {
+                    if written.name == label.name -> index = parameter_index
+                }
+            }
+            if index < 0 -> next
+        }
+        sema_taint_check_crossing(graph, state, module_identity, owner, callee, index, tag_value, argument.span)
+    }
+}
+
+// E0737 at each fixed argument of a call through a value with no known body.
+sema_taint_refuse_indirect: fn(state: &SemaTaintFlowState, args: [CallArg]) {
+    loop argument in args {
+        tag_value: sema_taint_fixed_in(state, argument.expr) ?? next
+        sema_taint_e0737(state, tag_value, "what an indirect call runs (the value it calls has no known body to check)", argument.span)
+    }
+}
+
+sema_taint_any_fixed: fn(state: &SemaTaintFlowState, args: [CallArg]) -> Bool {
+    loop argument in args {
+        if sema_taint_fixed_in(state, argument.expr) != None -> return true
+    }
+    false
+}
+
+// The module whose function `name` a call in the walked module reaches:
+// its own, or the one an import binds the name from ("": none).
+sema_taint_function_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, name: String) -> String {
+    if sema_taint_slot(state.catalog.callable_slots, "{state.module_identity}||{name}") != None -> return state.module_identity.copy()
+    sema_taint_import_module(graph, state.module_identity, name)
+}
+
+// `name(args)`: a function, or a local function value (no known body).
+sema_taint_check_call_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, call: Call) {
+    if !sema_taint_any_fixed(state, call.args) -> return
+    if sema_taint_binding_index(state.bindings, call.name) != None {
+        sema_taint_refuse_indirect(state, call.args)
+        return
+    }
+    module_identity: sema_taint_function_module(graph, state, call.name)
+    if module_identity == "" -> return
+    callee: sema_taint_body_of(graph, module_identity, "", call.name) ?? return
+    sema_taint_check_crossings(graph, state, module_identity, "", callee, call.args, 0)
+}
+
+// `callee(args)` on a callee expression: a named function when it names
+// one, else a value with no known body.
+sema_taint_check_value_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, callee: Expr, args: [CallArg]) {
+    if !sema_taint_any_fixed(state, args) -> return
+    if callee == .Ident(name, _, _) {
+        if sema_taint_binding_index(state.bindings, name) == None {
+            module_identity: sema_taint_function_module(graph, state, name)
+            if module_identity != "" {
+                if sema_taint_body_of(graph, module_identity, "", name) == .Val(function) {
+                    sema_taint_check_crossings(graph, state, module_identity, "", function, args, 0)
+                    return
+                }
+            }
+        }
+    }
+    sema_taint_refuse_indirect(state, args)
+}
+
+// `receiver.method(args)`: a function of an imported module, or a method
+// of the receiver's declared type, whose `self` takes the receiver.
+sema_taint_check_method_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, receiver: Expr, method: String, args: [CallArg]) {
+    receiver_fixed: sema_taint_fixed_in(state, receiver)
+    if receiver_fixed == None && !sema_taint_any_fixed(state, args) -> return
+    if receiver == .Ident(alias, _, _) {
+        if sema_taint_binding_index(state.bindings, alias) == None {
+            target: sema_taint_import_module(graph, state.module_identity, alias)
+            if target != "" {
+                function: sema_taint_body_of(graph, target, "", method) ?? return
+                sema_taint_check_crossings(graph, state, target, "", function, args, 0)
+                return
+            }
+        }
+    }
+    owner: sema_taint_type_of_expr(state, receiver) ?? return
+    fact: sema_taint_find_callable(state.catalog, state.module_identity, owner, method) ?? return
+    if fact.owner != owner -> return
+    function: sema_taint_body_of(graph, fact.module_identity, owner, method) ?? return
+    offset := 0
+    if function.params.len() > 0 && function.params[0].name == "self" {
+        offset = 1
+        if receiver_fixed == .Val(tag_value) -> sema_taint_check_crossing(graph, state, fact.module_identity, owner, function, 0, tag_value, expr_span(receiver))
+    }
+    sema_taint_check_crossings(graph, state, fact.module_identity, owner, function, args, offset)
+}
+
 // Whether the `Arithmetic` scope argument `mode` wraps or saturates.
 sema_taint_mode_wraps: fn(mode: ArithmeticMode?) -> Bool Never! {
     if mode == .Val(value) -> return value == .Wrapping || value == .Saturating
@@ -1744,6 +2016,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_check_wide_from(state, receiver, method, args, method_span)
             sema_taint_check_expr(graph, state, receiver)
             loop argument in args -> sema_taint_check_expr(graph, state, argument.expr)
+            sema_taint_check_method_crossing(graph, state, receiver, method, args)
         }
         .Call(call, _) -> {
             credential_sink := call.name == "print" || call.name == "eprint"
@@ -1781,11 +2054,13 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
                 }
             }
             loop argument in call.args -> sema_taint_check_expr(graph, state, argument.expr)
+            sema_taint_check_call_crossing(graph, state, call)
         }
         .CallValue(callee, args, _, _) -> {
             sema_taint_check_steer(state, callee, "an indirect call target")
             sema_taint_check_expr(graph, state, callee)
             loop argument in args -> sema_taint_check_expr(graph, state, argument.expr)
+            sema_taint_check_value_crossing(graph, state, callee, args)
         }
         .Tainted(inner, _, _, _) -> sema_taint_check_expr(graph, state, inner)
         // A left-leaning chain (`a + b + c …`) costs no stack per operator.
