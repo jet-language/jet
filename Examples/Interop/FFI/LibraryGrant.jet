@@ -1,0 +1,18 @@
+// A foreign-library grant names one library: `FFI.C("c")` lets this package
+// call into the C library its key `c` names (libc) and into no other C
+// library. A row granting `FFI.C("m")` instead refuses the `labs` call below
+// with E0749; the bare `FFI.C` grants every C library and inline C body.
+package: {
+    name: "absolute"
+    version: "0.1.0"
+    authority: { allow: [IO, FFI.C("c")] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}

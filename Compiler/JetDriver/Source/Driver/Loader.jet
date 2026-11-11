@@ -48,6 +48,7 @@ use {
         owned_trait,
         core_module_has_type,
         diagnostic_with_source_path,
+        effect_scope_argument_valid,
         effect_scope_is_scoped,
         effect_scope_name,
         effect_scope_split,
@@ -242,16 +243,30 @@ jet_driver_authority_diagnostic: fn(span: Span, detail: String) -> Diagnostic {
     jet_driver_diagnostic("E1221", span, "the package's `authority:` block is malformed", detail, "`authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights")
 }
 
-// E1221's reason for an `FFI` right written with an argument, such as
-// `FFI.C("nativeffi")` (#6281 c144): that is the foreign-call effect naming
-// a library, not a memory denial, and an authority list names the right
-// alone. None for every other root.
+// E1221's reason for an `FFI` right written with an argument in
+// `authority.needs`, such as `FFI.C("nativeffi")` (#6281 c144): that is the
+// foreign-call effect naming a library, not a memory denial, and a guest's
+// needs name the right alone. None for every other root.
 jet_driver_authority_ffi_argument: fn(name: String, place: String) -> String? {
     if sema_effect_root(name) != "FFI" -> return None
     open: name.find("(")
     if open < 0 -> return None
     right: String.from_bytes_lossy(name.bytes()[0..<open])
     Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
+}
+
+// E1221's reason for an `FFI` right written with an argument that is no
+// library grant (#6281 c181); None for every other right and for a grant
+// like `FFI.C("c")`, the calls into the one C library the package's key `c`
+// names. The bare root names no language, so it can't name a library of
+// one, and the library is one quoted name.
+jet_driver_authority_ffi_library: fn(name: String) -> String? {
+    if sema_effect_root(name) != "FFI" || !name.contains("(") -> return None
+    split: effect_scope_split(name)
+    library: split.scope ?? return Val("`{name}` names its library without quotes; write the library key as a string, like `FFI.C(\"c\")`")
+    if split.base == "FFI" -> return Val("`{name}` names the library `{library}` without its language; a library belongs to one language, so write `FFI.C(\"{library}\")` for a C library")
+    if !effect_scope_argument_valid(library) -> return Val("`{name}` has an invalid library argument; name one library key, like `FFI.C(\"c\")`")
+    None
 }
 
 jet_driver_is_ui_capability: fn(name: String) -> Bool Never! {
@@ -363,7 +378,7 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
-            jet_driver_authority_ffi_argument(name, "`{field}:`") == .Val(ffi_argument) -> diagnostics.push(jet_driver_authority_diagnostic(span, ffi_argument))
+            jet_driver_authority_ffi_library(name) == .Val(ffi_library) -> diagnostics.push(jet_driver_authority_diagnostic(span, ffi_library))
             effect_scope_is_scoped(name) && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid scope argument - name a folder, host or device, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
             name.contains("(") && !effect_scope_is_scoped(name) && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
             name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))

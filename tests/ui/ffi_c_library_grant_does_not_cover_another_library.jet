@@ -1,0 +1,15 @@
+// A grant naming the C library `c` covers calls into that library only: the
+// call into the math library `m` is another library, so the row refuses it.
+package: {
+    name: "one_library"
+    authority: { allow: [FFI.C("c"), IO, Mem.Alloc] }
+}
+
+use m: c.m
+#Import c.m: module {
+    cosine: fn(x: Float) -> Float = "cos"
+}
+
+run: fn() {
+    print("{m.cosine(0.0)}")
+}

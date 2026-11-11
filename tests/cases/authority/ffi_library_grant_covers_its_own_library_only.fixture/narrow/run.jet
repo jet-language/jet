@@ -1,0 +1,14 @@
+// The narrow grant: `FFI.C("c")` covers the call into the C library `c`.
+package: {
+    name: "narrow"
+    authority: { allow: [IO, FFI.C("c")] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}

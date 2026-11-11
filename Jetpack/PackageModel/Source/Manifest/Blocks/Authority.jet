@@ -11,7 +11,7 @@ use {
         AUTHORITY_TRUST_REQUIRE_LOGGED, AUTHORITY_TRUST_REQUIRE_NONE, PROVIDER_FIELD_ALLOW,
         PROVIDER_FIELD_DENY, PROVIDER_FIELD_REGISTRY, syntax_is_ui_capability,
     ]
-    jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_root]
+    jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_root, effect_scope_argument_valid, effect_scope_split]
 }
 
 TrustDecision: enum {
@@ -308,17 +308,33 @@ pkg_parse_effect_list: fn(field: String, value: String) -> [String] PackageParse
     loop name in names {
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
         if name.contains("(") {
-            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
-            if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`{field}:`") ?? "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
+            if authority_root(name) == "FFI" {
+                if pkg_authority_ffi_library(name) == .Val(reason) -> return Err(PackageParseError.BadEffectsBlock(reason))
+                next
+            }
+            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
+            if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
         }
     }
     Ok(names)
 }
 
-// The reason for an `FFI` right written with an argument, such as
-// `FFI.C("nativeffi")` (#6281 c144): that is the foreign-call effect naming
-// a library, not a memory denial, and an authority list names the right
-// alone. None for every other root.
+// Why an `FFI` right written with an argument is no library grant, or None
+// when it is one (#6281 c181): `FFI.C("c")` grants calls into the one C
+// library the package's key `c` names. The bare root names no language, so
+// it can't name a library of one, and the library is one quoted name.
+pkg_authority_ffi_library: fn(name: String) -> String? Never! {
+    split: effect_scope_split(name)
+    library: split.scope ?? return Val("`{name}` names its library without quotes; write the library key as a string, like `FFI.C(\"c\")`")
+    if split.base == "FFI" -> return Val("`{name}` names the library `{library}` without its language; a library belongs to one language, so write `FFI.C(\"{library}\")` for a C library")
+    if !effect_scope_argument_valid(library) -> return Val("`{name}` has an invalid library argument; name one library key, like `FFI.C(\"c\")`")
+    None
+}
+
+// The reason for an `FFI` right written with an argument in
+// `authority.needs`, such as `FFI.C("nativeffi")` (#6281 c144): that is the
+// foreign-call effect naming a library, not a memory denial, and a guest's
+// needs name the right alone. None for every other root.
 pkg_authority_ffi_argument: fn(name: String, place: String) -> String? {
     if authority_root(name) != "FFI" -> return None
     open: name.find("(")

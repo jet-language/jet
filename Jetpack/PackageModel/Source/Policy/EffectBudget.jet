@@ -16,7 +16,7 @@
 use jet_foundation.[
     AUTHORITY_PANIC_ROOT, AuthorityVerdict, Diagnostic, Span, authority_answer,
     authority_covers, authority_covers_any, authority_holds, authority_is_deny_only, authority_parse_rights,
-    authority_root, diagnostic_from_registry, diagnostic_with_rights, diagnostic_with_source_path,
+    authority_root, diagnostic_from_registry, diagnostic_with_rights, diagnostic_with_source_path, effect_scope_is_scoped,
 ]
 
 EFFECT_ROOT_PACKAGE: "root"
@@ -347,11 +347,19 @@ pkg_effect_budget_rights: fn(names: [String]) -> [String] Never! {
 // row is E0749: the row is a ceiling, as a function's `-[…]>` row is. A
 // `deny` over the root's code is sema's E0749, checked at every function of
 // the package, so it is not repeated here. Rows may be ancestor roots; the
-// substrate verdict decides. Panic is deny-only, so no line grants it.
+// substrate verdict decides. Panic is deny-only, so no line grants it. A
+// library grant (`FFI.C("c")`) names its library by a key of the package
+// that writes it, and equal keys in two packages need not name one locked
+// library, so `allow` lends a dependency none of its library grants; the
+// dependency's own grant line names its own keys.
 pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
     allow: if manifest.authority.allow == {
         .Val(names) -> Val(pkg_effect_budget_rights(names))
+        .None -> None
+    }
+    dependency_allow: if allow == {
+        .Val(rights) -> Val(pkg_effect_without_library_grants(rights))
         .None -> None
     }
     deny: pkg_effect_budget_rights(manifest.authority.deny ?? [String]{})
@@ -362,7 +370,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
         granted: if root -> None else -> pkg_effect_grant_for(manifest, package.name)
         limit: if granted == {
             .Val(line) -> Val(line)
-            .None -> allow
+            .None -> if root -> allow else -> dependency_allow
         }
         loop effect_name in package.effects {
             is_panic: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
@@ -395,6 +403,18 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
         }
     }
     diagnostics
+}
+
+// `rights` without its library grants (`FFI.C("c")`): the rights the root's
+// `allow` row lends a dependency, whose library keys are its own.
+pkg_effect_without_library_grants: fn(rights: [String]) -> [String] Never! {
+    out := [String]{}
+    loop right in rights {
+        if authority_root(right) == "FFI" && effect_scope_is_scoped(right) -> next
+        // copy: the borrowed manifest row stays the root's limit.
+        out.push(right.copy())
+    }
+    out
 }
 
 // The parsed `authority.grants` row of one dependency, if any.
@@ -509,12 +529,14 @@ pkg_lock_widened_note: fn(dependency: String, reach: PackageEffectReach) -> Stri
 
 // E1220: a dependency reaches an effect outside this package's budget.
 // `chain` is the call path into the dependency, down to the function that
-// performs the effect (`site`).
+// performs the effect (`site`). A library effect names the dependency's own
+// library key, which only its grant line can name.
 pkg_e1220_path: fn(dependency: String, effect_name: String, site: String?, chain: [String]) -> Diagnostic Never! {
+    fix: if authority_root(effect_name) == "FFI" && effect_scope_is_scoped(effect_name) -> "grant `{effect_name}` to `{dependency}` in `authority.grants` (the key names `{dependency}`'s own library), or drop the dependency" else -> "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
     diagnostic: diagnostic_from_registry("E1220", None,
         "`{dependency}`{pkg_e1220_location(site)} uses the `{effect_name}` effect, which this package's budget doesn't allow",
         "an `authority` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
-        "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency")
+        fix)
     diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
 }
 

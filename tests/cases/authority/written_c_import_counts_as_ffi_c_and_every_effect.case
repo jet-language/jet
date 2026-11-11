@@ -1,5 +1,6 @@
-# Claim (#6614 c11): a written `#Import c.<lib>: module` call records `FFI.C`
-# and, since the C body is unseen, reaches every effect: the run lists `FFI.C`,
+# Claim (#6614 c11): a written `#Import c.<lib>: module` call records
+# `FFI.C("<lib>")` (#6281 c181) and, since the C body is unseen, reaches
+# every effect: the run lists `FFI.C("c")`,
 # a written ceiling refuses it (E0740), a package `deny: [FFI]` refuses it, and
 # a package that denies Exec and FS refuses a C `system` call (E0749) before
 # the shell can write a file.
@@ -10,11 +11,11 @@ env: JETPACK_ROOT={work}/jetpack
 step plain: jet run --verbose -A plain/ffi.jet
 exit: 0
 stdout: = "pid>0=true\n"
-stderr: = "jet run: effects used: FFI.C, IO\n"
+stderr: = "jet run: effects used: FFI.C(\"c\"), IO\n"
 step bounded: jet check bounded/run.jet
 exit: 1 # the IO ceiling does not hold a C call
 stderr: ~ "E0740" # the IO ceiling does not hold a C call
-stderr: ~ "FFI.C" # the C call's own effect is named
+stderr: ~ "uses the effect `Browser, DB, Env, Exec, FFI, FS, GPU, Log, Meta, Net, Rand, Secret, Time`" # every effect; the C call's `FFI.C("c")` is a scoped need that the bare `FFI` covers, so it is not named twice
 step denied: jet check denied/run.jet
 exit: 1 # the package denies FFI
 stderr: ~ "E0749" # the package denies FFI

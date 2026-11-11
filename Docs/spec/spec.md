@@ -2280,8 +2280,9 @@ alters them.
 ### Effect scopes
 
 An effect argument names a scope from Core's scope kinds: a folder
-(`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a device
-(`GPU("npu")`). The argument is one plain string, with no interpolation,
+(`FS.Read("templates/")`), a host (`Net("api.example.com")`), a device
+(`GPU("npu")`) or a C library (`FFI.C("z")`, see "C ABI"). The argument
+is one plain string, with no interpolation,
 quote or backslash; `Mem` and `Panic` take none. One covers rule
 (`Compiler/JetFoundation/Source/Policy/EffectScope.jet`) decides coverage for
 effect rows, denials and run grants, from three fixed laws
@@ -3818,16 +3819,28 @@ The reserved `__bindgen__` path is E3206. A second C `use` form for the same
 library is E3204; an incompatible overlay is E3205, and handwritten
 `#Bindgen` is E3207.
 
-A C call records `FFI.C`. When no binding descriptor owns the declaration's
+A C call records `FFI.C("<lib>")`, the C leaf scoped to the library key the
+call enters: `#Import c.z: module` and the bindings a `z: c@…` dependency
+generates both name `z`. When no binding descriptor owns the declaration's
 effect row (a written `#Import c.<lib>: module` with no `c@` dependency
 descriptor), the checker cannot see what the C body does, so the call also
 reaches every effect: written ceilings (E0740) and `deny` rows (E0749) apply
 to it, and C `system` under `deny: [Exec]` is refused at check time. A package
-`authority: { allow: […] }` row holds such a call by `FFI.C`, the explicit
-opt-in to foreign code that may do anything: a row without `FFI.C` is E0749
-naming it. A call whose descriptor declares its row is held to that row, and
-`FFI.C` covers neither another `FFI` leaf nor a Jet-side effect. Core's
-own C bindings are toolchain code whose public functions declare their rows.
+`authority: { allow: […] }` row holds such a call by a library grant,
+`FFI.C("<lib>")`, the explicit opt-in to that library's code doing anything,
+or by the whole-family `FFI.C` or `FFI`: a row without one is E0749 naming
+`FFI.C("<lib>")`. A library grant covers its own library only, so
+`allow: [IO, FFI.C("c")]` refuses a call into `m`; `deny: [FFI.C("c")]`
+refuses calls into `c` under a broad grant. The key belongs to the package
+that writes it: a root's `FFI.C("c")` lends a dependency nothing, and a
+dependency's library calls are granted by its `authority.grants` line, such as
+`grants: { "helper": [FFI.C("c")] }`, or by a whole-family grant (E1220
+otherwise). A grant names a language leaf: `FFI("c")` is E1221. An inline
+`#FFI(c)` body enters no library and records the bare `FFI.C`, which only a
+whole-family grant covers. A call whose descriptor declares its row is held
+to that row, and `FFI.C` covers neither another `FFI` leaf nor a Jet-side
+effect. Core's own C bindings are toolchain code whose public functions
+declare their rows. (D-FFI-EFFECTS1)
 
 A C declaration binds by-value scalars, `String`, `Char`, and C-layout
 aggregates. Lists, maps, tuples, options, results, and other Jet aggregates

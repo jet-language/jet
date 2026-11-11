@@ -18,6 +18,8 @@ use {
         TExprType,
         StmtKind,
         compiler_transfer_rows,
+        effect_scope_argument_valid,
+        effect_scope_name,
         foundation_named_type,
         type_table_intern,
         Call,
@@ -2792,14 +2794,29 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
 
 // An extern callee (`#FFI(<lang>)` body or foreign row) carries its one foreign
 // effect root; a written C binding with no descriptor-owned root carries the
-// `FFI.C` leaf; a Jet callee has none.
+// `FFI.C` leaf; a Jet callee has none. A call into a C library
+// (`#Import c.<lib>: module`, or the bindings a C provider generates under
+// the descriptor root `FFI`) names that library, `FFI.C("<lib>")`, so a
+// grant naming one library never covers another, and `FFI` and `FFI.C`
+// still cover it; an inline `#FFI(C)` body names no library and keeps
+// `FFI.C`.
 sema_expr_call_foreign_effect_root: fn(program: SemaProgramTables, callee: SymbolID?) -> String? {
     symbol: callee ?? return None
     if program.registration_graph == .Val(graph) {
         abi: sema_registration_callable_abi(graph, symbol) ?? return None
         if !abi.is_extern -> return None
-        if abi.foreign_effect_root == .Val(root) -> return Val(root)
-        if abi.is_c_abi && !sema_expr_call_core_binding(symbol) -> return Val("FFI.C")
+        core: sema_expr_call_core_binding(symbol)
+        root := abi.foreign_effect_root ?? ""
+        if root == "" {
+            if !abi.is_c_abi || core -> return None
+            root = "FFI.C"
+        }
+        if (root != "FFI.C" && root != "FFI") || core -> return Val(root)
+        if sema_registration_callable_row(graph, symbol.key) == .Val(.Foreign(module_index, index)) {
+            library: graph.modules[module_index].foreign_functions[index].foreign_library
+            if graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule && effect_scope_argument_valid(library) -> return Val(effect_scope_name("FFI.C", library))
+        }
+        return Val(root)
     }
     None
 }

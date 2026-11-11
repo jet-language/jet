@@ -1,0 +1,14 @@
+// A grant naming the library `m` doesn't cover the call into the library `c`.
+package: {
+    name: "other"
+    authority: { allow: [IO, FFI.C("m")] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}

@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `ffi_c_library_grant_does_not_cover_another_library::run` reaches the `FFI.C("m")` effect, which the package's `authority: { allow: […] }` row doesn't list
+  --> tests/ui/ffi_c_library_grant_does_not_cover_another_library.jet:13:1
+    |
+ 13 | run: fn() {
+    | ^^^
+ Why: A written `allow` row is a ceiling: the package's code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)
+ Fix: Add `FFI.C("m")` to `authority.allow`, or remove the call that reaches it
+ Denial: invocation
+ Call chain: ffi_c_library_grant_does_not_cover_another_library::run
+More: jet-lang.dev/e/E0749

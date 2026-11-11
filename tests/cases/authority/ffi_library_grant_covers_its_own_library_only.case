@@ -1,0 +1,45 @@
+# Claim (#6281 c181): a foreign-library grant names one library. A call into
+# a C library records `FFI.C("<library>")`, named by the key of the package
+# that makes it; `FFI.C("c")` in `authority.allow` covers calls into `c` and
+# into no other library, the bare `FFI.C` covers every C library, and a
+# `deny` of one library wins over the broad grant. A grant names the library
+# key, not the local alias. Equal keys in two packages confer no shared
+# authority: the root's `FFI.C("c")` lends the dependency nothing, and the
+# dependency's grant line names the dependency's own key. `FFI("c")` names
+# no language and is refused.
+fixture: ffi_library_grant_covers_its_own_library_only.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step narrow: jet run narrow/run.jet
+exit: 0 # the grant names the library the call enters
+stdout: = "7\n"
+step other: jet check other/run.jet
+exit: 1 # a grant naming `m` doesn't cover the call into `c`
+stderr: ~ "E0749" # the package row is the ceiling
+stderr: ~ "reaches the `FFI.C(\"c\")` effect" # the call names its library
+stderr: ~ "Add `FFI.C(\"c\")` to `authority.allow`" # the fix names the library
+step alias: jet check alias/run.jet
+exit: 1 # the alias `native` is not the library key `c`
+stderr: ~ "reaches the `FFI.C(\"c\")` effect" # the call names the library key
+step broad: jet run broad/run.jet
+exit: 0 # the bare `FFI.C` covers every C library
+stdout: = "7\n"
+step denied: jet check denied/run.jet
+exit: 1 # the denial of `c` wins over the broad grant
+stderr: ~ "E0749" # the package denies the library
+stderr: ~ "FFI.C(\"c\")" # the denied library is named
+step shared: jet check shared/main.jet
+exit: 1 # the root's key `c` is not the helper's key `c`
+stderr: ~ "E1220" # the dependency is outside the root's budget
+stderr: ~ "`helper`" # the dependency is named
+stderr: ~ "FFI.C(\"c\")" # its library effect is named
+stderr: ~ "the key names `helper`'s own library" # the fix points at the helper's grant line
+step granted: jet run granted/main.jet
+exit: 0 # the helper's grant line names its own key
+stdout: = "7\n"
+step nolanguage: jet check nolanguage/run.jet
+exit: 1 # a library belongs to one language
+stderr: ~ "E1221" # the authority block is refused
+stderr: ~ "names the library `c` without its language" # the language is missing
+stderr: ~ "write `FFI.C(\"c\")` for a C library" # the fix names the language leaf

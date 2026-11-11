@@ -1,0 +1,14 @@
+// The broad grant: the bare `FFI.C` covers every C library.
+package: {
+    name: "broad"
+    authority: { allow: [IO, FFI.C] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}

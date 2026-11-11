@@ -4591,6 +4591,19 @@ to the same binding generator. A safe wrapper does not prove its foreign
 implementation safe; missing facts remain unknown and native trust retains
 its existing audited boundary.
 
+**D-FFI-EFFECTS1=A — a foreign-library grant names one library**
+*(ratified 2026-11-10, #6281)*: the existing `FFI.C` effect takes a library
+key as its scope argument in `authority.allow`, `deny`, `grants`, and run
+grants: `authority: { allow: [IO, FFI.C("c")] }`. A call into a C library
+(`#Import c.<lib>: module` or the bindings its `c@` dependency generates)
+records `FFI.C("<lib>")` through the existing foreign effect root and covers
+solver; a grant naming one library never covers another, while the bare
+`FFI.C` and `FFI` stay whole-family grants. The key is the writing package's:
+a root's library grant lends a dependency nothing, and a dependency's
+`grants` line names its own keys. `FFI("c")` names no language and is E1221.
+A library grant admits code; it does not contain it (D-FFI-CONTRACT1 keeps
+evidence and isolation).
+
 **D-FFI-AUTO1=A — proved adaptations with checked conditions**
 *(ratified 2026-09-05, #2933)*: generate an adaptation
 only from an established rule and its satisfied contract. Pointer/count

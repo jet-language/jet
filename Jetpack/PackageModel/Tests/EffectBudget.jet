@@ -164,15 +164,17 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
 }
 
 // #6281 c146: a foreign call is held to the written `allow` row by the
-// effects it has. An undescribed C call has `FFI.C`, the opt-in to "foreign
-// code may do anything"; a descriptor-owned binding has its descriptor's
-// root; `FFI.C` never covers another FFI leaf or a Jet-side effect.
+// effects it has. An undescribed call into the C library `c` has
+// `FFI.C("c")`, the opt-in to "this library's code may do anything"; a
+// descriptor-owned binding has its descriptor's root; `FFI.C` never covers
+// another FFI leaf or a Jet-side effect.
 #Test("a written allow row holds each foreign call to the effects it has") {
-    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C", "IO"}, [String: [String]]{"FFI.C": [String]{"run::run"}}, [String]{}, None)}
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String: [String]]{"FFI.C(\"c\")": [String]{"run::run"}}, [String]{}, None)}
     omitted: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"IO", "Mem.Alloc"}))
     assert_eq(omitted.len(), 1)
     assert_eq(omitted[0].code, "E0749")
-    assert(omitted[0].what.contains("`FFI.C`"))
+    assert(omitted[0].what.contains("`FFI.C(\"c\")`"))
+    assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})).len(), 0)
     assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"})).len(), 0)
     assert_eq(pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI", "IO", "Mem.Alloc"})).len(), 0)
     described: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.Fortran"}, [String: [String]]{"FFI.Fortran": [String]{"run::run"}}, [String]{}, None)}
@@ -185,6 +187,29 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     assert_eq(net.len(), 1)
     assert_eq(net[0].code, "E0749")
     assert(net[0].what.contains("`Net`"))
+}
+
+// #6281 c181: a library grant covers its own library only, and a grant in
+// the root's `allow` row names the root's key, so it lends a dependency
+// nothing; the dependency's grant line names the dependency's own key.
+#Test("a foreign-library grant covers its own library in its own package") {
+    c_call: [PackageEffects]{pkg_test_package_effects("root", [String]{"FFI.C(\"c\")", "IO"}, [String: [String]]{"FFI.C(\"c\")": [String]{"run::run"}}, [String]{}, None)}
+    other: pkg_effect_enforce(c_call, pkg_test_budget_manifest([String]{"FFI.C(\"m\")", "IO", "Mem.Alloc"}))
+    assert_eq(other.len(), 1)
+    assert_eq(other[0].code, "E0749")
+    assert(other[0].what.contains("`FFI.C(\"c\")`"))
+    assert(other[0].fix.contains("`FFI.C(\"c\")`"))
+    span: Span{start: 4, end: 12}
+    helper_call: [PackageEffects]{pkg_test_package_effects("helper", [String]{"FFI.C(\"c\")"}, [String: [String]]{"FFI.C(\"c\")": [String]{"helper::magnitude"}}, [String]{}, Val(span))}
+    manifest := pkg_test_budget_manifest([String]{"FFI.C(\"c\")", "IO", "Mem.Alloc"})
+    lent: pkg_effect_enforce(helper_call, manifest)
+    assert_eq(lent.len(), 1)
+    assert_eq(lent[0].code, "E1220")
+    assert(lent[0].what.contains("`FFI.C(\"c\")`"))
+    assert(lent[0].fix.contains("the key names `helper`'s own library"))
+    manifest.authority.grants = [PackageGrant]{PackageGrant{package: "helper", rights: [String]{"FFI.C(\"c\")"}}}
+    assert_eq(pkg_effect_enforce(helper_call, manifest).len(), 0)
+    assert_eq(pkg_effect_enforce(helper_call, pkg_test_budget_manifest([String]{"FFI.C", "IO", "Mem.Alloc"})).len(), 0)
 }
 
 #Test("panic budget ignores allow omission but honors denial") {

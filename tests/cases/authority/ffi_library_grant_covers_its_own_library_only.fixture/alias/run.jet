@@ -1,0 +1,15 @@
+// A grant names the library key, not the local alias: `native` is the alias
+// of the library `c`, so `FFI.C("native")` doesn't cover the call.
+package: {
+    name: "alias"
+    authority: { allow: [IO, FFI.C("native")] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}

@@ -1,0 +1,14 @@
+// An explicit denial of one library wins over the broad grant.
+package: {
+    name: "denied"
+    authority: { allow: [IO, FFI.C], deny: [FFI.C("c")] }
+}
+
+use native: c.c
+#Import c.c: module {
+    absolute: fn(n: Int) -> Int = "labs"
+}
+
+run: fn() {
+    print(native.absolute(-7))
+}
