@@ -920,6 +920,25 @@ jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
     }
 }
 
+// A declaration's leading comments. A blank line written between a standalone
+// comment and what follows it stays, so a banner comment above a declaration
+// never becomes that declaration's doc comment.
+jfmt_emit_leading_declaration: fn(f: &JetFmt, pos: Int) Never! {
+    loop f.comment_i < f.comments.len() {
+        // copy: the pending comment (owner: f.comments) is emitted through `&f`, as in jfmt_emit_leading.
+        comment: f.comments[f.comment_i].copy()
+        if comment.span.start >= pos -> break
+        if jfmt_is_trailing_comment_at(f, comment.span) -> break
+        jfmt_emit_comment_line(f, comment.text)
+        f.comment_i += 1
+        following: if f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < pos -> f.comments[f.comment_i].span.start else -> pos
+        if jfmt_src_range_valid(f, comment.span.end, following) && jfmt_source_has_blank_line(f.src_bytes, comment.span.end, following) {
+            jfmt_newline(f)
+            f.pending_blank = true
+        }
+    }
+}
+
 // Imports print before the items that precede them in source, so only the
 // pending top-level comments may lead the imports. A comment inside an earlier
 // item leaves the queue while the imports print (jfmt_return_item_comments
@@ -1165,12 +1184,15 @@ jfmt_source_span_multiline: fn(f: JetFmt, span: Span) -> Bool Never! {
 }
 
 // Rust `fmt_comma_items`, split at its closure boundaries: begin, then per
-// item before/render/after, then end.
+// item before/render/after, then end. A multiline list puts each item on its
+// own line one level in, and its closer back at the list's own indent.
 jfmt_comma_begin: fn(f: &JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
     multiline := false
     if source == .Val(list) -> multiline = jfmt_source_span_multiline(f, list.span)
-    if multiline && count > 0 -> jfmt_newline(f)
-    multiline
+    if !multiline -> return false
+    if count > 0 -> jfmt_newline(f)
+    f.indent += 1
+    true
 }
 
 jfmt_comma_before: fn(f: &JetFmt, index: Int, multiline: Bool, item_start: Int) Never! {
@@ -1194,6 +1216,7 @@ jfmt_comma_after: fn(f: &JetFmt, multiline: Bool, item_end: Int) Never! {
 jfmt_comma_end: fn(f: &JetFmt, multiline: Bool, source: JetFmtSourceList?) Never! {
     if !multiline -> return
     if source == .Val(list) -> jfmt_emit_leading(f, list.close_start)
+    f.indent -= 1
     if !f.at_line_start -> jfmt_newline(f)
 }
 
@@ -1667,6 +1690,19 @@ jfmt_fmt_expression_rule: fn(f: &JetFmt, span: Span) -> Bool {
     false
 }
 
+// The `#!/…` launch line at byte 0 is no token (the lexer reads it there
+// only); it prints byte for byte, and a blank line written after it stays.
+jfmt_fmt_launch_line: fn(f: &JetFmt) Never! {
+    bytes: f.src_bytes
+    if bytes.len() < 3 || bytes[0] != (U8{35}) || bytes[1] != (U8{33}) || bytes[2] != (U8{47}) -> return
+    end := 0
+    loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+    jfmt_write(f, jfmt_bytes_text(bytes, 0, end))
+    jfmt_newline(f)
+    next_start: if f.source_toks.len() > 0 -> f.source_toks[0].span.start else -> bytes.len()
+    if next_start > end && jfmt_source_has_blank_line(bytes, end, next_start) -> jfmt_newline(f)
+}
+
 // Rust `format_program_with_tokens`; comments come from the source tokens.
 jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> String {
     f := jfmt_new(prog, src, source_toks, simplify)
@@ -1674,6 +1710,7 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
 }
 
 jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
+    jfmt_fmt_launch_line(f)
     first := true
     ordered_file_rules := [Marker]{}
     loop application in prog.applied_rules {
@@ -1833,7 +1870,7 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
         } else {
             item: prog.items[item_i]
             leading_at: jfmt_item_span_start(f, item)
-            jfmt_emit_leading(f, leading_at)
+            jfmt_emit_leading_declaration(f, leading_at)
             jfmt_fmt_item(f, item)
             jfmt_emit_trailing(f, jfmt_item_span_end(item))
             item_i += 1

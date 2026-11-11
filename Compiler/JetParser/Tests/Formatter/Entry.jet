@@ -137,3 +137,53 @@ run: fn() {
     assert_eq(found, [String]{"(a * b)", "(a - b)", "(xs.len())", "((c))", "(c)", "(ok)", "(a + b)"})
     assert(jet_format_redundant_grouping("run: fn() {{ x: ( }}\n") == None)
 }
+
+// The `#!` launch line is no token; it prints byte for byte.
+#Test("launch_line_prints_byte_for_byte") {
+    assert_eq(fmt_core_stable("#!/usr/bin/env jet\nrun: fn() {{\n    print(1)\n}}\n"), "#!/usr/bin/env jet\nrun: fn() {{ print(1) }}\n")
+    assert_eq(fmt_core_stable("#!/usr/bin/env jet\n\n// Tool entry.\n\nrun: fn() {{\n    print(1)\n}}\n"), "#!/usr/bin/env jet\n\n// Tool entry.\n\nrun: fn() {{ print(1) }}\n")
+}
+
+// A blank line between a standalone comment and the declaration under it
+// stays, so a banner never becomes that declaration's doc comment; a comment
+// written against the declaration stays against it.
+#Test("banner_comment_keeps_its_blank_line") {
+    source: "// --- helpers ---\n\nhelper: fn() -> Int {{ 1 }}\n\n// --- entry ---\n\n// Prints the helper.\nrun: fn() {{ print(helper()) }}\n"
+    assert_eq(fmt_core_stable(source), source)
+    member: "Point: struct {{\n    // --- position ---\n\n    x: Int\n    // The height.\n    y: Int\n}}\n"
+    assert_eq(fmt_core_stable(member), member)
+}
+
+// A multiline argument or parameter list puts each entry one level in and its
+// closer back at the list's own indent, a text-block argument included.
+#Test("multiline_lists_indent_their_entries_one_level") {
+    source: `show: fn(
+    text: String,
+    n: Int,
+) { print(text) }
+
+run: fn() {
+    show(
+        """
+        hello
+        """,
+        2,
+    )
+    twice(
+        () -> {
+            print("HI")
+            print("Hello")
+        },
+    )
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+    assert_eq(fmt_core_stable("run: fn() {{\n    twice(() -> {{\n        print(\"HI\")\n        print(\"Hello\")\n    }})\n}}\n"), "run: fn() {{\n    twice(\n        () -> {{\n            print(\"HI\")\n            print(\"Hello\")\n        }},\n    )\n}}\n")
+}
+
+// A lambda whose body is one statement written after `->` keeps its line,
+// so the call around it stays on one line too.
+#Test("written_lambda_statement_keeps_its_line") {
+    source: "run: fn() {{\n    store.transaction(\"x\", (n: &Int) -> n += 1)\n    store.each((n) -> total += n)\n}}\n"
+    assert_eq(fmt_core_stable(source), source)
+}

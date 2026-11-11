@@ -1920,6 +1920,14 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
     if lambda.body == {
         .Expr(value) -> jfmt_fmt_expr(f, value, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
         .Block(statements) -> {
+            // A lone statement written after `->` keeps its line, as an arm's
+            // does: `(n: &Int) -> n += 1`.
+            if jfmt_arm_body_was_braceless(f, statements) {
+                mark: jfmt_mark(f)
+                jfmt_fmt_stmt_inline(f, statements[0])
+                if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+                jfmt_rollback(f, mark)
+            }
             jfmt_write(f, "{{")
             jfmt_newline(f)
             jfmt_fmt_limited_block(f, statements, lambda.span.end)
@@ -2483,6 +2491,7 @@ jfmt_hugs_fn_lambda: fn(f: JetFmt, arg: CallArg, source: JetFmtSourceList?) -> B
 
 jfmt_fmt_call_args_multiline: fn(f: &JetFmt, args: [CallArg], source: JetFmtSourceList?) {
     if args.len() > 0 -> jfmt_newline(f)
+    f.indent += 1
     loop (index, arg) in args {
         if index > 0 -> jfmt_newline(f)
         jfmt_emit_leading(f, arg.span.start)
@@ -2491,6 +2500,7 @@ jfmt_fmt_call_args_multiline: fn(f: &JetFmt, args: [CallArg], source: JetFmtSour
         jfmt_emit_trailing(f, arg.span.end)
     }
     if source == .Val(list) -> jfmt_emit_leading(f, list.close_start)
+    f.indent -= 1
     if !f.at_line_start -> jfmt_newline(f)
 }
 

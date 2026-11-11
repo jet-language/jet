@@ -950,7 +950,7 @@ jfmt_fmt_module_body: fn(f: &JetFmt, imports: [ImportDecl], items: [Item], marke
             jfmt_emit_trailing(f, markers[entry.index].span.end)
             position += 1
         } else {
-            jfmt_emit_leading(f, entry.start)
+            jfmt_emit_leading_declaration(f, entry.start)
             jfmt_fmt_item(f, items[entry.index])
             jfmt_emit_trailing(f, jfmt_item_span_end(items[entry.index]))
             position += 1
@@ -1084,7 +1084,7 @@ jfmt_fmt_c_module: fn(f: &JetFmt, c_module: CModule) {
     loop index in 0..<c_module.functions.len() {
         function: c_module.functions[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(f)
-        jfmt_emit_leading(f, function.span.start)
+        jfmt_emit_leading_declaration(f, function.span.start)
         jfmt_fmt_extern_fn(f, function)
         jfmt_emit_trailing(f, function.span.end)
     }
@@ -1625,7 +1625,7 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
         }
         if member.kind == JFMT_MEMBER_ASSOC_TYPE {
             row: assoc_types[member.index]
-            jfmt_emit_leading(f, row.span.start)
+            jfmt_emit_leading_declaration(f, row.span.start)
             jfmt_write(f, row.name)
             jfmt_write(f, ": ")
             jfmt_fmt_type(f, row.ty)
@@ -1633,13 +1633,13 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
             jfmt_fmt_marker_line(f, markers[member.index])
         } else if member.kind == JFMT_MEMBER_CONSTANT {
             constant: constants[member.index]
-            jfmt_emit_leading(f, constant.span.start)
+            jfmt_emit_leading_declaration(f, constant.span.start)
             jfmt_write(f, constant.name)
             jfmt_write(f, ": ")
             jfmt_fmt_expr(f, constant.value, JFMT_PREC_OR_FALLBACK)
         } else {
             method: methods[member.index]
-            jfmt_emit_leading(f, method.name_span.start)
+            jfmt_emit_leading_declaration(f, method.name_span.start)
             jfmt_fmt_func(f, method)
         }
     }
@@ -2057,7 +2057,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_write(f, "}}")
     } else if member.kind == JFMT_MEMBER_FIELD {
         field: body.fields[member.index]
-        jfmt_emit_leading(f, field.name_span.start)
+        jfmt_emit_leading_declaration(f, field.name_span.start)
         skipped := false
         loop marker in field.serde_markers {
             if marker.name == MARKER_SKIP || marker.name == MARKER_FLATTEN -> skipped = true
@@ -2065,13 +2065,13 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_fmt_field(f, field, derives_decode && !skipped)
     } else if member.kind == JFMT_MEMBER_CLI_BINDING {
         binding: body.cli_bindings[member.index]
-        jfmt_emit_leading(f, binding.name_span.start)
+        jfmt_emit_leading_declaration(f, binding.name_span.start)
         jfmt_fmt_cli_binding(f, binding)
     } else if member.kind == JFMT_MEMBER_TRAIT_IMPL {
         jfmt_fmt_trait_impl_block(f, body.trait_impls[member.index])
     } else if member.kind == JFMT_MEMBER_METHOD {
         method: body.methods[member.index]
-        jfmt_emit_leading(f, method.name_span.start)
+        jfmt_emit_leading_declaration(f, method.name_span.start)
         jfmt_fmt_func(f, method)
     } else if member.kind == JFMT_MEMBER_VALIDATE {
         jfmt_emit_leading(f, member.start)

@@ -1,0 +1,11 @@
+Store: struct {
+    count: Int
+
+    transaction: fn(self: &Store, name: String, change: fn(&Int)) { change(&self.count) }
+}
+
+run: fn() {
+    store := Store{count: 0}
+    store.transaction("x", (n: &Int) -> n += 1)
+    print(store.count)
+}
