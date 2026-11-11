@@ -1,0 +1,118 @@
+// What a scaling-harness case produced (PortBars.jet and the gauntlet harness
+// run this in the case directory with the file holding the program's output),
+// with the case directory written as `<case>`: the usage with each program's
+// own spelling of the gate, profiler and generator as the Jet twin spells
+// them; the `Receipt:` line; each progress line up to its timings (wall, RSS
+// and phase seconds vary run to run), sorted, as `--jobs` finishes rungs in
+// any order; then the receipt's deterministic fields: the run, every series
+// with its points' work counters, the judged counter growth and the failures.
+// Objects print their fields by name without the null ones (the original
+// leaves out a field the twin writes as null); numbers print as integers or
+// with six decimals.
+use {
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+}
+
+SPELLINGS: [(from: String, to: String)]{
+    (from: "node harness.mjs", to: "jet Tools/perf/scaling/harness"),
+    (from: "node generate.mjs --list", to: "jet Tools/perf/scaling/generate --list"),
+    (from: "(profile.mjs)", to: "(Tools/perf/scaling/profile)"),
+}
+
+run: fn() {
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    receipt := ""
+    progress := [String]{}
+    loop line in printed.lines() {
+        text := line.replace(here, "<case>")
+        loop spelling in SPELLINGS -> text = text.replace(spelling.from, spelling.to)
+        if line.starts_with("Receipt: ") {
+            receipt = line.removeprefix("Receipt: ")
+            print(text)
+            next
+        }
+        if text.contains(" wall ") {
+            cut: text.partition(" wall ")
+            rest: cut.tail.partition("] ")
+            progress.push("{cut.head} {rest.tail}")
+            next
+        }
+        print(text)
+    }
+    progress.sort()
+    loop line in progress -> print(line)
+    if receipt == "" -> return
+    parsed: json.parse(files.read(receipt) ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
+    loop key in ["schema", "mode", "jobs", "memoryMax", "timeoutS", "stopAfterS", "passed", "target", "compilers", "workDir", "buildRoot"] {
+        print("{key}: {show(field(parsed, key), here)}")
+    }
+    loop failure in list(field(parsed, "failures")) -> print("FAIL {show(failure, here)}")
+    loop series in list(field(parsed, "series")) {
+        print("== series")
+        loop key in ["shape", "layout", "compiler", "mode", "kind", "dimension", "ladder", "done", "truncated", "floors", "projection", "profile", "profilePoint"] {
+            print("{key}: {show(field(series, key), here)}")
+        }
+        print("baseline: {point(field(series, "baseline"), here)}")
+        loop measured in list(field(series, "points")) -> print("point: {point(measured, here)}")
+        if field(series, "metrics") == .Object(entries) {
+            loop entry in entries -> print("metric {entry.key}: {show(entry.value, here)}")
+        }
+        loop failure in list(field(series, "failures")) -> print("failure: {show(failure, here)}")
+    }
+}
+
+// A measured compile without its timings, sizes on disk or build directory;
+// its counter, trace and diagnostic metrics by name (the original writes them
+// in the order it measured them, the twin by name).
+point: fn(value: Dyn, here: String) -> String Never! {
+    if value == Dyn.Null -> return "null"
+    parts := [String]{}
+    loop key in ["n", "x", "code_lines", "source_sha256", "ok", "exit", "problems", "open_phases", "timeout_phase", "dir"] {
+        parts.push("{key}={show(field(value, key), here)}")
+    }
+    metrics := [String]{}
+    if field(value, "metrics") == .Object(entries) {
+        loop entry in entries {
+            if entry.key.starts_with("counter.") || entry.key.starts_with("trace.") || entry.key == "diagnostics" -> metrics.push("{entry.key}={show(entry.value, here)}")
+        }
+    }
+    metrics.sort()
+    parts.extend(metrics)
+    parts.join(" ")
+}
+
+field: fn(value: Dyn, key: String) -> Dyn Never! { value.get(key) ?? Dyn.Null }
+
+list: fn(value: Dyn) -> [Dyn] Never! {
+    if value == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+show: fn(value: Dyn, here: String) -> String Never! {
+    if value == .Object(entries) {
+        shown := [String]{}
+        loop entry in entries {
+            if entry.value != Dyn.Null -> shown.push("{entry.key}: {show(entry.value, here)}")
+        }
+        shown.sort()
+        return "{{{shown.join(", ")}}}"
+    }
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()
+        .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
+        .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
+        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+    }
+}
+
+number: fn(value: Float) -> String Never! {
+    if math.is_integer(value) -> return "{math.round(value)}"
+    fmt.decimal(value, 6)
+}

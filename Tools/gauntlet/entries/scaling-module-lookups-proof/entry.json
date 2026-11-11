@@ -1,0 +1,18 @@
+{
+  "name": "scaling-module-lookups-proof",
+  "mode": "tool",
+  "description": "The #4601 module-index regression proof module-lookups-proof.mjs and its Jet twin module-lookups-proof/run.jet over the jet_scaling_gate package, #5072 c7. Each case gates the comptime shape (files layout, N=128..1024 and the N=1 baseline) into a fresh proof directory with a stand-in bootstrap compiler from fixtures (JET_SCRATCH_ROOT=scratch holds the build root): linear module lookups pass; quadratic ones exceed the linear envelope; a compiler that never succeeds fails the baseline. The check prints proof/module-lookups-proof.json (the compiler and receipt with the case directory as <case>; objects by field name without null fields) and whether stdout ends with the same result. The other cases: a proof directory that already exists, a missing --root and a missing compiler file (exit 1, the original's uncaught error, nothing printed).",
+  "tool": {
+    "original": "Tools/perf/scaling/module-lookups-proof.mjs",
+    "jet": "Tools/perf/scaling/module-lookups-proof/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--compiler", "linear", "--root", "proof"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 0, "check": "check.jet", "expected": "expected/linear.out"},
+      {"args": ["--compiler", "quadratic", "--root", "proof"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 1, "check": "check.jet", "expected": "expected/quadratic.out"},
+      {"args": ["--compiler", "broken", "--root", "proof"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 1, "check": "check.jet", "expected": "expected/broken.out"},
+      {"args": ["--compiler", "linear", "--root", "scratch-taken"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "linear"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "missing", "--root", "proof"], "env": {"JET_SCRATCH_ROOT": "scratch"}, "exit": 1, "expected": "expected/empty.out"}
+    ]
+  }
+}

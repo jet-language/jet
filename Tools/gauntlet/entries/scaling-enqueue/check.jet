@@ -1,0 +1,77 @@
+// What a scaling-enqueue case produced (PortBars.jet and the gauntlet harness
+// run this in the case directory, with the case's environment, with the file
+// holding the program's output), with the case directory written as `<case>`
+// and the original's spelling of run-gate as the Jet twin's: the printed
+// lines; every file in the proofq queue under JET_STATE_ROOT, by name, with
+// its permission bits, its mtime after JET_SCALING_QUEUE_STAMP's in seconds,
+// rounded (the original's millisecond drifts by one), and its script (the
+// checkout it enters as `<repo>`); then work/queue-plan.json,
+// each job's config by harness.mjs's option names, objects by field name
+// without null fields, numbers as integers or with six decimals.
+use {
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+}
+
+CONFIG: ["compilers", "shapes", "bases", "ladders", "steps", "domainLadder", "memoryMax", "timeoutS", "stopAfterS", "jetCommand", "seed", "profileTop", "layouts", "buildRoot", "mode", "jobs", "workDir", "receipt"]
+
+run: fn() {
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    loop line in printed.lines() -> print(line.replace(here, "<case>").replace("node Tools/perf/scaling/enqueue.mjs", "jet Tools/perf/scaling/enqueue"))
+    queue: files.join(process.env_get("JET_STATE_ROOT") ?? "", "proofq/queue")
+    if files.is_dir(queue) {
+        stamp: files.getmtime(process.env_get("JET_SCALING_QUEUE_STAMP") ?? "") ?? process.fail(1, "{err}")
+        names := files.list_dir(queue).map(entry -> entry.name.copy())
+        names.sort()
+        loop name in names {
+            file: files.join(queue, name)
+            info: files.stat(file) ?? process.fail(1, "{err}")
+            print("== {name} mode {fmt.oct(info.mode % 512)} mtime +{((files.getmtime(file) ?? process.fail(1, "{err}")) - stamp + 500) /% 1000} s")
+            loop line in (files.read(file) ?? process.fail(1, "{err}")).lines() {
+                text: line.replace(here, "<case>").replace("node Tools/perf/scaling/run-gate.mjs", "jet Tools/perf/scaling/run-gate")
+                print(if text.starts_with("cd '") -> "cd '<repo>' || exit 2" else -> text)
+            }
+        }
+    }
+    if !files.is_file("work/queue-plan.json") -> return
+    plan: json.parse(files.read("work/queue-plan.json") ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
+    loop job in list(plan) {
+        print("== job {show(field(job, "name"), here)} shared {show(field(job, "shared"), here)}")
+        loop key in CONFIG -> print("{key}: {show(field(field(job, "config"), key), here)}")
+    }
+}
+
+field: fn(value: Dyn, key: String) -> Dyn Never! { value.get(key) ?? Dyn.Null }
+
+list: fn(value: Dyn) -> [Dyn] Never! {
+    if value == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+show: fn(value: Dyn, here: String) -> String Never! {
+    if value == .Object(entries) {
+        shown := [String]{}
+        loop entry in entries {
+            if entry.value != Dyn.Null -> shown.push("{entry.key}: {show(entry.value, here)}")
+        }
+        shown.sort()
+        return "{{{shown.join(", ")}}}"
+    }
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()
+        .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
+        .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
+        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+    }
+}
+
+number: fn(value: Float) -> String Never! {
+    if math.is_integer(value) -> return "{math.round(value)}"
+    fmt.decimal(value, 6)
+}

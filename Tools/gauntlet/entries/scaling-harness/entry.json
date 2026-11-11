@@ -1,0 +1,35 @@
+{
+  "name": "scaling-harness",
+  "mode": "tool",
+  "description": "The compiler scaling gate harness.mjs and its Jet twin harness/run.jet over the jet_scaling_gate package, #5072 c7. Each run gates the small-fns stress shape (ladder 2,4,8 plus the N=1 baseline) in counter-only mode with fake.sh as the `command:` compiler: it writes a one-span trace and JET_PHASE_COUNTERS lines on stdout and stderr (a nested counter object, the `:` form) whose work grows linearly or quadratically in N, fails from N=4, reports two diagnostics, prints a malformed or a negative counter, or names an unknown placeholder. The check prints stdout and the receipt's deterministic fields with the case directory as <case>: the progress lines up to their timings, sorted (parallel compiles finish in any order), the run's settings, every series' baseline and points with their counters and trace counts by name, the judged counter growth and every failure; two compilers over both layouts with --jobs 2 cover the parallel counter mode. The other cases cover --help and every invalid invocation (exit 2). Timing mode is not a case: its verdicts depend on the machine's speed.",
+  "tool": {
+    "original": "Tools/perf/scaling/harness.mjs",
+    "jet": "Tools/perf/scaling/harness/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--compiler", "lin=command:sh ../../../fake.sh linear {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 0, "check": "check.jet", "expected": "expected/linear.out"},
+      {"args": ["--compiler", "quad=command:sh ../../../fake.sh quadratic {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/quadratic.out"},
+      {"args": ["--compiler", "lin=command:sh ../../../fake.sh linear {n} {trace}", "--compiler", "quad=command:sh ../../../fake.sh quadratic {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--mode", "counters", "--jobs", "2", "--work-dir", "work", "--build-root", "build", "--receipt", "work/gate.json"], "exit": 1, "check": "check.jet", "expected": "expected/jobs.out"},
+      {"args": ["--compiler", "broken=command:sh ../../../fake.sh broken {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4,8", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/broken.out"},
+      {"args": ["--compiler", "errors=command:sh ../../../fake.sh errors {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/errors.out"},
+      {"args": ["--compiler", "bad=command:sh ../../../fake.sh malformed {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/malformed.out"},
+      {"args": ["--compiler", "neg=command:sh ../../../fake.sh negative {n} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "check": "check.jet", "expected": "expected/negative.out"},
+      {"args": ["--compiler", "odd=command:sh ../../../fake.sh linear {bogus} {trace}", "--shape", "small-fns", "--ladder", "small-fns=2,4", "--layout", "single", "--mode", "counters", "--work-dir", "work", "--build-root", "build"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["--help"], "exit": 0, "check": "check.jet", "expected": "expected/help.out"},
+      {"args": ["--shape", "small-fns"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--bogus", "x"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--work-dir"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--compiler", "lin=command:false"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=rustc:/bin/true"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--shape", "nope"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--ladder", "small-fns=2,1"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--base", "small-fns=1"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--domain-ladder", "5"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--steps", "1"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--jet-command", "run"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--layout", "both"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--mode", "fast"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--jobs", "0"], "exit": 2, "expected": "expected/empty.out"}
+    ]
+  }
+}

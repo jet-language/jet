@@ -21,6 +21,7 @@ import { parseCounters, phaseTable, readTrace, runMeasured } from './measure.mjs
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../../..');
 export const PINS = JSON.parse(fs.readFileSync(path.join(here, 'bench.json'), 'utf8'));
+export const BUDGETS = JSON.parse(fs.readFileSync(path.join(REPO, 'Tools/perf/scaling/phase-budgets.json'), 'utf8')).phase_budgets;
 const MANIFEST = path.join(REPO, 'Tools/gauntlet/measurement-manifest.json');
 const PERF_BASELINE = path.join(REPO, 'Tools/perf/baseline.json');
 export const RECEIPT_SCHEMA = 'jet.compile-throughput.receipt/v1';
@@ -339,7 +340,7 @@ export function phaseBudgetCheck(summary, codeLines) {
   const rows = [];
   const total = summary.frontend_wall_ns.median;
   let named = 0;
-  for (const row of PINS.phase_budgets) {
+  for (const row of BUDGETS) {
     let actual;
     if (row.measure === 'startup') actual = summary.startup_ns ?? null;
     else if (row.measure === 'glue') actual = null;
@@ -347,7 +348,7 @@ export function phaseBudgetCheck(summary, codeLines) {
     if (row.kinds) named += actual ?? 0;
     rows.push({ row: row.row, phase: row.phase, budget_ns: Math.round(row.wall_budget_s * 1e9 * scale), actual_ns: actual, owners: row.owners });
   }
-  const glue = rows.find(row => PINS.phase_budgets.find(budget => budget.row === row.row).measure === 'glue');
+  const glue = rows.find(row => BUDGETS.find(budget => budget.row === row.row).measure === 'glue');
   if (glue) glue.actual_ns = Math.max(0, total - named - (summary.startup_ns ?? 0));
   for (const row of rows) row.status = row.actual_ns === null ? 'unmeasured' : row.actual_ns < row.budget_ns ? 'within' : 'over';
   return { scale, rows, over: rows.filter(row => row.status !== 'within').map(row => `${row.phase}: ${row.actual_ns} ns vs ${row.budget_ns} ns budget (owners ${row.owners.join(', ')})`) };

@@ -41,7 +41,8 @@ Fails (exit 1): a nonzero, timed-out or incomplete compile, error
 diagnostics, a missing trace or open phase span, a wrong golden, a missing
 sample, artifacts or diagnostics differing across samples or arms, and in
 the full lane every cell gate (memory, the 2 s and 150k lines/s thresholds,
-and each `bench.json` phase budget, reported with its owning cards). The quick
+and each phase budget of `Tools/perf/scaling/phase-budgets.json`, reported
+with its owning cards). The quick
 lane compares per-phase medians, the whole frontend and peak RSS with
 `Tools/perf/baseline.json` budgets (15%), skipping baseline values under
 100 ms or 64 MiB; `--write-baseline FILE` records a passing run's baseline.

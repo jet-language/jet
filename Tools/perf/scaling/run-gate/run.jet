@@ -1,0 +1,55 @@
+// One resumable scaling gate (Tower #4601), the twin of run-gate.mjs: one
+// receipt and report.md per shape under `--work-dir`/run-<shape>, both
+// layouts, every compiler, then the report of every shape in `--work-dir`.
+//
+// Usage: jet Tools/perf/scaling/run-gate --compiler LABEL=KIND:PATH [harness options]
+// Exit 0: every shape passed; 1: a gate failure; 2: invalid invocation, or a
+// compile that cannot start or a file that cannot be written.
+package: {
+    name: "scaling_run_gate"
+    version: "0.0.1"
+    deps: {
+        // A root package declares each directory its dependencies reach.
+        jet_scaling_corpora: ../corpora,
+        jet_scaling_gate: ../gate,
+        jet_scaling_reports: ../reports,
+    }
+}
+
+use {
+    jet_scaling_gate.[options, receipt_tree, run_gate]
+    jet_scaling_reports.[report]
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+TOOL: "/Tools/perf/scaling/run-gate/run.jet"
+USAGE: "Usage: jet Tools/perf/scaling/run-gate --compiler LABEL=KIND:PATH [harness options]\nEach shape has its own resumable receipt and report under --work-dir."
+
+run: fn() {
+    config: options(process.args(), sys.executable().removesuffix(TOOL)) ?? process.fail(2, err.message)
+    if config.help {
+        print(USAGE)
+        return
+    }
+    receipts := [(file: String, receipt: Dyn)]{}
+    passed := true
+    loop shape in config.shapes {
+        one := config.copy()
+        one.shapes = [shape.copy()]
+        one.work_dir = files.join(config.work_dir, "run-{shape}")
+        one.receipt = files.join(one.work_dir, "receipt.json")
+        receipt: run_gate(one) ?? process.fail(2, err.message)
+        passed = passed && receipt.passed == Val(true)
+        entry: (file: one.receipt.copy(), receipt: receipt_tree(receipt))
+        text: report([entry.copy()]) ?? process.fail(2, "{err}")
+        files.write(files.join(one.work_dir, "report.md"), text) ?? process.fail(2, "{err}")
+        receipts.push(entry)
+    }
+    all: files.join(config.work_dir, "report.md")
+    text: report(receipts) ?? process.fail(2, "{err}")
+    files.write(all, text) ?? process.fail(2, "{err}")
+    print("Report: {all}")
+    if !passed -> process.exit(1)
+}

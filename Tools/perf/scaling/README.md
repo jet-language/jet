@@ -22,6 +22,23 @@ line. The gauntlet entry
 `Tools/gauntlet/entries/scaling-generate` pairs the two; generate.mjs stays
 the generator of record until the twin passes every port bar.
 
+`jet Tools/perf/scaling/harness/run.jet` and `jet Tools/perf/scaling/profile/run.jet`
+(over the `jet_scaling_gate` package in `gate/`: Gate.jet and Profile.jet) are
+the Jet twins of harness.mjs and profile.mjs: same arguments, same receipt,
+same progress lines and exit codes. The gauntlet entries
+`Tools/gauntlet/entries/scaling-harness` and `scaling-profile` pair them;
+harness.mjs, profile.mjs and measure.mjs stay the gate of record until the
+cutover.
+
+`jet Tools/perf/scaling/run-gate`, `jet Tools/perf/scaling/enqueue` and
+`jet Tools/perf/scaling/module-lookups-proof` are the Jet twins of
+run-gate.mjs, enqueue.mjs and module-lookups-proof.mjs over the same package;
+the twin enqueue's proofq jobs run the run-gate twin. The report twin
+`jet Tools/perf/scaling/report` and run-gate share `report` from the
+`jet_scaling_reports` package in `reports/`. The gauntlet entries
+`scaling-run-gate`, `scaling-enqueue`, `scaling-module-lookups-proof` and
+`scaling-report` pair them; the originals stay until the cutover.
+
 Set `RUST_JET` and `JETC0` to the current dev head's shared pair recorded in
 `$JET_STATE_ROOT/dev-artifacts.json`, after that head includes these counters.
 Changing compiler binaries requires fresh receipt roots. Older candidates may
@@ -137,8 +154,8 @@ Line packing and single-file assembly append iteratively, so large rungs do not
 depend on the JavaScript engine's call-argument limit.
 Series are baseline-subtracted (an N=1 rung), judged between the first and
 last measurable rung against N log N (bounds: counters 1.25, time/RSS 1.5),
-and projected to 1M lines. Floors come from
-`Tools/perf/throughput/bench.json` phase budgets plus 1M lines in 10 s end
+and projected to 1M lines. Floors come from the phase budgets in
+`phase-budgets.json` plus 1M lines in 10 s end
 to end. `--profile` re-runs the top rung of a failing series under perf and
 attributes samples per phase to source functions (`profile.mjs`). Exit 0
 pass, 1 failure, 2 invalid invocation; the receipt is JSON in `--work-dir`.

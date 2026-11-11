@@ -1,0 +1,107 @@
+// The deterministic #4601 module-index regression proof with an already-built
+// Jet compiler, the twin of module-lookups-proof.mjs; nothing here builds the
+// compiler or a generated Rust backend. One counter-mode gate of the comptime
+// shape (files layout, N = 128, 256, 512, 1024 and the N=1 baseline) into a
+// fresh --root; every rung must compile and count more sema.check module
+// lookups than the baseline, within a fixed linear envelope anchored on the
+// first rung. The result is printed and written to
+// --root/module-lookups-proof.json.
+//
+// Usage: jet Tools/perf/scaling/module-lookups-proof --compiler BUILT_JETC0 --root FRESH_DIRECTORY
+// Exit 0: the proof holds; 1: it fails, or an invalid invocation (as the
+// original's uncaught errors).
+package: {
+    name: "scaling_module_lookups_proof"
+    version: "0.0.1"
+    deps: {
+        // A root package declares each directory its dependencies reach.
+        jet_scaling_corpora: ../corpora,
+        jet_scaling_gate: ../gate,
+    }
+}
+
+use {
+    jet_scaling_gate.[Receipt, absolute, js, options, run_gate, scratch_root]
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    sys: core.sys
+}
+
+TOOL: "/Tools/perf/scaling/module-lookups-proof/run.jet"
+SIZES: [Int]{128, 256, 512, 1024}
+METRIC: "counter.sema.check.module_lookups"
+MISSING: "Missing or disabled deterministic baseline counter"
+// JavaScript's Number.MAX_SAFE_INTEGER: a counter above it is not an exact count.
+MAX_SAFE: 9007199254740991.0
+
+// A rung's module lookups (None when the compile reported none).
+Count: struct {
+    n: Int
+    ok: Bool
+    lookups: Float?
+}
+
+#Rename(.Camel)
+Proof: struct {
+    metric: String
+    sizes: [Int]
+    compiler: String
+    compiler_sha256: String
+    counts: [Count]
+    baseline: Float?
+    passed: Bool
+    error: String?
+    receipt: String
+    scope: String
+}
+
+// The first of the original's assertions that fails, or None.
+verdict: fn(receipt: Receipt, counts: [Count]) -> String? Never! {
+    if receipt.series.len() != 1 -> return Val("Expected the one complete comptime/files series")
+    base: receipt.series[0].baseline ?? return Val("The size-one baseline must compile successfully")
+    if !base.ok -> return Val("The size-one baseline must compile successfully")
+    baseline: base.metrics.get(METRIC) ?? return Val(MISSING)
+    if !math.is_integer(baseline) || baseline <= 0.0 || baseline > MAX_SAFE -> return Val(MISSING)
+    if counts.map(count -> count.n) != SIZES -> return Val("Every named rung is required")
+    loop point in counts {
+        if !point.ok -> return Val("N={point.n} did not compile successfully")
+        lookups: point.lookups ?? return Val("N={point.n} has no valid growing deterministic counter")
+        if !math.is_integer(lookups) || lookups <= baseline || lookups > MAX_SAFE -> return Val("N={point.n} has no valid growing deterministic counter")
+        anchor: counts[0].lookups ?? lookups
+        limit: (anchor - baseline) * Float{point.n} / Float{SIZES[0]} * 1.25
+        if lookups - baseline > limit -> return Val("N={point.n}: {js(lookups - baseline)} module lookups exceed the linear envelope")
+    }
+    None
+}
+
+run: fn() {
+    args: process.args()
+    // The arguments in pairs, the last of a name winning, as the original pairs them.
+    flags := [String: String]{}
+    loop at in 0..<args.len() /% 2 -> flags[args[2 * at].copy()] = args[2 * at + 1].copy()
+    compiler_flag: flags.get("--compiler") ?? ""
+    root_flag: flags.get("--root") ?? ""
+    if compiler_flag == "" || root_flag == "" -> process.fail(1, "Usage: module-lookups-proof.mjs --compiler BUILT_JETC0 --root FRESH_DIRECTORY")
+    root: absolute(root_flag)
+    if files.exists(root) -> process.fail(1, "Proof directory already exists: {root}")
+    compiler: absolute(compiler_flag)
+    compiler_sha256: crypto.sha256(files.read_bytes(compiler) ?? process.fail(1, "{err}")).hex()
+    gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(n -> "{n}").join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch_root(), "scaling-module-lookups"), files.basename(root))]
+    config: options(gate, sys.executable().removesuffix(TOOL)) ?? process.fail(1, err.message)
+    receipt: run_gate(config) ?? process.fail(1, err.message)
+    counts := [Count]{}
+    baseline := Float?{None}
+    if receipt.series.len() > 0 {
+        loop point in receipt.series[0].points -> counts.push(Count{n: point.n, ok: point.ok, lookups: point.metrics.get(METRIC)})
+        if receipt.series[0].baseline == .Val(base) -> baseline = base.metrics.get(METRIC)
+    }
+    error: verdict(receipt, counts)
+    proof: Proof{metric: METRIC, sizes: SIZES.copy(), compiler: compiler, compiler_sha256: compiler_sha256, counts: counts, baseline: baseline, passed: error == None, error: error, receipt: config.receipt.copy(), scope: "module-index regression only; unrelated full-gate failures remain in receipt.json"}
+    text: json.to_string_pretty(proof) ?? process.fail(1, "{err}")
+    files.write(files.join(root, "module-lookups-proof.json"), "{text}\n") ?? process.fail(1, "{err}")
+    print(text)
+    if error != None -> process.exit(1)
+}

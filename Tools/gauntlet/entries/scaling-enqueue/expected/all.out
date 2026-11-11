@@ -1,0 +1,124 @@
+state/proofq/queue/ScalingGate-counters-1.sh
+state/proofq/queue/ScalingGate-counters-2.sh
+state/proofq/queue/ScalingGate-counters-3.sh
+state/proofq/queue/PerfScalingGate-timing.sh
+== PerfScalingGate-timing.sh mode 755 mtime +1 s
+#!/usr/bin/env bash
+# proofq: mem=25G time=50M kind=measure
+# #4601: timing; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '/mnt/jetscratch/scaling-gate' || exit $?
+flock 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'lin=command:true {n}' '--shape' 'huge-fns' '--shape' 'fan-in' '--shape' 'web' '--shape' 'game' '--shape' 'cli' '--shape' 'data' '--shape' 'gui' '--shape' 'embedded' '--shape' 'compiler' '--shape' 'scientific' '--shape' 'generic-lib' '--shape' 'generated' '--steps' '2' '--domain-ladder' '125000,1000000' '--memory-max' '24G' '--timeout' '20' '--stop-after' 'Infinity' '--seed' '1' '--jet-command' 'build' '--work-dir' '<case>/work/timing' '--build-root' '/mnt/jetscratch/scaling-gate' '--mode' 'timing' '--jobs' '1' '--layout' 'files' '--layout' 'single'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== ScalingGate-counters-1.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '/mnt/jetscratch/scaling-gate' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'lin=command:true {n}' '--shape' 'modules' '--shape' 'small-fns' '--shape' 'huge-fns' '--shape' 'deep-nesting' '--shape' 'wide-enums' '--shape' 'impls-traits' '--shape' 'generics' '--shape' 'comptime' '--shape' 'data-tables' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '25' '--stop-after' 'Infinity' '--seed' '1' '--jet-command' 'build' '--work-dir' '<case>/work/counter-1' '--build-root' '/mnt/jetscratch/scaling-gate' '--mode' 'counters' '--jobs' '2' '--layout' 'files' '--layout' 'single'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== ScalingGate-counters-2.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '/mnt/jetscratch/scaling-gate' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'lin=command:true {n}' '--shape' 'imports' '--shape' 'call-chains' '--shape' 'errors' '--shape' 'diagnostics' '--shape' 'strings' '--shape' 'fan-in' '--shape' 'web' '--shape' 'game' '--shape' 'cli' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '25' '--stop-after' 'Infinity' '--seed' '1' '--jet-command' 'build' '--work-dir' '<case>/work/counter-2' '--build-root' '/mnt/jetscratch/scaling-gate' '--mode' 'counters' '--jobs' '2' '--layout' 'files' '--layout' 'single'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== ScalingGate-counters-3.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '/mnt/jetscratch/scaling-gate' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'lin=command:true {n}' '--shape' 'data' '--shape' 'gui' '--shape' 'embedded' '--shape' 'compiler' '--shape' 'scientific' '--shape' 'generic-lib' '--shape' 'generated' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '25' '--stop-after' 'Infinity' '--seed' '1' '--jet-command' 'build' '--work-dir' '<case>/work/counter-3' '--build-root' '/mnt/jetscratch/scaling-gate' '--mode' 'counters' '--jobs' '2' '--layout' 'files' '--layout' 'single'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== job "ScalingGate-counters-1" shared true
+compilers: [{kind: "command", label: "lin", template: "true {n}"}]
+shapes: ["modules", "small-fns", "huge-fns", "deep-nesting", "wide-enums", "impls-traits", "generics", "comptime", "data-tables"]
+bases: {}
+ladders: {}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 25
+stopAfterS: null
+jetCommand: "build"
+seed: 1
+profileTop: false
+layouts: ["files", "single"]
+buildRoot: "/mnt/jetscratch/scaling-gate"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-1"
+receipt: "<case>/work/receipt.json"
+== job "ScalingGate-counters-2" shared true
+compilers: [{kind: "command", label: "lin", template: "true {n}"}]
+shapes: ["imports", "call-chains", "errors", "diagnostics", "strings", "fan-in", "web", "game", "cli"]
+bases: {}
+ladders: {}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 25
+stopAfterS: null
+jetCommand: "build"
+seed: 1
+profileTop: false
+layouts: ["files", "single"]
+buildRoot: "/mnt/jetscratch/scaling-gate"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-2"
+receipt: "<case>/work/receipt.json"
+== job "ScalingGate-counters-3" shared true
+compilers: [{kind: "command", label: "lin", template: "true {n}"}]
+shapes: ["data", "gui", "embedded", "compiler", "scientific", "generic-lib", "generated"]
+bases: {}
+ladders: {}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 25
+stopAfterS: null
+jetCommand: "build"
+seed: 1
+profileTop: false
+layouts: ["files", "single"]
+buildRoot: "/mnt/jetscratch/scaling-gate"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-3"
+receipt: "<case>/work/receipt.json"
+== job "PerfScalingGate-timing" shared false
+compilers: [{kind: "command", label: "lin", template: "true {n}"}]
+shapes: ["huge-fns", "fan-in", "web", "game", "cli", "data", "gui", "embedded", "compiler", "scientific", "generic-lib", "generated"]
+bases: {}
+ladders: {}
+steps: 2
+domainLadder: [125000, 1000000]
+memoryMax: "24G"
+timeoutS: 20
+stopAfterS: null
+jetCommand: "build"
+seed: 1
+profileTop: false
+layouts: ["files", "single"]
+buildRoot: "/mnt/jetscratch/scaling-gate"
+mode: "timing"
+jobs: 1
+workDir: "<case>/work/timing"
+receipt: "<case>/work/receipt.json"

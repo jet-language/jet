@@ -1,0 +1,46 @@
+// What a scaling-run-gate case produced (PortBars.jet and the gauntlet harness
+// run this in the case directory with the file holding the program's output),
+// with the case directory written as `<case>`: the usage (the original's
+// spelling of the command as the Jet twin spells it) and the `Report:` line;
+// each progress line up to its timings (wall, RSS and phase seconds vary run
+// to run), sorted; then every report.md the run wrote, each shape's
+// (work/run-<shape>/report.md, by name) and the whole run's
+// (work/report.md), with each receipt's start and finish time as `<time>`.
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    progress := [String]{}
+    loop line in printed.lines() {
+        text: line.replace(here, "<case>").replace("node Tools/perf/scaling/run-gate.mjs", "jet Tools/perf/scaling/run-gate")
+        if text.contains(" wall ") {
+            cut: text.partition(" wall ")
+            progress.push("{cut.head} {cut.tail.partition("] ").tail}")
+            next
+        }
+        print(text)
+    }
+    progress.sort()
+    loop shown in progress -> print(shown)
+    if !files.is_dir("work") -> return
+    reports := files.list_dir("work", matching: "run-*").map(entry -> "work/{entry.name}/report.md").filter(file -> files.exists(file))
+    reports.sort()
+    reports.push("work/report.md")
+    loop file in reports.filter(file -> files.exists(file)) {
+        print("== {file}")
+        text: files.read(file) ?? process.fail(1, "{err}")
+        loop line in text.lines() {
+            shown: line.replace(here, "<case>")
+            if !shown.starts_with("Receipt `") {
+                print(shown)
+                next
+            }
+            cut: shown.partition("`: ")
+            print("{cut.head}`: <time> to <time>, mode {cut.tail.partition(", mode ").tail}")
+        }
+    }
+}

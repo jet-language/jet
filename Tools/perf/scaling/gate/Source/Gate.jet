@@ -1,0 +1,1234 @@
+// The compiler scaling gate (Tower #4319, #4601), the twin of
+// Tools/perf/scaling/harness.mjs.
+//
+// For every corpus shape (jet_scaling_corpora: one stressed dimension each,
+// or a realistic domain program) and every compiler, compile a size ladder
+// (N, 2N, 4N, 8N by default; 125k..1M lines for domains) plus a size-1
+// baseline, and read per phase: wall time from the JET_TRACE_FILE phase
+// spans, the deterministic work counters (`JET_PHASE_COUNTERS` lines: both
+// compiler halves), and the trace's own span and item counts. Each series is
+// fitted against k * N log N on its baseline-subtracted (marginal) values;
+// the gate fails naming the shape, compiler, phase and the counter that grows
+// fastest inside that phase. It also fails when a phase or the whole compile
+// is slower than its lines/s floor (Tools/perf/scaling/phase-budgets.json and
+// the end-to-end floor), and projects every phase to 1M lines.
+//
+// A compile runs as Tools/perf/compile-throughput/Throughput.jet runs one: a
+// Core process in a memory scope of its own (no swap) with a timeout, whose
+// receipt gives the CPU time of every process it waited for and the scope's
+// peak memory.
+use {
+    jet_scaling_corpora.[Corpus, Shape, ShapeKind, corpus, layouts, shapes, write_files]
+    combinatorics: core.math.combinatorics
+    crypto: core.crypto
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+BUDGETS: "Tools/perf/scaling/phase-budgets.json"
+DOMAIN_LADDER: [Int]{125000, 250000, 500000, 1000000}
+JET_COMMANDS: [String]{"build", "check"}
+MODES: [String]{"timing", "counters"}
+// The verdicts whose counter can dominate a phase.
+JUDGED: [String]{"fitted", "appears"}
+TARGET_LINES: 1000000
+TARGET_SECONDS: 10
+// Float constants, for the headers of `if`s (a typed literal there would open the body).
+ZERO: Float{0.0}
+ONE: Float{1.0}
+TWO: Float{2.0}
+// The measured command's output goes to the files named by $1 and $2.
+REDIRECT: "exec </dev/null >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
+// No core dumps, and the deep recursion of a large corpus gets a 1 GiB stack.
+SCOPED: "ulimit -c 0; ulimit -s 1048576; exec \"$@\""
+COMPILER_SPEC: Regex{"^([\w.-]+)=(jet|bootstrap|command):(.+)$"}
+COUNTER_LINE: Regex{"^JET_PHASE_COUNTERS(?:\s+|:\s*)(\{{.*\}})\s*$"}
+PLACEHOLDER: Regex{"^[a-z]+$"}
+
+USAGE: [String]{
+    "Usage: jet Tools/perf/scaling/harness --compiler LABEL=KIND:PATH [--compiler ...] [options]",
+    "  KIND: jet (`jet build`; --jet-command check), bootstrap (a generated compiler, runner protocol),",
+    "        command (a shell template: {{project}} {{entry}} {{n}} {{trace}} {{dir}}).",
+    "  --shape NAME           repeatable; default every shape (jet Tools/perf/scaling/generate --list)",
+    "  --stress | --domains   every stress shape / every domain shape",
+    "  --base SHAPE=N         stress ladder base (ladder N, 2N, 4N, 8N); --steps K for K rungs",
+    "  --ladder SHAPE=A,B,..  explicit ladder for one shape",
+    "  --domain-ladder A,B,.. domain ladder in code lines (default 125000,250000,500000,1000000)",
+    "  --memory-max 20G  --timeout 1800  --stop-after SECONDS (skip larger rungs after a slower one)",
+    "  --profile              perf-profile the top rung of every failing series (Tools/perf/scaling/profile)",
+    "  --layout files|single  repeatable; default both (a multi-file failure is a gate failure)",
+    "  --work-dir DIR  --receipt FILE  --seed S",
+    "  --build-root DIR       projects/stores/compiler outputs/perf.data (default $JET_SCRATCH_ROOT/scaling-gate)",
+    "  --mode timing|counters counter-only mode gates deterministic work, not time/RSS/floors",
+    "  --jobs N              parallel counter-mode compiles (default 1); timing stays serial",
+    "Receipts checkpoint every baseline, rung and profile compile; rerunning the same",
+    "invocation resumes without retrying completed compiles, including timeouts.",
+    "Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.",
+}
+
+// A compiler under test: `path` for jet and bootstrap, `template` for command.
+Compiler: struct {
+    label: String
+    kind: String
+    path: String?
+    template: String?
+}
+
+// The resolution and bound of a metric family.
+Family: struct {
+    min: Float
+    bound: Float
+}
+
+Families: struct {
+    time: Family
+    rss: Family
+    counter: Family
+}
+
+FAMILIES: Families{time: Family{min: Float{0.25}, bound: Float{1.5}}, rss: Family{min: Float{65536.0}, bound: Float{1.5}}, counter: Family{min: Float{64.0}, bound: Float{1.25}}}
+
+// A lines/s floor from one phase budget.
+FloorRule: struct {
+    phase: String
+    kinds: [String]
+    lines_per_second: Float
+    owners: [String]
+}
+
+Limits: struct {
+    rows: [FloorRule]
+    startup_s: Float?
+    total_lines_per_second: Float
+}
+
+BudgetRow: struct {
+    phase: String
+    measure: String
+    kinds: [String]?
+    wall_budget_s: Float
+    owners: [String]
+}
+
+// phase-budgets.json.
+Budgets: struct {
+    schema: String
+    about: String
+    phase_budgets_basis: String
+    phase_budgets: [BudgetRow]
+}
+
+// One measured compile. `x` is the size the fit uses: N, or the code lines of
+// a domain corpus; `exit` is None when a signal ended the compile.
+Point: struct {
+    n: Int
+    x: Int
+    code_lines: Int
+    source_sha256: String
+    ok: Bool
+    problems: [String]
+    open_phases: [String]
+    timeout_phase: String?
+    metrics: [String: Float]
+    dir: String
+    build_dir: String
+    exit: Int?
+}
+
+// A metric's growth: `ratio` is infinite for a series that "appears" (the
+// receipt file writes it as null, as JSON.stringify does) and None for one
+// that is unmeasured.
+Growth: struct {
+    verdict: String
+    reason: String?
+    ratio: Float?
+    #Rename("from") first: Int?
+    #Rename("to") last: Int?
+    exponent: Float?
+    bound: Float
+    values: [Float?]
+}
+
+Failure: struct {
+    kind: String
+    metric: String?
+    phase: String?
+    counter: String?
+    ratio: Float?
+    exponent: Float?
+    text: String
+}
+
+// `lines_per_second` is None when it is infinite (no time in the phase).
+FloorRow: struct {
+    phase: String
+    lines_per_second: Float?
+    floor: Float
+    owners: [String]?
+}
+
+Projected: struct {
+    measured_s: Float
+    at_lines: Int
+    exponent: Float
+    projected_s: Float
+}
+
+Projection: struct {
+    measured_at_lines: Int
+    target_lines: Int
+    target_seconds: Int
+    phases: [String: Projected]
+}
+
+// One ranked symbol of a profiled phase (Profile.jet ranks them). Declared
+// here, beside the receipt types that hold it: a struct-typed field only gets
+// a derived codec when its struct is declared in the same file.
+Row: struct {
+    share: Float
+    symbol: String
+    // None prints as nothing: no source found.
+    source: String?
+}
+
+ProfiledPhase: struct {
+    samples: Int
+    #Rename("self") own: [Row]
+    inclusive: [Row]
+}
+
+ProfileResult: struct {
+    perf_data: String
+    compile_ok: Bool
+    phases: [String: ProfiledPhase]
+}
+
+Series: struct {
+    shape: String
+    layout: String
+    compiler: String
+    mode: String
+    kind: String
+    dimension: String
+    ladder: [Int]
+    baseline: Point?
+    points: [Point]
+    truncated: String?
+    metrics: [String: Growth]{[String: Growth]{}}
+    failures: [Failure]{[Failure]{}}
+    floors: [FloorRow]?
+    projection: Projection?
+    profile: ProfileResult?
+    #Rename("profilePoint") profile_point: Point?
+    done: Bool{false}
+}
+
+Target: struct {
+    lines: Int
+    seconds: Int
+}
+
+// What a receipt checkpoints: a resumed run must repeat it exactly.
+#Rename(.Camel)
+Invocation: struct {
+    compilers: [Compiler]
+    shapes: [String]
+    layouts: [String]
+    ladders: [String: [Int]]
+    seed: Int
+    memory_max: String
+    timeout_s: Int
+    failure_policy: String
+    stop_after_s: Float?
+    profile_top: Bool
+    build_root: String
+    mode: String
+    jobs: Int
+    families: Families
+    floors: Limits
+}
+
+#Rename(.Camel)
+Receipt: struct {
+    schema: String
+    invocation: String
+    started_at: String
+    work_dir: String
+    host: String
+    compilers: [Compiler]
+    families: Families
+    floors: Limits
+    target: Target
+    memory_max: String
+    timeout_s: Int
+    stop_after_s: Float?
+    build_root: String
+    mode: String
+    jobs: Int
+    series: [Series]
+    failures: [String]
+    passed: Bool?
+    finished_at: String?
+}
+
+// `stop_after_s` None is no limit; `repo` holds phase-budgets.json and the
+// sources a profile resolves symbols to. Encoded with harness.mjs's names
+// (enqueue's queue-plan.json).
+#Rename(.Camel)
+Config: struct {
+    compilers: [Compiler]
+    shapes: [String]
+    bases: [String: Int]
+    ladders: [String: [Int]]
+    steps: Int
+    domain_ladder: [Int]
+    memory_max: String
+    timeout_s: Int
+    stop_after_s: Float?
+    jet_command: String
+    seed: Int
+    profile_top: Bool
+    layouts: [String]
+    build_root: String
+    mode: String
+    jobs: Int
+    work_dir: String
+    receipt: String
+    repo: String
+    // --help: print the usage and run nothing.
+    help: Bool
+}
+
+// One compile's paths and what its corpus expects.
+Rung: struct {
+    n: Int
+    x: Int
+    code_lines: Int
+    source_sha256: String
+    diagnostics: Int
+    dir: String
+    build_dir: String
+    trace: String
+    receipt: String
+    spec: ProcessSpec
+}
+
+Started: struct {
+    rung: Rung
+    child: ProcessChild
+    spawn_unix_ms: Int
+    start_ns: Int
+}
+
+Span: struct {
+    start: Float
+    end: Float
+    items: Float?
+}
+
+PhaseRow: struct {
+    wall_ns: Float
+    count: Int
+    items: Float?
+}
+
+PhaseTable: struct {
+    phases: [String: PhaseRow]
+    first_begin_ns: Float?
+    unclosed: [String]
+    events: Int
+}
+
+Judged: struct {
+    metrics: [String: Growth]
+    failures: [Failure]
+}
+
+// ------------------------------------------------------------- formatting
+
+// A number as JavaScript prints it.
+js: fn(value: Float) -> String Never! {
+    if math.is_nan(value) -> return "NaN"
+    if !math.is_finite(value) -> return if value > ZERO -> "Infinity" else -> "-Infinity"
+    json.canonical(Dyn.Float(value)) ?? "{value}"
+}
+
+// A rounded number as JavaScript prints `Math.round(value)`.
+whole: fn(value: Float) -> String Never! { if math.is_finite(value) -> "{math.round(value)}" else -> js(value) }
+
+// Two decimals, `inf`, or `?` for no number.
+two: fn(value: Float?) -> String Never! {
+    number: value ?? return "?"
+    if math.is_finite(number) -> fmt.decimal(number, 2) else -> "inf"
+}
+
+finite: fn(value: Float) -> Float? Never! { if math.is_finite(value) -> Val(value) else -> None }
+
+// `new Date().toISOString()`.
+iso_now: fn() -> String Never! {
+    ms: time.now().to_unix_ms()
+    whole: time.from_unix_seconds(ms /% 1000).format_rfc3339().removesuffix("Z")
+    "{whole}.{"{ms % 1000}".pad_start(3, "0")}Z"
+}
+
+absolute: fn(path: String) -> String Never! { files.collapse(files.absolute(path) ?? path) }
+
+// $name, or None when it is unset or empty.
+env: fn(name: String) -> String? Never! {
+    value: process.env_get(name) ?? return None
+    if value == "" -> None else -> Val(value)
+}
+
+// Tools/agent/Roots.jet's state root (per-user dev state, proofq's queue).
+state_root: fn() -> String Never! {
+    home: env("HOME") ?? sys.home_dir() ?? ""
+    env("JET_STATE_ROOT") ?? files.join(env("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev")
+}
+
+// Tools/agent/Roots.jet's scratch root.
+scratch_root: fn() -> String Never! { env("JET_SCRATCH_ROOT") ?? state_root() }
+
+// ---------------------------------------------------------------- counters
+
+// Every JET_PHASE_COUNTERS line's counters summed under `phase.name`
+// (`total` without a phase).
+parse_counters: fn(output: String) -> [String: Float] Err! {
+    counters := [String: Float]{}
+    loop raw in output.split("\n") {
+        line: raw.removesuffix("\r")
+        if !line.starts_with("JET_PHASE_COUNTERS") -> next
+        found: COUNTER_LINE.match(line) ?? return Err("Malformed counter line: {line}")
+        parsed: json.parse(found.group(1) ?? "") ?? return Err(err.display_text())
+        if parsed == .Object(entries) {
+            phase: if (parsed.get("phase") ?? Dyn.Text("total")) == .Text(name) -> name.copy() else -> return Err("Counter phase must be a string")
+            loop entry in entries {
+                if entry.key != "phase" -> walk_counters(entry.value, if phase == "" -> entry.key.copy() else -> "{phase}.{entry.key}", counters)
+            }
+        }
+    }
+    Ok(counters)
+}
+
+walk_counters: fn(value: Dyn, key: String, counters: &[String: Float]) Err! {
+    if value == .Object(entries) {
+        loop entry in entries -> walk_counters(entry.value, if key == "" -> entry.key.copy() else -> "{key}.{entry.key}", counters)
+        return Ok()
+    }
+    number: if value == {
+        .Int(_) | .Float(_) | .Number(_) -> value.float() ?? math.NAN
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err("Non-numeric counter: {key}")
+    }
+    if !math.is_finite(number) || number < ZERO -> return Err("Invalid counter: {key}")
+    counters[key.copy()] = (counters.get(key) ?? Float{0.0}) + number
+    Ok()
+}
+
+// ------------------------------------------------------------ growth fit
+
+nlogn: fn(x: Float) -> Float Never! { x * math.log2(if x > TWO -> x else -> TWO) }
+
+// Least-squares exponent of `values` against `sizes` (log-log), over the
+// points with a positive value.
+exponent: fn(sizes: [Int], values: [Float]) -> Float? Never! {
+    points := [(x: Float, y: Float)]{}
+    loop i in 0..<sizes.len() {
+        if values[i] > ZERO -> points.push((x: math.ln(Float{sizes[i]}), y: math.ln(values[i])))
+    }
+    if points.len() < 2 -> return None
+    mx := Float{0.0}
+    my := Float{0.0}
+    loop point in points {
+        mx += point.x
+        my += point.y
+    }
+    mx = mx / Float{points.len()}
+    my = my / Float{points.len()}
+    sxx := Float{0.0}
+    sxy := Float{0.0}
+    loop point in points {
+        sxx += (point.x - mx) * (point.x - mx)
+        sxy += (point.x - mx) * (point.y - my)
+    }
+    if sxx == ZERO -> None else -> Val(sxy / sxx)
+}
+
+unmeasured: fn(reason: String, bounds: Family, values: [Float?]) -> Growth Never! {
+    Growth{verdict: "unmeasured", reason: Val(reason), ratio: None, first: None, last: None, exponent: None, bound: bounds.bound, values: values.copy()}
+}
+
+// Growth of a marginal series relative to N log N between its first and last
+// measurable rung: 1 is N log N; above the bound fails. `bounds.min` is the
+// resolution: a series whose last marginal value is below it is not judged,
+// and the first rung is the first whose marginal reaches it. A work counter
+// (`exact`) that is exactly zero on every earlier rung and nonzero on the
+// last "appears": work no smaller input does. Measured time or memory below
+// resolution on every earlier rung is noise, not appearance.
+growth: fn(sizes: [Int], values: [Float?], bounds: Family, exact: Bool) -> Growth Never! {
+    usable := [(x: Int, v: Float)]{}
+    loop i in 0..<sizes.len() {
+        if values[i] == .Val(v) -> usable.push((x: sizes[i], v: v))
+    }
+    if usable.len() < 2 -> return unmeasured("fewer than two rungs", bounds, values)
+    top: usable[usable.len() - 1]
+    if top.v < bounds.min -> return unmeasured("below resolution ({js(top.v)} < {js(bounds.min)})", bounds, values)
+    at := 0
+    loop usable[at].v < bounds.min {
+        at += 1
+    }
+    low: usable[at]
+    if low.x == top.x {
+        zero: exact && !usable.slice(0, usable.len() - 1).any(point -> point.v != ZERO)
+        if zero -> return Growth{verdict: "appears", reason: Val("zero until N={top.x}"), ratio: Val(math.INFINITY), first: None, last: None, exponent: None, bound: bounds.bound, values: values.copy()}
+        return unmeasured("below resolution until N={top.x}", bounds, values)
+    }
+    ratio: (top.v / low.v) / (nlogn(Float{top.x}) / nlogn(Float{low.x}))
+    fit: exponent(usable.map(point -> point.x), usable.map(point -> if point.v > ZERO -> point.v else -> ZERO))
+    Growth{verdict: "fitted", reason: None, ratio: Val(ratio), first: Val(low.x), last: Val(top.x), exponent: fit, bound: bounds.bound, values: values.copy()}
+}
+
+superlinear: fn(metric: Growth) -> Bool Never! {
+    metric.verdict == "appears" || (metric.verdict == "fitted" && (metric.ratio ?? Float{0.0}) > metric.bound)
+}
+
+counter_key: fn(key: String) -> Bool Never! { key.starts_with("counter.") || key.starts_with("trace.") }
+
+family: fn(key: String) -> Family Never! {
+    if counter_key(key) -> return FAMILIES.counter
+    if key == "peak_rss_kb" -> FAMILIES.rss else -> FAMILIES.time
+}
+
+// The phase a metric belongs to (`phase.sema.check` -> sema.check; counters
+// `counter.sema.check.scope_lookups` -> sema.check; `trace.lower.items`).
+metric_phase: fn(key: String) -> String? Never! {
+    if key.starts_with("phase.") -> return Val(key.removeprefix("phase."))
+    if !counter_key(key) -> return None
+    parts: key.split(".").to_list()
+    Val(parts.slice(1, parts.len() - 1).join("."))
+}
+
+// The counter inside `phase` (or enclosing it) that grows fastest.
+dominating: fn(metrics: [String: Growth], phase: String) -> String? Never! {
+    best := String?{None}
+    best_ratio := -math.INFINITY
+    loop (key, metric) in metrics {
+        if !counter_key(key) || !JUDGED.contains(metric.verdict) -> next
+        owner: metric_phase(key) ?? ""
+        if owner != phase && !owner.starts_with("{phase}.") && !phase.starts_with("{owner}.") -> next
+        ratio: metric.ratio ?? Float{0.0}
+        if ratio > best_ratio {
+            best = Val(key.copy())
+            best_ratio = ratio
+        }
+    }
+    best
+}
+
+// One series' growth per metric and its failures, each naming the phase and
+// its dominating counter.
+judge: fn(series: Series) -> Judged Never! {
+    points: series.points.filter(point -> point.ok)
+    sizes: points.map(point -> point.x)
+    keys := [String: Bool]{}
+    loop point in points {
+        loop key in point.metrics.keys() {
+            if series.mode != "counters" || counter_key(key) -> keys[key.copy()] = true
+        }
+    }
+    metrics := [String: Growth]{}
+    loop key in keys.keys() {
+        base := Float{0.0}
+        if series.baseline == .Val(baseline) {
+            if baseline.ok -> base = baseline.metrics.get(key) ?? Float{0.0}
+        }
+        values: points.map(point -> point.metrics.get(key).map(value -> value - base))
+        metrics[key.copy()] = growth(sizes, values, family(key), counter_key(key))
+    }
+    failures := [Failure]{}
+    loop (key, metric) in metrics {
+        if !superlinear(metric) -> next
+        phase: metric_phase(key) ?? key.copy()
+        counter := String?{None}
+        counter_text := ""
+        if key.starts_with("phase.") {
+            counter = dominating(metrics, phase)
+            counter_text = "; no counter covers this phase"
+            if counter == .Val(name) {
+                within: if superlinear(metrics[name]) -> "" else -> " (within bound: the phase's extra work is uncounted)"
+                counter_text = "; dominating counter {name} x{two(metrics[name].ratio)}{within}"
+            }
+        }
+        from_n: if metric.first == .Val(n) -> "{n}" else -> "?"
+        to_n: if metric.last == .Val(n) -> "{n}" else -> "?"
+        text: "{key} grows x{two(metric.ratio)} faster than N log N from N={from_n} to {to_n} (exponent {two(metric.exponent)}; bound x{js(metric.bound)}){counter_text}"
+        failures.push(Failure{kind: "growth", metric: Val(key.copy()), phase: Val(phase), counter: counter, ratio: metric.ratio, exponent: metric.exponent, text: text})
+    }
+    Judged{metrics: metrics, failures: failures}
+}
+
+// ---------------------------------------------------------- lines/s floors
+
+// Phase floors from the per-phase wall budgets of phase-budgets.json (seconds
+// per 300k lines -> lines/s), plus the end-to-end floor of TARGET_LINES in
+// TARGET_SECONDS. `startup` is an absolute budget, not a rate.
+floors: fn(repo: String) -> Limits Err! {
+    budgets: json.decode<Budgets>(files.read(files.join(repo, BUDGETS))) ?? return Err("{BUDGETS} has no phase_budgets rows")
+    rows := [FloorRule]{}
+    startup := Float?{None}
+    loop row in budgets.phase_budgets {
+        if row.measure == "kinds" -> rows.push(FloorRule{phase: row.phase.copy(), kinds: row.kinds ?? [String]{}, lines_per_second: Float{300000.0} / row.wall_budget_s, owners: row.owners.copy()})
+        if row.measure == "startup" && startup == None -> startup = Val(row.wall_budget_s)
+    }
+    Ok(Limits{rows: rows, startup_s: startup, total_lines_per_second: Float{TARGET_LINES} / Float{TARGET_SECONDS}})
+}
+
+floor_failure: fn(phase: String, text: String) -> Failure Never! {
+    Failure{kind: "floor", metric: None, phase: Val(phase), counter: None, ratio: None, exponent: None, text: text}
+}
+
+check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [Failure]) Never! {
+    lines: Float{point.code_lines}
+    total: lines / (point.metrics.get("wall_seconds") ?? Float{0.0})
+    rows := [FloorRow]{FloorRow{phase: "end to end", lines_per_second: finite(total), floor: limits.total_lines_per_second, owners: None}}
+    failures := [Failure]{}
+    if total < limits.total_lines_per_second -> failures.push(floor_failure("end to end", "end to end {whole(total)} lines/s < floor {js(limits.total_lines_per_second)}"))
+    loop rule in limits.rows {
+        if rule.kinds.filter(kind -> point.metrics.has_key("phase.{kind}")).len() == 0 -> next
+        seconds := Float{0.0}
+        loop kind in rule.kinds -> seconds += point.metrics.get("phase.{kind}") ?? Float{0.0}
+        rate: if seconds > ZERO -> lines / seconds else -> math.INFINITY
+        rows.push(FloorRow{phase: rule.phase.copy(), lines_per_second: finite(rate), floor: rule.lines_per_second, owners: Val(rule.owners.copy())})
+        if rate < rule.lines_per_second -> failures.push(floor_failure(rule.phase, "{rule.phase} ({rule.kinds.join("+")}) {whole(rate)} lines/s < floor {whole(rule.lines_per_second)} (owners {rule.owners.join(", ")})"))
+    }
+    if limits.startup_s == .Val(budget) {
+        startup: point.metrics.get("startup_seconds") ?? Float{0.0}
+        if startup > budget -> failures.push(floor_failure("startup", "startup {fmt.decimal(startup, 3)} s > {js(budget)} s"))
+    }
+    (rows: rows, failures: failures)
+}
+
+// Every phase's wall at TARGET_LINES from the largest passing rung and the
+// fitted exponent (never below 1): a projection, not a measurement.
+project: fn(series: Series, judged: Judged) -> Projection? Never! {
+    points: series.points.filter(point -> point.ok)
+    if points.len() == 0 -> return None
+    top: points[points.len() - 1]
+    scale: Float{TARGET_LINES} / Float{top.code_lines}
+    phases := [String: Projected]{}
+    loop (key, value) in top.metrics {
+        if !key.starts_with("phase.") && key != "wall_seconds" -> next
+        fitted: judged.metrics.get(key)?.exponent ?? Float{1.0}
+        b: if fitted > ONE -> fitted else -> ONE
+        phases[key.copy()] = Projected{measured_s: value, at_lines: top.code_lines, exponent: b, projected_s: value * scale.pow(b)}
+    }
+    Val(Projection{measured_at_lines: top.code_lines, target_lines: TARGET_LINES, target_seconds: TARGET_SECONDS, phases: phases})
+}
+
+// ------------------------------------------------------------- compilers
+
+parse_compiler: fn(spec: String) -> Compiler Err! {
+    found: COMPILER_SPEC.match(spec) ?? return Err("--compiler expects LABEL=jet:PATH, LABEL=bootstrap:PATH or LABEL=command:TEMPLATE (got {spec})")
+    label: found.group(1) ?? ""
+    kind: found.group(2) ?? ""
+    target: found.group(3) ?? ""
+    if kind == "command" -> return Ok(Compiler{label: label, kind: kind, path: None, template: Val(target)})
+    home: env("HOME") ?? sys.home_dir() ?? ""
+    expanded: if target.starts_with("~/") -> "{home}{target.removeprefix("~")}" else -> target
+    Ok(Compiler{label: label, kind: kind, path: Val(absolute(expanded)), template: None})
+}
+
+quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\\''")}'" }
+
+// A command template with each `{name}` placeholder shell-quoted.
+expand: fn(template: String, values: [(key: String, value: String)]) -> String Err! {
+    pieces: template.split("{{").to_list()
+    out := pieces[0].copy()
+    loop piece in pieces.slice(1, pieces.len()) {
+        key: piece.partition("}}").head
+        if !piece.contains("}}") || !PLACEHOLDER.is_match(key) {
+            out = "{out}{{{piece}"
+            next
+        }
+        missing: "Unknown command placeholder: {{{key}}}"
+        rest: piece.removeprefix("{key}}}")
+        found: values.find(pair -> pair.key == key) ?? return Err(missing)
+        out = "{out}{quote(found.value)}{rest}"
+    }
+    Ok(out)
+}
+
+// A systemd size (`20G`, `512M`, bytes without a suffix) in bytes.
+memory_bytes: fn(text: String) -> Int? Never! {
+    scale := 1
+    digits := text.copy()
+    loop unit in [(suffix: "K", factor: 1024), (suffix: "M", factor: 1048576), (suffix: "G", factor: 1073741824), (suffix: "T", factor: 1099511627776)] {
+        if text.ends_with(unit.suffix) {
+            scale = unit.factor
+            digits = text.removesuffix(unit.suffix)
+        }
+    }
+    count: Int.parse(digits) ?? return None
+    if count < 1 -> None else -> Val(count * scale)
+}
+
+// ----------------------------------------------------------------- measure
+
+// The compile of `built` into `dir`, ready to start: a fresh project and store
+// under the build root (projects, stores, emitted Rust, outputs and perf.data
+// stay off the evidence tree), output to dir/stdout.log and dir/stderr.log.
+prepare: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: String, profiled: Bool) -> Rung Err! {
+    files.remove_all(dir) ?? ()
+    files.create_dir_all(dir)
+    build_dir: files.join(config.build_root, crypto.sha256(absolute(dir)).hex())
+    files.remove_all(build_dir) ?? ()
+    project_dir: files.join(build_dir, "project")
+    store: files.join(build_dir, "store")
+    trace: files.join(dir, "trace.json")
+    receipt: files.join(dir, "receipt")
+    entry: files.join(project_dir, "main.jet")
+    write_files(built.files, project_dir)
+    files.create_dir_all(store)
+    command: if compiler.kind == {
+        "bootstrap" -> [String]{compiler.path ?? ""}
+        "jet" -> [String]{compiler.path ?? "", config.jet_command, "--color=never", entry}
+        else -> [String]{"/bin/sh", "-c", expand(compiler.template ?? "", [(key: "project", value: project_dir), (key: "entry", value: entry), (key: "n", value: "{n}"), (key: "trace", value: trace), (key: "dir", value: build_dir)])}
+    }
+    scoped: compiler.kind != "command"
+    argv := [String]{"/bin/sh", "-c", REDIRECT, "redirect", files.join(dir, "stdout.log"), files.join(dir, "stderr.log")}
+    if profiled -> argv.extend(wrap(build_dir))
+    if scoped -> argv.extend([String]{"bash", "-c", SCOPED, "scoped"})
+    argv.extend(command)
+    spec := process.cmd(argv).cwd(project_dir).stdout(.Inherit).stderr(.Inherit).timeout(time.duration_seconds(config.timeout_s))
+    if scoped -> spec = spec.memory_scope(memory_bytes(config.memory_max) ?? return Err("--memory-max is not a size: {config.memory_max}"))
+    if compiler.kind == "bootstrap" {
+        spec = spec.env_clear()
+        bootstrap: [(name: String, value: String)]{
+            (name: "HOME", value: env("HOME") ?? sys.home_dir() ?? ""),
+            (name: "PATH", value: process.env_get("PATH") ?? ""),
+            (name: "LC_ALL", value: "C"),
+            (name: "JET_BOOTSTRAP_MODE", value: "runner"),
+            (name: "JET_BOOTSTRAP_FACTORY_TIER", value: "aot"),
+            (name: "JET_BOOTSTRAP_SOURCE_ROOT", value: project_dir),
+            (name: "JET_BOOTSTRAP_ENTRY", value: "main.jet"),
+            (name: "JET_BOOTSTRAP_OUTPUT", value: files.join(build_dir, "out.rs")),
+            (name: "JET_BOOTSTRAP_RECEIPT", value: receipt),
+            (name: "RUST_MIN_STACK", value: "8388608"),
+        }
+        loop variable in bootstrap -> spec = spec.env(variable.name, variable.value)
+    }
+    loop variable in [(name: "JET_STORE_DIR", value: store), (name: "JET_TRACE_FILE", value: trace), (name: "JET_PHASE_COUNTERS", value: "1"), (name: "TMPDIR", value: build_dir), (name: "NO_COLOR", value: "1")] {
+        spec = spec.env(variable.name, variable.value)
+    }
+    x: if built.kind == .Domain -> built.code_lines else -> n
+    Ok(Rung{n: n, x: x, code_lines: built.code_lines, source_sha256: built.source_sha256.copy(), diagnostics: built.diagnostics, dir: dir.copy(), build_dir: build_dir, trace: trace, receipt: receipt, spec: spec})
+}
+
+start: fn(rung: Rung) -> Started Err! {
+    spawn_unix_ms: time.now().to_unix_ms()
+    start_ns: time.unix_ns()
+    child: rung.spec.spawn()
+    Ok(Started{rung: rung, child: child, spawn_unix_ms: spawn_unix_ms, start_ns: start_ns})
+}
+
+// The JET_TRACE_FILE's phase spans (name == cat): per kind the union of its
+// spans across threads, their count and their items; the first begin, and
+// the kinds still open. Trace time 0 is the `trace.start` event's
+// `args.unix_ms`, measured from the spawn.
+phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
+    events := [Dyn]{}
+    text: files.read(path) ?? ""
+    loop raw in text.split("\n") {
+        line: raw.trim().removesuffix(",")
+        if !line.starts_with("{{") -> next
+        event: json.parse(line) ?? next
+        events.push(event)
+    }
+    offset_ns: if events.find(event -> shown(event, "name") == "trace.start") == .Val(origin) -> (number(origin.get("args") ?? Dyn.Null, "unix_ms") - Float{spawn_unix_ms}) * Float{1000000.0} else -> Float{0.0}
+    slots := [String: Int]{}
+    open := [(kind: String, starts: [Float])]{}
+    kinds := [String: Int]{}
+    spans := [[Span]]{}
+    first := Float?{None}
+    loop event in events {
+        ph: shown(event, "ph")
+        if (ph != "B" && ph != "E") || (event.get("name") ?? UNDEFINED) != (event.get("cat") ?? UNDEFINED) -> next
+        kind: shown(event, "cat")
+        tid: shown(event, "tid")
+        key: "{tid.len()}:{tid}{kind}"
+        t: number(event, "ts") * Float{1000.0} + offset_ns
+        if ph == "B" {
+            if t < (first ?? math.INFINITY) -> first = Val(t)
+            if !slots.has_key(key) {
+                slots[key] = open.len()
+                open.push((kind: kind.copy(), starts: [Float]{}))
+            }
+            open[slots[key]].starts.push(t)
+            next
+        }
+        slot: slots.get(key) ?? next
+        begun: open[slot].starts.pop() ?? next
+        if !kinds.has_key(kind) {
+            kinds[kind.copy()] = spans.len()
+            spans.push([Span]{})
+        }
+        items := Float?{None}
+        if (event.get("args") ?? Dyn.Null).get("items") == .Val(value) {
+            if value != Dyn.Null -> items = Val(value.float() ?? math.NAN)
+        }
+        spans[kinds[kind]].push(Span{start: begun, end: t, items: items})
+    }
+    unclosed: open.filter(entry -> entry.starts.len() > 0).map(entry -> entry.kind.copy())
+    phases := [String: PhaseRow]{}
+    loop (kind, at) in kinds {
+        list := spans[at].copy()
+        list.sort_by((a, b) -> a.start <=> b.start)
+        wall := Float{0.0}
+        items := Float?{None}
+        low := list[0].start
+        high := list[0].end
+        loop span in list {
+            if span.items == .Val(count) -> items = Val((items ?? Float{0.0}) + count)
+            if span.start > high {
+                wall += high - low
+                low = span.start
+            }
+            high = math.max_float(high, span.end)
+        }
+        wall += high - low
+        phases[kind.copy()] = PhaseRow{wall_ns: Float{math.round(wall)}, count: list.len(), items: items}
+    }
+    PhaseTable{phases: phases, first_begin_ns: first, unclosed: unclosed, events: events.len()}
+}
+
+// The `code` of a bootstrap report row as `String(report.code ?? '')` reads it.
+report_code: fn(text: String) -> String Never! {
+    report: json.parse(text) ?? return ""
+    code: report.get("code") ?? return ""
+    if code == .Null -> "" else -> code.to_text() ?? ""
+}
+
+// Diagnostics a compile reported: the bootstrap receipt's report rows, or
+// `Error [CODE]` lines of `jet`.
+outcome: fn(compiler: Compiler, rung: Rung, code: Int, text: String) -> (complete: Bool, errors: Int) Never! {
+    errors := 0
+    if compiler.kind == "bootstrap" {
+        written: if files.exists(rung.receipt) -> files.read(rung.receipt) ?? "" else -> ""
+        complete := false
+        loop line in written.split("\n") {
+            if line == "complete=true" -> complete = true
+            if line.starts_with("report_json=") && !report_code(line.removeprefix("report_json=")).starts_with("L") -> errors += 1
+        }
+        return (complete: complete, errors: errors)
+    }
+    loop line in text.split("\n") {
+        if line.starts_with("Error [E") -> errors += 1
+    }
+    (complete: code == 0, errors: errors)
+}
+
+// Wait for a started compile and read its point.
+finish: fn(config: Config, compiler: Compiler, started: Started) -> Point Err! {
+    receipt: started.child.wait()
+    wall_ns: time.unix_ns() - started.start_ns
+    rung: started.rung
+    text: "{files.read(files.join(rung.dir, "stdout.log"))}\n{files.read(files.join(rung.dir, "stderr.log"))}"
+    problems := [String]{}
+    counters: parse_counters(text) ?? {
+        problems.push(err.message)
+        [String: Float]{}
+    }
+    table: phase_table(rung.trace, started.spawn_unix_ms)
+    result: outcome(compiler, rung, receipt.code, text)
+    metrics := [String: Float]{}
+    metrics["wall_seconds"] = Float{wall_ns} / Float{1000000000.0}
+    metrics["user_seconds"] = Float{receipt.user_cpu_ns ?? 0} / Float{1000000000.0}
+    metrics["peak_rss_kb"] = Float{math.round(Float{receipt.peak_memory_bytes ?? 0} / Float{1024.0})}
+    if table.first_begin_ns == .Val(first) -> metrics["startup_seconds"] = first / Float{1000000000.0}
+    loop (kind, phase) in table.phases {
+        metrics["phase.{kind}"] = phase.wall_ns / Float{1000000000.0}
+        metrics["trace.{kind}.spans"] = Float{phase.count}
+        if phase.items == .Val(items) -> metrics["trace.{kind}.items"] = items
+    }
+    loop (name, value) in counters -> metrics["counter.{name}"] = value
+    open: combinatorics.unique(table.unclosed)
+    timeout_phase := String?{None}
+    if receipt.timed_out {
+        phase: if open.len() > 0 -> open[open.len() - 1].copy() else if table.events > 0 -> "between phases" else -> "startup"
+        problems.push("timed out after {config.timeout_s} s in {phase}")
+        timeout_phase = Val(phase)
+    }
+    if table.events == 0 -> problems.push("no JET_TRACE_FILE trace")
+    exit: if receipt.signal == None -> Val(receipt.code) else -> None
+    ended: if receipt.signal == .Val(signal) -> "exit null, signal {signal}" else -> "exit {receipt.code}"
+    if rung.diagnostics == 0 && (!result.complete || result.errors > 0) -> problems.push("compile failed ({ended}, {result.errors} errors); see {rung.dir}")
+    if rung.diagnostics > 0 && result.errors < rung.diagnostics -> problems.push("reported {result.errors} of {rung.diagnostics} expected diagnostics; see {rung.dir}")
+    metrics["diagnostics"] = Float{result.errors}
+    Ok(Point{n: rung.n, x: rung.x, code_lines: rung.code_lines, source_sha256: rung.source_sha256.copy(), ok: problems.len() == 0, problems: problems, open_phases: open, timeout_phase: timeout_phase, metrics: metrics, dir: rung.dir.copy(), build_dir: rung.build_dir.copy(), exit: exit})
+}
+
+// One measured compile of one corpus.
+measure: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: String, profiled: Bool) -> Point Err! {
+    finish(config, compiler, start(prepare(config, compiler, built, n, dir, profiled)))
+}
+
+// ---------------------------------------------------------------- the run
+
+// No declared contract: jet_scaling_corpora's `shapes` declares none either,
+// so its callers (all of them return Err) carry whatever it may fail with.
+shape_named: fn(name: String) -> Shape? { shapes().find(shape -> shape.name == name) }
+
+ladder_for: fn(config: Config, shape: Shape) -> [Int] Never! {
+    if config.ladders.get(shape.name) == .Val(ladder) -> return ladder.copy()
+    if shape.kind == .Domain -> return config.domain_ladder.copy()
+    base: config.bases.get(shape.name) ?? shape.base
+    ladder := [Int]{}
+    size := base
+    loop _ in 0..<config.steps {
+        ladder.push(size)
+        size *= 2
+    }
+    ladder
+}
+
+kind_name: fn(kind: ShapeKind) -> String Never! { if kind == .Domain -> "domain" else -> "stress" }
+
+// A receipt is a checkpoint, not a cache across different compiler invocations.
+resume_receipt: fn(config: Config, limits: Limits, previous: Receipt?) -> Receipt Err! {
+    ladders := [String: [Int]]{}
+    loop name in config.shapes {
+        shape: shape_named(name) ?? return Err("Unknown shape {name}")
+        ladders[name.copy()] = ladder_for(config, shape)
+    }
+    invocation: json.to_string(Invocation{compilers: config.compilers.copy(), shapes: config.shapes.copy(), layouts: config.layouts.copy(), ladders: ladders, seed: config.seed, memory_max: config.memory_max.copy(), timeout_s: config.timeout_s, failure_policy: "all-rungs", stop_after_s: config.stop_after_s, profile_top: config.profile_top, build_root: config.build_root.copy(), mode: config.mode.copy(), jobs: config.jobs, families: FAMILIES, floors: limits.copy()})
+    if previous == .Val(receipt) {
+        if receipt.invocation != invocation -> return Err("Receipt invocation differs; use a new --work-dir")
+        return Ok(receipt.copy())
+    }
+    Ok(Receipt{schema: "jet.scaling-gate/v3", invocation: invocation, started_at: iso_now(), work_dir: config.work_dir.copy(), host: sys.hostname(), compilers: config.compilers.copy(), families: FAMILIES, floors: limits.copy(), target: Target{lines: TARGET_LINES, seconds: TARGET_SECONDS}, memory_max: config.memory_max.copy(), timeout_s: config.timeout_s, stop_after_s: config.stop_after_s, build_root: config.build_root.copy(), mode: config.mode.copy(), jobs: config.jobs, series: [Series]{}, failures: [String]{}, passed: None, finished_at: None})
+}
+
+// The receipt as JSON.stringify(receipt, null, 2) writes it, where an
+// appearing growth's infinite ratio is null: Core's JSON writer refuses a
+// non-finite Float, so the written copy holds None there.
+save: fn(config: Config, receipt: Receipt) Err! {
+    written := receipt.copy()
+    loop i in 0..<written.series.len() {
+        metrics := [String: Growth]{}
+        loop (key, metric) in written.series[i].metrics {
+            shown := metric.copy()
+            if !math.is_finite(shown.ratio ?? ZERO) -> shown.ratio = None
+            metrics[key.copy()] = shown
+        }
+        written.series[i].metrics = metrics
+        loop j in 0..<written.series[i].failures.len() {
+            if !math.is_finite(written.series[i].failures[j].ratio ?? ZERO) -> written.series[i].failures[j].ratio = None
+        }
+    }
+    pending: "{config.receipt}.pending"
+    text: json.to_string_pretty(written)
+    files.write(pending, "{text}\n")
+    files.rename(pending, config.receipt)
+}
+
+// A receipt or config as a JSON tree (derived encoders are private to this
+// module): run-gate reports receipts from memory, enqueue records configs.
+receipt_tree: fn(receipt: Receipt) -> Dyn Never! { receipt.encode() }
+config_tree: fn(config: Config) -> Dyn Never! { config.encode() }
+
+log: fn(config: Config, line: String) {
+    print(line)
+    files.append_all(files.join(config.work_dir, "gate.log"), "{iso_now()} {line}\n") ?? ()
+}
+
+summary: fn(point: Point) -> String Never! {
+    phases := [(name: String, seconds: Float)]{}
+    loop (key, value) in point.metrics {
+        if key.starts_with("phase.") -> phases.push((name: key.removeprefix("phase."), seconds: value))
+    }
+    phases.sort_by((a, b) -> b.seconds <=> a.seconds)
+    top: phases.take(3).map(phase -> "{phase.name} {fmt.decimal(phase.seconds, 2)}s").join(", ")
+    wall: point.metrics.get("wall_seconds") ?? Float{0.0}
+    rss: (point.metrics.get("peak_rss_kb") ?? Float{0.0}) / Float{1048576.0}
+    state: if point.ok -> "ok" else -> "FAILED"
+    problems: if point.ok -> "" else -> " {point.problems.join("; ")}"
+    "{state} wall {fmt.decimal(wall, 2)}s rss {fmt.decimal(rss, 2)}G [{top}]{problems}"
+}
+
+where: fn(config: Config, compiler: Compiler, shape: String, layout: String, rung: String) -> String Never! {
+    files.join(files.join(files.join(config.work_dir, compiler.label), "{shape}-{layout}"), rung)
+}
+
+// `shape[layout]/compiler`, the name a series' progress lines and failures carry.
+series_label: fn(series: Series) -> String Never! { "{series.shape}[{series.layout}]/{series.compiler}" }
+
+// Counter-only compiles, at most `config.jobs` at once; each lands in the
+// series (points in ladder order) and the receipt as it finishes.
+measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: &Receipt, at: Int) Err! {
+    ladder: receipt.series[at].ladder.copy()
+    pending := [Int]{}
+    if receipt.series[at].baseline == None -> pending.push(1)
+    loop n in ladder {
+        if receipt.series[at].points.find(point -> point.n == n) == None -> pending.push(n)
+    }
+    running := [Started]{}
+    finished := [Bool]{}
+    loop running.len() < pending.len() || finished.contains(false) {
+        if running.len() < pending.len() && finished.filter(flag -> !flag).len() < config.jobs {
+            n: pending[running.len()]
+            running.push(start(prepare(config, compiler, corpus(shape, n, config.seed, layout), n, where(config, compiler, shape.name, layout, "{n}"), false)))
+            finished.push(false)
+            next
+        }
+        done := -1
+        loop i in 0..<running.len() {
+            if !finished[i] && (running[i].child.exited() ?? true) {
+                done = i
+                break
+            }
+        }
+        if done < 0 {
+            time.sleep(5ms)
+            next
+        }
+        finished[done] = true
+        point: finish(config, compiler, running[done])
+        text: "{label} N={point.n} {summary(point)} (counter-only; time/RSS not gated)"
+        if point.n == 1 {
+            receipt.series[at].baseline = Val(point)
+        } else {
+            receipt.series[at].points.push(point)
+            receipt.series[at].points.sort_by((a, b) -> (ladder.index_of(a.n) ?? -1) <=> (ladder.index_of(b.n) ?? -1))
+        }
+        save(config, receipt)
+        log(config, text)
+    }
+    Ok()
+}
+
+// The baseline and every rung, one at a time; a rung slower than
+// --stop-after ends the ladder.
+measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, label: String, receipt: &Receipt, at: Int) Err! {
+    if receipt.series[at].baseline == None {
+        point: measure(config, compiler, corpus(shape, 1, config.seed, layout), 1, where(config, compiler, shape.name, layout, "1"), false)
+        text: "{label} N=1 {summary(point)}"
+        receipt.series[at].baseline = Val(point)
+        save(config, receipt)
+        log(config, text)
+    }
+    ladder: receipt.series[at].ladder.copy()
+    loop n in ladder {
+        wall := Float{0.0}
+        if receipt.series[at].points.find(point -> point.n == n) == .Val(point) {
+            wall = point.metrics.get("wall_seconds") ?? Float{0.0}
+        } else {
+            built: corpus(shape, n, config.seed, layout)
+            point: measure(config, compiler, built, n, where(config, compiler, shape.name, layout, "{n}"), false)
+            wall = point.metrics.get("wall_seconds") ?? Float{0.0}
+            text: "{label} N={n} ({built.code_lines} lines) {summary(point)}"
+            receipt.series[at].points.push(point)
+            save(config, receipt)
+            log(config, text)
+        }
+        if config.stop_after_s == .Val(limit) {
+            if wall > limit && n != ladder[ladder.len() - 1] {
+                receipt.series[at].truncated = Val("stopped after N={n}: {fmt.decimal(wall, 1)} s > --stop-after {js(limit)} s")
+                break
+            }
+        }
+    }
+    Ok()
+}
+
+// Re-run the largest passing rung under perf and attribute its samples to
+// the failing phases (Profile.jet): the responsible functions with their
+// source.
+profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, n: Int, receipt: &Receipt, at: Int) -> ProfileResult Err! {
+    dir: where(config, compiler, shape.name, layout, "{n}-profile")
+    phases: combinatorics.unique(receipt.series[at].failures.filter(failure -> failure.kind == "growth").map(failure -> (failure.phase ?? "").copy()))
+    if receipt.series[at].profile_point == None {
+        receipt.series[at].profile_point = Val(measure(config, compiler, corpus(shape, n, config.seed, layout), n, dir, true))
+        save(config, receipt)
+    }
+    point: receipt.series[at].profile_point ?? return Err("no profile compile")
+    profiled := [String: ProfiledPhase]{}
+    loop phase in profile(point.build_dir, files.join(dir, "trace.json"), phases, config.repo) {
+        profiled[phase.phase.copy()] = ProfiledPhase{samples: phase.samples, own: phase.own.copy(), inclusive: phase.inclusive.copy()}
+    }
+    Ok(ProfileResult{perf_data: files.join(point.build_dir, "perf.data"), compile_ok: point.ok, phases: profiled})
+}
+
+// The failures of a point that did not pass: a timeout or a failed compile,
+// in the phase it stopped in.
+point_failure: fn(point: Point, prefix: String) -> Failure Never! {
+    kind: if point.timeout_phase == None -> "compile" else -> "timeout"
+    phase: if point.timeout_phase == .Val(name) -> Val(name.copy()) else if point.open_phases.len() > 0 -> Val(point.open_phases[point.open_phases.len() - 1].copy()) else -> None
+    Failure{kind: kind, metric: None, phase: phase, counter: None, ratio: None, exponent: None, text: "{prefix}: {point.problems.join("; ")}"}
+}
+
+run_gate: fn(config: Config) -> Receipt Err! {
+    files.create_dir_all(config.work_dir)
+    limits: floors(config.repo)
+    previous := Receipt?{None}
+    if files.exists(config.receipt) -> previous = Val(json.decode<Receipt>(files.read(config.receipt)) ?? return Err("{config.receipt} is not a scaling gate receipt"))
+    receipt := resume_receipt(config, limits, previous)
+    save(config, receipt)
+    loop name in config.shapes {
+        shape: shape_named(name) ?? return Err("Unknown shape {name}")
+        loop compiler in config.compilers {
+            loop layout in config.layouts {
+                label: "{name}[{layout}]/{compiler.label}"
+                at := -1
+                loop i in 0..<receipt.series.len() {
+                    if series_label(receipt.series[i]) == label {
+                        at = i
+                        break
+                    }
+                }
+                if at < 0 {
+                    at = receipt.series.len()
+                    receipt.series.push(Series{shape: name.copy(), layout: layout.copy(), compiler: compiler.label.copy(), mode: config.mode.copy(), kind: kind_name(shape.kind), dimension: shape.dimension.copy(), ladder: ladder_for(config, shape), baseline: None, points: [Point]{}, truncated: None, metrics: [String: Growth]{}, failures: [Failure]{}, floors: None, projection: None, profile: None, profile_point: None, done: false})
+                }
+                if receipt.series[at].done -> next
+                if config.mode == "counters" -> measure_counters(config, compiler, shape, layout, label, receipt, at) else -> measure_timing(config, compiler, shape, layout, label, receipt, at)
+                judged: judge(receipt.series[at])
+                failures := judged.failures.copy()
+                failures.extend(receipt.series[at].baseline.map(point -> if point.ok -> [Failure]{} else -> [Failure]{point_failure(point, "baseline")}) ?? [Failure]{})
+                passing: receipt.series[at].points.filter(point -> point.ok)
+                if config.mode != "counters" && passing.len() > 0 {
+                    checked: check_floors(passing[passing.len() - 1], limits)
+                    receipt.series[at].floors = Val(checked.rows.copy())
+                    failures.extend(checked.failures.copy())
+                }
+                if receipt.series[at].truncated == .Val(truncated) -> failures.push(Failure{kind: "truncated", metric: None, phase: None, counter: None, ratio: None, exponent: None, text: truncated.copy()})
+                failures.extend(receipt.series[at].points.filter(point -> !point.ok).map(point -> point_failure(point, "N={point.n}")))
+                if config.mode != "counters" && shape.kind == .Domain -> receipt.series[at].projection = project(receipt.series[at], judged)
+                receipt.series[at].metrics = judged.metrics.copy()
+                receipt.series[at].failures = failures
+                save(config, receipt)
+                growing: receipt.series[at].failures.filter(failure -> failure.kind == "growth").len() > 0
+                if config.mode != "counters" && config.profile_top && growing && passing.len() > 0 && receipt.series[at].profile == None {
+                    receipt.series[at].profile = Val(profile_top(config, compiler, shape, layout, passing[passing.len() - 1].n, receipt, at))
+                }
+                receipt.series[at].done = true
+                save(config, receipt)
+            }
+        }
+    }
+    all := [String]{}
+    loop series in receipt.series {
+        loop failure in series.failures -> all.push("{series_label(series)}: {failure.text}")
+    }
+    receipt.passed = Val(all.len() == 0)
+    receipt.failures = all
+    receipt.finished_at = Val(iso_now())
+    save(config, receipt)
+    Ok(receipt)
+}
+
+// --------------------------------------------------------------- options
+
+usage: fn() -> String Never! { USAGE.join("\n") }
+
+// `A,B,...` as the sizes above 1 it names.
+sizes: fn(text: String) -> [Int] Never! {
+    found := [Int]{}
+    loop item in text.split(",") {
+        n: Int.parse(item.trim()) ?? next
+        if n > 1 -> found.push(n)
+    }
+    found
+}
+
+// The gate's options (`help` set for --help). `repo` is the checkout the gate runs from.
+options: fn(args: [String], repo: String) -> Config Err! {
+    scratch: files.join(scratch_root(), "scaling-gate")
+    stamp: iso_now().replace(":", "-").replace(".", "-")
+    config := Config{compilers: [Compiler]{}, shapes: [String]{}, bases: [String: Int]{}, ladders: [String: [Int]]{}, steps: 4, domain_ladder: DOMAIN_LADDER.copy(), memory_max: "20G", timeout_s: 1800, stop_after_s: None, jet_command: "build", seed: 1, profile_top: false, layouts: [String]{}, build_root: scratch.copy(), mode: "timing", jobs: 1, work_dir: files.join(scratch, stamp), receipt: "", repo: repo.copy(), help: false}
+    known: shapes()
+    i := 0
+    loop i < args.len() {
+        flag: args[i]
+        i += 1
+        if flag == "--help" {
+            config.help = true
+            return Ok(config)
+        }
+        if flag == "--stress" || flag == "--domains" {
+            wanted: if flag == "--stress" -> ShapeKind.Stress else -> ShapeKind.Domain
+            config.shapes.extend(known.filter(shape -> shape.kind == wanted).map(shape -> shape.name.copy()))
+            next
+        }
+        if flag == "--profile" {
+            config.profile_top = true
+            next
+        }
+        if i >= args.len() -> return Err("Missing value for {flag}")
+        value: args[i]
+        i += 1
+        if flag == {
+            "--compiler" -> config.compilers.push(parse_compiler(value))
+            "--shape" -> {
+                if shape_named(value) == None -> return Err("Unknown shape {value}")
+                config.shapes.push(value.copy())
+            }
+            "--base" -> {
+                pair: value.partition("=")
+                n: Int.parse(pair.tail) ?? 0
+                if shape_named(pair.head) == None || n <= 1 -> return Err("--base expects SHAPE=N")
+                config.bases[pair.head.copy()] = n
+            }
+            "--ladder" -> {
+                pair: value.partition("=")
+                if shape_named(pair.head) == None || sizes(pair.tail).len() < 2 -> return Err("--ladder expects SHAPE=A,B,...")
+                config.ladders[pair.head.copy()] = sizes(pair.tail)
+            }
+            "--domain-ladder" -> {
+                config.domain_ladder = sizes(value)
+                if config.domain_ladder.len() < 2 -> return Err("--domain-ladder needs two sizes")
+            }
+            "--steps" -> {
+                config.steps = Int.parse(value) ?? 0
+                if config.steps < 2 -> return Err("--steps must be >= 2")
+            }
+            "--memory-max" -> {
+                if memory_bytes(value) == None -> return Err("--memory-max is a size such as 20G")
+                config.memory_max = value.copy()
+            }
+            "--timeout" -> config.timeout_s = Int.parse(value) ?? return Err("--timeout is whole seconds")
+            "--stop-after" -> config.stop_after_s = Val(Float.parse(value) ?? return Err("--stop-after is seconds"))
+            "--jet-command" -> {
+                if !JET_COMMANDS.contains(value) -> return Err("--jet-command is build or check")
+                config.jet_command = value.copy()
+            }
+            "--work-dir" -> config.work_dir = absolute(value)
+            "--build-root" -> config.build_root = absolute(value)
+            "--receipt" -> config.receipt = absolute(value)
+            "--layout" -> {
+                if !layouts().contains(value) -> return Err("--layout is {layouts().join(" or ")}")
+                config.layouts.push(value.copy())
+            }
+            "--seed" -> config.seed = Int.parse(value) ?? return Err("--seed is an integer")
+            "--mode" -> {
+                if !MODES.contains(value) -> return Err("--mode is timing or counters")
+                config.mode = value.copy()
+            }
+            "--jobs" -> {
+                config.jobs = Int.parse(value) ?? 0
+                if config.jobs < 1 -> return Err("--jobs must be a positive integer")
+            }
+            else -> return Err("Unknown option: {flag}")
+        }
+    }
+    if config.compilers.len() == 0 -> return Err("At least one --compiler is required")
+    if combinatorics.unique(config.compilers.map(compiler -> compiler.label.copy())).len() < config.compilers.len() -> return Err("Compiler labels must be unique")
+    if config.shapes.len() == 0 -> config.shapes = known.map(shape -> shape.name.copy())
+    config.shapes = combinatorics.unique(config.shapes)
+    if config.layouts.len() == 0 -> config.layouts = layouts()
+    config.layouts = combinatorics.unique(config.layouts)
+    if config.receipt == "" -> config.receipt = files.join(config.work_dir, "receipt.json")
+    Ok(config)
+}

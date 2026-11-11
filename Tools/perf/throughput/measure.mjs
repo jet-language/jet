@@ -13,7 +13,11 @@
 import fs from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 
-export const GNU_TIME = '/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time';
+// GNU time (`-f`, `-o`): the first `time` on PATH (the shell's `time` is a
+// keyword, not this), else the store path it was pinned to.
+export const GNU_TIME = (process.env.PATH ?? '').split(':').filter(Boolean).map(dir => `${dir}/time`).find(file => {
+  try { fs.accessSync(file, fs.constants.X_OK); return true; } catch { return false; }
+}) ?? '/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time';
 export const SAMPLE_MS = 20;
 const TICKS_PER_SECOND = Number(spawnSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).stdout.trim()) || 100;
 const PAGE_BYTES = Number(spawnSync('getconf', ['PAGESIZE'], { encoding: 'utf8' }).stdout.trim()) || 4096;

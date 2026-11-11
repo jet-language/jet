@@ -1,0 +1,155 @@
+// Queues the scaling gate (Tower #4601) on proofq, the twin of enqueue.mjs.
+// Counter correctness can share a machine; only the small timing sample needs
+// quiet: three counter groups (2 parallel rungs, 25 s cap, 8G each) and one
+// serial timing sample (20 s cap, 24G) of huge-fns, fan-in and every domain at
+// 125k and 1M, each a proofq job running run-gate/run.jet. The jobs take the
+// mtime of the queued job JET_SCALING_QUEUE_STAMP names, the timing sample
+// 1 s later, so the queue runs them after it; the plan is in
+// `--work-dir`/queue-plan.json and each queued file is printed.
+//
+// Usage: JET_SCALING_QUEUE_STAMP=EXISTING_JOB jet Tools/perf/scaling/enqueue --compiler LABEL=KIND:PATH [harness options]
+// Exit 1 (as the original's uncaught errors): an invalid invocation, an
+// unreadable stamp, a job already queued or a file that cannot be written.
+package: {
+    name: "scaling_enqueue"
+    version: "0.0.1"
+    deps: {
+        // A root package declares each directory its dependencies reach.
+        jet_scaling_corpora: ../corpora,
+        jet_scaling_gate: ../gate,
+    }
+}
+
+use {
+    jet_scaling_corpora.[shapes]
+    jet_scaling_gate.[Config, config_tree, js, options, state_root]
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    sys: core.sys
+}
+
+TOOL: "/Tools/perf/scaling/enqueue/run.jet"
+USAGE: "Usage: JET_SCALING_QUEUE_STAMP=EXISTING_JOB jet Tools/perf/scaling/enqueue --compiler LABEL=KIND:PATH [harness options]\nQueues three counter groups (2 parallel rungs, 25 s cap, 8G each) and one serial timing sample (20 s cap, 24G): huge-fns, fan-in and all domains at 125k/1M."
+
+// A queued gate run; `shared` jobs may share the machine.
+Job: struct {
+    name: String
+    shared: Bool
+    config: Config
+}
+
+// A job as queue-plan.json records it, the config under harness.mjs's names.
+Planned: struct {
+    name: String
+    shared: Bool
+    config: Dyn
+}
+
+// enqueue.mjs's `queuePlan`: the shapes in three counter groups, then the
+// timing sample of the domains, huge-fns and fan-in among them.
+queue_plan: fn(config: Config) -> [Job] Never! {
+    size: (config.shapes.len() + 2) /% 3
+    groups := [[String]]{}
+    loop shape in config.shapes {
+        if groups.len() == 0 || groups[groups.len() - 1].len() == size -> groups.push([String]{})
+        groups[groups.len() - 1].push(shape.copy())
+    }
+    plan := [Job]{}
+    loop members in groups {
+        group := config.copy()
+        group.shapes = members.copy()
+        group.mode = "counters"
+        group.jobs = 2
+        group.timeout_s = if config.timeout_s < 25 -> config.timeout_s else -> 25
+        group.memory_max = "8G"
+        group.profile_top = false
+        group.work_dir = files.join(config.work_dir, "counter-{plan.len() + 1}")
+        plan.push(Job{name: "ScalingGate-counters-{plan.len() + 1}", shared: true, config: group})
+    }
+    domains: shapes().filter(shape -> shape.kind == .Domain).map(shape -> shape.name.copy())
+    timing := config.copy()
+    timing.shapes = config.shapes.filter(shape -> domains.contains(shape) || shape == "huge-fns" || shape == "fan-in")
+    timing.mode = "timing"
+    timing.jobs = 1
+    timing.timeout_s = if config.timeout_s < 20 -> config.timeout_s else -> 20
+    timing.memory_max = "24G"
+    timing.steps = 2
+    timing.ladders = [String: [Int]]{}
+    timing.domain_ladder = [Int]{125000, 1000000}
+    timing.stop_after_s = None
+    timing.profile_top = false
+    timing.work_dir = files.join(config.work_dir, "timing")
+    plan.push(Job{name: "PerfScalingGate-timing", shared: false, config: timing})
+    plan.filter(job -> job.config.shapes.len() > 0)
+}
+
+// run-gate's arguments for one job, as enqueue.mjs spells them.
+gate_args: fn(config: Config) -> [String] Never! {
+    args := [String]{}
+    loop compiler in config.compilers -> args.extend(["--compiler", "{compiler.label}={compiler.kind}:{compiler.path ?? compiler.template ?? ""}"])
+    loop shape in config.shapes -> args.extend(["--shape", shape.copy()])
+    args.extend(["--steps", "{config.steps}", "--domain-ladder", config.domain_ladder.map(n -> "{n}").join(","), "--memory-max", config.memory_max.copy(), "--timeout", "{config.timeout_s}", "--stop-after", js(config.stop_after_s ?? math.INFINITY)])
+    args.extend(["--seed", "{config.seed}", "--jet-command", config.jet_command.copy(), "--work-dir", config.work_dir.copy(), "--build-root", config.build_root.copy(), "--mode", config.mode.copy(), "--jobs", "{config.jobs}"])
+    loop layout in config.layouts -> args.extend(["--layout", layout.copy()])
+    loop shape in config.shapes {
+        if config.bases.get(shape) == .Val(base) -> args.extend(["--base", "{shape}={base}"])
+        if config.ladders.get(shape) == .Val(ladder) -> args.extend(["--ladder", "{shape}={ladder.map(n -> "{n}").join(",")}"])
+    }
+    args
+}
+
+quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\\''")}'" }
+
+// The proofq job: the disk guard, then run-gate under the scaling-gate lock
+// (shared by counter groups); rc 1 is gate evidence, not an invalid run.
+script: fn(job: Job, repo: String) -> String Never! {
+    lock: quote(files.join(state_root(), "scaling-gate.lock"))
+    guard: quote(files.join(state_root(), "disk-guard.sh"))
+    args: gate_args(job.config).map(arg -> quote(arg)).join(" ")
+    lines: [
+        "#!/usr/bin/env bash",
+        "# proofq: mem={if job.shared -> 18 else -> 25}G time=50M kind={if job.shared -> "test" else -> "measure"}",
+        "# #4601: {job.config.mode}; rc=1 is gate evidence, not an invalid run.",
+        "set -u",
+        "cd {quote(repo)} || exit 2",
+        "Tools/agent/JetEnv.jet bash {guard} --check 30 {quote(job.config.build_root)} || exit $?",
+        "flock {if job.shared -> "--shared " else -> ""}{lock} Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate {args}",
+        "rc=$?",
+        "echo \"gate rc=$rc (1 = failures recorded in receipt.json)\"",
+        "[ \"$rc\" -le 1 ]",
+    ]
+    "{lines.join("\n")}\n"
+}
+
+run: fn() {
+    repo: sys.executable().removesuffix(TOOL)
+    config: options(process.args(), repo) ?? process.fail(1, err.message)
+    if config.help {
+        print(USAGE)
+        return
+    }
+    stamp_file: process.env_get("JET_SCALING_QUEUE_STAMP") ?? process.fail(1, "JET_SCALING_QUEUE_STAMP names no queued job")
+    stamp: files.getmtime(stamp_file) ?? process.fail(1, "{err}")
+    plan: queue_plan(config)
+    queue: files.join(state_root(), "proofq/queue")
+    files.create_dir_all(config.work_dir) ?? process.fail(1, "{err}")
+    files.create_dir_all(queue) ?? process.fail(1, "{err}")
+    planned: json.to_string_pretty(plan.map(job -> Planned{name: job.name.copy(), shared: job.shared, config: config_tree(job.config)})) ?? process.fail(1, "{err}")
+    files.write(files.join(config.work_dir, "queue-plan.json"), planned) ?? process.fail(1, "{err}")
+    loop job in plan {
+        file: files.join(queue, "{job.name}.sh")
+        pending: "{file}.hold"
+        if files.exists(file) -> process.fail(1, "Job already exists: {file}")
+        writer: files.create(pending, if_exists: .Refuse, mode: Val(0o755)) ?? process.fail(1, "{err}")
+        writer.write_all(script(job, repo).bytes()) ?? process.fail(1, "{err}")
+        writer.flush() ?? process.fail(1, "{err}")
+        // Core sets whole-second times only; touch keeps the stamp's millisecond.
+        when: stamp + (if job.shared -> 0 else -> 1000)
+        touched: process.cmd(["touch", "-d", "@{when /% 1000}.{"{when % 1000}".pad_start(3, "0")}", pending]).run() ?? process.fail(1, "touch cannot start: {err}")
+        if touched.code != 0 -> process.fail(1, "touch {pending}: {touched.errors.trim()}")
+        files.rename(pending, file) ?? process.fail(1, "{err}")
+        print(file)
+    }
+}

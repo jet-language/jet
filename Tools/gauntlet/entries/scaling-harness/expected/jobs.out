@@ -1,0 +1,128 @@
+Receipt: <case>/work/gate.json
+small-fns[files]/lin N=1 ok (counter-only; time/RSS not gated)
+small-fns[files]/lin N=2 ok (counter-only; time/RSS not gated)
+small-fns[files]/lin N=4 ok (counter-only; time/RSS not gated)
+small-fns[files]/lin N=8 ok (counter-only; time/RSS not gated)
+small-fns[files]/quad N=1 ok (counter-only; time/RSS not gated)
+small-fns[files]/quad N=2 ok (counter-only; time/RSS not gated)
+small-fns[files]/quad N=4 ok (counter-only; time/RSS not gated)
+small-fns[files]/quad N=8 ok (counter-only; time/RSS not gated)
+small-fns[single]/lin N=1 ok (counter-only; time/RSS not gated)
+small-fns[single]/lin N=2 ok (counter-only; time/RSS not gated)
+small-fns[single]/lin N=4 ok (counter-only; time/RSS not gated)
+small-fns[single]/lin N=8 ok (counter-only; time/RSS not gated)
+small-fns[single]/quad N=1 ok (counter-only; time/RSS not gated)
+small-fns[single]/quad N=2 ok (counter-only; time/RSS not gated)
+small-fns[single]/quad N=4 ok (counter-only; time/RSS not gated)
+small-fns[single]/quad N=8 ok (counter-only; time/RSS not gated)
+schema: "jet.scaling-gate/v3"
+mode: "counters"
+jobs: 2
+memoryMax: "20G"
+timeoutS: 1800
+stopAfterS: null
+passed: false
+target: {lines: 1000000, seconds: 10}
+compilers: [{kind: "command", label: "lin", template: "sh ../../../fake.sh linear {n} {trace}"}, {kind: "command", label: "quad", template: "sh ../../../fake.sh quadratic {n} {trace}"}]
+workDir: "<case>/work"
+buildRoot: "<case>/build"
+FAIL "small-fns[files]/quad: counter.sema.check.scope_lookups grows x1.75 faster than N log N from N=2 to 8 (exponent 2.20; bound x1.25)"
+FAIL "small-fns[single]/quad: counter.sema.check.scope_lookups grows x1.75 faster than N log N from N=2 to 8 (exponent 2.20; bound x1.25)"
+== series
+shape: "small-fns"
+layout: "files"
+compiler: "lin"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4, 8]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="c36188dc2be57a037f2231b5f052b3e271e82f2ca500cbd4f9fefe26e4e24c24" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-files/1" counter.parse.tokens=3 counter.sema.check.cache.hits=1 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=100 diagnostics=0 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="fffb134e066f1aa21afb01126feeb4ef6b3d7e9fc669ebfb04fe6df327fe5977" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-files/2" counter.parse.tokens=6 counter.sema.check.cache.hits=2 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=200 diagnostics=0 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="17ad3fdfa61c7b70886027e84153b7c5dcaebd64bd4f9a9dc072df6f56bda240" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-files/4" counter.parse.tokens=12 counter.sema.check.cache.hits=4 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=400 diagnostics=0 trace.parse.items=4 trace.parse.spans=1
+point: n=8 x=8 code_lines=40 source_sha256="e405bd481053caf1415e46a17ab58327a6ac7bc490d2de87dd2cb58bede1d396" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-files/8" counter.parse.tokens=24 counter.sema.check.cache.hits=8 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=800 diagnostics=0 trace.parse.items=8 trace.parse.spans=1
+metric counter.parse.tokens: {bound: 1.250000, reason: "below resolution (21 < 64)", values: [3, 9, 21], verdict: "unmeasured"}
+metric counter.sema.check.cache.hits: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric counter.sema.check.cache.misses: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+metric counter.sema.check.scope_lookups: {bound: 1.250000, exponent: 1.403677, from: 2, ratio: 0.583333, to: 8, values: [100, 300, 700], verdict: "fitted"}
+metric trace.parse.items: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric trace.parse.spans: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+== series
+shape: "small-fns"
+layout: "single"
+compiler: "lin"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4, 8]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="7f8af1b0b18acb97d28b314679faec9e0401dbdc31d3d33c5703ebff76ff331b" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-single/1" counter.parse.tokens=3 counter.sema.check.cache.hits=1 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=100 diagnostics=0 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="6d8aa812b22941e6d65a60b12f0ba87497d9a6c509730d38747133faedfe6cb2" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-single/2" counter.parse.tokens=6 counter.sema.check.cache.hits=2 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=200 diagnostics=0 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="2f2f59123f2a5b5bfa7c6bab6978f2f11755740dc103cab76e7e07bd5ecf8240" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-single/4" counter.parse.tokens=12 counter.sema.check.cache.hits=4 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=400 diagnostics=0 trace.parse.items=4 trace.parse.spans=1
+point: n=8 x=8 code_lines=40 source_sha256="0e55e659c96c961371e99acf6341587f1899b0b9d1f0b682f117f13b85c1500f" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/lin/small-fns-single/8" counter.parse.tokens=24 counter.sema.check.cache.hits=8 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=800 diagnostics=0 trace.parse.items=8 trace.parse.spans=1
+metric counter.parse.tokens: {bound: 1.250000, reason: "below resolution (21 < 64)", values: [3, 9, 21], verdict: "unmeasured"}
+metric counter.sema.check.cache.hits: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric counter.sema.check.cache.misses: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+metric counter.sema.check.scope_lookups: {bound: 1.250000, exponent: 1.403677, from: 2, ratio: 0.583333, to: 8, values: [100, 300, 700], verdict: "fitted"}
+metric trace.parse.items: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric trace.parse.spans: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+== series
+shape: "small-fns"
+layout: "files"
+compiler: "quad"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4, 8]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="c36188dc2be57a037f2231b5f052b3e271e82f2ca500cbd4f9fefe26e4e24c24" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-files/1" counter.parse.tokens=3 counter.sema.check.cache.hits=1 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=100 diagnostics=0 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="fffb134e066f1aa21afb01126feeb4ef6b3d7e9fc669ebfb04fe6df327fe5977" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-files/2" counter.parse.tokens=6 counter.sema.check.cache.hits=2 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=400 diagnostics=0 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="17ad3fdfa61c7b70886027e84153b7c5dcaebd64bd4f9a9dc072df6f56bda240" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-files/4" counter.parse.tokens=12 counter.sema.check.cache.hits=4 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=1600 diagnostics=0 trace.parse.items=4 trace.parse.spans=1
+point: n=8 x=8 code_lines=40 source_sha256="e405bd481053caf1415e46a17ab58327a6ac7bc490d2de87dd2cb58bede1d396" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-files/8" counter.parse.tokens=24 counter.sema.check.cache.hits=8 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=6400 diagnostics=0 trace.parse.items=8 trace.parse.spans=1
+metric counter.parse.tokens: {bound: 1.250000, reason: "below resolution (21 < 64)", values: [3, 9, 21], verdict: "unmeasured"}
+metric counter.sema.check.cache.hits: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric counter.sema.check.cache.misses: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+metric counter.sema.check.scope_lookups: {bound: 1.250000, exponent: 2.196159, from: 2, ratio: 1.750000, to: 8, values: [300, 1500, 6300], verdict: "fitted"}
+metric trace.parse.items: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric trace.parse.spans: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+failure: {exponent: 2.196159, kind: "growth", metric: "counter.sema.check.scope_lookups", phase: "sema.check", ratio: 1.750000, text: "counter.sema.check.scope_lookups grows x1.75 faster than N log N from N=2 to 8 (exponent 2.20; bound x1.25)"}
+== series
+shape: "small-fns"
+layout: "single"
+compiler: "quad"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4, 8]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="7f8af1b0b18acb97d28b314679faec9e0401dbdc31d3d33c5703ebff76ff331b" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-single/1" counter.parse.tokens=3 counter.sema.check.cache.hits=1 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=100 diagnostics=0 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="6d8aa812b22941e6d65a60b12f0ba87497d9a6c509730d38747133faedfe6cb2" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-single/2" counter.parse.tokens=6 counter.sema.check.cache.hits=2 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=400 diagnostics=0 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="2f2f59123f2a5b5bfa7c6bab6978f2f11755740dc103cab76e7e07bd5ecf8240" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-single/4" counter.parse.tokens=12 counter.sema.check.cache.hits=4 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=1600 diagnostics=0 trace.parse.items=4 trace.parse.spans=1
+point: n=8 x=8 code_lines=40 source_sha256="0e55e659c96c961371e99acf6341587f1899b0b9d1f0b682f117f13b85c1500f" ok=true exit=0 problems=[] open_phases=[] timeout_phase=null dir="<case>/work/quad/small-fns-single/8" counter.parse.tokens=24 counter.sema.check.cache.hits=8 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=6400 diagnostics=0 trace.parse.items=8 trace.parse.spans=1
+metric counter.parse.tokens: {bound: 1.250000, reason: "below resolution (21 < 64)", values: [3, 9, 21], verdict: "unmeasured"}
+metric counter.sema.check.cache.hits: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric counter.sema.check.cache.misses: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+metric counter.sema.check.scope_lookups: {bound: 1.250000, exponent: 2.196159, from: 2, ratio: 1.750000, to: 8, values: [300, 1500, 6300], verdict: "fitted"}
+metric trace.parse.items: {bound: 1.250000, reason: "below resolution (7 < 64)", values: [1, 3, 7], verdict: "unmeasured"}
+metric trace.parse.spans: {bound: 1.250000, reason: "below resolution (0 < 64)", values: [0, 0, 0], verdict: "unmeasured"}
+failure: {exponent: 2.196159, kind: "growth", metric: "counter.sema.check.scope_lookups", phase: "sema.check", ratio: 1.750000, text: "counter.sema.check.scope_lookups grows x1.75 faster than N log N from N=2 to 8 (exponent 2.20; bound x1.25)"}

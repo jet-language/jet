@@ -1,0 +1,31 @@
+state/proofq/queue/ScalingGate-counters-1.sh
+== ScalingGate-counters-1.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '<case>/build' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'lin=command:true' '--shape' 'deep-nesting' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '25' '--stop-after' 'Infinity' '--seed' '1' '--jet-command' 'build' '--work-dir' '<case>/work/counter-1' '--build-root' '<case>/build' '--mode' 'counters' '--jobs' '2' '--layout' 'files' '--layout' 'single'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== job "ScalingGate-counters-1" shared true
+compilers: [{kind: "command", label: "lin", template: "true"}]
+shapes: ["deep-nesting"]
+bases: {}
+ladders: {}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 25
+stopAfterS: null
+jetCommand: "build"
+seed: 1
+profileTop: false
+layouts: ["files", "single"]
+buildRoot: "<case>/build"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-1"
+receipt: "<case>/work/receipt.json"

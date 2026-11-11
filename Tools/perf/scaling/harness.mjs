@@ -10,8 +10,8 @@
 // against k * N log N on its baseline-subtracted (marginal) values; the gate
 // fails naming the shape, compiler, phase and the counter that grows fastest
 // inside that phase. It also fails when a phase or the whole compile is
-// slower than its lines/s floor (Tools/perf/throughput/bench.json phase
-// budgets and the end-to-end floor), and projects every phase to 1M lines.
+// slower than its lines/s floor (phase-budgets.json and the end-to-end
+// floor), and projects every phase to 1M lines.
 //
 // Usage: node harness.mjs --compiler LABEL=KIND:PATH [--shape NAME]... [options]
 // (see USAGE below). Exit 0: every series passed; 1: a growth, floor, compile
@@ -30,7 +30,7 @@ import { scratchRoot } from '../../agent/roots.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '../../..');
-export const BENCH = path.join(REPO, 'Tools/perf/throughput/bench.json');
+export const BUDGETS = path.join(here, 'phase-budgets.json');
 export const DOMAIN_LADDER = Object.freeze([125000, 250000, 500000, 1000000]);
 export const TARGET_LINES = 1000000;
 export const TARGET_SECONDS = 10;
@@ -157,7 +157,7 @@ const fmt = value => (typeof value === 'number' ? (Number.isFinite(value) ? valu
 // Phase floors from the throughput cell's per-phase wall budgets (seconds per
 // 300k lines -> lines/s), plus the end-to-end floor of TARGET_LINES in
 // TARGET_SECONDS. `startup` is an absolute budget, not a rate.
-export function floors(bench = JSON.parse(fs.readFileSync(BENCH, 'utf8'))) {
+export function floors(bench = JSON.parse(fs.readFileSync(BUDGETS, 'utf8'))) {
   const rows = bench.phase_budgets.filter(row => row.measure === 'kinds').map(row => ({
     phase: row.phase, kinds: row.kinds, lines_per_second: 300000 / row.wall_budget_s, owners: row.owners,
   }));

@@ -1,0 +1,19 @@
+{
+  "name": "scaling-enqueue",
+  "mode": "tool",
+  "description": "The compiler scaling gate's proofq enqueuer enqueue.mjs and its Jet twin enqueue/run.jet over the jet_scaling_gate package, #5072 c7. Each case runs in its own directory with JET_STATE_ROOT=state (proofq's queue in state/proofq/queue) and JET_SCALING_QUEUE_STAMP=stamp: every shape (three counter groups of 9, 9 and 7 shapes and the timing sample of huge-fns, fan-in and the ten domains), two chosen shapes with explicit options (a ladder, a base, one layout, --stop-after, --timeout above and below the caps, a seed, --jet-command check, a jet compiler, --build-root), and one stress shape (no timing sample). The check prints the queued files, each with its permission bits, its mtime after the stamp's in rounded seconds (counter groups +0, timing +1; the original's millisecond drifts by one) and its script with the checkout as <repo> and the original's run-gate.mjs as the twin's run-gate, then queue-plan.json's jobs and their configs by harness.mjs's names (fields by name without null ones; the twin also records repo and help). The other cases: --help; a job already queued, an unreadable stamp and an invalid invocation (exit 1, the original's uncaught error, nothing printed).",
+  "tool": {
+    "original": "Tools/perf/scaling/enqueue.mjs",
+    "jet": "Tools/perf/scaling/enqueue/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--compiler", "lin=command:true {n}", "--work-dir", "work"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 0, "check": "check.jet", "expected": "expected/all.out"},
+      {"args": ["--compiler", "jet=jet:bin/jet", "--compiler", "cmd=command:sh 'it'\"s\" {n}", "--shape", "small-fns", "--shape", "fan-in", "--ladder", "small-fns=2,4", "--base", "fan-in=8", "--layout", "single", "--stop-after", "30", "--timeout", "22", "--seed", "3", "--jet-command", "check", "--build-root", "build", "--work-dir", "work"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 0, "check": "check.jet", "expected": "expected/chosen.out"},
+      {"args": ["--compiler", "lin=command:true", "--shape", "deep-nesting", "--work-dir", "work", "--build-root", "build"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 0, "check": "check.jet", "expected": "expected/stress.out"},
+      {"args": ["--help"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 0, "check": "check.jet", "expected": "expected/help.out"},
+      {"args": ["--compiler", "lin=command:true", "--work-dir", "work"], "env": {"JET_STATE_ROOT": "taken", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--work-dir", "work"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "missing"}, "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["--compiler", "lin=command:true", "--mode", "fast"], "env": {"JET_STATE_ROOT": "state", "JET_SCALING_QUEUE_STAMP": "stamp"}, "exit": 1, "expected": "expected/empty.out"}
+    ]
+  }
+}

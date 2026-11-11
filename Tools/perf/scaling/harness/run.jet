@@ -1,0 +1,37 @@
+// The compiler scaling gate (Tower #4319, #4601), the twin of harness.mjs's
+// command line: parse the options, run every series (jet_scaling_gate) and
+// print the receipt path, with each failure on stderr.
+//
+// Usage: jet Tools/perf/scaling/harness --compiler LABEL=KIND:PATH [--shape NAME]... [options]
+// (see `--help`). Exit 0: every series passed; 1: a growth, floor, compile
+// or counter failure; 2: invalid invocation.
+package: {
+    name: "scaling_harness"
+    version: "0.0.1"
+    deps: {
+        // A root package declares each directory its dependencies reach.
+        jet_scaling_corpora: ../corpora,
+        jet_scaling_gate: ../gate,
+    }
+}
+
+use {
+    jet_scaling_gate.[options, run_gate, usage]
+    process: core.process
+    sys: core.sys
+}
+
+TOOL: "/Tools/perf/scaling/harness/run.jet"
+
+run: fn() {
+    config: options(process.args(), sys.executable().removesuffix(TOOL)) ?? process.fail(2, "{err.message}\n{usage()}")
+    if config.help {
+        print(usage())
+        return
+    }
+    // A compile that cannot start or a receipt that cannot be written ends the
+    // run with exit 1, as an uncaught error ends harness.mjs.
+    receipt: run_gate(config) ?? process.fail(1, err.message)
+    print("Receipt: {config.receipt}")
+    if receipt.passed != Val(true) -> process.fail(1, receipt.failures.map(failure -> "FAIL {failure}").join("\n"))
+}

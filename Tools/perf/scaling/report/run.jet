@@ -1,114 +1,31 @@
 // Markdown report of compiler scaling gate receipts (Tower #4601), the twin
-// of report.mjs. Per corpus, layout and compiler: the ladder outcome, every
-// superlinear phase with its dominating counter and the responsible functions
-// (from --profile), the lines/s floor failures, compile failures and
-// incomplete series, each domain phase projected to 1M lines against the
-// 10 s budget, and the counter-only shapes the timing sample lacks.
+// of report.mjs: the report itself is jet_scaling_reports' `report`; this
+// command reads the receipts, waits for planned proofq jobs and writes it.
 //
 // Usage: jet Tools/perf/scaling/report RECEIPT.json... | --runs-dir DIR [--output FILE]
 //            [--findings FILE] [--wait-proofq DONE_DIR --plan FILE]
 // --wait-proofq waits until each planned proofq job has written its
 // `<name>.rc`, then reports every planned job's receipts; a planned shape
 // without a finished receipt adds a "Missing or unfinished receipts" section
-// and exit 2.
-//
-// Each receipt leaf is read as the one type its producer writes (harness.mjs,
-// `jet.scaling-gate/v3`); a leaf of another type is a decode error, which ends
-// the run with exit 1, as report.mjs ends with a TypeError on a receipt
-// without its arrays. A compiler's label and `path ?? template` print as
-// report.mjs's template literal prints them: absent is `undefined`.
+// and exit 2. A receipt leaf of another type than its producer writes is a
+// decode error, which ends the run with exit 1.
 package: {
     name: "scaling_report"
     version: "0.0.1"
+    deps: {
+        jet_scaling_reports: ../reports,
+    }
 }
 
 use {
+    jet_scaling_reports.[report]
     combinatorics: core.math.combinatorics
     files: core.files
-    fmt: core.text.fmt
     json: core.encoding.json
-    math: core.math
     process: core.process
     term: core.term
     time: core.time
 }
-
-// `value.toFixed(digits)`, `?` for null. toFixed keeps the sign of a negative
-// value that rounds to zero; fmt.decimal does too from #5072 c51 on.
-fixed: fn(value: Float?, digits: Int{2}) -> String {
-    v: value ?? return "?"
-    "{if v < 0.0 -> "-" else -> ""}{fmt.decimal(math.abs(v), digits)}"
-}
-
-// The top three inclusive functions of the failing phase, from --profile.
-hot: fn(s: Dyn, f: Dyn) -> String [FieldError]! {
-    profile: s.get("profile") ?? return Ok("(not profiled)")
-    phase: profile.field("phases").get(f.field("phase").text()) ?? return Ok("(not profiled)")
-    rows := [String]{}
-    loop row in phase.field("inclusive").decode<[Dyn]>().take(3) -> rows.push("{(row.get("source") ?? Dyn.Null).decode<String?>()?("source") ?? row.field("symbol").text()?("symbol")} {fmt.decimal(row.field("share").float() * 100.0, 0)}%")
-    Ok(rows.join("; "))
-}
-
-report: fn(receipts: [(file: String, receipt: Dyn)]) -> String [FieldError]! {
-    out := ["# Scaling gate report (#4601)", ""]
-    series := [Dyn]{}
-    loop loaded in receipts {
-        r: loaded.receipt
-        compilers: r.field("compilers").decode<[Dyn]>().map(c -> "{c.get("label") ?? "undefined"}={if (c.get("path") ?? Dyn.Null) == Dyn.Null -> "{c.get("template") ?? "undefined"}" else -> "{c.field("path")}"}")
-        out.extend(["Receipt `{loaded.file}`: {r.field("startedAt").text()} to {(r.get("finishedAt") ?? "(running)").text()}, mode {(r.get("mode") ?? "timing").text()}, compilers {compilers.join(", ")}, {r.field("failures").decode<[String]>().len()} failures.", ""])
-        series.extend(r.field("series").decode<[Dyn]>()?("series"))
-    }
-    out.extend(["Counter-only series gate deterministic work and compile outcomes; their contended wall/RSS observations are not timing samples. Timing floors and 1M projections come only from serial timing-mode series. Unmeasured timing cells remain uncovered, not wins.", "", "## Ladder outcome", "", "| Corpus | Layout | Compiler | Mode | Rungs passed (x: N or lines) | Top rung wall s | Peak RSS GB | Stopped |", "|---|---|---|---|---|---:|---:|---|"])
-    // One pass over the series fills every later section in series order.
-    growth := ["", "## Superlinear phases and counters (growth vs N log N over the measured rungs)", "", "| Corpus | Layout | Compiler | Mode | Metric | x N log N | Exponent | Dominating counter | Responsible functions (profile, phase share) |", "|---|---|---|---|---|---:|---:|---|---|"]
-    floors := ["", "## Floor failures at the top rung", "", "| Corpus | Layout | Compiler | Failure |", "|---|---|---|---|"]
-    broken := ["", "## Compile failures, timeouts and incomplete ladders", "", "| Corpus | Layout | Compiler | Mode | Phase | Failure |", "|---|---|---|---|---|---|"]
-    uncovered := ["", "## Timing coverage not established", "", "| Corpus | Layout | Compiler | Reason |", "|---|---|---|---|"]
-    projected := ["", "## Domain corpora: phases projected to 1M lines (budget 10 s end to end)", "", "| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |", "|---|---|---|---:|---|---:|---:|---:|"]
-    loop s in series {
-        mode: (s.get("mode") ?? "timing").text()
-        cell: "| {s.field("shape").text()} | {s.field("layout").text()} | {s.field("compiler").text()} |"
-        rungs := [String]{}
-        top := Dyn.Null
-        loop p in s.field("points").decode<[Dyn]>() {
-            if !p.field("ok").bool() -> next
-            rungs.push("{p.field("x").int()}")
-            top = p
-        }
-        timed: top != Dyn.Null && mode != "counters"
-        out.push("{cell} {mode} | {if rungs.len() == 0 -> "none" else -> rungs.join(", ")} | {if timed -> fixed(top.field("metrics").field("wall_seconds").float()?("wall_seconds"), 1) else -> "-"} | {if timed -> fixed(Float{top.field("metrics").field("peak_rss_kb").int()} / 1048576.0) else -> "-"} | {(s.get("truncated") ?? Dyn.Null).decode<String?>()?("truncated") ?? ""} |")
-        loop f in (s.get("failures") ?? []).decode<[Dyn]>() {
-            kind: f.field("kind").text()
-            if kind == "growth" -> growth.push("{cell} {mode} | {f.field("metric").text()} | {fixed(f.field("ratio").decode<Float?>()?("ratio"))} | {fixed(f.field("exponent").decode<Float?>()?("exponent"))} | {f.field("counter").decode<String?>()?("counter") ?? "-"} | {hot(s, f)} |")
-            if kind == "floor" -> floors.push("{cell} {f.field("text").text()} |")
-            if ["compile", "timeout", "truncated"].contains(kind) -> broken.push("{cell} {mode} | {f.field("phase").decode<String?>()?("phase") ?? "-"} | {f.field("text").text()} |")
-        }
-        if !(s.get("done") ?? s.has("failures")).bool() -> broken.push("{cell} {mode} | - | incomplete checkpoint |")
-        if mode == "counters" {
-            reason := "not in the timing sample"
-            loop t in series {
-                if (t.get("mode") ?? "timing").text() == "counters" || "| {t.field("shape").text()} | {t.field("layout").text()} | {t.field("compiler").text()} |" != cell -> next
-                oks := [Bool]{}
-                loop p in t.field("points").decode<[Dyn]>() -> oks.push(p.field("ok").bool()?("ok"))
-                reason = if oks.contains(true) -> "" else -> "timing compilation failed"
-                break
-            }
-            if reason != "" -> uncovered.push("{cell} {reason} |")
-        }
-        phases: (s.get("projection") ?? next).field("phases")
-        rows := [(key: String, p: Dyn, projected: Float)]{}
-        loop key in phases.keys() {
-            p: phases.field(key)?(key)
-            rows.push((key: key, p: p, projected: p.field("projected_s").float()?("projected_s")))
-        }
-        // The keys keep their JSON order, so the stable sort keeps equal phases in it.
-        rows.sort_by((a, b) -> b.projected <=> a.projected)
-        loop row in rows -> projected.push("{cell} {row.p.field("at_lines").int()} | {if row.key == "wall_seconds" -> "**total**" else -> row.key.slice(6..<row.key.len())} | {fixed(row.p.field("measured_s").float()?("measured_s"))} | {fixed(row.p.field("exponent").float()?("exponent"))} | {fixed(row.projected, 1)} |")
-    }
-    Ok("{out.join("\n")}\n{growth.join("\n")}\n{floors.join("\n")}\n{broken.join("\n")}\n{projected.join("\n")}\n{uncovered.join("\n")}\n")
-}
-
-// ---- The command -------------------------------------------------------------
 
 // The receipt files, then each `--runs-dir`'s `run-*/receipt.json` in name
 // order, each file once.
@@ -161,10 +78,7 @@ command: fn(argv: [String]) -> (text: String, output: String, summary: String, m
     }
     loop job in plan -> inputs.extend(["--runs-dir", job.field("config").field("workDir").text()?("workDir")])
     receipts: read_receipts(inputs)
-    if receipts.len() == 0 && plan_file == "" {
-        term.eprint("Usage: jet Tools/perf/scaling/report RECEIPT.json... | --runs-dir DIR [--output FILE] [--findings FILE] [--wait-proofq DONE_DIR --plan FILE]")
-        process.exit(2)
-    }
+    if receipts.len() == 0 && plan_file == "" -> process.fail(2, "Usage: jet Tools/perf/scaling/report RECEIPT.json... | --runs-dir DIR [--output FILE] [--findings FILE] [--wait-proofq DONE_DIR --plan FILE]")
     text := report(receipts)
     // The planned shapes without a finished receipt of the planned mode.
     finished := [String]{}

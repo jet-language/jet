@@ -741,8 +741,9 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);
   }
 
-  // The compile-throughput cell (#4529): its contract, its harness, and the
-  // bench300k pin shared with Tools/perf/throughput/bench.json.
+  // The compile-throughput cell (#4529): its contract, its harness, the
+  // bench300k pin shared with Tools/perf/throughput/bench.json, and the
+  // phase budgets (Tools/perf/scaling/phase-budgets.json).
   const throughput = manifest.axes.compile_throughput;
   assert.deepEqual(compileThroughputContractIssues(throughput), []);
   assert.equal(await exists(repoSourcePath(throughput.harness)), true);
@@ -753,7 +754,8 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.equal(bench300k.generator, `node Tools/perf/scaling/generate.mjs mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
   assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
   assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
-  assert.ok(pins.phase_budgets.every((row) => row.owners.length > 0));
+  const budgets = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/scaling/phase-budgets.json"), "utf8"));
+  assert.ok(budgets.phase_budgets.every((row) => row.owners.length > 0));
 
   // The Nix peer: five paired cells, the stricter target on the three
   // everyday loops, and a generated project whose edit files exist.

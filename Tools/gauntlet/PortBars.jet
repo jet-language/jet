@@ -8,6 +8,11 @@
 // `--measure` runs no case: it prints each side's tokens, branches, control
 // nesting depth and files (with each file's tokens) under SOURCE RULES.
 //
+// Cases run in `port_bars_judge_<pid>_<ns>` under the scratch root
+// ($JET_SCRATCH_ROOT, else $JET_STATE_ROOT, else Jet's user cache), never on
+// a RAM-backed /tmp. A judge removes it when it ends, and on start removes the
+// `port_bars_*` directories that killed judges left behind.
+//
 // A tool entry (Tools/gauntlet/entries/<name>/entry.json, "mode": "tool")
 // names the original as `tool.original` and its Jet twin as `tool.jet`, with
 // the fixtures and parity cases Tools/agent/ScriptPairing.jet describes. Each
@@ -86,8 +91,9 @@
 // dependency (`deps: { kit: ../kit, }` in the file's inline `package:` block)
 // counts each file of the package's Source directory that declares a name the
 // file's `use` lines take from it (`kit.[a, b]`, `kit.a`), then each file
-// there declaring a word such a counted file uses. Core, Node
-// built-ins and installed packages are never counted.
+// there declaring a word such a counted file uses; a counted package file
+// reaches the path dependencies of its own package.jet the same way. Core,
+// Node built-ins and installed packages are never counted.
 //
 // PROXY RULES. Branches are decisions, counted by one table per language that
 // spells the same kinds of decision (DECISION TABLES); a decision written in a
@@ -1056,6 +1062,13 @@ program: fn(repo: String, path: String, language: Language) -[FS]> Program Never
             owner: owners[index].copy()
             if owner != "" {
                 loop target in package_sources(repo, owner, words) -> reached.push("{owner}\t{target}")
+                manifest: files.read(files.join(repo, "{owner}/package.jet")) ?? ""
+                loop dep in package_deps(manifest) {
+                    pair: dep.partition("\t")
+                    dir: normalized("{owner}/{pair.tail}")
+                    if dir == "" -> next
+                    loop target in package_sources(repo, dir, package_names(text, pair.head)) -> reached.push("{dir}\t{target}")
+                }
             }
             loop dep in package_deps(text) {
                 pair: dep.partition("\t")
@@ -1714,6 +1727,33 @@ repo_root: fn() -[Env, FS]> String Never! {
     files.cwd() ?? "."
 }
 
+// The scratch root (Tools/agent/roots.sh): $JET_SCRATCH_ROOT, else
+// $JET_STATE_ROOT, else Jet's user cache. Work directories stay there, on
+// disk: on a RAM-backed /tmp a killed judge's leftovers hold memory.
+scratch_root: fn() -[Env]> String Never! {
+    cache: process.env_get("XDG_CACHE_HOME") ?? "{process.env_get("HOME") ?? ""}/.cache"
+    process.env_get("JET_SCRATCH_ROOT") ?? process.env_get("JET_STATE_ROOT") ?? "{cache}/jet-dev"
+}
+
+// A fresh work directory `port_bars_<label>_<pid>_<ns>` under the scratch
+// root. First it removes the `port_bars_*` directories that killed judges left
+// there or in the temporary directory, where earlier judges made theirs: each
+// one whose pid (the name's second-to-last field) has no /proc entry.
+work_dir: fn(label: String) -[Env, FS, Time]> String IOError! {
+    root: scratch_root()
+    loop dir in [root, files.gettempdir()] {
+        entries: files.list_dir(dir, matching: "port_bars_*") ?? next
+        loop entry in entries {
+            fields: entry.name.split("_").to_list()
+            pid: fields[fields.len() - 2].to_int() ?? next
+            if entry.is_dir && !files.exists("/proc/{pid}") -> files.remove_all(files.join(dir, entry.name)) ?? ()
+        }
+    }
+    work: files.join(root, "port_bars_{label}_{sys.pid()}_{time.unix_ns()}")
+    files.create_dir_all(work) ?? return Err(err)
+    Ok(work)
+}
+
 cannot_run: fn(message: String) -[Exec, IO]> Never {
     term.eprint(message)
     process.exit(64)
@@ -1763,7 +1803,7 @@ run: fn() {
         }
         return
     }
-    work: files.mkdtemp("port-bars") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
+    work: work_dir("judge") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
     failed := 0
     print("entry\tbar\tresult\tdetail")
     loop name in names {
@@ -1779,7 +1819,7 @@ run: fn() {
 // ---- tests ----
 
 #Test("a program's tokens and proxies span the repository modules it imports, transitively and once each, on both sides") {
-    dir: files.mkdtemp("port-bars-sources") ?? panic("a temporary directory cannot be made: {err}")
+    dir: work_dir("sources") ?? panic("a scratch directory cannot be made: {err}")
     plant(dir, "Tools/fx/a.mjs", "import fs from 'node:fs';\nimport {{ b }} from './b.mjs';\nimport {{\n  c,\n}} from \"../fy/c.mjs\";\nimport '../../../outside.mjs';\nif (b) c();\n")
     plant(dir, "Tools/fx/b.mjs", "import {{ c }} from '../fy/c.mjs';\nexport const b = 1;\n")
     plant(dir, "Tools/fy/c.mjs", "import {{ b }} from '../fx/b.mjs';\nexport function c() {{ if (b) return 2; }}\n")
@@ -1810,17 +1850,32 @@ run: fn() {
     files.remove_all(dir) ?? ()
 }
 
-#Test("a Jet twin counts the package sources it takes names from, and those they use") {
-    dir: files.mkdtemp("port-bars-package") ?? panic("a temporary directory cannot be made: {err}")
-    plant(dir, "Tools/kit/package.jet", "package: {{\n    name: \"kit\"\n    version: \"0.0.1\"\n}}\n")
-    plant(dir, "Tools/kit/Source/A.jet", "alpha: fn() -> Int {{ beta() }}\n")
+#Test("a Jet twin counts the package sources it takes names from, those they use, and their package's own dependencies") {
+    dir: work_dir("package") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/base/package.jet", "name: \"base\"\nversion: \"0.0.1\"\n")
+    plant(dir, "Tools/base/Source/D.jet", "delta: fn() -> Int {{ 4 }}\n")
+    plant(dir, "Tools/base/Source/E.jet", "epsilon: fn() -> Int {{ 5 }}\n")
+    plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\ndeps: {{\n    base: ../base,\n}}\n")
+    plant(dir, "Tools/kit/Source/A.jet", "use base.[delta]\n\nalpha: fn() -> Int {{ beta() + delta() }}\n")
     plant(dir, "Tools/kit/Source/B.jet", "beta: fn() -> Int {{ 2 }}\n")
     plant(dir, "Tools/kit/Source/C.jet", "gamma: fn() -> Int {{ 3 }}\n")
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse {{\n    kit.[alpha]\n    math: core.math\n}}\n\nrun: fn() {{ print(alpha()) }}\n")
     twin: program(dir, "Tools/fx/twin/run.jet", .Jet)
-    assert_eq(twin.paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/B.jet"])
+    assert_eq(twin.paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/B.jet", "Tools/base/Source/D.jet"])
     assert_eq(package_names("use {{\n    kit.[alpha, beta]\n    one: kit.gamma\n}}\nuse kit.delta\n", "kit"), ["alpha", "beta", "gamma", "delta"])
     files.remove_all(dir) ?? ()
+}
+
+#Test("a work directory is made under the scratch root, after a dead judge's leftover there is removed") {
+    root: scratch_root()
+    // No process has pid 999999999: Linux's pid_max is at most 4194304.
+    stale: files.join(root, "port_bars_judge_999999999_1")
+    files.create_dir_all(stale) ?? panic("`{stale}` cannot be made: {err}")
+    work: work_dir("sweep") ?? panic("a scratch directory cannot be made: {err}")
+    assert(work.starts_with(files.join(root, "port_bars_sweep_{sys.pid()}_")))
+    assert(files.is_dir(work))
+    assert(!files.exists(stale))
+    files.remove_all(work) ?? ()
 }
 
 #Test("each language's token rule counts words, symbols and whole strings, never comments or the #! line") {
@@ -1966,15 +2021,16 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
 }
 
 #Test("a planted entry that wins every bar passes, as do a named token gap and a job its check proves, and each planted loss fails its bar alone") {
-    dir: files.mkdtemp("port-bars-planted") ?? panic("a temporary directory cannot be made: {err}")
-    // Slow and large: half a gigabyte held for 0.4 s.
-    plant(dir, "Tools/fx/heavy.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(0.4)\nprint(3)\n")
-    plant(dir, "Tools/fx/wrong.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(0.4)\nprint(4)\n")
+    dir: work_dir("planted") ?? panic("a scratch directory cannot be made: {err}")
+    // Slow and large: half a gigabyte held for a second, a margin a warmed
+    // Jet run on a loaded machine stays inside.
+    plant(dir, "Tools/fx/heavy.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nprint(3)\n")
+    plant(dir, "Tools/fx/wrong.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nprint(4)\n")
     plant(dir, "Tools/fx/fast.sh", "a=1\nb=2\nc=3\nd=4\ne=5\necho 3\n")
     plant(dir, "Tools/fx/Small.jet", "run: fn() {{ print(3) }}\n")
     plant(dir, "Tools/fx/Big.jet", "run: fn() {{\n    first: 1\n    second: 2\n    third: first + second\n    print(third)\n}}\n")
     // The same job, a file holding 3, reported in other words; and a wrong job.
-    plant(dir, "Tools/fx/job.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(0.4)\nopen(\"job\", \"w\").write(\"3\\n\")\nprint(\"python wrote the job\")\n")
+    plant(dir, "Tools/fx/job.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nopen(\"job\", \"w\").write(\"3\\n\")\nprint(\"python wrote the job\")\n")
     plant(dir, "Tools/fx/Job.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"3\\n\")\n    print(\"done\")\n}}\n")
     plant(dir, "Tools/fx/WrongJob.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"4\\n\")\n    print(\"python wrote the job\")\n}}\n")
     check: "use {{\n    files: core.files\n}}\n\nrun: fn() {{ print(files.read(\"job\").trim()) }}\n"
@@ -1988,7 +2044,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant_entry(dir, "job", "Tools/fx/job.py", "Tools/fx/Job.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
     plant_entry(dir, "wrongjob", "Tools/fx/job.py", "Tools/fx/WrongJob.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
     jet: absolute(process.env_get("JET") ?? "jet")
-    work: files.mkdtemp("port-bars-work") ?? panic("a temporary directory cannot be made: {err}")
+    work: work_dir("work") ?? panic("a scratch directory cannot be made: {err}")
     expected: [[], ["parity"], ["speed"], ["tokens"], ["reasoning"], [], [], ["parity"]]
     names: ["pass", "parity", "speed", "tokens", "reasoning", "gapped", "job", "wrongjob"]
     loop index in 0..<names.len() {

@@ -1,0 +1,93 @@
+state/proofq/queue/ScalingGate-counters-1.sh
+state/proofq/queue/ScalingGate-counters-2.sh
+state/proofq/queue/PerfScalingGate-timing.sh
+== PerfScalingGate-timing.sh mode 755 mtime +1 s
+#!/usr/bin/env bash
+# proofq: mem=25G time=50M kind=measure
+# #4601: timing; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '<case>/build' || exit $?
+flock 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'jet=jet:<case>/bin/jet' '--compiler' 'cmd=command:sh '\''it'\''"s" {n}' '--shape' 'fan-in' '--steps' '2' '--domain-ladder' '125000,1000000' '--memory-max' '24G' '--timeout' '20' '--stop-after' 'Infinity' '--seed' '3' '--jet-command' 'check' '--work-dir' '<case>/work/timing' '--build-root' '<case>/build' '--mode' 'timing' '--jobs' '1' '--layout' 'single' '--base' 'fan-in=8'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== ScalingGate-counters-1.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '<case>/build' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'jet=jet:<case>/bin/jet' '--compiler' 'cmd=command:sh '\''it'\''"s" {n}' '--shape' 'small-fns' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '22' '--stop-after' '30' '--seed' '3' '--jet-command' 'check' '--work-dir' '<case>/work/counter-1' '--build-root' '<case>/build' '--mode' 'counters' '--jobs' '2' '--layout' 'single' '--ladder' 'small-fns=2,4'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== ScalingGate-counters-2.sh mode 755 mtime +0 s
+#!/usr/bin/env bash
+# proofq: mem=18G time=50M kind=test
+# #4601: counters; rc=1 is gate evidence, not an invalid run.
+set -u
+cd '<repo>' || exit 2
+Tools/agent/JetEnv.jet bash 'state/disk-guard.sh' --check 30 '<case>/build' || exit $?
+flock --shared 'state/scaling-gate.lock' Tools/agent/JetEnv.jet jet Tools/perf/scaling/run-gate '--compiler' 'jet=jet:<case>/bin/jet' '--compiler' 'cmd=command:sh '\''it'\''"s" {n}' '--shape' 'fan-in' '--steps' '4' '--domain-ladder' '125000,250000,500000,1000000' '--memory-max' '8G' '--timeout' '22' '--stop-after' '30' '--seed' '3' '--jet-command' 'check' '--work-dir' '<case>/work/counter-2' '--build-root' '<case>/build' '--mode' 'counters' '--jobs' '2' '--layout' 'single' '--base' 'fan-in=8'
+rc=$?
+echo "gate rc=$rc (1 = failures recorded in receipt.json)"
+[ "$rc" -le 1 ]
+== job "ScalingGate-counters-1" shared true
+compilers: [{kind: "jet", label: "jet", path: "<case>/bin/jet"}, {kind: "command", label: "cmd", template: "sh 'it'\"s\" {n}"}]
+shapes: ["small-fns"]
+bases: {fan-in: 8}
+ladders: {small-fns: [2, 4]}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 22
+stopAfterS: 30
+jetCommand: "check"
+seed: 3
+profileTop: false
+layouts: ["single"]
+buildRoot: "<case>/build"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-1"
+receipt: "<case>/work/receipt.json"
+== job "ScalingGate-counters-2" shared true
+compilers: [{kind: "jet", label: "jet", path: "<case>/bin/jet"}, {kind: "command", label: "cmd", template: "sh 'it'\"s\" {n}"}]
+shapes: ["fan-in"]
+bases: {fan-in: 8}
+ladders: {small-fns: [2, 4]}
+steps: 4
+domainLadder: [125000, 250000, 500000, 1000000]
+memoryMax: "8G"
+timeoutS: 22
+stopAfterS: 30
+jetCommand: "check"
+seed: 3
+profileTop: false
+layouts: ["single"]
+buildRoot: "<case>/build"
+mode: "counters"
+jobs: 2
+workDir: "<case>/work/counter-2"
+receipt: "<case>/work/receipt.json"
+== job "PerfScalingGate-timing" shared false
+compilers: [{kind: "jet", label: "jet", path: "<case>/bin/jet"}, {kind: "command", label: "cmd", template: "sh 'it'\"s\" {n}"}]
+shapes: ["fan-in"]
+bases: {fan-in: 8}
+ladders: {}
+steps: 2
+domainLadder: [125000, 1000000]
+memoryMax: "24G"
+timeoutS: 20
+stopAfterS: null
+jetCommand: "check"
+seed: 3
+profileTop: false
+layouts: ["single"]
+buildRoot: "<case>/build"
+mode: "timing"
+jobs: 1
+workDir: "<case>/work/timing"
+receipt: "<case>/work/receipt.json"

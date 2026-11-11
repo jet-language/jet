@@ -1,0 +1,53 @@
+// What a scaling-module-lookups-proof case produced (PortBars.jet and the
+// gauntlet harness run this in the case directory with the file holding the
+// program's output), with the case directory written as `<case>`:
+// proof/module-lookups-proof.json's fields in the original's order, objects
+// by field name without null fields (the original leaves out a missing
+// count the twin writes as null), numbers as integers or with six decimals;
+// then whether the result printed after the gate's progress lines is the same.
+use {
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+}
+
+FIELDS: ["metric", "sizes", "compiler", "compilerSha256", "counts", "baseline", "passed", "error", "receipt", "scope"]
+
+run: fn() {
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    if !files.is_file("proof/module-lookups-proof.json") -> return
+    written: json.parse(files.read("proof/module-lookups-proof.json") ?? process.fail(1, "{err}")) ?? process.fail(1, err.display_text())
+    loop key in FIELDS -> print("{key}: {show(written.get(key) ?? Dyn.Null, here)}")
+    result := [String]{}
+    loop line in (files.read(process.args()[0]) ?? process.fail(1, "{err}")).lines() {
+        if result.len() > 0 || line == "{{" -> result.push(line.copy())
+    }
+    printed: json.parse(result.join("\n")) ?? Dyn.Null
+    print("printed as written: {show(printed, here) == show(written, here)}")
+}
+
+show: fn(value: Dyn, here: String) -> String Never! {
+    if value == .Object(entries) {
+        shown := [String]{}
+        loop entry in entries {
+            if entry.value != Dyn.Null -> shown.push("{entry.key}: {show(entry.value, here)}")
+        }
+        shown.sort()
+        return "{{{shown.join(", ")}}}"
+    }
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()
+        .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
+        .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
+        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+    }
+}
+
+number: fn(value: Float) -> String Never! {
+    if math.is_integer(value) -> return "{math.round(value)}"
+    fmt.decimal(value, 6)
+}
