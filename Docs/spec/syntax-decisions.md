@@ -5452,7 +5452,9 @@ or `Float` becomes a duration only through the type-owned closed family
 `Duration.milliseconds/seconds/minutes/hours(value)`. Scaling rejects overflow
 and non-finite floats; fractional milliseconds truncate toward zero. Whole-unit
 reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)`, return
-`Int !RangeError`, and truncate toward zero. The former `core.time` free
+`Int !RangeError`, and truncate toward zero. (Amended 2026-11-11, #5072 c18:
+every whole-unit read of a nanosecond carrier fits, so `duration.in` returns a
+plain `Int` with no error path.) The former `core.time` free
 constructors and per-unit readers leave the surface without aliases. D-TYPE2-TIME1
 amends the static literal rule: `ns`, `us`, `ms`, `s`, `min`, `h`, and `d` resolve
 through the canonical `core.units::Time` family and produce the checked

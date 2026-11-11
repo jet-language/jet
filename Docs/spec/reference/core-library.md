@@ -3454,7 +3454,7 @@ run: fn() {
 | `clock.tick(milliseconds)` / `clock.advance(to_ms)` | `Int` | Advance a manual clock and return its new millisecond value. |
 | `clock.wait(duration)` | `Int` | Advance by whole duration milliseconds and return the new value; this does not park a task. |
 | `Duration.nanoseconds(n)` / `microseconds(n)` / `milliseconds(n)` / `seconds(n)` / `minutes(n)` / `hours(n)` | `Duration !RangeError` | Construct a checked duration from the named unit. |
-| `duration.in(unit)` / `total_in(unit)` | `Int !RangeError` / `Float` | Convert a duration to a named unit. |
+| `duration.in(unit)` / `total_in(unit)` | `Int` / `Float` | Convert a duration to a named unit: `in` gives the whole units, truncated toward zero, and cannot fail; `total_in` keeps the fraction. |
 | `duration.is_zero()` / `total_seconds()` / `difference(other)` / `round(unit)` / `abs()` / `negated()` / `sign()` | varies | Inspect or transform a duration. |
 
 Ordinary `Clock` copies fork independent timelines, including copies inside

@@ -165,8 +165,9 @@ vocabulary](vocabulary.md).
 - A `Duration` is a signed whole-nanosecond `i64` carrier. Construct one with
   `Duration.nanoseconds`, `.microseconds`, `.milliseconds`, `.seconds`,
   `.minutes`, or `.hours`; non-finite and out-of-range input produces
-  `RangeError`. `duration.in(.Unit)` reads one whole unit and truncates toward
-  zero; `total_in(unit)` preserves the fractional value. `round` supports the
+  `RangeError`. `duration.in(.Unit)` reads one whole unit, truncates toward
+  zero, and cannot fail, so it is a plain `Int`; `total_in(unit)` preserves the
+  fractional value. `round` supports the
   nine canonical rounding modes. `abs`, `negated`, `sign`, `is_zero`, and
   `difference` operate on the exact carrier. The `ns`, `us`, `ms`, `s`, `min`,
   `h`, and `d` suffixes resolve through the canonical Time family

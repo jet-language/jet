@@ -90,16 +90,14 @@ runtime_duration_unit_ns: fn(unit: I64) -> I64 {
     Float{ns} / Float{scale}
 }
 
-// jet_duration_kernel_in through the C adapter: the whole count of `unit` in
-// the duration, truncated towards zero. The read cannot fail, so the Result is
-// always Ok; `error` is the adapter's unused Err slot.
-#Export(c) jet_duration_in: fn(value: I64, unit: I64, output: I64, _error: I64) -> I64 {
+// jet_duration_kernel_in: the whole count of `unit` in the duration,
+// truncated towards zero, as an owned exact-Int word. The read cannot fail.
+#Export(c) jet_duration_in: fn(value: I64, unit: I64) -> I64 {
     ns: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scale: runtime_duration_scale(unit)
-    if (scale == I64{0}) -> return I64{0}
-    time_glue_store(output, jet_int_owned_from_i64(ns / scale))
-    I64{1}
+    if (scale == I64{0}) -> return jet_int_owned_from_i64(I64{0})
+    jet_int_owned_from_i64(ns / scale)
 }
 
 // jet_duration_kernel_total_seconds: whole seconds, truncated towards zero, as
