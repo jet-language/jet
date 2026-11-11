@@ -1,0 +1,14 @@
+# A Set of a small fieldless enum is stored as one U64 word: `bits()` reads
+# it, `Set<E>.from_bits(n)` builds it back (None for a bit no case stands
+# for), a `#Specified` enum crosses as its own single-bit values, and a
+# struct holding the Set is 8 bytes. The same on every tier.
+fixture: set_bits_round_trip_on_every_tier/input
+step: jet run run.jet
+exit: 0
+stdout: = "3\ntrue\n2\nnone\n65\ntrue\n8\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "3\ntrue\n2\nnone\n65\ntrue\n8\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "3\ntrue\n2\nnone\n65\ntrue\n8\n"

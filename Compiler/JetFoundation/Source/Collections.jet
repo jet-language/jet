@@ -97,6 +97,7 @@ SemaCollectionOperation: enum {
     SetClosure(operation: TClosureOp)
     SetMinimum
     IterToSet
+    SetBits
 }
 
 // Receiver families a row applies to. `List` covers fixed lists and `Iter`
@@ -185,6 +186,8 @@ CollectionResult: enum {
     WriteViewPair
     WriteViewList
     DisjointUnit
+    // `bits()`: the U64 word of a Set stored as bits.
+    Bits
 }
 
 // The checked operation a row produces. Fixed operations carry their builtin
@@ -196,6 +199,7 @@ CollectionOp: enum {
     SetClosure(op: TClosureOp)
     SetMinimum
     IterToSet
+    SetBits
     ListShuffle
     Copy
     SeqMap
@@ -330,6 +334,7 @@ COLLECTION_OPERATIONS: comptime { [CollectionOperationRow]{
     {receivers: CollectionReceivers.Set, name: "min", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.SetMinimum, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "max", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Max{float: false}}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    {receivers: CollectionReceivers.Set, name: "bits", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bits, op: CollectionOp.SetBits, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "to_set", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Receiver, op: CollectionOp.Copy, law: CollectionLaw.Copy, empty: "empty Set", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetInsert}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current, stores: true},
     {receivers: CollectionReceivers.Set, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
@@ -651,7 +656,7 @@ collection_window_write: fn(receiver: Type, row: CollectionOperationRow) -> Bool
     if !window -> return false
     if row.op == {
         .Builtin(op) -> op == TBuiltinOp.Sort || op == TBuiltinOp.SortDesc || op == TBuiltinOp.Reverse
-        .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .ListShuffle | .Copy | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
+        .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .SetBits | .ListShuffle | .Copy | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
     }
 }
 
@@ -917,6 +922,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .WriteViewPair -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}, TypeTupleField{name: "right", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}}}, err: Type.String})
         .WriteViewList -> Val(Type.Result{ok: Type.List{element: Type.Apply{name: "ViewMut", args: [Type]{element}}}, err: Type.String})
         .DisjointUnit -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{}}, err: Type.String})
+        .Bits -> Val(Type.IntN{signed: false, bits: 64})
         .MinMax -> Val(Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}}}})
         .TryCollected -> {
             if element == {
@@ -963,6 +969,7 @@ sema_collection_method_operation: fn(contract: SemaCollectionMethodContract, arg
         .SetClosure(op) -> SemaCollectionOperation.SetClosure{operation: op.copy()}
         .SetMinimum -> SemaCollectionOperation.SetMinimum
         .IterToSet -> SemaCollectionOperation.IterToSet
+        .SetBits -> SemaCollectionOperation.SetBits
         .ListShuffle -> SemaCollectionOperation.ListShuffle
         .Copy -> panic("copy rows are checked by the explicit copy path before operation selection")
         .SeqMap -> SemaCollectionOperation.Closure{operation: if {

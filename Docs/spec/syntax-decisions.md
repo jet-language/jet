@@ -3937,8 +3937,13 @@ cases have no numbers is E1125. `#Through` on the last arm is E1126, a next
 body that reads a name its own arm binds is E1127, and `#Through` on an arm
 that always leaves, or in a table that gives a value, is E1128. A second `#As`
 field in one struct is E1129, and `#As` on a computed field is E1131.
-`#Specified`, `#Through` and `#As` are built; the Set bits are ratified and not
-yet implemented (card #5028).
+A `Set<E>` over an enum of 1 to 64 cases with no payloads and no type
+parameters is one `U64` word: case i is bit i in declaration order, and a
+`#Specified` enum's cases are their own values, each of which must be one bit
+(E1132). `s.bits()` reads the word and `Set<E>.from_bits(n)` gives `Set<E>?`,
+None when `n` has a bit no case stands for; either on another Set is E1133.
+This amends only D-COLLBREADTH1's storage: Set's methods and printing are
+unchanged. All four are built.
 
 
 ### Low-level tier

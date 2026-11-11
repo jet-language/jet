@@ -170,7 +170,7 @@ ir_counted_entry: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
     ty: ir_untag(m.types[row].ty)
     if ty == .List(element) -> return ir_value_type(m, p, element)
     if ir_map_entry_type(ty) == .Val(entry) -> return ir_value_type(m, p, entry)
-    if ir_set_element(ty) == .Val(element) -> return ir_value_type(m, p, element)
+    if ir_set_element(ty) == .Val(element) && ir_bit_set_def(p, ty) == None -> return ir_value_type(m, p, element)
     if ir_priority_queue_element(ty) == .Val(element) -> return ir_value_type(m, p, element)
     None
 }

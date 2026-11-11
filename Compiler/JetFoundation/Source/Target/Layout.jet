@@ -554,7 +554,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .List(_) -> Val(ByteLayout{size: 24, alignment: 8, stride: 24})
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
-        .Apply(name, args) -> if name == "Ptr" && args.len() == 1 -> Val(jet_target_layout_scalar(8)) else -> None
+        .Apply(name, args) -> if (name == "Ptr" && args.len() == 1) || jet_target_layout_bit_set(engine, name, args, owner_qualified_name) -> Val(jet_target_layout_scalar(8)) else -> None
         .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
     }
 }
@@ -737,6 +737,7 @@ jet_target_layout_type_inner: fn(engine: TargetLayoutEngine, ty: Type, owner_qua
         .Named(name) -> jet_target_layout_named_type(engine, name, [Type]{}, owner_qualified_name, query)
         .Apply(name, args) -> {
             if name == "Ptr" && args.len() == 1 -> return Val(ByteLayout{size: engine.target.pointer_size, alignment: engine.target.pointer_alignment, stride: engine.target.pointer_size})
+            if jet_target_layout_bit_set(engine, name, args, owner_qualified_name) -> return Val(jet_target_layout_scalar(8))
             if jet_target_layout_is_atomic_name(name) -> return jet_target_layout_atomic_layout(engine, args)
             jet_target_layout_named_type(engine, name, args, owner_qualified_name, query)
         }
@@ -755,6 +756,45 @@ jet_target_layout_atomic_layout: fn(engine: TargetLayoutEngine, args: [Type]) ->
         jet_target_layout_atomic_scalar_type(args[0]) -> Val(jet_target_layout_scalar(8))
         else -> None
     }
+}
+
+// Whether `Set<args[0]>` is stored as bits, one 8-byte word with a bit per
+// case: its element names an enum of 1 to 64 cases with no payloads and no
+// type parameters.
+jet_target_layout_bit_set: fn(engine: TargetLayoutEngine, name: String, args: [Type], owner_qualified_name: String) -> Bool Never! {
+    if name != "Set" || args.len() != 1 -> return false
+    element: if args[0] == .Named(element_name) -> element_name.copy() else -> return false
+    resolved: jet_target_layout_resolved_name(engine, owner_qualified_name, element)
+    if resolved == element && engine.item_positions.get(element) == .Val(position) -> return jet_layout_bits_enum(engine.items[position])
+    position: engine.qualified_positions.get(resolved) ?? return false
+    jet_layout_bits_enum(engine.qualified_items[position].item)
+}
+
+// Whether `item` is an enum a Set stores as bits.
+jet_layout_bits_enum: fn(item: Item) -> Bool Never! {
+    if item == .Enum(definition) {
+        if definition.type_params.len() > 0 || definition.variants.len() == 0 || definition.variants.len() > 64 -> return false
+        loop variant in definition.variants {
+            if variant.payload == {
+                .Unit -> {}
+                .Single(_, _) | .Named(_) -> return false
+            }
+        }
+        return true
+    }
+    false
+}
+
+// The bit index of `value` when it is one bit of a 64-bit word (a power of
+// two from 1 to 2^63), None for any other value: the bit a `#Specified`
+// enum's case crosses as in a Set stored as bits.
+jet_layout_one_bit_shift: fn(value: Int) -> Int? Never! {
+    power := 1
+    loop shift in 0..<64 {
+        if value == power -> return Val(shift)
+        power = power * 2
+    }
+    None
 }
 
 // Rust: none (Jet-only pass)

@@ -1,0 +1,35 @@
+// A Set of a small fieldless enum is one U64 word: case i is bit i.
+Perm: enum {
+    Read
+    Write
+    Run
+}
+
+// A `#Specified` enum whose values are single bits crosses as those bits,
+// the way C flags do.
+#Specified
+Mode: enum {
+    Owner = 1
+    Group = 8
+    Other = 64
+}
+
+Holder: struct {
+    perms: Set<Perm>
+}
+
+run: fn() {
+    perms: Set.from([Perm.Read, Perm.Write])
+    print(perms.bits())
+    back: Set<Perm>.from_bits(5) ?? Set<Perm>.new()
+    print(back.has(.Read) && back.has(.Run) && !back.has(.Write))
+    print(back.len())
+    stray := "none"
+    if Set<Perm>.from_bits(8) == .Val(_) -> stray = "some"
+    print(stray)
+    modes: Set.from([Mode.Owner, Mode.Other])
+    print(modes.bits())
+    both: Set<Mode>.from_bits(72) ?? Set<Mode>.new()
+    print(both.has(.Group) && both.has(.Other) && !both.has(.Owner))
+    print(Holder.reflect().layout.size)
+}

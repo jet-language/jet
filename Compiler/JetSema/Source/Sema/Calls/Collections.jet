@@ -10,13 +10,19 @@ use jet_foundation.[
     ParamZone,
     SemaCollectionMethodContract,
     Span,
+    SymbolID,
+    SymbolKind,
     TBuiltinOp,
     TClosureOp,
     TListRemoveMode,
+    TMethodRef,
+    TPreludeArg,
+    TStaticOwner,
     Type,
     ViewSourcePath,
     collection_row_takes_argument,
     expr_span,
+    jet_layout_one_bit_shift,
     sema_collection_is_map,
     sema_collection_method_argument_type,
     sema_collection_method_contract,
@@ -24,6 +30,7 @@ use jet_foundation.[
     sema_collection_method_operation,
     sema_collection_method_result_type,
     sema_collection_receiver_element,
+    symbol_id,
     type_name,
 ]
 
@@ -229,7 +236,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     }
     copies_receiver := if contract.row.op == {
         .Copy -> true
-        .Builtin(_) | .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .ListShuffle | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
+        .Builtin(_) | .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .SetBits | .ListShuffle | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
     }
     if copies_receiver {
         if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -434,9 +441,54 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             drained := sema_tree_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
             sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
+        // `set.bits()` crosses the Set's word through the Prelude Set route.
+        .SetBits -> {
+            element: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
+            if !sema_call_set_bits_ready(element, "bits()", span, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            path: "std::collections::HashSet"
+            reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
+            argument := TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            sema_tree_node(result_type, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: false, path: path, generics: [TPreludeArg]{TPreludeArg.Jet{ty: element}}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+        }
     }
     checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
+}
+
+// A Set of a fieldless enum of 1 to 64 cases with no type parameters is
+// stored as bits (the IR's ir_bit_set_def): `bits()` and
+// `Set<E>.from_bits(n)` cross it as a U64. A `#Specified` enum's cases
+// cross as their own values, so each must be one bit (E1132); any other
+// element is E1133.
+sema_call_set_bits_ready: fn(element: Type, callee: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    element_name: type_name(element)
+    refused: sema_error("E1133", span, "`{callee}` needs a Set stored as bits, and `Set<{element_name}>` is not one", "only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case", "use such an enum as the element, or read the Set with `to_list()`")
+    named: if element == .Named(name) -> name.copy() else -> ""
+    definition: sema_serde_type_definition(environment, program, named) ?? {
+        diagnostics.push(refused)
+        return false
+    }
+    ready := named != "" && definition.generic_params.len() == 0
+    if definition.kind == .Enum(variants, _) {
+        if variants.len() == 0 || variants.len() > 64 -> ready = false
+        loop variant in variants {
+            if variant.payload == {
+                .Unit -> {}
+                .Single(_) | .Named(_) -> ready = false
+            }
+        }
+        if ready && definition.specified {
+            reported: diagnostics.len()
+            loop variant in variants {
+                value: variant.discriminant ?? 0
+                if jet_layout_one_bit_shift(value) == None -> diagnostics.push(sema_error("E1132", span, "case `{element_name}.{variant.name}` has value {value}, which is not one bit", "`bits()` and `from_bits` map each case of a `#Specified` enum to its own value, so each value must be a single bit", "give the case a power-of-two value, or remove `#Specified` so the cases take bits in declaration order"))
+            }
+            return diagnostics.len() == reported
+        }
+        if ready -> return true
+    }
+    diagnostics.push(refused)
+    false
 }
 
 // Rust lower_method_call: the lazy and iterator-kernel builtins run on

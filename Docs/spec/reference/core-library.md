@@ -528,7 +528,7 @@ records the shipped surface without adding aliases:
 | --- | --- | --- |
 | `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `fill`, `fill_repeat`, `copy`, and `equal`. |
 | `[K:V]` | `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | Ordered `keys`, `values`, `get`, `has_key`, `add`, `add_new`, `remove`, `pop`, `merge`, `copy`, `equal`, `map`, `filter`, `flat_map`, `fold`, `intersection`, `slice`, `top_n`, and reducers. |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. |
+| `Set<T>` | `Set.new()`, `Set.from(xs)`, `Set<E>.from_bits(n)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. A Set of a fieldless enum of up to 64 cases is one bit word with `bits()`. |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`(w: String) -> w.len()`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | Double-ended push/pop and peek, capacity, lookup/delete, list conversion, join, reverse, split, and size/clear operations. |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)`, `PriorityQueue.by(key)`, `PriorityQueue.by_desc(key)`, `PriorityQueue.from_by(xs, key)`, `PriorityQueue.from_by_desc(xs, key)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. `new` and `from` pop the largest item first by its own order. The `by` forms order by a pure key function (`(s: Score) -> s.points`, an `Int`, `Float`, `String` or other natively ordered key): `by` pops the smallest key first and `by_desc` the largest; items with equal keys pop in the order they went in, and `to_sorted_list` lists them in pop order. A key function with effects is rejected (E0747). |
@@ -690,6 +690,7 @@ runs each of these cases.
 | `Set<T>` | `min()` | borrows | Lookup | None | current |
 | `Set<T>` | `max()` | borrows | Lookup | None | current |
 | `Set<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
+| `Set<T>` | `bits()` | borrows | Measure | 0 | current |
 | `Set<T>` | `to_set()` | borrows | Copy | empty Set | current |
 | `Set<T>` | `add(item)` | exclusive, in place | Mutate | true | current |
 | `Set<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |

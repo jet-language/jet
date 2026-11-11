@@ -1062,6 +1062,15 @@ case state its number, so adding or moving a case renumbers no other
 case without a number is E1124, and `#Specified` on a struct or on an enum
 whose cases have no numbers is E1125.
 
+A `Set<E>` over an enum of 1 to 64 cases with no payloads and no type
+parameters is stored as one `U64` word (D-JAI-SMALL1=A). Case i is bit i in
+declaration order; a `#Specified` enum's cases are their own values, so C
+flags cross unchanged, and a value that is not one bit is E1132.
+`perms.bits()` reads the word (`Set.from([Perm.Read, Perm.Write]).bits() ==
+3`), and `Set<Perm>.from_bits(n)` gives `Set<Perm>?`, None when `n` has a bit
+no case stands for. Either on a Set that is not stored as bits is E1133.
+Set's other methods are the same on every element type.
+
 ## Fixed-size lists
 
 `[T#N]` refines a list to exactly `N` elements of type `T`. Destructuring must

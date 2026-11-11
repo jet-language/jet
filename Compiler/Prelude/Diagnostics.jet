@@ -9286,6 +9286,35 @@ AsComputed: struct {
     }
 }
 
+FlagValueNotOneBit: struct {
+    name: String
+    variant: String
+    value: String
+
+    impl Diagnostic {
+        code: "E1132"
+        meaning: "A `#Specified` enum read as bits has a case value that is not one bit"
+        detail: true
+        what: fn(self) -> String { "Case `{self.name}.{self.variant}` has value {self.value}, which is not one bit." }
+        why: fn(self) -> String { "`bits()` and `from_bits` map each case of a `#Specified` enum to its own value, so each value must be a single bit." }
+        fix: fn(self) -> String { "Give the case a power-of-two value, or remove `#Specified` so the cases take bits in declaration order." }
+    }
+}
+
+SetNotBits: struct {
+    callee: String
+    element: String
+
+    impl Diagnostic {
+        code: "E1133"
+        meaning: "`bits()` or `from_bits` on a Set not stored as bits"
+        detail: true
+        what: fn(self) -> String { "`{self.callee}` needs a Set stored as bits, and `Set<{self.element}>` is not one." }
+        why: fn(self) -> String { "Only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case." }
+        fix: fn(self) -> String { "Use such an enum as the element, or read the Set with `to_list()`." }
+    }
+}
+
 UndischargedTask: struct {
     impl Diagnostic {
         code: "L1101"

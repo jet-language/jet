@@ -1,0 +1,26 @@
+Error [jet.SetNotBits]: `bits()` needs a Set stored as bits, and `Set<Shape>` is not one
+  --> tests/ui/set_bits_refusals.jet:17:18
+    |
+ 17 |     print(shapes.bits())
+    |                  ^^^^
+ Why: Only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case
+ Fix: Use such an enum as the element, or read the Set with `to_list()`
+More: jet-lang.dev/e/E1133
+
+Error [jet.SetNotBits]: `bits()` needs a Set stored as bits, and `Set<String>` is not one
+  --> tests/ui/set_bits_refusals.jet:19:17
+    |
+ 19 |     print(names.bits())
+    |                 ^^^^
+ Why: Only a Set of an enum with 1 to 64 cases, no payloads and no type parameters is stored as one bit per case
+ Fix: Use such an enum as the element, or read the Set with `to_list()`
+More: jet-lang.dev/e/E1133
+
+Error [jet.FlagValueNotOneBit]: Case `Flag.Mixed` has value 3, which is not one bit
+  --> tests/ui/set_bits_refusals.jet:20:21
+    |
+ 20 |     print(Set<Flag>.from_bits(1) == .None)
+    |                     ^^^^^^^^^
+ Why: `bits()` and `from_bits` map each case of a `#Specified` enum to its own value, so each value must be a single bit
+ Fix: Give the case a power-of-two value, or remove `#Specified` so the cases take bits in declaration order
+More: jet-lang.dev/e/E1132

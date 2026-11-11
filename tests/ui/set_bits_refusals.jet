@@ -1,0 +1,21 @@
+// `bits()` and `Set<E>.from_bits(n)` need a Set stored as bits, and a
+// `#Specified` element crosses as its values, so each must be one bit.
+Shape: enum {
+    Dot
+    Line(Int)
+}
+
+#Specified
+Flag: enum {
+    Low = 1
+    Mixed = 3
+    High = 4
+}
+
+run: fn() {
+    shapes: Set.from([Shape.Dot])
+    print(shapes.bits())
+    names: Set.from(["a"])
+    print(names.bits())
+    print(Set<Flag>.from_bits(1) == .None)
+}

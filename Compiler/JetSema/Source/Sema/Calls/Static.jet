@@ -779,6 +779,12 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
         element_name: type_name(result_args[0])
         diagnostics.push(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "{row.owner} elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
     }
+    // `Set<E>.from_bits(n)` builds a Set stored as bits (E1132, E1133).
+    if row.owner == "Set" && row.method == "from_bits" && result == .Option(set_type) {
+        if set_type == .Apply(_, set_args) && set_args.len() == 1 {
+            if !sema_call_set_bits_ready(set_args[0], "Set.from_bits", span, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    }
 
     if row.lowering == .CoreCall(core_module, member) {
         record: core_call(core_module, member) ?? {

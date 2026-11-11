@@ -15,13 +15,17 @@
 // insertion order: a new key moves in at its key position (a hashed Rank's
 // index is then rebuilt and its sorted count is its length, so nothing ever
 // merges), and an unhashed Rank finds a key by a linear scan.
+//
+// A Set of a small fieldless enum has no header: it is stored as bits
+// (ir_bit_set_def, at the end of this file).
 
-use jet_foundation.[Span, Type, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, Type, jet_layout_one_bit_shift, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
 ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
     elem: ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
+    if ir_bit_set_def(p, m.types[set_row].ty) != None -> return None
     key_row: ir_value_type(m, p, elem) ?? return None
     kind: ir_map_key_kind(m, key_row)
     if kind == "" -> return None
@@ -477,6 +481,10 @@ ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
 ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 0 -> return ir_fail_slot(b, span, "Set.new with {inputs.len()} arguments")
     set_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
+    if ir_bit_set_def(p, result) != None {
+        empty: ir_word_const(m, b, 0)
+        return ir_bit_set_make(m, b, set_row, empty)
+    }
     if ir_set_shape(m, p, set_row) == None -> return ir_fail_slot(b, span, "Set construction of {ir_type_name(result)}")
     ir_list_empty(m, b, set_row)
 }
@@ -489,6 +497,7 @@ ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result:
 // header owns (Rank.from_by).
 ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, order: Int, span: Span) -> Int Never! {
     set_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if ir_bit_set_def(p, ty) != None -> return ir_bit_set_from(m, p, b, ty, set_row, source, span)
     shape: ir_set_shape(m, p, set_row) ?? return ir_fail_slot(b, span, "Set construction of {ir_type_name(ty)}")
     elem: shape.entry_ty
     source_ty: ir_lazy_slot_type(m, b, source)
@@ -560,6 +569,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
         return Val(ir_set_from(m, p, b, ty, subject, -1, span))
     }
     set_row: b.f.slot_type[subject]
+    if ir_bit_set_def(p, m.types[set_row].ty) == .Val(definition) -> return ir_bit_set_builtin(m, p, b, ty, route, symbol, set_row, definition, subject, operands, span)
     shape: ir_set_shape(m, p, set_row) ?? return None
     if symbol == "jet_set_len" || symbol == "jet_set_capacity" {
         int_row: ir_type_row(m, Type.Int) ?? 0
@@ -579,30 +589,16 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     if symbol == "jet_set_shuffle" {
         if operands.len() != 1 -> return None
         list_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
-        iter_ty: Type.Apply{name: "Iter", args: [Type]{shape.entry_ty.copy()}}
-        iter_row: ir_value_type(m, p, iter_ty) ?? return Val(ir_type_fail(b, span, iter_ty))
-        items: ir_set_list(m, p, b, shape, subject, list_row)
-        meta: ir_lazy_meta(m, p, b, shape.entry_ty, span)
-        if meta < 0 -> return Val(-1)
-        source: ir_lazy_iter_from_list(m, p, b, items, shape.entry_ty, meta, iter_row, span)
-        if source < 0 -> return Val(-1)
-        shuffled: ir_runtime(m, b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
-        ir_lazy_consumed(m, b, source)
-        out: ir_list_empty(m, b, list_row)
-        _: ir_runtime(m, b, "jet_rt_native_iter_to_list", [Int]{shuffled, out}, -1)
-        ir_lazy_consumed(m, b, shuffled)
-        b.fresh[out] = true
-        return Val(out)
+        listed: ir_set_list(m, p, b, shape, subject, list_row)
+        return Val(ir_set_shuffled(m, p, b, shape.entry_ty, listed, list_row, span))
     }
     if symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None
         result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
         if symbol != "jet_set_values" -> return Val(ir_set_list(m, p, b, shape, subject, result_row))
         list_row: ir_value_type(m, p, Type.List{element: shape.entry_ty}) ?? return Val(ir_fail_slot(b, span, "type [{ir_type_name(shape.entry_ty)}]"))
-        items: ir_set_list(m, p, b, shape, subject, list_row)
-        meta: ir_lazy_meta(m, p, b, shape.entry_ty, span)
-        if meta < 0 -> return Val(-1)
-        return Val(ir_lazy_iter_from_list(m, p, b, items, shape.entry_ty, meta, result_row, span))
+        listed: ir_set_list(m, p, b, shape, subject, list_row)
+        return Val(ir_set_values(m, p, b, shape.entry_ty, listed, result_row, span))
     }
     if symbol == "jet_set_equal" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set equal without an operand"))
@@ -756,4 +752,360 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     present: ir_bool_op(m, b, IROp.Ge, found, none)
     ir_release(m, b, key)
     Val(present)
+}
+
+// `shuffle()` over `items`, a fresh List of copies of a Set's keys: a fresh
+// List of them in the Iter shuffle's order.
+ir_set_shuffled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, elem: Type, items: Int, list_row: Int, span: Span) -> Int Never! {
+    iter_ty: Type.Apply{name: "Iter", args: [Type]{elem.copy()}}
+    iter_row: ir_value_type(m, p, iter_ty) ?? return ir_type_fail(b, span, iter_ty)
+    meta: ir_lazy_meta(m, p, b, elem, span)
+    if meta < 0 -> return -1
+    source: ir_lazy_iter_from_list(m, p, b, items, elem, meta, iter_row, span)
+    if source < 0 -> return -1
+    shuffled: ir_runtime(m, b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
+    ir_lazy_consumed(m, b, source)
+    out: ir_list_empty(m, b, list_row)
+    _: ir_runtime(m, b, "jet_rt_native_iter_to_list", [Int]{shuffled, out}, -1)
+    ir_lazy_consumed(m, b, shuffled)
+    b.fresh[out] = true
+    out
+}
+
+// `values()` over `items`, a fresh List of copies of a Set's keys: the
+// Iter of type row `iter_row` over them.
+ir_set_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, elem: Type, items: Int, iter_row: Int, span: Span) -> Int Never! {
+    meta: ir_lazy_meta(m, p, b, elem, span)
+    if meta < 0 -> return -1
+    ir_lazy_iter_from_list(m, p, b, items, elem, meta, iter_row, span)
+}
+
+// A Set of a fieldless enum of 1 to 64 cases with no type parameters is
+// stored as bits: one word whose bit i is case i in declaration order (a
+// payload-free enum value is its case index). The word sits in an 8-byte
+// aggregate, so a write lands in place; it owns nothing, so a copy is a
+// byte copy and a drop does nothing. Its ascending key order is the case
+// order. `bits()` and `Set<E>.from_bits(n)` cross the word as a U64, a
+// `#Specified` enum's cases each as their own single-bit value.
+
+// The enum definition of a Set stored as bits, None for any other type.
+ir_bit_set_def: fn(p: IRProgram, ty: Type) -> Int? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name != "Set" || args.len() != 1 -> return None
+        if ir_untag(args[0]) == .Apply(_, _) -> return None
+        enum_name: ir_nominal_name(ir_untag(args[0])) ?? return None
+        definition: ir_type_def(p, enum_name) ?? return None
+        if p.types[definition].generic_params.len() > 0 -> return None
+        if p.types[definition].kind == .Enum(variants, _) {
+            if variants.len() == 0 || variants.len() > 64 -> return None
+            loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(_) | .Named(_) -> return None
+                }
+            }
+            return Val(definition)
+        }
+    }
+    None
+}
+
+// The case count of the enum definition `definition`.
+ir_bit_set_cases: fn(p: IRProgram, definition: Int) -> Int Never! {
+    if p.types[definition].kind == .Enum(variants, _) -> return variants.len()
+    0
+}
+
+// The bit each case of the `#Specified` enum `definition` crosses as, by
+// case index; None when a case value is not one bit (sema refuses it).
+ir_bit_set_shifts: fn(p: IRProgram, definition: Int) -> [Int]? Never! {
+    shifts := [Int]{}
+    if p.types[definition].kind == .Enum(variants, _) {
+        loop variant in variants {
+            value: variant.discriminant ?? return None
+            shifts.push(jet_layout_one_bit_shift(value) ?? return None)
+        }
+    }
+    Val(shifts)
+}
+
+// A fresh Set of type row `set_row` stored as the bits `word`.
+ir_bit_set_make: fn(m: &IRModule, b: &IRBuilder, set_row: Int, word: Int) -> Int Never! {
+    set: ir_fresh_temp(m, b, set_row)
+    ir_emit(b.f, IROp.StackAddress, set, 8, 8, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, set, 0, word, b.line)
+    set
+}
+
+// The word `1 << shift`.
+ir_bit_set_bit: fn(m: &IRModule, b: &IRBuilder, shift: Int) -> Int Never! {
+    one: ir_word_const(m, b, 1)
+    ir_word_op(m, b, IROp.Shl, one, shift)
+}
+
+IRBitWalk: struct {
+    // The case index, a word counting up from 0.
+    index: Int
+    done: Int
+}
+
+// Opens a walk over the cases whose bit `word` holds, in case order; inside
+// it, `index` is the case index. ir_bit_walk_close ends it.
+ir_bit_walk_open: fn(m: &IRModule, b: &IRBuilder, word: Int, cases: Int) -> IRBitWalk Never! {
+    index: ir_word_const(m, b, 0)
+    zero: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    limit: ir_word_const(m, b, cases)
+    done: ir_open(b.f, IROp.Block, b.line)
+    _: ir_open(b.f, IROp.Loop, b.line)
+    more: ir_bool_op(m, b, IROp.Lt, index, limit)
+    ir_exit_unless(m, b, more, done)
+    shifted: ir_word_op(m, b, IROp.Shr, word, index)
+    held: ir_word_op(m, b, IROp.BitAnd, shifted, one)
+    present: ir_bool_op(m, b, IROp.Ne, held, zero)
+    ir_open_if(b.f, present, b.line)
+    IRBitWalk{index: index, done: done}
+}
+
+ir_bit_walk_close: fn(m: &IRModule, b: &IRBuilder, walk: IRBitWalk) Never! {
+    ir_end(b.f, b.line)
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Add, walk.index, walk.index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+}
+
+// A fresh List of type row `list_row` of the cases whose bit `word` holds,
+// in case order.
+ir_bit_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, cases: Int, elem_row: Int, list_row: Int) -> Int Never! {
+    out: ir_list_empty(m, b, list_row)
+    walk: ir_bit_walk_open(m, b, word, cases)
+    key: ir_temp(m, b, elem_row)
+    ir_emit(b.f, IROp.Copy, key, walk.index, -1, -1, b.line)
+    ir_list_push(m, p, b, out, elem_row, key)
+    ir_bit_walk_close(m, b, walk)
+    out
+}
+
+// `Set.from(source)` / `source.to_set()` of a Set stored as bits: the bit
+// of each element of the List or Iter `source`.
+ir_bit_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, set_row: Int, source: Int, span: Span) -> Int Never! {
+    elem: ir_set_element(ir_untag(ty)) ?? return ir_type_fail(b, span, ty)
+    elem_row: ir_value_type(m, p, elem) ?? return ir_type_fail(b, span, elem)
+    source_ty: ir_lazy_slot_type(m, b, source)
+    list := source
+    if ir_iter_element(source_ty) != None {
+        list_row: ir_value_type(m, p, Type.List{element: elem.copy()}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(elem)}]")
+        list = ir_list_empty(m, b, list_row)
+        _: ir_lazy_runtime(m, b, "jet_rt_native_iter_to_list", [Int]{source, list}, -1, source)
+    } else if ir_list_element(m, p, b, source) != Val(elem_row) {
+        return ir_fail_slot(b, span, "Set construction source {ir_type_name(source_ty)} is not its element List")
+    }
+    word: ir_word_const(m, b, 0)
+    walk: ir_walk_open(m, b, list, elem_row)
+    index: ir_enum_tag_of(m, b, walk.item)
+    bit: ir_bit_set_bit(m, b, index)
+    ir_emit(b.f, IROp.BitOr, word, word, bit, IR_OVERFLOW_WRAP, b.line)
+    ir_walk_close(m, b, walk)
+    ir_release(m, b, list)
+    ir_bit_set_make(m, b, set_row, word)
+}
+
+// `set.bits()` (the Prelude std::collections::HashSet::bits route): the
+// word as a U64, each present case of a `#Specified` enum as its own value.
+ir_bit_set_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if inputs.len() != 1 || inputs[0] < 0 -> return ir_fail_slot(b, span, "Set.bits with {inputs.len()} arguments")
+    set_ty: m.types[b.f.slot_type[inputs[0]]].ty
+    definition: ir_bit_set_def(p, set_ty) ?? return ir_fail_slot(b, span, "bits of {ir_type_name(set_ty)}")
+    row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
+    word: ir_load_word(m, b, inputs[0], 0)
+    out: ir_temp(m, b, row)
+    if !p.types[definition].specified {
+        ir_emit(b.f, IROp.Copy, out, word, -1, -1, b.line)
+        return out
+    }
+    shifts: ir_bit_set_shifts(p, definition) ?? return ir_fail_slot(b, span, "bits of {ir_type_name(set_ty)}, whose case values are not single bits")
+    total: ir_word_const(m, b, 0)
+    zero: ir_word_const(m, b, 0)
+    loop (index, shift) in shifts {
+        position: ir_word_const(m, b, index)
+        case_bit: ir_bit_set_bit(m, b, position)
+        held: ir_word_op(m, b, IROp.BitAnd, word, case_bit)
+        present: ir_bool_op(m, b, IROp.Ne, held, zero)
+        ir_open_if(b.f, present, b.line)
+        shift_word: ir_word_const(m, b, shift)
+        own: ir_bit_set_bit(m, b, shift_word)
+        ir_emit(b.f, IROp.BitOr, total, total, own, IR_OVERFLOW_WRAP, b.line)
+        ir_end(b.f, b.line)
+    }
+    ir_emit(b.f, IROp.Copy, out, total, -1, -1, b.line)
+    out
+}
+
+// `Set<E>.from_bits(n)` (the Prelude std::collections::HashSet::from_bits
+// route): the Set whose bits `n` gives, each case of a `#Specified` enum by
+// its own value; None when `n` has a bit no case stands for.
+ir_bit_set_from_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if inputs.len() != 1 || inputs[0] < 0 -> return ir_fail_slot(b, span, "Set.from_bits with {inputs.len()} arguments")
+    option_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
+    set_ty: if ir_untag(result) == .Option(inner) -> inner.copy() else -> return ir_fail_slot(b, span, "Set.from_bits of {ir_type_name(result)}")
+    definition: ir_bit_set_def(p, set_ty) ?? return ir_fail_slot(b, span, "Set.from_bits of {ir_type_name(set_ty)}")
+    set_row: ir_value_type(m, p, set_ty) ?? return ir_type_fail(b, span, set_ty)
+    given: inputs[0]
+    cases: ir_bit_set_cases(p, definition)
+    zero: ir_word_const(m, b, 0)
+    ones: ir_word_const(m, b, -1)
+    word: ir_word_const(m, b, 0)
+    known: ir_word_const(m, b, -1)
+    if !p.types[definition].specified {
+        ir_emit(b.f, IROp.Copy, word, given, -1, -1, b.line)
+        if cases < 64 {
+            one: ir_word_const(m, b, 1)
+            cases_word: ir_word_const(m, b, cases)
+            past: ir_bit_set_bit(m, b, cases_word)
+            ir_emit(b.f, IROp.Sub, known, past, one, IR_OVERFLOW_WRAP, b.line)
+        }
+    } else {
+        shifts: ir_bit_set_shifts(p, definition) ?? return ir_fail_slot(b, span, "Set.from_bits of {ir_type_name(set_ty)}, whose case values are not single bits")
+        ir_emit(b.f, IROp.Copy, known, zero, -1, -1, b.line)
+        loop (index, shift) in shifts {
+            shift_word: ir_word_const(m, b, shift)
+            own: ir_bit_set_bit(m, b, shift_word)
+            ir_emit(b.f, IROp.BitOr, known, known, own, IR_OVERFLOW_WRAP, b.line)
+            held: ir_word_op(m, b, IROp.BitAnd, given, own)
+            present: ir_bool_op(m, b, IROp.Ne, held, zero)
+            ir_open_if(b.f, present, b.line)
+            position: ir_word_const(m, b, index)
+            case_bit: ir_bit_set_bit(m, b, position)
+            ir_emit(b.f, IROp.BitOr, word, word, case_bit, IR_OVERFLOW_WRAP, b.line)
+            ir_end(b.f, b.line)
+        }
+    }
+    unknown: ir_word_op(m, b, IROp.BitXor, known, ones)
+    stray: ir_word_op(m, b, IROp.BitAnd, given, unknown)
+    valid: ir_bool_op(m, b, IROp.Eq, stray, zero)
+    out: ir_fresh_temp(m, b, option_row)
+    ir_option_none(m, b, out)
+    ir_open_if(b.f, valid, b.line)
+    set: ir_bit_set_make(m, b, set_row, word)
+    made: ir_option_make(m, p, b, option_row, set, 8)
+    ir_option_set(m, b, out, made)
+    ir_end(b.f, b.line)
+    out
+}
+
+// A Set builtin on a Set stored as bits (ir_set_builtin's symbols).
+ir_bit_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, symbol: String, set_row: Int, definition: Int, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+    elem: ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
+    elem_row: ir_value_type(m, p, elem) ?? return Val(ir_type_fail(b, span, elem))
+    cases: ir_bit_set_cases(p, definition)
+    int_row: ir_type_row(m, Type.Int) ?? 0
+    zero: ir_word_const(m, b, 0)
+    word: ir_load_word(m, b, subject, 0)
+    if symbol == "jet_set_capacity" -> return Val(ir_int_constant(m, b, int_row, cases))
+    if symbol == "jet_set_len" {
+        count: ir_word_const(m, b, 0)
+        walk: ir_bit_walk_open(m, b, word, cases)
+        one: ir_word_const(m, b, 1)
+        ir_emit(b.f, IROp.Add, count, count, one, IR_OVERFLOW_WRAP, b.line)
+        ir_bit_walk_close(m, b, walk)
+        length: ir_temp(m, b, int_row)
+        ir_emit(b.f, IROp.Copy, length, count, -1, -1, b.line)
+        return Val(length)
+    }
+    if symbol == "jet_set_is_empty" -> return Val(ir_bool_op(m, b, IROp.Eq, word, zero))
+    if symbol == "jet_set_first" || symbol == "jet_set_last" || symbol == "jet_set_max" {
+        if operands.len() != 1 -> return None
+        result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
+        found: ir_word_const(m, b, -1)
+        walk: ir_bit_walk_open(m, b, word, cases)
+        if symbol == "jet_set_first" {
+            unset: ir_bool_op(m, b, IROp.Lt, found, zero)
+            ir_open_if(b.f, unset, b.line)
+            ir_emit(b.f, IROp.Copy, found, walk.index, -1, -1, b.line)
+            ir_end(b.f, b.line)
+        } else {
+            ir_emit(b.f, IROp.Copy, found, walk.index, -1, -1, b.line)
+        }
+        ir_bit_walk_close(m, b, walk)
+        result: ir_fresh_temp(m, b, result_row)
+        ir_option_none(m, b, result)
+        present: ir_bool_op(m, b, IROp.Ge, found, zero)
+        ir_open_if(b.f, present, b.line)
+        key: ir_temp(m, b, elem_row)
+        ir_emit(b.f, IROp.Copy, key, found, -1, -1, b.line)
+        made: ir_option_make(m, p, b, result_row, key, m.types[elem_row].size)
+        ir_option_set(m, b, result, made)
+        ir_end(b.f, b.line)
+        return Val(result)
+    }
+    if symbol == "jet_set_shuffle" || symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
+        if operands.len() != 1 -> return None
+        result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
+        list_row := result_row
+        if symbol == "jet_set_values" {
+            list_row = ir_value_type(m, p, Type.List{element: elem.copy()}) ?? return Val(ir_fail_slot(b, span, "type [{ir_type_name(elem)}]"))
+        }
+        items: ir_bit_set_list(m, p, b, word, cases, elem_row, list_row)
+        if symbol == "jet_set_shuffle" -> return Val(ir_set_shuffled(m, p, b, elem, items, result_row, span))
+        if symbol == "jet_set_values" -> return Val(ir_set_values(m, p, b, elem, items, result_row, span))
+        return Val(items)
+    }
+    paired: symbol == "jet_set_equal" || symbol == "jet_set_union" || symbol == "jet_set_intersection" || symbol == "jet_set_difference" || symbol == "jet_set_symmetric_difference" || symbol == "jet_set_is_subset" || symbol == "jet_set_is_superset" || symbol == "jet_set_is_disjoint"
+    if paired {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set {route} without an operand"))
+        other: ir_adapt(m, p, b, operands[1], set_row, span)
+        if ir_failed(b) -> return Val(-1)
+        theirs: ir_load_word(m, b, other, 0)
+        ir_release(m, b, other)
+        shared: ir_word_op(m, b, IROp.BitAnd, word, theirs)
+        if symbol == {
+            "jet_set_equal" -> return Val(ir_bool_op(m, b, IROp.Eq, word, theirs))
+            "jet_set_is_subset" -> return Val(ir_bool_op(m, b, IROp.Eq, shared, word))
+            "jet_set_is_superset" -> return Val(ir_bool_op(m, b, IROp.Eq, shared, theirs))
+            "jet_set_is_disjoint" -> return Val(ir_bool_op(m, b, IROp.Eq, shared, zero))
+            "jet_set_union" -> {
+                joined: ir_word_op(m, b, IROp.BitOr, word, theirs)
+                return Val(ir_bit_set_make(m, b, set_row, joined))
+            }
+            "jet_set_intersection" -> return Val(ir_bit_set_make(m, b, set_row, shared))
+            "jet_set_symmetric_difference" -> {
+                either: ir_word_op(m, b, IROp.BitXor, word, theirs)
+                return Val(ir_bit_set_make(m, b, set_row, either))
+            }
+            else -> {
+                left: ir_word_op(m, b, IROp.BitXor, word, shared)
+                return Val(ir_bit_set_make(m, b, set_row, left))
+            }
+        }
+    }
+    if symbol == "std::collections::HashSet::clear" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(b, span, "Set clear with {operands.len() - 1} arguments"))
+        ir_emit(b.f, IROp.Store, -1, subject, 0, zero, b.line)
+        return Val(-1)
+    }
+    keyed: symbol == "jet_set_has" || symbol == "jet_set_insert" || symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel"
+    if !keyed -> return None
+    if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set builtin {route} without a key"))
+    key: ir_adapt(m, p, b, operands[1], elem_row, span)
+    if ir_failed(b) -> return Val(-1)
+    index: ir_enum_tag_of(m, b, key)
+    bit: ir_bit_set_bit(m, b, index)
+    held: ir_word_op(m, b, IROp.BitAnd, word, bit)
+    present: ir_bool_op(m, b, IROp.Ne, held, zero)
+    if symbol == "jet_set_has" -> return Val(present)
+    updated: if symbol == "jet_set_insert" || symbol == "jet_set_replace_kernel" -> ir_word_op(m, b, IROp.BitOr, word, bit) else -> ir_word_op(m, b, IROp.BitXor, word, held)
+    ir_emit(b.f, IROp.Store, -1, subject, 0, updated, b.line)
+    if symbol == "jet_set_insert" -> return Val(ir_bool_op(m, b, IROp.Eq, held, zero))
+    if symbol == "jet_set_remove" -> return Val(-1)
+    // pop and replace give back the key the Set held.
+    option_row: ir_value_type(m, p, Type.Option{inner: elem.copy()}) ?? return Val(ir_fail_slot(b, span, "Set builtin {route} result"))
+    result: ir_fresh_temp(m, b, option_row)
+    ir_option_none(m, b, result)
+    ir_open_if(b.f, present, b.line)
+    made: ir_option_make(m, p, b, option_row, key, m.types[elem_row].size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    Val(result)
 }
