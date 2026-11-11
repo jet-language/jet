@@ -8,7 +8,10 @@ package: {
         args: .Library{ entry: args }
     }
 }
-use core: core
+use {
+    core: core
+    rt: jet.runtime.process
+}
 
 
 // core.args — argv decoding against a declarative spec.
@@ -1062,7 +1065,7 @@ __cli_bool_opt_of: fn(value: String?) -> Bool? Never! {
 
 // The start vector the compiler's generated entry parses: the program name,
 // then the program's words. User code reads `process.args()` instead.
-__cli_argv: fn() -[Exec.Args]> [String] Never! { core.process.argv() }
+__cli_argv: fn() -[Exec.Args]> [String] Never! { rt.argv() }
 // The pieces of the parser the compiler writes for a `#CLI` struct without
 // commands. `help` is the root help text after the program name.
 __cli_usage: fn(argv: [String], help: String) -> String Never! {
@@ -1297,7 +1300,7 @@ args_label: fn(entry: ArgEntry) -> String Never! {
 // Rust `JetArgsSpec::help` for one level. Every level names the program
 // argv[0] runs as.
 args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
-    argv: core.process.argv()
+    argv: rt.argv()
     s := "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}"
     positional_count := 0
     loop entry in spec.levels[at].entries {

@@ -819,8 +819,7 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
 }
 
 // The effect leaf a plain Core call needs, or None when its root suffices.
-// D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of `Exec`
-// (Syntax EFFECT_LEAF_EXEC_ARGS), and so is ending the program's own process
+// D-AUTH-AMBIENT1=A: ending the program's own process is a leaf of `Exec`
 // (`Exec.Exit`); spawning a process keeps the ungranted `Exec` root.
 call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
     if module_name == {
@@ -875,11 +874,11 @@ call_sink: fn(module_name: String, member: String) -> String? Never! {
 }
 
 // `CoreCallRecord::new`'s record: the call's facts, Prelude symbol `symbol`.
-plain_record: fn(constructor: String, module_name: String, member: String, symbol: String, mask: [Bool], constants: [String: String]) -> CallRecord CoreRowsError! {
+plain_record: fn(constructor: String, module_name: String, member: String, symbol: String, mask: [Bool]) -> CallRecord {
     root: call_effect(module_name, member)
     capability: if root == None -> pure_capability() else -> CallCapability{kind: "NativeRequired", provider: Val(module_name.copy()), fallback: None, failure: Val("core.capability.unavailable")}
-    leaf: if module_name == "core.process" && (member == "argv" || member == "args") -> Val(rust_string("EFFECT_LEAF_EXEC_ARGS", "core.process effect leaf", constants) ?? return Err(err)) else -> call_effect_leaf(module_name, member)
-    Ok(CallRecord{constructor: constructor, module_name: module_name, member: member, receiver_types: [String]{}, arity: mask.len(), max_arity: mask.len(), borrow_mask: mask, frame_accesses: [CallAccess]{}, frame_completion: None, effect_kind: root, capability: capability, effect_leaf: leaf, sink_class: call_sink(module_name, member), pure_route: "NoPureRoute", symbol: Val(symbol), source_target: None, coverage: 47, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None})
+    leaf: call_effect_leaf(module_name, member)
+    CallRecord{constructor: constructor, module_name: module_name, member: member, receiver_types: [String]{}, arity: mask.len(), max_arity: mask.len(), borrow_mask: mask, frame_accesses: [CallAccess]{}, frame_completion: None, effect_kind: root, capability: capability, effect_leaf: leaf, sink_class: call_sink(module_name, member), pure_route: "NoPureRoute", symbol: Val(symbol), source_target: None, coverage: 47, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None}
 }
 
 // A record the Jet source of its module defines: no Prelude symbol, Sema
@@ -908,7 +907,7 @@ new_record: fn(call: RustCall, count: Int, context: String, constants: [String: 
     module_name: rust_string(call.args[0], context, constants) ?? return Err(err)
     member: rust_string(call.args[1], context, constants) ?? return Err(err)
     symbol: rust_string(call.args[2], context, constants) ?? return Err(err)
-    record := plain_record(call.name, module_name, member, symbol, rust_bools(call.args[4], context) ?? return Err(err), constants) ?? return Err(err)
+    record := plain_record(call.name, module_name, member, symbol, rust_bools(call.args[4], context) ?? return Err(err))
     if count == 6 -> record.coverage = call_coverage(call.args[5], context) ?? return Err(err)
     Ok(record)
 }
@@ -918,12 +917,12 @@ constructor_record: fn(call: RustCall, context: String, constants: [String: Stri
         "CoreCallRecord::source_owned" -> {
             expect_args(call, 3, context) ?? return Err(err)
             member: rust_string(call.args[1], context, constants) ?? return Err(err)
-            record: plain_record(call.name, rust_string(call.args[0], context, constants) ?? return Err(err), member, member, rust_bools(call.args[2], context) ?? return Err(err), constants) ?? return Err(err)
+            record: plain_record(call.name, rust_string(call.args[0], context, constants) ?? return Err(err), member, member, rust_bools(call.args[2], context) ?? return Err(err))
             Ok(source_owned(record))
         }
         "sema_web_call" -> {
             expect_args(call, 4, context) ?? return Err(err)
-            plain_record(call.name, rust_string(call.args[0], context, constants) ?? return Err(err), rust_string(call.args[1], context, constants) ?? return Err(err), rust_string(call.args[2], context, constants) ?? return Err(err), rust_bools(call.args[3], context) ?? return Err(err), constants)
+            Ok(plain_record(call.name, rust_string(call.args[0], context, constants) ?? return Err(err), rust_string(call.args[1], context, constants) ?? return Err(err), rust_string(call.args[2], context, constants) ?? return Err(err), rust_bools(call.args[3], context) ?? return Err(err)))
         }
         "CoreCallRecord::new" -> new_record(call, 5, context, constants)
         "CoreCallRecord::new_with_coverage" -> new_record(call, 6, context, constants)

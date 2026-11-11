@@ -13,6 +13,7 @@ use {
     core: core
     files: core.files
     unicode: core.text
+    rt: jet.runtime.process
 }
 
 // Exact ProcessSignal shape. Signal arming shares the one native interrupt
@@ -117,7 +118,7 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
     if word != "" -> argv.push(word)
 }
 
-args: fn() -[Exec.Args]> [String] Never! { args_from_argv(core.process.argv()) }
+args: fn() -[Exec.Args]> [String] Never! { args_from_argv(rt.argv()) }
 
 check: fn(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()

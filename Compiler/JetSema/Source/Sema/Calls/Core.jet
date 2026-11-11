@@ -1357,12 +1357,6 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
         return None
     }
-    // The start vector stays private to Core source; the generated `#CLI`
-    // entry reads it through `core.args`.
-    if record.module_name == "core.process" && record.member == "argv" && !environment.source_file.starts_with("<corelib>/") {
-        diagnostics.push(sema_call_core_unknown_item("core.process", "argv", span))
-        return None
-    }
     if record.module_name == "core.term" && record.member == "__stdin_line" {
         if !sema_call_core_checked_source(environment) {
             diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
