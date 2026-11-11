@@ -50,22 +50,30 @@
 // $JET_DEV_WORKTREE (CENSUS_COMMIT names another commit) plus the named
 // worktree files, so other lanes' uncommitted work never enters it; a named
 // file the worktree no longer has is deleted from the snapshot. In package
-// form in the snapshot, with the seed ($JET_SEED, else CENSUS_JET_DIR):
-// `jet check Compiler/JetCli` (sema of the CLI and every package it depends
-// on), then `jet build Compiler` in the dev shell (optimize, lowering,
-// object and link rows; it also makes the runtime pack the new compiler
-// lowers, as chain s1 does, and regenerates the sources git keeps, which
-// must come out as committed or the census prints STALE), then that
-// compiler's own `jet check Compiler/JetCli` (as
-// chain s2 does) and its `jet check Core` (every Core body, called or not;
-// it moves to the seed's check once the seed carries `jet check Core`), each
-// with keep-going and every row of its report listed at its file:line. Each
-// pass runs with its own memory cap (HEAVY_MEMORY).
-// CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
-// self-checks. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
-// census of every pass writes the snapshot's preflight receipt, which
-// `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build` require.
-// Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
+// form in the snapshot, with the seed ($JET_SEED, else CENSUS_JET_DIR), at
+// once (phase A): `jet check Compiler/JetCli` (sema of the CLI and every
+// package it depends on); `jet build Compiler` in the dev shell (optimize,
+// lowering, object and link rows; it also makes the runtime pack the new
+// compiler lowers, as chain s1 does, and regenerates the sources git keeps,
+// which must come out as committed or the census prints STALE); and
+// `jet test tests/guards` in GUARD_SHARDS shards (every guard: many walk the
+// whole tree). Then, with the compiler the build made, at once (phase B):
+// its own `jet check Compiler/JetCli` (as chain s2 does), its `jet check
+// Core` (every Core body, called or not; it moves to the seed's check once
+// the seed carries `jet check Core`) and Jetpack/Bootstrap/Check.jet of each
+// Jetpack area a named file reaches (all of them when none is named or one
+// is under CHECKER_PREFIXES; the rest are carried over). The areas run in
+// lanes packed under area_budget by their last measured peaks
+// (r14/area-peaks.tsv, updated from each check's receipt). Every pass
+// reports whatever another found; checks keep going and list every row of
+// their report at its file:line. Each pass has its own memory cap
+// (CHECK_MEMORY, BUILD_MEMORY, GUARD_MEMORY, CORE_MEMORY). CENSUS_BUILD=0
+// skips the build and what needs it, CENSUS_SELFCHECK=0 phase B. Output:
+// $JET_SCRATCH_ROOT/discovery/r14/{snap,census}, with census/phases.tsv
+// (phase, seconds, rc, peak MiB, note; one row per area). A census whose
+// RECEIPT_PASSES are clean writes the snapshot's preflight receipt, which
+// `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build`
+// require. Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
 //
 // `precommit` runs the census for a commit touching FILE... when one of them
 // is a compiler input (or a runtime, backend, Core or Jetpack source or a
@@ -118,8 +126,9 @@
 // change) in memory-sized parallel waves on a sealed export
 // ($JET_RUN_ROOT/train/sealed, read-only during the run), a red line rerun on
 // HEAD with the seed at once. A job with a gate, build or test row of its own
-// is set aside with its stack (`SET ASIDE`) and the rest lands on the same
-// build, rebuilt only when a job set aside after it changed a compiler input.
+// is set aside (`SET ASIDE`), with the jobs whose patches no longer apply
+// without it, and the rest lands on the same build, rebuilt only when a job
+// set aside after it changed a compiler input.
 // A job's side files: BASE.tests and BASE.meta beside BASE.patch, else
 // `tests` and `meta` beside the patch (a `seed:` split in meta keeps gate
 // rows from setting the job aside). Patches that share a file land as one
@@ -167,13 +176,45 @@ IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // The generated CoreSourceRows views: a patch whose only conflict is in them
 // is admitted around them (the batch regenerates them from its sources).
 GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreStructureRows.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet", "Compiler/JetFoundation/Source/Registry/EffectRoots.jet"}
-// Every heavy pass: its memory capped at HEAVY_MEMORY in its own systemd scope
-// (the whole process tree, the runtime pack's steps among them, shares the
-// cap; an address-space limit would count the fibers' reserved stacks, not
-// memory), low priority, pinned CPUs and the compiler's 1 GiB stack.
+// Test inputs the gate leaves to the tests: cases, ui and run fixtures.
+TEST_INPUT_PREFIXES: [String]{"tests/cases/", "tests/ui/", "tests/run/"}
+TEST_INPUT_MARKS: [String]{".fixture/", "/fixtures/"}
+// Every heavy pass: its memory capped in its own systemd scope (the whole
+// process tree, the runtime pack's steps among them, shares the cap; an
+// address-space limit would count the fibers' reserved stacks, not memory),
+// low priority, pinned CPUs and the compiler's 1 GiB stack. HEAVY_MEMORY is
+// a lone pass's cap; the census runs its passes at once, each under its own
+// cap (measured peaks, the census-snap6 dry run of 2026-11-11: the seed's
+// check 6.6G, its build 8.5G, a guard shard under 1G, the Core self-check
+// 2.3G).
 HEAVY_MEMORY: "32G"
+CHECK_MEMORY: "12G"
+BUILD_MEMORY: "16G"
+GUARD_MEMORY: "4G"
+CORE_MEMORY: "8G"
 HEAVY_CPUS: "16-27"
+// The census's concurrent passes share these CPUs.
+CENSUS_CPUS: "8-31"
 HEAVY_STACK: "--stack=1073741824:1073741824"
+// The census runs tests/guards as GUARD_SHARDS `--shard=I/N` runs at once.
+GUARD_SHARDS: 4
+// The Jetpack areas' check scopes share area_budget bytes (MemAvailable at
+// launch less TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX): each is capped at
+// its last measured peak (r14/area-peaks.tsv; AREA_UNMEASURED when it has
+// none) plus a fifth and AREA_MARGIN, and the areas run in lanes packed under
+// the budget (pack_lanes).
+AREA_BUDGET_MAX: 34359738368
+GIB: 1073741824
+AREA_UNMEASURED: 4294967296
+AREA_MARGIN: 268435456
+// A file under these changes the checker (the compiler and the Core it
+// checks with) or the area assembler, so it reaches every Jetpack area.
+CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
+// The census passes in the order their lines print.
+PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+// The failing Core #Tests the core-tests pass tolerates: one "FILE: test
+// title" per line (# comments), each file run by the pass.
+CORE_KNOWN: "Tools/agent/core-known.txt"
 // The ratchets every commit keeps, each run as `jet TOOL --check`, and how
 // many run at once.
 RATCHETS: [String]{
@@ -802,10 +843,10 @@ Setting: struct {
     value: String
 }
 
-// `argv` as a heavy pass, killed after `seconds` (0: no limit), run as
-// run_logged runs it.
-run_heavy: fn(dir: String, seconds: Int, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
-    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={HEAVY_MEMORY}", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"}
+// `argv` as a heavy pass, capped at `memory` on the CPUs `cpus`, killed
+// after `seconds` (0: no limit), run as run_logged runs it.
+run_heavy: fn(dir: String, seconds: Int, memory: String, cpus: String, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
+    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "taskset", "-c", cpus, "prlimit", HEAVY_STACK, "--"}
     out.extend(argv.copy())
     spec := process.cmd(out)
     if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
@@ -908,16 +949,43 @@ show: fn(lines: [String], limit: Int) -[IO]> {
 
 // --- census -----------------------------------------------------------------
 
-// The passes after the check (the check always runs).
+// The passes after the check, the guards and the build (they always run).
 Passes: struct {
     build: Bool
     selfcheck: Bool
+}
+
+// A census pass as it ran: its phases.tsv row (name, exit, wall seconds,
+// peak bytes when it was measured, a note) and the lines it prints. A pass
+// that was not run has the name "".
+PassRun: struct {
+    name: String
+    rc: Int
+    seconds: Int
+    peak: Int
+    note: String
+    lines: [String]
+}
+
+// Jetpack areas that check one after another, beside the other lanes:
+// `width` is the largest cap of its areas, what the lane holds at most, and
+// `load` their summed caps, its expected length.
+AreaLane: struct {
+    width: Int
+    load: Int
+    areas: [String]
 }
 
 census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     census(args, Passes{build: env_or("CENSUS_BUILD", "1") != "0", selfcheck: env_or("CENSUS_SELFCHECK", "1") != "0"})
 }
 
+// The collect-all census: every pass runs and reports, whatever an earlier
+// one found, except those that need what a failed pass did not make (the
+// self-checks and the areas need the build's compiler). Phase A runs the
+// seed's check, its build and the guard shards at once; phase B the
+// self-check, the Core self-check and the Jetpack area lanes. Each pass's
+// seconds (and each area's peak) go to OUT/phases.tsv.
 census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     worktree: dev_worktree()
     if worktree == "" {
@@ -979,62 +1047,447 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     }
     package_dirs: compiler_package_dirs(snap) ?? [String]{}
     seed_jet: "{compiler_dir}/jet"
-    check_report: "{out}/check-keep-going.tsv"
-    checked: run_heavy(snap, 0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}, compile_env(identity, snap, check_report), "{out}/check")
-    check_rows: report_rows(check_report)
-    print("check rc={checked} rows={check_rows}")
-    show(census_rows(check_report, snap, package_dirs), 21)
-    if checked != 0 || check_rows != 0 -> return 1
-    if !passes.build -> return 0
+    runs := [PassRun]{}
 
-    // `jet build Compiler` makes jet and, beside it, the runtime pack that jet
-    // lowers, behind the dev shell (Tools/agent/JetEnv.jet). It builds at
-    // `basic`, as the chain stages do (Chain.jet build_stage).
+    // Phase A. The build makes jet and, beside it, the runtime pack that jet
+    // lowers, behind the dev shell (Tools/agent/JetEnv.jet), at `basic` as
+    // the chain stages do (Chain.jet build_stage). The check reads no build
+    // output, so it runs beside it.
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
-    build_report: "{out}/build-keep-going.tsv"
-    built: run_heavy(snap, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--optimize=basic", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
-    build_rows: report_rows(build_report)
-    print("build rc={built} rows={build_rows}")
-    show(census_rows(build_report, snap, package_dirs), 21)
-    if built != 0 || build_rows != 0 {
-        print(clip(files.read("{out}/build.err") ?? "", 600))
-        return 1
+    task.group phase_a(limit: 2 + GUARD_SHARDS) {
+        checking: task compile_pass("check", snap, out, CHECK_MEMORY, 0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}, identity, package_dirs, 21)
+        building: task build_pass(passes, worktree, head, snap, out, seed_jet, identity, package_dirs, named)
+        shards: loop at in 0..<GUARD_SHARDS -> task guard_shard(snap, out, seed_jet, identity, at + 1)
+        runs.push(checking.join() ?? lost_pass("check"))
+        runs.push(building.join() ?? lost_pass("build"))
+        shard_runs := [PassRun]{}
+        loop shard in shards -> shard_runs.push(shard.join() ?? lost_pass("guards"))
+        runs.push(guards_run(shard_runs))
     }
-    // The sources the build regenerates and git keeps (`kept: true`) must be
-    // committed as it wrote them.
-    stale: stale_kept(worktree, head, snap, named)
-    if stale.len() > 0 {
-        print("STALE: {stale.join(", ")} differ from what `jet build Compiler` generates; build it and commit them")
-        return 1
-    }
+    if !passes.build || !pass_clean(runs, "build") -> return census_finish(runs, out)
+
+    // The runtime pack beside the built jet; then phase B.
     self_jet: "{snap}/Compiler/JetCli/.jet/build/jet"
     native_key: (files.read("{snap}/Compiler/JetCli/.jet/build/jet-runtime/native.key") ?? "").trim()
     if native_key == "" {
-        print("runtime rc=1 (the build made no runtime pack beside {self_jet})")
-        return 1
+        runs.push(PassRun{name: "runtime-pack", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=1 (the build made no runtime pack beside {self_jet})"}})
+        return census_finish(runs, out)
     }
-    print("runtime rc=0 native.key {native_key}")
-    if !passes.selfcheck -> return 0
+    runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
+    if !passes.selfcheck -> return census_finish(runs, out)
 
-    self_report: "{out}/selfcheck-keep-going.tsv"
-    selfchecked: run_heavy(snap, 1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCli"}, compile_env(identity, snap, self_report), "{out}/selfcheck")
-    self_rows: report_rows(self_report)
-    print("selfcheck rc={selfchecked} rows={self_rows}")
-    show(census_rows(self_report, snap, package_dirs), 11)
-    // Every Core body, called or not, whatever the self-check above found.
-    core_report: "{out}/selfcheck-core-keep-going.tsv"
-    core_checked: run_heavy(snap, 1200, [String]{self_jet, "check", "--threads", "12", "Core"}, compile_env(identity, snap, core_report), "{out}/selfcheck-core")
-    core_rows: report_rows(core_report)
-    print("selfcheck-core rc={core_checked} rows={core_rows}")
-    show(census_rows(core_report, snap, package_dirs), 11)
-    if selfchecked != 0 || self_rows != 0 || core_checked != 0 || core_rows != 0 -> return 1
-
+    task.group phase_b(limit: 3) {
+        self_checking: task compile_pass("selfcheck", snap, out, CHECK_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCli"}, identity, package_dirs, 11)
+        // Every Core body, called or not, whatever the self-check finds.
+        core_checking: task compile_pass("selfcheck-core", snap, out, CORE_MEMORY, 1200, [String]{self_jet, "check", "--threads", "12", "Core"}, identity, package_dirs, 11)
+        runs.extend(area_runs(snap, out, r14, self_jet, identity, named))
+        runs.push(self_checking.join() ?? lost_pass("selfcheck"))
+        runs.push(core_checking.join() ?? lost_pass("selfcheck-core"))
+    }
+    // Core's #Tests after the self-checks, so their scopes never stack on them.
+    runs.push(core_tests_pass(snap, out, seed_jet, self_jet, identity, source_identity, named))
+    code: census_finish(runs, out)
+    // The receipt vouches for RECEIPT_PASSES only.
+    if !RECEIPT_PASSES.all(name -> pass_clean(runs, name)) -> return code
     written: write_receipt(source_identity, read_identity(compiler_dir), head, named, receipt_dir()) ?? {
         print("census: the preflight receipt cannot be written: {err.message}")
         return 2
     }
     print("preflight receipt {written}")
+    code
+}
+
+// A pass whose task ended without a result.
+lost_pass: fn(name: String) -> PassRun Never! {
+    PassRun{name: name.copy(), rc: 1, seconds: 0, peak: 0, note: "lost", lines: [String]{"{name} rc=1 (its task ended without a result)"}}
+}
+
+// The first `limit` of `lines`.
+first_of: fn(lines: [String], limit: Int) -> [String] Never! {
+    out := [String]{}
+    loop line in lines {
+        if out.len() >= limit -> break
+        out.push(line.copy())
+    }
+    out
+}
+
+// Whether the pass `name` ran and came out clean.
+pass_clean: fn(runs: [PassRun], name: String) -> Bool Never! {
+    runs.any(run -> run.name == name && run.rc == 0)
+}
+
+// The census's exit: 0 when every pass that ran is clean, else 1.
+census_rc: fn(runs: [PassRun]) -> Int Never! {
+    if runs.any(run -> run.name != "" && run.rc != 0) -> 1 else -> 0
+}
+
+// A compile `argv` of the snapshot `snap` as the pass `name`: its keep-going
+// rows counted, the first `limit` of them shown.
+compile_pass: fn(name: String, snap: String, out: String, memory: String, seconds: Int, argv: [String], identity: String, package_dirs: [String], limit: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    watch: time.start()
+    report: "{out}/{name}-keep-going.tsv"
+    code: run_heavy(snap, seconds, memory, CENSUS_CPUS, argv, compile_env(identity, snap, report), "{out}/{name}")
+    rows: report_rows(report)
+    lines := [String]{"{name} rc={code} rows={rows}"}
+    lines.extend(first_of(census_rows(report, snap, package_dirs), limit))
+    if code != 0 && rows == 0 -> lines.push(clip(files.read("{out}/{name}.err") ?? "", 600))
+    PassRun{name: name.copy(), rc: if code == 0 && rows == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "cap {memory}", lines: lines}
+}
+
+// `jet build Compiler` of the snapshot, then the kept sources it regenerates
+// (`kept: true`), which must be committed as it wrote them.
+build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out: String, seed_jet: String, identity: String, package_dirs: [String], named: [String]) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    if !passes.build -> return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    run := compile_pass("build", snap, out, BUILD_MEMORY, 1800, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "build", "--optimize=basic", "--threads", "12", "Compiler"}, identity, package_dirs, 21)
+    if run.rc != 0 -> return run
+    stale: stale_kept(worktree, head, snap, named)
+    if stale.len() > 0 {
+        run.rc = 1
+        run.lines.push("STALE: {stale.join(", ")} differ from what `jet build Compiler` generates; build it and commit them")
+    }
+    run
+}
+
+// Shard `shard` of GUARD_SHARDS of tests/guards, run by the seed behind the
+// dev shell: its failing tests, and whether it finished.
+guard_shard: fn(snap: String, out: String, seed_jet: String, identity: String, shard: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    watch: time.start()
+    log: "{out}/guards.{shard}"
+    code: run_heavy(snap, 2400, GUARD_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "test", "tests/guards", "--shard={shard}/{GUARD_SHARDS}"}, compile_env(identity, snap, ""), log)
+    text: "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}"
+    lines: guard_failures(text)
+    PassRun{name: "guards", rc: if code == 0 && lines.len() == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "shard {shard}/{GUARD_SHARDS} rc={code}", lines: lines}
+}
+
+// The failing tests of a `jet test` run's output, and a line when it did not
+// finish (no `N passed, M failed` tally).
+guard_failures: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    finished := false
+    loop line in text.lines() {
+        if line.ends_with(": FAIL") -> out.push("  FAIL {line.removesuffix(": FAIL")}")
+        tally: line.partition(" passed, ")
+        if tally.sep != "" && (Int.parse(tally.head) ?? -1) >= 0 && tally.tail.ends_with(" failed") -> finished = true
+    }
+    if !finished -> out.push("  did not finish (no `N passed, M failed` tally)")
+    out
+}
+
+// The guard shards as one pass: the longest shard's seconds, every failure.
+guards_run: fn(shards: [PassRun]) -> PassRun Never! {
+    lines := [String]{}
+    seconds := 0
+    rc := 0
+    loop shard in shards {
+        if shard.seconds > seconds -> seconds = shard.seconds
+        if shard.rc != 0 {
+            rc = 1
+            lines.push("  {shard.note}:")
+            lines.extend(shard.lines.copy())
+        }
+    }
+    head := [String]{"guards rc={rc} shards={shards.len()}"}
+    head.extend(first_of(lines, 40))
+    PassRun{name: "guards", rc: rc, seconds: seconds, peak: 0, note: "{shards.len()} shards", lines: head}
+}
+
+// Core's #Tests (#6530 c2): `jet test Core/<Area>/<File>.jet` runs that Core
+// unit's tests with Core's privileges, one file per run, by the built jet
+// under its own source identity (under the seed's, Core does not compile).
+// The files: every named Core file that holds a #Test and the file of every
+// CORE_KNOWN row. A failing test that is no CORE_KNOWN row, or a file whose
+// tests did not finish, fails the pass. CENSUS_CORE_TESTS=0 skips it.
+core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: String, identity: String, source_identity: String, named: [String]) -[Env, Exec, FS, Time, Time.Wait]> PassRun Never! {
+    if env_or("CENSUS_CORE_TESTS", "1") == "0" -> return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    watch: time.start()
+    known := [String]{}
+    loop line in (files.read("{snap}/{CORE_KNOWN}") ?? "").lines() {
+        row: line.trim()
+        if row != "" && !row.starts_with("#") -> known.push(row.copy())
+    }
+    targets := [String]{}
+    loop path in named {
+        if path.starts_with("Core/") && path.ends_with(".jet") && !targets.contains(path) && (files.read("{snap}/{path}") ?? "").contains("#Test") -> targets.push(path.copy())
+    }
+    loop row in known {
+        path: row.partition(": ").head
+        if !targets.contains(path) && files.is_file("{snap}/{path}") -> targets.push(path.copy())
+    }
+    files.create_dir_all("{out}/core-tests") ?? ()
+    lines := [String]{}
+    rc := 0
+    loop path in targets {
+        log: "{out}/core-tests/{path.replace("/", "_")}"
+        // The dev shell runs under the seed's identity; the test under the built jet's own.
+        code: run_heavy(snap, 600, CORE_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", "env", "JET_COMPILER_IDENTITY={source_identity}", self_jet, "test", path}, compile_env(identity, snap, ""), log)
+        loop failure in guard_failures("{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}") {
+            if !failure.starts_with("  FAIL ") {
+                rc = 1
+                lines.push("  NEW {path}: its tests did not finish (rc={code}, {log}.out)")
+                next
+            }
+            key: "{path}: {failure.removeprefix("  FAIL ")}"
+            if known.contains(key) {
+                lines.push("  known {key}")
+                next
+            }
+            rc = 1
+            lines.push("  NEW {key}")
+        }
+    }
+    head := [String]{"core-tests rc={rc} files={targets.len()}"}
+    head.extend(first_of(lines, 40))
+    PassRun{name: "core-tests", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{targets.len()} files", lines: head}
+}
+
+// The Jetpack areas a census of `named` reaches, checked in lanes packed
+// under area_budget: an "areas" run, then one run per area checked.
+area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity: String, named: [String]) -[Exec, FS, Time, Time.Wait]> [PassRun] Never! {
+    watch: time.start()
+    env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
+    listed: run_in_env(snap, [String]{self_jet, "{snap}/Jetpack/Bootstrap/Assemble.jet", "areas", "populated"}, env)
+    if listed.code != 0 -> return [PassRun]{PassRun{name: "areas", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{"areas rc=1 (Assemble.jet areas populated: {first_line(listed)})"}}}
+    all := [String]{}
+    loop line in listed.output.lines() {
+        if line.trim() != "" -> all.push(line.trim().copy())
+    }
+    sources := [[String]]{}
+    if !reaches_every_area(named) {
+        loop area in all {
+            listing: run_in_env(snap, [String]{self_jet, "{snap}/Jetpack/Bootstrap/Assemble.jet", "areas", "sources", area}, env)
+            // An area whose sources cannot be listed is checked.
+            if listing.code != 0 {
+                sources.push(named.copy())
+                next
+            }
+            area_sources := [String]{}
+            loop line in listing.output.lines() -> area_sources.push(line.trim().copy())
+            sources.push(area_sources)
+        }
+    }
+    reached: areas_reached(all, sources, named)
+    peaks_path: "{r14}/area-peaks.tsv"
+    known: read_peaks(files.read(peaks_path) ?? "")
+    caps := [Int]{}
+    loop area in reached -> caps.push(area_cap(peak_of(known, area)))
+    lanes: pack_lanes(reached, caps, area_budget(available_gib() * GIB))
+    state: "{out}/jetpack-areas-state"
+    home: "{out}/jetpack-areas-home"
+    files.create_dir_all("{state}/jetpack-bootstrap") ?? ()
+    files.create_dir_all("{home}/cwd") ?? ()
+    checked := [PassRun]{}
+    task.group area_lanes(limit: if lanes.len() > 0 -> lanes.len() else -> 1) {
+        handles: loop lane in lanes -> task area_lane(lane.areas.copy(), reached.copy(), caps.copy(), snap.copy(), state.copy(), home.copy(), self_jet.copy(), identity.copy())
+        loop handle in handles -> checked.extend(handle.join() ?? [PassRun]{lost_pass("areas")})
+    }
+    files.remove_all(home) ?? ()
+    updated := known.copy()
+    loop run in checked {
+        if run.peak > 0 -> updated = with_peak(updated, run.name.removeprefix("area:"), run.peak)
+    }
+    files.write(peaks_path, peak_rows(updated)) ?? ()
+    rc := 0
+    lines := [String]{}
+    loop run in checked {
+        if run.rc != 0 {
+            rc = 1
+            lines.extend(run.lines.copy())
+        }
+    }
+    carried := 0
+    loop area in all {
+        if !reached.contains(area) {
+            carried += 1
+            lines.push("area {area} carried over: no named file reaches its closure and the checker is the last landed census's")
+        }
+    }
+    head := [String]{"jetpack-areas rc={rc} run={reached.len()} carried-over={carried} lanes={lanes.len()}"}
+    head.extend(lines)
+    out_runs := [PassRun]{PassRun{name: "areas", rc: rc, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{reached.len()} run, {carried} carried over, {lanes.len()} lanes", lines: head}}
+    out_runs.extend(checked)
+    out_runs
+}
+
+// One lane's areas, checked one after another by Jetpack/Bootstrap/Check.jet,
+// each in Check.jet's own memory scopes capped at its cap.
+area_lane: fn(lane_areas: [String], areas: [String], caps: [Int], snap: String, state: String, home: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> [PassRun] Never! {
+    out := [PassRun]{}
+    loop area in lane_areas {
+        watch: time.start()
+        cap := AREA_UNMEASURED
+        loop at in 0..<areas.len() {
+            if areas[at] == area -> cap = caps[at]
+        }
+        env: [Setting]{
+            Setting{name: "HOME", value: home.copy()},
+            Setting{name: "JET_HOME", value: "{home}/.jet"},
+            Setting{name: "JET", value: self_jet.copy()},
+            Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()},
+            Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()},
+            Setting{name: "JETPACK_BOOTSTRAP_SOURCE_ROOT", value: snap.copy()},
+            Setting{name: "JETPACK_WORKER", value: "census-each-{area}"},
+            Setting{name: "JET_STATE_ROOT", value: state.copy()},
+            Setting{name: "JETPACK_CHECK_MEM", value: "{cap /% 1048576}M"},
+            Setting{name: "JETPACK_CHECK_SLOTS", value: "32"},
+            Setting{name: "JETPACK_MIN_FREE_MB", value: "4000"},
+        }
+        log: "{state}/jetpack-bootstrap/census-each-{area}"
+        spec: process.cmd([String]{"taskset", "-c", CENSUS_CPUS, self_jet, "{snap}/Jetpack/Bootstrap/Check.jet", "--area", area}).timeout(time.duration_seconds(1800))
+        code: run_spec(spec, self_jet, "{home}/cwd", env, log)
+        peak: area_peak(state, area)
+        lines := [String]{"area {area} FAILED exit {code} (log {log}.out)"}
+        loop line in "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}".lines() {
+            if lines.len() > 6 -> break
+            if line.starts_with("  --> ") || line.starts_with("Error [") -> lines.push(clip(line, 200))
+        }
+        out.push(PassRun{name: "area:{area}", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: peak, note: "cap {cap /% 1048576}M", lines: lines})
+    }
+    out
+}
+
+// The check peak an area's receipt (in a `census-each-AREA-*` directory)
+// records, 0 for none.
+area_peak: fn(state: String, area: String) -[FS]> Int Never! {
+    peak := 0
+    loop entry in entries("{state}/jetpack-bootstrap") {
+        if !entry.is_dir || !entry.name.starts_with("census-each-{area}-") -> next
+        loop line in (files.read("{state}/jetpack-bootstrap/{entry.name}/check.receipt") ?? "").lines() {
+            if line.starts_with("check-peak-bytes:") -> peak = Int.parse(line.removeprefix("check-peak-bytes:").trim()) ?? peak
+        }
+    }
+    peak
+}
+
+// Whether a file of `named` changes the checker or the area assembler, or
+// none is named, so every area is checked.
+reaches_every_area: fn(named: [String]) -> Bool Never! {
+    named.len() == 0 || named.any(path -> CHECKER_PREFIXES.any(prefix -> path.starts_with(prefix)))
+}
+
+// The areas of `areas` a census of `named` checks: every one when
+// reaches_every_area, else those whose closure's sources (`sources[i]` for
+// `areas[i]`) hold a named file.
+areas_reached: fn(areas: [String], sources: [[String]], named: [String]) -> [String] Never! {
+    if reaches_every_area(named) -> return areas.copy()
+    out := [String]{}
+    loop at in 0..<areas.len() {
+        if at < sources.len() && sources[at].any(path -> named.contains(path)) -> out.push(areas[at].copy())
+    }
+    out
+}
+
+// The areas' budget when `available` bytes are free: what stays above
+// TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX; 0 (one area at a time) when
+// nothing does.
+area_budget: fn(available: Int) -> Int Never! {
+    above: available - TRAIN_FLOOR_GIB * GIB
+    if above <= 0 -> return 0
+    if above > AREA_BUDGET_MAX -> AREA_BUDGET_MAX else -> above
+}
+
+// An area's check cap: its peak (AREA_UNMEASURED when unmeasured) and a
+// fifth, plus AREA_MARGIN.
+area_cap: fn(peak: Int) -> Int Never! {
+    measured: if peak > 0 -> peak else -> AREA_UNMEASURED
+    measured + measured /% 5 + AREA_MARGIN
+}
+
+// The areas in lanes that run at once, each lane's areas one after another.
+// Largest cap first, an area opens a lane while the lanes' widths and its
+// cap fit `budget` (the first always does), else it joins the least loaded
+// lane, which is at least as wide as it is.
+pack_lanes: fn(areas: [String], caps: [Int], budget: Int) -> [AreaLane] Never! {
+    taken := [Bool]{}
+    loop _ in 0..<areas.len() -> taken.push(false)
+    lanes := [AreaLane]{}
+    used := 0
+    loop _ in 0..<areas.len() {
+        pick := -1
+        loop at in 0..<areas.len() {
+            if !taken[at] && (pick < 0 || caps[at] > caps[pick]) -> pick = at
+        }
+        taken[pick] = true
+        cap: caps[pick]
+        if lanes.len() == 0 || used + cap <= budget {
+            lanes.push(AreaLane{width: cap, load: cap, areas: [String]{areas[pick].copy()}})
+            used += cap
+            next
+        }
+        home := 0
+        loop at in 1..<lanes.len() {
+            if lanes[at].load < lanes[home].load -> home = at
+        }
+        grown := lanes[home].areas.copy()
+        grown.push(areas[pick].copy())
+        lanes[home] = AreaLane{width: lanes[home].width, load: lanes[home].load + cap, areas: grown}
+    }
+    lanes
+}
+
+// `area<TAB>bytes` rows; malformed rows are skipped.
+read_peaks: fn(text: String) -> [Setting] Never! {
+    out := [Setting]{}
+    loop line in text.lines() {
+        row: line.partition("\t")
+        if row.sep != "" && row.head != "" && (Int.parse(row.tail.trim()) ?? 0) > 0 -> out = with_peak(out, row.head, Int.parse(row.tail.trim()) ?? 0)
+    }
+    out
+}
+
+peak_of: fn(peaks: [Setting], area: String) -> Int Never! {
+    loop row in peaks {
+        if row.name == area -> return Int.parse(row.value) ?? 0
+    }
     0
+}
+
+with_peak: fn(peaks: [Setting], area: String, peak: Int) -> [Setting] Never! {
+    out := [Setting]{}
+    loop row in peaks {
+        if row.name != area -> out.push(row.copy())
+    }
+    out.push(Setting{name: area.copy(), value: "{peak}"})
+    out
+}
+
+peak_rows: fn(peaks: [Setting]) -> String Never! {
+    text := ""
+    loop row in peaks -> text = "{text}{row.name}\t{row.value}\n"
+    text
+}
+
+// Print every pass's lines in PASS_ORDER, write OUT/phases.tsv (each area's
+// row after the passes) and return census_rc.
+census_finish: fn(runs: [PassRun], out: String) -[FS, IO]> Int Never! {
+    loop name in PASS_ORDER {
+        loop run in runs {
+            if run.name == name -> loop line in run.lines -> print(line)
+        }
+    }
+    files.write("{out}/phases.tsv", phase_rows(runs)) ?? print("census: {out}/phases.tsv cannot be written: {err}")
+    code: census_rc(runs)
+    print("census rc={code} phases {out}/phases.tsv")
+    code
+}
+
+// The phases.tsv text: a header, then each run's row, passes in PASS_ORDER
+// and then the areas as they ran; peaks in MiB.
+phase_rows: fn(runs: [PassRun]) -> String Never! {
+    text := "phase\tseconds\trc\tpeak_mb\tnote\n"
+    loop name in PASS_ORDER {
+        loop run in runs {
+            if run.name == name -> text = "{text}{phase_row(run)}"
+        }
+    }
+    loop run in runs {
+        if run.name.starts_with("area:") -> text = "{text}{phase_row(run)}"
+    }
+    text
+}
+
+phase_row: fn(run: PassRun) -> String Never! {
+    "{run.name}\t{run.seconds}\t{run.rc}\t{run.peak /% 1048576}\t{run.note}\n"
 }
 
 // The kept outputs of the build in `snap` (its receipt's `kept` rows) whose
@@ -1303,7 +1756,7 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         return 0
     }
     seed: seed_dir()
-    code: run_heavy(tree, 1200, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCli"}, compile_env(read_identity(seed), tree, ""), "{tree}/check")
+    code: run_heavy(tree, 1200, HEAVY_MEMORY, HEAVY_CPUS, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCli"}, compile_env(read_identity(seed), tree, ""), "{tree}/check")
     rows: error_rows(files.read("{tree}/check.err") ?? "")
     if code == 0 && rows.len() == 0 {
         print("prescreen: clean")
@@ -1622,8 +2075,9 @@ batch_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never!
 // compose, the seed gate of every touched package (rule 1), one build, the
 // `precommit` of every changed path (rule 2), then the jobs' affected test
 // rows on a sealed export (rules 3, 4 and 7), then the commits. A job red at
-// the gate, the build or its rows is set aside with its stack (`SET ASIDE` in
-// the report) and the rest lands on the same build; the build reruns only when
+// the gate, the build or its rows is set aside (`SET ASIDE` in the report),
+// with the jobs whose patches no longer apply without it, and the rest lands
+// on the same build; the build reruns only when
 // a job set aside after it changed a compiler input. The report is
 // $JET_RUN_ROOT/batch-land.log; it ends in the stage table (rule 8). Exit: 0
 // landed (or nothing applied); 2 setup failure; 3 the worktree has tracked
@@ -1671,11 +2125,11 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     }
 
     // Rule 1: a job with a seed check row in a file it touches is set aside,
-    // with its stack, before anything is built.
+    // before anything is built.
     started = epoch()
     gated: prebuild_gate(dir, composed.applied, work, log)
     if gated.len() > 0 {
-        aside = with_stack(aside, composed.applied, gated, "a seed check row in a file it touches (the gate)", log)
+        aside = set_aside(aside, composed.applied, gated, "a seed check row in a file it touches (the gate)", log)
         revert_batch(dir, composed.applied, composed.all, log)
         composed = compose(dir, jobs, aside, log)
     }
@@ -1702,7 +2156,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
             revert_batch(dir, composed.applied, composed.all, log)
             return finish(log, stages, 5)
         }
-        aside = with_stack(aside, composed.applied, red, "a build row in a file it touches", log)
+        aside = set_aside(aside, composed.applied, red, "a build row in a file it touches", log)
         revert_batch(dir, composed.applied, composed.all, log)
         composed = compose(dir, jobs, aside, log)
         if !composed.ok -> return finish(log, stages, 5)
@@ -1727,7 +2181,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     if tested.red.len() > 0 {
         started = epoch()
         before: aside.copy()
-        aside = with_stack(aside, composed.applied, tested.red, "a red test row", log)
+        aside = set_aside(aside, composed.applied, tested.red, "a red test row", log)
         compiler := false
         loop item in composed.applied {
             if before.contains(job_key(item.job)) || !aside.contains(job_key(item.job)) -> next
@@ -2049,35 +2503,36 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
     Composed{ok: true, applied: applied, all: all, regenerated: regenerated}
 }
 
-// `aside` plus the `red` jobs of `applied` and their stacks: every later job
-// of a set-aside job's lane, or sharing a file with one. Each new one is
-// reported as `SET ASIDE LANE NAME - why`.
-with_stack: fn(aside: [String], applied: [Applied], red: [String], why: String, log: String) -[FS, IO]> [String] Never! {
+// `aside` plus the `red` jobs of `applied`. A job that depends on a red one is
+// not named here: the recompose after the set-aside leaves out every job whose
+// patch no longer applies without it ("DOES NOT APPLY", with the rest of its
+// lane), and a job that still applies stands on its own rows. Sharing a file,
+// or a lane, with a red job is not a dependency. Each new one is reported as
+// `SET ASIDE LANE NAME - why`.
+set_aside: fn(aside: [String], applied: [Applied], red: [String], why: String, log: String) -[FS, IO]> [String] Never! {
     out := aside.copy()
-    lanes := [String]{}
-    paths := [String]{}
     loop item in applied {
         key: job_key(item.job)
-        hit := red.contains(key) || lanes.contains(item.job.lane)
-        loop path in item.paths {
-            if paths.contains(path) -> hit = true
-        }
-        if !hit -> next
-        lanes.push(item.job.lane.copy())
-        paths.extend(item.paths.copy())
-        if out.contains(key) -> next
+        if !red.contains(key) || out.contains(key) -> next
         out.push(key.copy())
-        reason: if red.contains(key) -> why.copy() else -> "in the stack of a job set aside for {why}"
-        say(log, "SET ASIDE {key} - {reason}")
+        say(log, "SET ASIDE {key} - {why}")
     }
     out
 }
 
 // The package a changed `path` is checked through: Compiler/JetCli for the
 // compiler and Core (the census's check), else the nearest directory of `tree`
-// with a package.jet; "" for a path in no package (left to the tests).
+// with a package.jet; "" for a path in no package or a test input (left to the
+// tests). A cases or ui fixture is often meant to fail, so the gate never
+// checks one (a negative case's expected E0067 once set aside a whole train).
 package_of: fn(tree: String, path: String) -[FS]> String Never! {
     if path.starts_with("Compiler/") || path.starts_with("Core/") -> return "Compiler/JetCli"
+    loop index in 0..<TEST_INPUT_PREFIXES.len() {
+        if path.starts_with(TEST_INPUT_PREFIXES[index]) -> return ""
+    }
+    loop index in 0..<TEST_INPUT_MARKS.len() {
+        if path.contains(TEST_INPUT_MARKS[index]) -> return ""
+    }
     dir := path.rpartition("/").head
     loop dir != "" {
         if files.is_file("{tree}/{dir}/package.jet") -> return dir
@@ -3548,6 +4003,21 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     assert_eq(jobs[1].name, "name")
 }
 
+#Test("the gate checks no test fixture; Compiler and Core go through JetCli") {
+    assert_eq(package_of("/nonexistent", "tests/cases/core_shared_sites/a.fixture/b/main.jet"), "")
+    assert_eq(package_of("/nonexistent", "tests/ui/x/main.jet"), "")
+    assert_eq(package_of("/nonexistent", "Tools/gauntlet/entries/e/fixtures/main.jet"), "")
+    assert_eq(package_of("/nonexistent", "Core/Text/Fmt.jet"), "Compiler/JetCli")
+}
+
+#Test("a red job is set aside alone: sharing a file or a lane is not a dependency") {
+    a: Job{lane: "L", message: "/q/a.msg", patch: "/q/a.patch", name: "a"}
+    b: Job{lane: "L", message: "/q/b.msg", patch: "/q/b.patch", name: "b"}
+    c: Job{lane: "M", message: "/q/c.msg", patch: "/q/c.patch", name: "c"}
+    applied: [Applied]{Applied{job: a, paths: [String]{"x.jet"}}, Applied{job: b, paths: [String]{"y.jet"}}, Applied{job: c, paths: [String]{"x.jet"}}}
+    assert_eq(set_aside([String]{}, applied, [String]{job_key(a)}, "why", "/dev/null"), [String]{job_key(a)})
+}
+
 #Test("a job's result is read from its lines in the batch report") {
     job: Job{lane: "L", message: "/q/a.msg", patch: "/q/a.patch", name: "1-L"}
     assert_eq(job_result(job, "APPLIED L a.patch (2 files)\nCOMMITTED 0123abcd L a.patch\n", "ok"), "LANDED 0123abcd\n")
@@ -3574,4 +4044,71 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     assert_eq(train_verdict(0, "x\nPASS: a0.0.34 ready\n", "0123456789abcdef", "/w/t.log"), "RELEASE READY a0.0.34 from 0123456789; run the commands in /w/t.log")
     assert_eq(train_verdict(1, "FAIL: gains 3 < 10\nFAIL: rows\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: not released (gains 3 < 10; rows)")
     assert_eq(train_verdict(2, "boom\n", "0123456789abcdef", "/w/t.log"), "release gate 0123456789: could not start rc=2 (boom)")
+}
+
+#Test("a checker or assembler file, or no file, reaches every area; else the areas whose sources hold one") {
+    areas: [String]{"CLI", "NixEval", "Trust"}
+    sources: [[String]]{[String]{"Jetpack/CLI/Source/Main.jet", "Jetpack/Trust/Source/Key.jet"}, [String]{"Jetpack/NixEval/Source/Eval.jet"}, [String]{"Jetpack/Trust/Source/Key.jet"}}
+    assert_eq(areas_reached(areas, [[String]]{}, [String]{"Core/Text/Fmt.jet"}), areas)
+    assert_eq(areas_reached(areas, [[String]]{}, [String]{"Jetpack/Bootstrap/Assemble.jet"}), areas)
+    assert_eq(areas_reached(areas, [[String]]{}, [String]{}), areas)
+    assert_eq(areas_reached(areas, sources, [String]{"Jetpack/Trust/Source/Key.jet"}), [String]{"CLI", "Trust"})
+    assert_eq(areas_reached(areas, sources, [String]{"Tools/agent/Land.jet"}), [String]{})
+}
+
+#Test("an area's cap is its peak and a fifth plus the margin; unmeasured counts AREA_UNMEASURED") {
+    assert_eq(area_cap(1000), 1200 + AREA_MARGIN)
+    assert_eq(area_cap(0), AREA_UNMEASURED + AREA_UNMEASURED /% 5 + AREA_MARGIN)
+}
+
+#Test("areas pack largest first into lanes under the budget, the rest join the least loaded lane") {
+    lanes: pack_lanes([String]{"D", "A", "B", "E", "C"}, [Int]{1, 4, 4, 1, 4}, 9)
+    assert_eq(lanes.len(), 3)
+    assert_eq(lanes[0].areas, [String]{"A", "C"})
+    assert_eq(lanes[0].width, 4)
+    assert_eq(lanes[0].load, 8)
+    assert_eq(lanes[1].areas, [String]{"B"})
+    assert_eq(lanes[2].areas, [String]{"D", "E"})
+    assert_eq(lanes[2].width, 1)
+    one: pack_lanes([String]{"Big"}, [Int]{20}, 9)
+    assert_eq(one.len(), 1)
+    assert_eq(pack_lanes([String]{}, [Int]{}, 9).len(), 0)
+    assert_eq(pack_lanes([String]{"A", "B"}, [Int]{4, 4}, 0).len(), 1)
+    assert_eq(area_budget(33 * GIB), 21 * GIB)
+    assert_eq(area_budget(60 * GIB), AREA_BUDGET_MAX)
+    assert_eq(area_budget(8 * GIB), 0)
+}
+
+#Test("a guard shard fails on a FAIL line or a missing tally") {
+    assert_eq(guard_failures("a: pass\nb c: FAIL\n3 passed, 1 failed\n"), [String]{"  FAIL b c"})
+    assert_eq(guard_failures("a: pass\n1 passed, 0 failed\n"), [String]{})
+    assert_eq(guard_failures("a: pass\n"), [String]{"  did not finish (no `N passed, M failed` tally)"})
+    shards: [PassRun]{PassRun{name: "guards", rc: 0, seconds: 70, peak: 0, note: "shard 1/2 rc=0", lines: [String]{}}, PassRun{name: "guards", rc: 1, seconds: 90, peak: 0, note: "shard 2/2 rc=1", lines: [String]{"  FAIL x"}}}
+    run: guards_run(shards)
+    assert_eq(run.rc, 1)
+    assert_eq(run.seconds, 90)
+    assert_eq(run.lines, [String]{"guards rc=1 shards=2", "  shard 2/2 rc=1:", "  FAIL x"})
+}
+
+#Test("area peaks keep the last row per area and skip malformed rows") {
+    peaks: read_peaks("A\t10\nbad\nB\t0\nA\t12\nC\t7\n")
+    assert_eq(peak_rows(peaks), "A\t12\nC\t7\n")
+    assert_eq(peak_of(peaks, "C"), 7)
+    assert_eq(peak_of(peaks, "B"), 0)
+    assert_eq(peak_rows(with_peak(peaks, "C", 9)), "A\t12\nC\t9\n")
+}
+
+#Test("phases.tsv lists the passes in pass order, then the areas; a pass not run counts nowhere") {
+    runs: [PassRun]{
+        PassRun{name: "area:CLI", rc: 0, seconds: 50, peak: 4194304, note: "cap 4M", lines: [String]{}},
+        PassRun{name: "selfcheck", rc: 1, seconds: 30, peak: 0, note: "cap 12G", lines: [String]{}},
+        PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}},
+        PassRun{name: "check", rc: 0, seconds: 90, peak: 0, note: "cap 12G", lines: [String]{}},
+    }
+    assert_eq(phase_rows(runs), "phase\tseconds\trc\tpeak_mb\tnote\ncheck\t90\t0\t0\tcap 12G\nselfcheck\t30\t1\t0\tcap 12G\narea:CLI\t50\t0\t4\tcap 4M\n")
+    assert_eq(census_rc(runs), 1)
+    assert_eq(census_rc([PassRun]{PassRun{name: "", rc: 1, seconds: 0, peak: 0, note: "", lines: [String]{}}}), 0)
+    assert(pass_clean(runs, "check"))
+    assert(!pass_clean(runs, "selfcheck"))
+    assert(!pass_clean(runs, "build"))
 }

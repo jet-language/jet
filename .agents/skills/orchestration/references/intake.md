@@ -211,6 +211,7 @@ runs and one 39-minute full test pass. These rules bind every train:
 `Tools/agent/Land.jet batch` runs rules 1 to 4, 7 and 8 itself: the seed gate
 of every touched package from an empty directory, one `precommit`, the
 affected rows in memory-sized waves on a sealed export with an immediate
-rerun on `HEAD`, the set-aside of a red job with its stack, and the stage
-table at the end of `batch-land.log`. Rules 5 and 6 are the lander's when it
-cuts and schedules the trains.
+rerun on `HEAD`, the set-aside of a red job (with only the jobs whose patches
+no longer apply without it; a negative test fixture is never gated), and the
+stage table at the end of `batch-land.log`. Rules 5 and 6 are the lander's
+when it cuts and schedules the trains.
