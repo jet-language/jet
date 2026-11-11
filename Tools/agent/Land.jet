@@ -1410,23 +1410,6 @@ last_of: fn(lines: [String], count: Int) -> [String] Never! {
     out
 }
 
-// The last `count` lines of `text`.
-last_lines: fn(text: String, count: Int) -> [String] Never! {
-    lines := [String]{}
-    loop line in text.trim_end().lines() -> lines.push(line.copy())
-    last_of(lines, count)
-}
-
-// The first `count` lines of `text`.
-first_lines: fn(text: String, count: Int) -> [String] Never! {
-    lines := [String]{}
-    loop line in text.trim_end().lines() {
-        if lines.len() >= count -> break
-        lines.push(line.copy())
-    }
-    lines
-}
-
 // A command's output, then its error output.
 both: fn(ran: Ran) -> String Never! { "{ran.output}{ran.errors}" }
 
@@ -1638,7 +1621,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     dirty: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"})
     if dirty.code != 0 || dirty.output.trim() != "" {
         say(log, "worktree has tracked changes; refusing")
-        loop line in first_lines(dirty.output, 10) -> say(log, line)
+        loop line in dirty.output.trim_end().first_lines(10) -> say(log, line)
         return 3
     }
     parsed: git(dir, [String]{"rev-parse", "--verify", "HEAD"})
@@ -1690,7 +1673,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     }
     if regenerate {
         rows: seed_run(dir, [String]{"Tools/agent/CoreSourceRows.jet"}, 900)
-        say(log, "CoreSourceRows regeneration rc={rows.code} {last_lines(both(rows), 1).join(" ")}")
+        say(log, "CoreSourceRows regeneration rc={rows.code} {both(rows).trim_end().last_lines(1).join(" ")}")
         if rows.code != 0 {
             say(log, "CoreSourceRows regeneration FAILED; reverting")
             revert_batch(dir, applied, all, log)
@@ -1699,7 +1682,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     }
     // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
     generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
-    say(log, "RuntimeGenerators rc={generated.code} {last_lines(both(generated), 2).join(" ")}")
+    say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")
     regenerated := [String]{}
     loop path in dirty_paths(dir) {
         if !all.contains(path) -> regenerated.push(path)
@@ -1800,7 +1783,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         if want == "" || want != chained {
             shown_want: if want == "" -> "none" else -> want.copy()
             failure = "the commit chain's tree {short_sha(tip)} is not the verified worktree ({shown_want}): some changed path is in no commit"
-            if want != "" -> say(log, "tree diff (chain vs verified): {first_lines(git(dir, [String]{"diff-tree", "-r", "--name-status", chained, want}).output, 20).join(" ")}")
+            if want != "" -> say(log, "tree diff (chain vs verified): {git(dir, [String]{"diff-tree", "-r", "--name-status", chained, want}).output.trim_end().first_lines(20).join(" ")}")
         }
     }
     // Publish every commit at once: HEAD moves only if it is still the pre-batch HEAD.
@@ -1891,7 +1874,7 @@ revert_batch: fn(dir: String, applied: [Applied], all: [String], log: String) -[
     left: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output
     if left.trim() == "" -> return
     say(log, "REVERT LEFT THE WORKTREE DIRTY")
-    loop line in first_lines(left, 20) -> say(log, line)
+    loop line in left.trim_end().first_lines(20) -> say(log, line)
     files.write("{run_root()}/lander.stop", "") ?? ()
 }
 
@@ -1907,7 +1890,7 @@ unstick: fn(dir: String) -[Exec, FS, Time.Wait]> String Never! {
     loop path in added -> files.remove(files.join(dir, path)) ?? ()
     tracked: nul_paths(git(dir, [String]{"diff", "--name-only", "-z", "--diff-filter=MD", "HEAD"}))
     if tracked.len() > 0 -> git_paths(dir, "", [String]{"checkout", "-q"}, tracked)
-    left: first_lines(git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output, 1000000).len()
+    left: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"}).output.trim_end().lines().len()
     "{summary} left: {left}"
 }
 
@@ -2190,7 +2173,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
     prune_bases(base)
     seeding := process.cmd([String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
     loop setting in unit_env(tools) -> seeding = seeding.env(setting.name, setting.value)
-    seeded: if seeding.run() == .Ok(receipt) -> last_lines("{receipt.output}{receipt.errors}", 1).join("") else -> "seed-published: Tools/agent/Chain.jet could not start"
+    seeded: if seeding.run() == .Ok(receipt) -> "{receipt.output}{receipt.errors}".trim_end().last_lines(1).join("") else -> "seed-published: Tools/agent/Chain.jet could not start"
     // A jetpack whose inputs did not change is copied now; otherwise the golden run builds one after its census.
     jetpack: if jetpack_reuse(repo, base, sha) -> "jetpack ready" else -> "jetpack build follows the golden census"
     Step{ok: true, line: "publish-base: {state} {dir}; {seeded}; {jetpack}; {want_goldens(tools, base, sha)}"}
@@ -2316,11 +2299,11 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
     }
     listed: run_in_env(tree, [String]{"{dir}/jet", "test", "Compiler", "--profile", "golden", "--optimize=none", "--list"}, compile_env(identity, tree, ""))
     rows: golden_rows(listed.output, exclude) ?? {
-        files.write("{dir}/goldens.failed", "golden selection failed\n{err.message}\n{last_lines(listed.errors, 20).join("\n")}\n") ?? ()
+        files.write("{dir}/goldens.failed", "golden selection failed\n{err.message}\n{listed.errors.trim_end().last_lines(20).join("\n")}\n") ?? ()
         return 1
     }
     if rows.len() == 0 {
-        files.write("{dir}/goldens.failed", "golden selection failed: no rows\n{last_lines(listed.errors, 20).join("\n")}\n") ?? ()
+        files.write("{dir}/goldens.failed", "golden selection failed: no rows\n{listed.errors.trim_end().last_lines(20).join("\n")}\n") ?? ()
         return 1
     }
     selection: "{work}/select.txt"
@@ -2353,9 +2336,9 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
             errors: files.read("{work}/goldens.err") ?? ""
             output: files.read("{work}/goldens.out") ?? ""
             clipped := [String]{}
-            loop line in last_lines(output, 20) -> clipped.push(clip(line, 400))
+            loop line in output.trim_end().last_lines(20) -> clipped.push(clip(line, 400))
             size: (files.read_bytes(results) ?? [U8]{}).len()
-            files.write("{dir}/goldens.failed", "rc={code}: no counts after {secs}s; results bytes {size}\n-- stderr tail\n{last_lines(errors, 60).join("\n")}\n-- stdout tail\n{clipped.join("\n")}\n") ?? ()
+            files.write("{dir}/goldens.failed", "rc={code}: no counts after {secs}s; results bytes {size}\n-- stderr tail\n{errors.trim_end().last_lines(60).join("\n")}\n-- stdout tail\n{clipped.join("\n")}\n") ?? ()
             files.write("{dir}/goldens.err", errors) ?? ()
             files.write("{dir}/goldens.stdout", output) ?? ()
             print("{stamp()} goldens {short_sha(sha)}: FAILED rc={code}")
@@ -2588,7 +2571,7 @@ train_verdict: fn(code: Int, output: String, head: String, out: String) -> Strin
         }
         return "release gate {short_sha(head)}: not released ({reasons.join("; ")})"
     }
-    "release gate {short_sha(head)}: could not start rc={code} ({clip(last_lines(output, 1).join(""), 200)})"
+    "release gate {short_sha(head)}: could not start rc={code} ({clip(output.trim_end().last_lines(1).join(""), 200)})"
 }
 
 // --- preflight receipts -----------------------------------------------------
