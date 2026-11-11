@@ -222,7 +222,9 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         loop function in module_row.functions {
             symbol: function.symbol
             if symbol.visibility > 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
-            if sema_liveness_is_root(function.declaration, is_entry) -> next
+            // A runtime binding is the jet.runtime interface's member: Core,
+            // not the runtime package, calls a `priv` one (#6615).
+            if sema_liveness_is_root(function.declaration, is_entry) || sema_guest_runtime_binding(module_row.package_identity, function.declaration) -> next
             sema_liveness_add_candidate(candidates, symbol.id.key, SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0})
         }
         loop constant in module_row.constants {

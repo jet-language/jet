@@ -310,7 +310,12 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
         }
     }
     core_private_seam: graph.modules[module_index].module_identity.starts_with("<corelib>/") && graph.modules[caller_index].module_identity.starts_with("<corelib>/")
-    export: (if registered_source_target || core_private_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? return None
+    export: (if registered_source_target || core_private_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? {
+        // A `priv` jet.runtime member is Core's alone (#6615): another caller
+        // gets the ordinary visibility error, not "has no item".
+        if source_name.starts_with("jet.runtime.") && sema_registration_direct_symbol(graph.modules[module_index], member) != None -> diagnostics.push(sema_call_private_member(member, span))
+        return None
+    }
     row: sema_call_export_function_row(environment, program, export) ?? {
         diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
         return None
@@ -376,7 +381,7 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
-            diagnostics.push(sema_error("E0605", span, "`{shown}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{shown}` from inside its module, or remove `priv` from its module or field"))
+            diagnostics.push(sema_call_private_member(shown, span))
         } else {
             diagnostics.push(sema_call_import_member_unknown(graph.modules[module_index].module_name, shown, alias_span))
         }
@@ -409,6 +414,12 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
     } else {
         return unhandled
     }
+}
+
+// E0605: `shown`, a member as written, is a `priv` declaration of a module
+// the caller is outside of.
+sema_call_private_member: fn(shown: String, span: Span) -> Diagnostic {
+    sema_error("E0605", span, "`{shown}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{shown}` from inside its module, or remove `priv` from its module or field")
 }
 
 // Whether the file module `alias` imports declares the inline module

@@ -40,7 +40,8 @@ jet_driver_unknown_runtime_interface_module: fn(module_name: String, span: Span)
 // `jet_std_time_sleep_duration_ns`). None for a top-level declaration.
 // `declaration` is "" when the Jet signature uses a form the interface
 // doesn't render (type parameters, or a parameter convention, default, or
-// variadic); the runtime pack build refuses that row.
+// variadic), or the member is `priv(package)`; the runtime pack build refuses
+// that row.
 jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> RuntimeInterfaceRow? Never! {
     module_path: sema_inline_member_module(declaration.name)
     if module_path == "" -> return None
@@ -50,9 +51,18 @@ jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> Runti
 
 // The member's Jet declaration, as the runtime declares it: its parameters,
 // effect row and result. A member without a row is pure, and a unit-fallible
-// one without a row writes its `E!` with no arrow.
+// one without a row writes its `E!` with no arrow. A `priv` member keeps its
+// `priv`: the interface module is a top-level unit of its own package, so
+// only Core reaches it (Calls/Core.jet core_private_seam) and any other
+// caller gets E0605.
 jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) -> String Never! {
-    if declaration.type_params.len() > 0 -> return ""
+    if declaration.type_params.len() > 0 || declaration.is_package_pub -> return ""
+    signature: jet_driver_runtime_interface_signature(declaration, member)
+    if signature == "" || declaration.is_pub -> return signature
+    "priv {signature}"
+}
+
+jet_driver_runtime_interface_signature: fn(declaration: Func, member: String) -> String Never! {
     params := [String]{}
     loop param in declaration.params {
         if param.convention != AccessConvention.Read || param.default != None || param.variadic -> return ""

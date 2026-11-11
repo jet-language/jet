@@ -175,7 +175,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     interface_rows := [RuntimeInterfaceRow]{}
     loop row in checked.c_exports {
         found: row.runtime_interface ?? next
-        if found.declaration == "" -> return jet_driver_compile_escaped_failure("the runtime's public function `{found.module_name}.{found.member}` has a signature the jet.runtime interface can't render (type parameters, or a parameter convention, default or variadic)")
+        if found.declaration == "" -> return jet_driver_compile_escaped_failure("the runtime's public function `{found.module_name}.{found.member}` has a signature the jet.runtime interface can't render (type parameters, or a parameter convention, default or variadic) or is `priv(package)`")
         interface_rows.push(RuntimeInterfaceRow{module_name: found.module_name.copy(), member: found.member.copy(), declaration: found.declaration.copy(), symbol: found.symbol.copy()})
     }
     interface_text: jet_driver_runtime_interface_file(interface_rows)
