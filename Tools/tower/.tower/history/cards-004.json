@@ -93394,6 +93394,114 @@
         }
       ],
       "retiredAt": "2026-11-11T02:35:31.062Z"
+    },
+    {
+      "id": "c0e3wgi0",
+      "num": 6550,
+      "title": "Native DispatchReport lacks trace() and failures() (D-EVENT2)",
+      "body": "D-EVENT2 (syntax-decisions.md:4372-4373, spec.md:3589-3590) says DispatchReport exposes failures() and an ordered EventTrace via trace(). Natively none of it exists: sema EventHandles.jet:87 has only state/accepted/delivered_handlers; IR BuildEvents.jet:64-66; runtime AsyncEvents.jet DispatchReport32 holds only refs/accepted/state/delivered, with no trace or failure storage, and DeadlineExceeded/HandlerFailed transitions are not recorded. The JS prelude has jet_dispatch_report_trace/failures (Event.js:826-830). The 4 tests/cases/async_event rows expecting traces such as 'queued -> running -> terminal:Cancelled' fail. Found by IrTypes-3, 2026-11-01.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07 22:20: proof of 25a878c83e (s1 built from origin/dev 25a878c83e by a0_035; cases --filter async_event; 4 runs): not met. 3 runs 6/6 PASS and 1 run with 2 FAILs (an earlier run also FAILed scope_cancel), so the rows are scheduling-dependent. (1) cancel_and_close_winners: the handler can start before the cancel/close wins (queued -> running -> Delivered). (2) scope_cancel_and_inherited_deadline: exit 70, E3013 with a task parked on a channel receive after owner teardown. Returned to G1Lead as top priority."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c1 scope (TestSystemLead-2 survey at 574a9fd134): the IR already routes DispatchReport failures/trace to runtime symbols, but sema doesn't list either method on DispatchReport and the runtime has neither. The native dispatch loop (Compiler/JetRuntime/Source/AsyncEvents.jet) ignores handler results: no HandlerFailed state, no Collect/Stop/Log/Ignore policy, no panic capture, no trace entries. Work: record failures (typed error) and trace entries in the runtime; add both methods in EventHandles.jet; add runtime functions for failures (typed list) and trace (EventTrace). Reference meaning: Compiler/Prelude/Web/Core/Event.js:431-483. Rows expect e.g. collect=true handlers=2 failures=2 and the trace queued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "2026-11-02 Main: landed 9cca72d39f (Main-9): `dead_code: keep` keeps the unreached functions' code in the image; before, the keep was recorded but the function bodies were still dropped. Wave 36: goldens 1207/0 regressions, ui lost 0, cases lost 0."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "Wave 34 (2026-11-02): IrTypes-65b (IrTypes-3 tests-green batch 2, with the 4 #6550 known-failing rows) not landed. Two losses, isolated by prefix bisect: (1) tests/ui/tracked_origin_fact_retired: the new unknown-`$` E0302 text (\"`$track_origin` is not a compiler-owned fact\" + the registered facts list) replaced the old field-access E0302, and its snapshot was not updated. (2) tests/cases/fmt/fmt_preserves_unsafe_site_modes_and_postfix_obligations: the parser now records `#Unsafe(\"…\")` as a block policy declaration, so `jet fmt` writes `#Unsafe(\"calling audited reader\", obligations: .Skip)`, which the source never says. IrTypes-64b (prerequisite; CardClose-66b depends on it) is also out: its condition collect-all change checks arm bodies after a failed pattern condition, so tests/ui/named_pattern_unnamed_case gains a cascaded E0107 (`reason` is unbound) after E0303. Patches stay in $JET_SCRATCH_ROOT/lanes/Main/wave/34/in/."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Native DispatchReport.trace() returns the ordered EventTrace and failures() the handler failures, with the same meaning as the web tier, and the 4 tests/cases/async_event rows pass on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "25a878c83e and a2342f7166: release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). PASS: corelib/async_event_overflow_and_failure_policies, async_event_scheduler_dispatch_and_invalid_capacity, async_event_scope_cancel_and_inherited_deadline_are_single_terminal, async_event_cancel_and_close_winners_remain_immutable_after_task_drain, event_observations/async_event_jit_callback_result_contract_matches_other_tiers, single_thread_rc/an_async_event_handler_keeps_counts_locked.",
+          "at": "2026-11-08T06:12:38.340Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T21:39:53.381Z",
+      "updated": "2026-11-08T06:12:45.548Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-08T06:12:45.548Z",
+      "questions": [],
+      "retiredAt": "2026-11-11T06:29:37.728Z"
+    },
+    {
+      "id": "c0xoy1gg",
+      "num": 6655,
+      "title": "Web tiers print the Rust-era 3-line error report while native prints the current form (I9)",
+      "body": "From #6651 (TestSystemLead-2 p87). Native error reports use the README 'failed here' form with source excerpts; the JS and Wasm frames, and the expected outputs of tests/cases/web_build/web_two_hop_journey_matches_all_execution_tiers and web_edge_preserves_one_error_wire_across_js_and_wasm, still use the 3-line Rust-era form. One error-report meaning must hold on every tier: the web hosts marshal the shared runtime's report and never re-encode it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Cases web_build/web_two_hop_journey_matches_all_execution_tiers and web_edge_preserves_one_error_wire_across_js_and_wasm PASS with one expected error report (the native form) on native, JS and Wasm tiers; the web host renders the runtime's report and holds no report formatting of its own.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2521741f43: release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). PASS: web_build/web_two_hop_journey_matches_all_execution_tiers and web_build/web_edge_preserves_one_error_wire_across_js_and_wasm.",
+          "at": "2026-11-08T06:12:40.109Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:54:40.968Z",
+      "updated": "2026-11-08T06:12:47.026Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-08T06:12:47.026Z",
+      "questions": [],
+      "retiredAt": "2026-11-11T06:29:37.729Z"
     }
   ]
 }
