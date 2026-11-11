@@ -49,12 +49,6 @@ run: fn() {
     process.exit(gate(repo_root(), args[1], args[3..<args.len()]))
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The checkout holding this tool, else the working directory.
 repo_root: fn() -[Env, FS]> String Never! {
     tool: "/Tools/ci/CiEvidence.jet"
@@ -150,11 +144,11 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     stdout_file: "{dir}/command.stdout"
     stderr_file: "{dir}/command.stderr"
     toolchain: "{dir}/toolchain.txt"
-    github: env_or("GITHUB_ACTIONS", "") == "true" || env_or("GITHUB_ACTIONS", "") == "1"
+    github: (process.env_nonempty("GITHUB_ACTIONS") ?? "") == "true" || (process.env_nonempty("GITHUB_ACTIONS") ?? "") == "1"
     checkout: run_text([String]{"git", "-C", root, "rev-parse", "--verify", "HEAD"}, root)
-    candidate: env_or("JET_CI_CANDIDATE_COMMIT", env_or("GITHUB_SHA", checkout))
-    runner_os := env_or("RUNNER_OS", env_or("GITHUB_RUNNER_OS", ""))
-    runner_arch := env_or("RUNNER_ARCH", env_or("GITHUB_RUNNER_ARCH", ""))
+    candidate: process.env_nonempty("JET_CI_CANDIDATE_COMMIT") ?? (process.env_nonempty("GITHUB_SHA") ?? checkout)
+    runner_os := process.env_nonempty("RUNNER_OS") ?? (process.env_nonempty("GITHUB_RUNNER_OS") ?? "")
+    runner_arch := process.env_nonempty("RUNNER_ARCH") ?? (process.env_nonempty("GITHUB_RUNNER_ARCH") ?? "")
     problems := [String]{}
 
     // A reused report directory can otherwise leave a previous pass beside a
@@ -177,9 +171,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     nix: run_text([String]{"nix", "--version"}, root)
     files.write(toolchain, "=== nix ===\n{if nix == "" -> "(unavailable)" else -> nix}\n") ?? problems.push("cannot write toolchain evidence: {toolchain}")
 
-    artifact_name: env_or("JET_CI_ARTIFACT_NAME", "not-published")
-    signature_candidate: env_or("JET_CI_SIGNATURE_CANDIDATE", candidate)
-    release_candidate: env_or("JET_CI_RELEASE_CANDIDATE", candidate)
+    artifact_name: process.env_nonempty("JET_CI_ARTIFACT_NAME") ?? "not-published"
+    signature_candidate: process.env_nonempty("JET_CI_SIGNATURE_CANDIDATE") ?? candidate
+    release_candidate: process.env_nonempty("JET_CI_RELEASE_CANDIDATE") ?? candidate
     evidence: Evidence{
         root: root.copy(), dir: dir.copy(), candidate: candidate.copy(), checkout: checkout.copy(),
         runner_os: runner_os.copy(), runner_arch: runner_arch.copy(), artifact_name: artifact_name.copy(),
@@ -190,7 +184,7 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
 
     if candidate == "" || !is_hex(candidate) -> problems.push("missing or invalid candidate commit identity")
     if candidate.len() != 40 -> problems.push("candidate commit identity must be a 40-character SHA-1")
-    github_sha: env_or("GITHUB_SHA", "")
+    github_sha: process.env_nonempty("GITHUB_SHA") ?? ""
     if github_sha != "" && candidate != github_sha -> problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
     if checkout != "" && candidate != checkout -> problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
     if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") -> problems.push("artifact name does not identify candidate: {artifact_name}")
@@ -237,10 +231,10 @@ start_failed: fn(evidence: Evidence, reason: String) -[Env, FS, IO]> Int Never! 
 // Write candidate.txt then receipt.txt, each through a temporary file, and
 // confirm every evidence file is a regular file.
 finalize: fn(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> Bool Never! {
-    matrix: env_or("JET_CI_SUPPORT_MATRIX", "{e.runner_os}/{e.runner_arch}")
-    run_id: env_or("GITHUB_RUN_ID", "local")
-    attempt: env_or("GITHUB_RUN_ATTEMPT", "1")
-    ref: env_or("GITHUB_REF", "local")
+    matrix: process.env_nonempty("JET_CI_SUPPORT_MATRIX") ?? "{e.runner_os}/{e.runner_arch}"
+    run_id: process.env_nonempty("GITHUB_RUN_ID") ?? "local"
+    attempt: process.env_nonempty("GITHUB_RUN_ATTEMPT") ?? "1"
+    ref: process.env_nonempty("GITHUB_REF") ?? "local"
     shown: if e.candidate == "" -> "unknown" else -> e.candidate.copy()
     bindings: "source_candidate_commit={e.candidate}\ntoolchain_candidate_commit={e.candidate}\nartifact_candidate_commit={e.candidate}\nsignature_candidate_commit={e.signature_candidate}\ntest_candidate_commit={e.candidate}\nsupport_matrix_candidate_commit={e.candidate}\nprovenance_candidate_commit={e.candidate}\nrelease_metadata_candidate_commit={e.release_candidate}\n"
     manifest: "schema=jet.ci-candidate.v1\ncandidate_commit={e.candidate}\n{bindings}source_revision={if e.checkout == "" -> "unknown" else -> e.checkout}\nsource_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nartifact_name={e.artifact_name}\nsignature=not-required-for-ci-test-gate\nsupport_matrix={matrix}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
@@ -249,8 +243,8 @@ finalize: fn(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> 
     quoted := ""
     loop arg in e.command -> quoted = "{quoted}{shell_quote(arg)} "
     receipt := "schema=jet.ci-evidence.v1\nstatus={status}\ncandidate_commit={shown}\ncandidate_manifest={candidate_path}\n{bindings}"
-    receipt = "{receipt}runner_os={e.runner_os}\nrunner_arch={e.runner_arch}\nworkflow={env_or("GITHUB_WORKFLOW", "CI")}\njob={env_or("GITHUB_JOB", "local")}\nrun_id={run_id}\nrun_attempt={attempt}\nevent={env_or("GITHUB_EVENT_NAME", "local")}\nref={ref}\n"
-    receipt = "{receipt}test_shard={env_or("JET_TEST_SHARD", "not-applicable")}\ntest_shard_count={env_or("JET_TEST_SHARD_COUNT", "not-applicable")}\nsupport_matrix={matrix}\nartifact_name={e.artifact_name}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
+    receipt = "{receipt}runner_os={e.runner_os}\nrunner_arch={e.runner_arch}\nworkflow={process.env_nonempty("GITHUB_WORKFLOW") ?? "CI"}\njob={process.env_nonempty("GITHUB_JOB") ?? "local"}\nrun_id={run_id}\nrun_attempt={attempt}\nevent={process.env_nonempty("GITHUB_EVENT_NAME") ?? "local"}\nref={ref}\n"
+    receipt = "{receipt}test_shard={process.env_nonempty("JET_TEST_SHARD") ?? "not-applicable"}\ntest_shard_count={process.env_nonempty("JET_TEST_SHARD_COUNT") ?? "not-applicable"}\nsupport_matrix={matrix}\nartifact_name={e.artifact_name}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
     receipt = "{receipt}source_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nstarted_at={e.started_at}\ncommand_exit={command_exit}\ncommand={quoted}\nstdout={e.dir}/command.stdout\nstderr={e.dir}/command.stderr\nsignature=not-required-for-ci-test-gate\npublication=github-actions-artifact\n"
     if !replace("{e.dir}/receipt.txt", receipt) -> return false
     loop path in evidence_paths(e.dir) {

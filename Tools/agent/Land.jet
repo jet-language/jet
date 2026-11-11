@@ -307,19 +307,13 @@ first_line: fn(ran: Ran) -> String Never! {
     text.partition("\n").head.copy()
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The jet binary the lane check runs: $JET, else the first `jet` file on
 // PATH, as an absolute path (LaneCheck.jet needs a binary path, not a
 // command name); "jet" when neither names one.
 jet_binary: fn() -[Env, FS]> String Never! {
-    named: env_or("JET", "jet")
+    named: process.env_nonempty("JET") ?? "jet"
     if named.contains("/") -> return files.canonicalize(named) ?? named.copy()
-    loop dir in env_or("PATH", "").split(":") {
+    loop dir in (process.env_nonempty("PATH") ?? "").split(":") {
         if dir == "" -> next
         candidate: files.join(dir, named)
         if files.is_file(candidate) -> return files.canonicalize(candidate) ?? candidate.copy()
@@ -339,7 +333,9 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+state_root: fn() -[Env, FS]> String Never! {
+    root("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev")
+}
 
 scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
 
@@ -681,7 +677,7 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
 
 // Why a speed lane's stack may not be queued, "" when it may.
 pareto_refusal: fn(lane: String, bases: [String]) -[Env, FS]> String Never! {
-    approved_file: env_or("PARETO_APPROVED", "{scratch_root()}/lanes/Main/pareto-approved.txt")
+    approved_file: process.env_nonempty("PARETO_APPROVED") ?? "{scratch_root()}/lanes/Main/pareto-approved.txt"
     approved := false
     if files.read(approved_file) == .Ok(text) {
         loop line in text.lines() {
@@ -964,7 +960,7 @@ AreaLane: struct {
 }
 
 census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
-    census(args, Passes{build: env_or("CENSUS_BUILD", "1") != "0", selfcheck: env_or("CENSUS_SELFCHECK", "1") != "0"})
+    census(args, Passes{build: (process.env_nonempty("CENSUS_BUILD") ?? "1") != "0", selfcheck: (process.env_nonempty("CENSUS_SELFCHECK") ?? "1") != "0"})
 }
 
 // The collect-all census: every pass runs and reports, whatever an earlier
@@ -998,13 +994,13 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         print("census: `{out}` cannot be created: {err}")
         return 2
     }
-    compiler_dir: env_or("CENSUS_JET_DIR", seed_dir())
-    identity: env_or("CENSUS_JET_IDENTITY", read_identity(compiler_dir))
+    compiler_dir: process.env_nonempty("CENSUS_JET_DIR") ?? seed_dir()
+    identity: process.env_nonempty("CENSUS_JET_IDENTITY") ?? read_identity(compiler_dir)
     if identity == "" {
         print("census: {compiler_dir} has no IDENTITY")
         return 2
     }
-    parsed: git(worktree, [String]{"rev-parse", "--verify", "{env_or("CENSUS_COMMIT", "HEAD")}^{{commit}}"})
+    parsed: git(worktree, [String]{"rev-parse", "--verify", "{process.env_nonempty("CENSUS_COMMIT") ?? "HEAD"}^{{commit}}"})
     if parsed.code != 0 {
         print("EXPORT FAILED: {first_line(parsed)}")
         return 2
@@ -1186,7 +1182,9 @@ guards_run: fn(shards: [PassRun]) -> PassRun Never! {
 // CORE_KNOWN row. A failing test that is no CORE_KNOWN row, or a file whose
 // tests did not finish, fails the pass. CENSUS_CORE_TESTS=0 skips it.
 core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: String, identity: String, source_identity: String, named: [String]) -[Env, Exec, FS, Time, Time.Wait]> PassRun Never! {
-    if env_or("CENSUS_CORE_TESTS", "1") == "0" -> return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    if (process.env_nonempty("CENSUS_CORE_TESTS") ?? "1") == "0" {
+        return PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}}
+    }
     watch: time.start()
     known := [String]{}
     loop line in (files.read("{snap}/{CORE_KNOWN}") ?? "").lines() {
@@ -1926,7 +1924,9 @@ tools_checkout: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
     dev_worktree()
 }
 
-seeds_root: fn() -[Env, FS]> String Never! { root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds") }
+seeds_root: fn() -[Env, FS]> String Never! {
+    root("JET_SEEDS", "{process.env_nonempty("XDG_DATA_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.local/share"}/jet-seeds")
+}
 
 base_root: fn() -[Env, FS]> String Never! { root("JET_BASE_ROOT", "{scratch_root()}/discovery/base") }
 
@@ -1935,7 +1935,7 @@ base_root: fn() -[Env, FS]> String Never! { root("JET_BASE_ROOT", "{scratch_root
 unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
     seed: seed_dir()
     env := [Setting]{
-        Setting{name: "PATH", value: env_or("PATH", "")},
+        Setting{name: "PATH", value: process.env_nonempty("PATH") ?? ""},
         Setting{name: "JET_STATE_ROOT", value: state_root()},
         Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()},
         Setting{name: "JET_RUN_ROOT", value: run_root()},
@@ -2885,7 +2885,7 @@ run_lines: fn(lines: [TestLine], picked: [Int], tree: String, jet_dir: String, g
     if width < 1 -> width = 1
     if width > TEST_JOBS_MAX -> width = TEST_JOBS_MAX
     identity: read_identity(seed_dir())
-    path: env_or("PATH", "")
+    path: process.env_nonempty("PATH") ?? ""
     specs := [ProcessSpec]{}
     loop at in picked {
         spec := process.cmd(capped(gib, [String]{"bash", "-c", lines[at].line})).cwd(tree).timeout(time.duration_seconds(TEST_SECONDS)).output_limit(268435456)
@@ -3485,7 +3485,7 @@ golden_census: fn(repo: String, base: String, sha: String, dir: String, work: St
     print("{stamp()} goldens {short_sha(sha)}: {rows.len()} examples with {dir}/jet")
     // Golden examples run host tools (C compilers, interpreters) that only the
     // dev shell (Tools/agent/JetEnv.jet) supplies until jet does.
-    cpus: env_or("SLOT_CPUS", "")
+    cpus: process.env_nonempty("SLOT_CPUS") ?? ""
     argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=24G", "-p", "MemorySwapMax=0", "timeout", "7200", "prlimit", "--core=0", HEAVY_STACK, "--"}
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "{tree}/Tools/agent/JetEnv.jet", "{dir}/jet", "test", "Compiler", "--profile", "golden", "--optimize=none", "--cases={selection}", "--jobs=6", "--time-limit=120s", "--results={results}"})
@@ -3611,7 +3611,7 @@ jetpack_build: fn(repo: String, base: String, sha: String, tree: String, tmp: St
     print("{stamp()} jetpack {short_sha(sha)}: hosted build with {dir}/jet")
     files.create_dir_all(tmp) ?? ()
     argv := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax=16G", "-p", "MemorySwapMax=0", "timeout", "6000", "prlimit", "--core=0", "--"}
-    cpus: env_or("SLOT_CPUS", "")
+    cpus: process.env_nonempty("SLOT_CPUS") ?? ""
     if cpus != "" -> argv.extend([String]{"taskset", "-c", cpus})
     argv.extend([String]{"{dir}/jet", "Jetpack/Bootstrap/Check.jet", "--hosted"})
     env := compile_env(read_identity(dir), tree, "")
@@ -3678,7 +3678,9 @@ jetpack_run: fn(repo: String, commit: String) -[Exec, Env, FS, IO, Time, Time.Wa
 
 // --- the release train ------------------------------------------------------
 
-release_root: fn() -[Env, FS]> String Never! { env_or("JET_RELEASE_WORK", "{state_root()}/release") }
+release_root: fn() -[Env, FS]> String Never! {
+    process.env_nonempty("JET_RELEASE_WORK") ?? "{state_root()}/release"
+}
 
 release_train_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     if args.len() != 1 -> usage()
@@ -3711,8 +3713,8 @@ release_train: fn(tools: String, sha: String) -[Exec, Env, FS, Time, Time.Wait]>
 // pushed or made current here.
 release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     work: release_root()
-    dev: env_or("RELEASE_DEV", dev_worktree())
-    log: env_or("RELEASE_LOG", "{run_root()}/batch-land.log")
+    dev: process.env_nonempty("RELEASE_DEV") ?? dev_worktree()
+    log: process.env_nonempty("RELEASE_LOG") ?? "{run_root()}/batch-land.log"
     // Another train holds the lock: it takes the newest pending HEAD.
     _train: files.try_lock("{work}/train.flock") ?? return 0
     loop {
@@ -3720,7 +3722,7 @@ release_train_run: fn() -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
         if head == "" -> break
         files.remove("{work}/pending") ?? ()
         out: "{work}/train-{head.slice(0..<12)}.log"
-        gated: seed_run(dev, [String]{"run", "Tools/release/Main.jet", "--", "admit", head, "--min-gains", env_or("RELEASE_MIN_GAINS", "10")}, 43200)
+        gated: seed_run(dev, [String]{"run", "Tools/release/Main.jet", "--", "admit", head, "--min-gains", process.env_nonempty("RELEASE_MIN_GAINS") ?? "10"}, 43200)
         files.write(out, both(gated)) ?? ()
         files.append_all(log, "{train_verdict(gated.code, both(gated), head, out)}\n") ?? ()
     }

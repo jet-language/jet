@@ -74,18 +74,16 @@ Admission: struct {
     text: String
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: sys.get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
+// The dev tool roots (Tools/agent/roots.sh).
+home_dir: fn() -[Env]> String Never! { process.env_nonempty("HOME") ?? "" }
+
+state_root: fn() -[Env]> String Never! {
+    process.env_nonempty("JET_STATE_ROOT") ?? files.join(process.env_nonempty("XDG_CACHE_HOME") ?? files.join(home_dir(), ".cache"), "jet-dev")
 }
 
-// The dev tool roots (Tools/agent/roots.sh).
-home_dir: fn() -[Env]> String Never! { env_or("HOME", "") }
-
-state_root: fn() -[Env]> String Never! { env_or("JET_STATE_ROOT", files.join(env_or("XDG_CACHE_HOME", files.join(home_dir(), ".cache")), "jet-dev")) }
-
-seeds_root: fn() -[Env]> String Never! { env_or("JET_SEEDS", files.join(env_or("XDG_DATA_HOME", files.join(home_dir(), ".local/share")), "jet-seeds")) }
+seeds_root: fn() -[Env]> String Never! {
+    process.env_nonempty("JET_SEEDS") ?? files.join(process.env_nonempty("XDG_DATA_HOME") ?? files.join(home_dir(), ".local/share"), "jet-seeds")
+}
 
 // The runner target Tools/release/support-matrix.tsv names, in node's
 // `<platform>-<arch>` spelling (Tools/agent/VerifyFull.jet runner_target).

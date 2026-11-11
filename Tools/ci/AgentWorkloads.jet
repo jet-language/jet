@@ -274,13 +274,6 @@ read_text: fn(path: String) -[FS]> String? Never! {
     }
 }
 
-// An environment override, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 repository_root: fn() -[FS, Env]> String Never! {
     if files.cwd() == {
         .Ok(cwd) -> cwd
@@ -294,7 +287,7 @@ frozen_inputs: fn(root: String, policy_text: String) -[FS, Env]> GateInputs Neve
     policy := policy_text
     if policy.ends_with("\n") -> policy = String.from_bytes_lossy(policy.bytes()[0..<policy.bytes().len() - 1])
     GateInputs{
-        baseline: read_text(env_or("JET_AGENT_WORKLOAD_BASELINE", "{root}/{BASELINE_PATH}")),
+        baseline: read_text(process.env_nonempty("JET_AGENT_WORKLOAD_BASELINE") ?? "{root}/{BASELINE_PATH}"),
         matrix: read_text("{root}/{MATRIX_PATH}"),
         manifest: read_text("{root}/{MANIFEST_PATH}"),
         policy_digest: crypto.sha256(policy.bytes()).hex(),
@@ -363,11 +356,11 @@ gate_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     }
     if args.len() != 0 -> return gate_usage()
     root: repository_root()
-    report: env_or("JET_AGENT_WORKLOAD_REPORT", "{root}/{DEFAULT_REPORT_PATH}")
+    report: process.env_nonempty("JET_AGENT_WORKLOAD_REPORT") ?? "{root}/{DEFAULT_REPORT_PATH}"
     home: process.env_get("HOME") ?? ""
-    cache: env_or("XDG_CACHE_HOME", "{home}/.cache")
-    state: env_or("JET_STATE_ROOT", "{cache}/jet-dev")
-    scratch: env_or("JET_AGENT_WORKLOAD_SCRATCH_DIR", env_or("TMPDIR", env_or("JET_SCRATCH_ROOT", state)))
+    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{home}/.cache"
+    state: process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev"
+    scratch: process.env_nonempty("JET_AGENT_WORKLOAD_SCRATCH_DIR") ?? (process.env_nonempty("TMPDIR") ?? (process.env_nonempty("JET_SCRATCH_ROOT") ?? state))
     report_parent: if report.rfind("/") > 0 -> String.from_bytes_lossy(report.bytes()[0..<report.rfind("/")]) else -> "."
     created: process.cmd([String]{"mkdir", "-p", scratch.copy(), report_parent}).run() ?? return uncovered("cannot create {scratch}")
     if created.code != 0 {

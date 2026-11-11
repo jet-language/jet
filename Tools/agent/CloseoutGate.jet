@@ -26,7 +26,7 @@ run: fn() {
     args: process.args()
     repo: repo_root()
     if args.len() >= 1 && args.len() <= 2 && args[0] == "check" {
-        requested: if args.len() == 2 -> args[1].copy() else -> env_or("JET_CLOSEOUT_MILESTONE", "")
+        requested: if args.len() == 2 -> args[1].copy() else -> process.env_nonempty("JET_CLOSEOUT_MILESTONE") ?? ""
         return check(repo, requested)
     }
     refuse("usage: jet Tools/agent/CloseoutGate.jet check [MILESTONE]")
@@ -35,12 +35,6 @@ run: fn() {
 refuse: fn(reason: String) -[Exec, IO]> Never {
     term.eprint("closeout gate: {reason}")
     process.exit(2)
-}
-
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
 }
 
 // The checkout holding this script.
@@ -65,7 +59,7 @@ output: fn(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> 
 
 // Tower reads go through the Jet board reader.
 board: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
-    argv := [String]{env_or("JET", "jet"), "{repo}/Tools/tower/Board.jet"}
+    argv := [String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/tower/Board.jet"}
     loop arg in args -> argv.push(arg.copy())
     output(repo, argv)
 }
@@ -87,7 +81,7 @@ pinned_head: fn(repo: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Nev
     text: files.read(manifest) ?? return refuse("`{manifest}` cannot be read: {err}")
     tree: json.parse(text) ?? return refuse("`{manifest}` is not JSON: {err}")
     commit: text_field(tree, "commit")
-    ran: process.cmd([String]{env_or("JET", "jet"), "{repo}/Tools/agent/ProofSource.jet", "check", repo, commit}).cwd(repo).run() ?? return refuse("the proof source check cannot start: {err}")
+    ran: process.cmd([String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/agent/ProofSource.jet", "check", repo, commit}).cwd(repo).run() ?? return refuse("the proof source check cannot start: {err}")
     if ran.code != 0 || ran.signal != None -> return refuse(ran.errors.trim_end().removeprefix("proof-source: "))
     Val(commit)
 }

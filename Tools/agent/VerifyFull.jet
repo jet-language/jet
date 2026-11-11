@@ -76,31 +76,31 @@ Ran: struct {
 }
 
 run: fn() {
-    jet: env_or("JET", "")
+    jet: process.env_nonempty("JET") ?? ""
     if jet == "" -> return abort("verify-full: JET must name the admitted compiler binary")
     binary: files.realpath(jet) ?? return abort("verify-full: JET `{jet}` cannot be resolved: {err}")
     repo: repo_root()
-    parent: env_or("JET_VERIFY_TMPDIR", env_or("TMPDIR", scratch_root()))
+    parent: process.env_nonempty("JET_VERIFY_TMPDIR") ?? (process.env_nonempty("TMPDIR") ?? scratch_root())
     files.create_dir_all(parent) ?? return abort("verify-full: scratch parent `{parent}` cannot be created: {err}")
     base: files.realpath(parent) ?? return abort("verify-full: scratch parent `{parent}` cannot be resolved: {err}")
     checkout: files.realpath(repo) ?? return abort("verify-full: checkout `{repo}` cannot be resolved: {err}")
     if inside(checkout, base) || inside(files.realpath("/tmp") ?? "/tmp", base) -> return abort("verify-full: scratch must be external and disk-backed")
     scratch: "{base}/jet-verify-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all(scratch) ?? return abort("verify-full: scratch `{scratch}` cannot be created: {err}")
-    evidence_dir: env_or("JET_CI_EVIDENCE_DIR", "{scratch}/evidence")
+    evidence_dir: process.env_nonempty("JET_CI_EVIDENCE_DIR") ?? "{scratch}/evidence"
     evidence: files.absolute(evidence_dir) ?? return abort("verify-full: evidence directory `{evidence_dir}` cannot be resolved: {err}")
     if inside(checkout, evidence) -> return abort("verify-full: evidence must be outside the checkout")
     files.create_dir_all(evidence) ?? return abort("verify-full: evidence directory `{evidence}` cannot be created: {err}")
     compiler: files.read_bytes(binary) ?? return abort("verify-full: `{binary}` cannot be read: {err}")
-    timeout_text: env_or("JET_VERIFY_TIMEOUT_MS", "{DEFAULT_TIMEOUT_MS}")
+    timeout_text: process.env_nonempty("JET_VERIFY_TIMEOUT_MS") ?? "{DEFAULT_TIMEOUT_MS}"
     timeout_ms: Int.parse(timeout_text) ?? return abort("verify-full: JET_VERIFY_TIMEOUT_MS `{timeout_text}` is not a number of milliseconds")
     state := Verify{
         repo: repo.copy(),
         binary: binary.copy(),
         jet_sha256: crypto.sha256(compiler).hex(),
         target: runner_target(),
-        shard_index: env_or("JET_TEST_SHARD", "0"),
-        shard_count: env_or("JET_TEST_SHARD_COUNT", "1"),
+        shard_index: process.env_nonempty("JET_TEST_SHARD") ?? "0",
+        shard_count: process.env_nonempty("JET_TEST_SHARD_COUNT") ?? "1",
         scratch: scratch.copy(),
         evidence: evidence.copy(),
         env: [Setting]{},
@@ -148,7 +148,7 @@ run: fn() {
     // The standing native safety gate (Docs/spec/safety.md): the full gate when
     // JET_SAFETY_ARTIFACTS names admitted native artifacts, else its source leg
     // with this compiler as the exact-head checker.
-    artifacts: env_or("JET_SAFETY_ARTIFACTS", "")
+    artifacts: process.env_nonempty("JET_SAFETY_ARTIFACTS") ?? ""
     safety: if artifacts != "" -> [String]{binary, "{root}/Tools/agent/SafetyGate.jet", "{scratch}/safety", artifacts} else -> [String]{binary, "{root}/Tools/agent/SafetyGate.jet", "--source", "{scratch}/safety", binary}
     safety_ran: run_child(state, "safety-gate", safety)
     record(state, safety_ran.row)
@@ -189,17 +189,10 @@ abort: fn(text: String) -[Exec, IO]> Never {
     process.exit(1)
 }
 
-// An environment value, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The shared scratch root of Tools/agent/roots.sh.
 scratch_root: fn() -[Env]> String Never! {
-    cache: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
-    env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
+    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"
+    process.env_nonempty("JET_SCRATCH_ROOT") ?? (process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev")
 }
 
 // The checkout holding this script.
@@ -562,9 +555,9 @@ fixture_checkout: fn() -[FS, Env]> String {
 
 #Test("verify-full collects every row, blocks after an unsafe child, and refuses a changed source or a failed closeout gate") {
     checkout: fixture_checkout()
-    jet: env_or("JET", process.which("jet") ?? panic("a jet on PATH or in JET runs the fixture runner"))
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? panic("a jet on PATH or in JET runs the fixture runner"))
     runner: files.read("{checkout}/Tools/agent/VerifyFull.jet") ?? panic("runner source: {err}")
-    base: env_or("JET_TEST_SCRATCH_DIR", scratch_root())
+    base: process.env_nonempty("JET_TEST_SCRATCH_DIR") ?? scratch_root()
     container: "{base}/verify-full-fixture-{sys.pid()}-{time.unix_ns()}"
     external: "{container}-evidence"
     files.create_dir_all(external) ?? panic("fixture evidence: {err}")
@@ -587,7 +580,7 @@ fixture_checkout: fn() -[FS, Env]> String {
         evidence: "{external}/{mode}"
         // The timeout only catches a hang; a loaded machine needs headroom.
         ran: process.cmd([String]{jet, "run", "-A", "{tree}/Tools/agent/VerifyFull.jet"}).cwd(tree)
-            .env("PATH", "{tree}/bin:{env_or("PATH", "/usr/bin:/bin")}").env("JET", "{tree}/bin/jet").env("FIXTURE_MODE", mode)
+            .env("PATH", "{tree}/bin:{process.env_nonempty("PATH") ?? "/usr/bin:/bin"}").env("JET", "{tree}/bin/jet").env("FIXTURE_MODE", mode)
             .env("JET_VERIFY_TMPDIR", external).env("JET_CI_EVIDENCE_DIR", evidence).env("JET_TEST_SHARD", "0").env("JET_TEST_SHARD_COUNT", "1")
             .env("JET_TOOLCHAIN_ROOT", checkout).timeout(300s).run() ?? panic("{mode}: the runner could not start: {err}")
         assert_eq(ran.signal, None)

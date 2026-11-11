@@ -7127,7 +7127,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/cache/Lanes.jet",
-      "line": 319,
+      "line": 312,
       "column": 21,
       "reason": "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc"
     },
@@ -11218,7 +11218,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
-| Tools | Tools/agent/cache/Lanes.jet | 319:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
+| Tools | Tools/agent/cache/Lanes.jet | 312:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/agent/orchestrator/LaneCommit.jet | 202:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 587:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 599:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |

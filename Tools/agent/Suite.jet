@@ -48,7 +48,7 @@ run: fn() {
 }
 
 suite: fn(label: String, tree: String, jetdir: String, profile: String, settings: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    sg: env_or("SUITE_OUT", "{scratch_root()}/lanes/Main/q/sg")
+    sg: process.env_nonempty("SUITE_OUT") ?? "{scratch_root()}/lanes/Main/q/sg"
     base: root("JET_BASE_ROOT", "{scratch_root()}/discovery/base")
     // The rows stage in memory (the testkit's scratch is /dev/shm, counted
     // against the pool's memory budget), so no row waits on a slow scratch disk
@@ -76,15 +76,15 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     if pool.jetpack != "" && !files.exists("{snapshot}/jetpack") {
         files.symlink(pool.jetpack, "{snapshot}/jetpack") ?? return fail("cannot link {snapshot}/jetpack: {err}")
     }
-    runner: env_or("SUITE_RUNNER", "{snapshot}/jet")
+    runner: process.env_nonempty("SUITE_RUNNER") ?? "{snapshot}/jet"
     print("runner: {runner}")
     identity: first_line("{base}/latest/IDENTITY") ?? return fail("{base}/latest/IDENTITY is unreadable")
     // Suite rows run host tools (C compilers, rustc, interpreters) that only
     // the dev shell (Tools/agent/JetEnv.jet) supplies until jet does.
     argv := [String]{runner, "{tree}/Tools/agent/JetEnv.jet", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
-    jobs: env_or("SUITE_JOBS", "")
+    jobs: process.env_nonempty("SUITE_JOBS") ?? ""
     if jobs != "" -> argv.push("--jobs={jobs}")
-    memory: env_or("SUITE_MEMORY", "")
+    memory: process.env_nonempty("SUITE_MEMORY") ?? ""
     if memory != "" -> argv.push("--memory={memory}")
     loop setting in settings -> argv.push(setting.copy())
     out: "{sg}/{profile}-{label}.txt"
@@ -103,7 +103,7 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
 // The jetpack the run gives a snapshot without its own, and the warning a
 // cases or corpora run without the snapshot's own jetpack prints.
 choose_jetpack: fn(jetdir: String, sha: String, base: String, profile: String) -[Env, FS, IO]> Pool Never! {
-    named: env_or("JETPACK", "")
+    named: process.env_nonempty("JETPACK") ?? ""
     if named != "" {
         print("jetpack: JETPACK {named}")
         return Pool{jetpack: named, warn: ""}
@@ -217,12 +217,6 @@ fail: fn(message: String) -[IO]> Int Never! {
 
 // --- roots (Tools/agent/roots.sh) -------------------------------------------
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
 // over the environment (the shell tools source the file first), else
 // `fallback`; an empty value is unset. A file sys.env_file refuses leaves the
@@ -233,6 +227,8 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+state_root: fn() -[Env, FS]> String Never! {
+    root("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev")
+}
 
 scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }

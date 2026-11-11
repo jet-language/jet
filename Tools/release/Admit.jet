@@ -675,7 +675,7 @@ absolute_or: fn(path: String) -[Env, FS]> String Never! {
 preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wait]> Pre Never! {
     errors := options.errors.copy()
     seeds: absolute_or(if options.seeds != "" -> options.seeds else -> seeds_root())
-    work_root: absolute_or(if options.work != "" -> options.work else -> env_or("JET_RELEASE_WORK", files.join(state_root(), "release")))
+    work_root: absolute_or(if options.work != "" -> options.work else -> process.env_nonempty("JET_RELEASE_WORK") ?? files.join(state_root(), "release"))
     sha := ""
     if options.commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{options.commit}^{{commit}}"})
@@ -2113,7 +2113,7 @@ Published: struct {
 // `jet` that tool finds on PATH.
 publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Published Never! {
     log: files.join(ctx.work, "logs/publish.log")
-    vars: [Var]{set_var("PATH", "{dest}:{env_or("PATH", "")}"), set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), drop_var("JET"), drop_var("JET_TOOLCHAIN_ROOT")}
+    vars: [Var]{set_var("PATH", "{dest}:{process.env_nonempty("PATH") ?? ""}"), set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), drop_var("JET"), drop_var("JET_TOOLCHAIN_ROOT")}
     release: [String]{files.join(dest, "jet"), "run", "Tools/release/Main.jet", "--"}
     steps: [(name: String, argv: [String])]{
         (name: "fetch origin dev", argv: [String]{"git", "-C", ctx.root.copy(), "fetch", "--quiet", "origin", "+refs/heads/dev:refs/remotes/origin/dev"}),

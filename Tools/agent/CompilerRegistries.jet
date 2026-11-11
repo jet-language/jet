@@ -215,18 +215,12 @@ fail: fn(message: String) -[Exec, IO]> Never {
     process.exit(1)
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
-jet_cli: fn() -[Env]> String Never! { env_or("JET", "jet") }
+jet_cli: fn() -[Env]> String Never! { process.env_nonempty("JET") ?? "jet" }
 
 // The shared scratch root of Tools/agent/roots.sh.
 scratch_root: fn() -[Env]> String Never! {
-    cache: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
-    env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
+    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"
+    process.env_nonempty("JET_SCRATCH_ROOT") ?? (process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev")
 }
 
 // The checkout holding this script, or else the one around the working directory.
@@ -272,7 +266,7 @@ parse_options: fn(args: [String]) -[Env, Exec, FS, IO]> Options Never! {
         at += 2
     }
     if options.command == "run" && options.jet == "" {
-        jet: env_or("JET", "")
+        jet: process.env_nonempty("JET") ?? ""
         if jet != "" -> options.jet = absolute(jet)
     }
     options
@@ -1164,9 +1158,13 @@ registry_spec: fn(argv: [String], cwd: String, repo: String, extra: [Setting], t
     spec
 }
 
-front_timeout_ms: fn() -[Env]> Int Never! { Int.parse(env_or("JET_FRONT_TIMEOUT_MS", "")) ?? TRANSPORT_TIMEOUT_MS }
+front_timeout_ms: fn() -[Env]> Int Never! {
+    Int.parse(process.env_nonempty("JET_FRONT_TIMEOUT_MS") ?? "") ?? TRANSPORT_TIMEOUT_MS
+}
 
-registry_timeout_ms: fn() -[Env]> Int Never! { Int.parse(env_or("JET_REGISTRY_TIMEOUT_MS", "")) ?? REGISTRY_TIMEOUT_MS }
+registry_timeout_ms: fn() -[Env]> Int Never! {
+    Int.parse(process.env_nonempty("JET_REGISTRY_TIMEOUT_MS") ?? "") ?? REGISTRY_TIMEOUT_MS
+}
 
 signal_dyn: fn(value: Int?) -> Dyn Never! {
     if value == .Val(number) -> return Dyn.Int(number)
@@ -1277,7 +1275,7 @@ link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, bin
     report_object: fault_report(lane) ?? return Err(err)
     args := cflags.copy()
     args.extend([String]{source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary})
-    execute(lane, env_or("CC", "cc"), args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, process.env_nonempty("CC") ?? "cc", args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     Ok()
 }
 

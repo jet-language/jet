@@ -52,16 +52,10 @@ abort: fn(text: String) -[Exec, IO]> Never {
     process.exit(1)
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The shared scratch root of Tools/agent/roots.sh.
 scratch_root: fn() -[Env]> String Never! {
-    cache: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
-    env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
+    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"
+    process.env_nonempty("JET_SCRATCH_ROOT") ?? (process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev")
 }
 
 is_full_sha: fn(text: String) -> Bool Never! {
@@ -199,7 +193,7 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 // --- tests ------------------------------------------------------------------
 
 fixture_dir: fn(name: String) -[Env, FS, Time]> String {
-    base: env_or("JET_TEST_SCRATCH_DIR", scratch_root())
+    base: process.env_nonempty("JET_TEST_SCRATCH_DIR") ?? scratch_root()
     dir: "{base}/proof-source-{name}-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all("{dir}/source") ?? panic("fixture {dir}: {err}")
     dir
@@ -252,7 +246,7 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
         if checkout == "/" || checkout == "" -> panic("run the test from inside the Jet checkout")
         checkout = files.dirname(checkout)
     }
-    jet: env_or("JET", process.which("jet") ?? panic("a jet on PATH or in JET runs the exporter"))
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? panic("a jet on PATH or in JET runs the exporter"))
     dir: fixture_dir("export")
     scratch: "{dir}/scratch"
     commit: crypto.sha1("{sys.pid()}-{time.unix_ns()}".bytes())
@@ -293,6 +287,6 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
 }
 
 run_export: fn(jet: String, checkout: String, commit: String, repository: String, bin: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessReceipt {
-    process.cmd([String]{jet, "run", "-A", "{checkout}/Tools/agent/ProofSource.jet", commit, repository}).env("PATH", "{bin}:{env_or("PATH", "/usr/bin:/bin")}")
+    process.cmd([String]{jet, "run", "-A", "{checkout}/Tools/agent/ProofSource.jet", commit, repository}).env("PATH", "{bin}:{process.env_nonempty("PATH") ?? "/usr/bin:/bin"}")
         .env("JET_SCRATCH_ROOT", scratch).env("JET_TOOLCHAIN_ROOT", checkout).timeout(300s).run() ?? panic("exporter: {err}")
 }

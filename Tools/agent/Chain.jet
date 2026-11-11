@@ -744,12 +744,6 @@ hundredths: fn(bytes: Int) -> String Never! {
 
 // --- roots ------------------------------------------------------------------
 
-// `name` from the environment, else `fallback`; an empty value is unset.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? ""
-    if value != "" -> value.copy() else -> fallback.copy()
-}
-
 // `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
 // over the environment (roots.sh sources the file first), else `fallback`; an
 // empty value is unset. A file sys.env_file refuses leaves the environment's.
@@ -774,12 +768,12 @@ Roots: struct {
 }
 
 roots: fn() -[Env, Exec, FS, IO]> Roots Never! {
-    home: env_or("HOME", "")
-    state: root_of("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{home}/.cache")}/jet-dev")
+    home: process.env_nonempty("HOME") ?? ""
+    state: root_of("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{home}/.cache"}/jet-dev")
     scratch: root_of("JET_SCRATCH_ROOT", state)
     run: root_of("JET_RUN_ROOT", "{scratch}/run")
-    seeds: root_of("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{home}/.local/share")}/jet-seeds")
-    named: env_or("JET_TOOLCHAIN_ROOT", "")
+    seeds: root_of("JET_SEEDS", "{process.env_nonempty("XDG_DATA_HOME") ?? "{home}/.local/share"}/jet-seeds")
+    named: process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? ""
     tools: if named != "" -> absolute(named) else -> files.cwd() ?? fail("no current directory: {err}")
     r14: "{scratch}/discovery/r14"
     Roots{state: state, scratch: scratch, run: run, seeds: seeds, tools: tools.copy(), repo: root_of("JET_DEV_WORKTREE", tools), r14: r14.copy(), root: "{r14}/snap"}
@@ -876,7 +870,7 @@ RUST_TOOLS: ["cargo", "rustc", "rustup"]
 
 norust_path: fn() -[Env, FS]> String Never! {
     kept := [String]{}
-    loop dir in env_or("PATH", "").split(":") {
+    loop dir in (process.env_nonempty("PATH") ?? "").split(":") {
         holds := false
         loop name in RUST_TOOLS {
             if files.is_file(files.join(dir, name)) -> holds = true
@@ -1129,11 +1123,11 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     out: if options.out == "" -> files.join(tree, ".chain") else -> options.out.copy()
     dirs: [String]{out.copy(), "{out}/logs", "{out}/keys"}
     loop dir in dirs -> files.create_dir_all(dir) ?? fail("cannot create `{dir}`: {err}")
-    named_seed: env_or("CHAIN_SEED", "{r.seeds}/current")
+    named_seed: process.env_nonempty("CHAIN_SEED") ?? "{r.seeds}/current"
     seed: files.canonicalize(named_seed) ?? fail("no seed at `{named_seed}`: {err}")
     cid: first_line(files.join(seed, "IDENTITY"))
     if cid == "" -> fail("`{seed}/IDENTITY` names no identity")
-    store := env_or("CHAIN_STORE", "")
+    store := process.env_nonempty("CHAIN_STORE") ?? ""
     cap := "20"
     if store == "" {
         if free_gb(r.scratch) >= 40 {
@@ -1143,7 +1137,7 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
             cap = "4"
         }
     }
-    cap = env_or("CHAIN_STORE_CAP_GB", cap)
+    cap = process.env_nonempty("CHAIN_STORE_CAP_GB") ?? cap
     files.create_dir_all(store) ?? fail("cannot create `{store}`: {err}")
     work: "{r.run}/chain-work/{sys.pid()}"
     files.create_dir_all("{work}/tmp") ?? fail("cannot create `{work}/tmp`: {err}")
@@ -1155,7 +1149,7 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     sys.set_stack_limit(Val(1073741824), Val(1073741824)) ?? ()
     nsdir: "{r.run}/chain-ns/{sys.pid()}"
-    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), mem: memory_bytes(env_or("CHAIN_MEMMAX", "24G")), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String: String]{}, pk: [String: String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
+    c := Chain{r: r, tree: tree, level: options.level.copy(), auto: options.auto, out: out.copy(), logs: "{out}/logs", base: base_sha, base_src: base_src, seed: seed.copy(), cid: cid.copy(), ver: cid.partition("#").head.copy(), mem: memory_bytes(process.env_nonempty("CHAIN_MEMMAX") ?? "24G"), store: store, cap: cap, work: work.copy(), nsdir: nsdir.copy(), mode: "", rows: [String]{}, sha: [String:String]{}, pk: [String:String]{}, miss: "", cpus: [Int]{}, seed_sha: "", seed_pk: "", bin: "-", digest: "-", members: [String]{}, reasons: [String]{}, nchanged: "not computed (explicit level)", started: time.unix_ns()}
     code: chain_run(c, options, seedpub)
     files.remove_all(work) ?? ()
     files.remove_all(nsdir) ?? ()
@@ -1213,7 +1207,7 @@ chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS
         return 0
     }
     // Inside a slot (SLOT_CPUS set) the chain runs inline.
-    held: env_or("SLOT_CPUS", "")
+    held: process.env_nonempty("SLOT_CPUS") ?? ""
     if held != "" {
         c.cpus = parse_cpus(held)
         c.mode = "run"
@@ -1862,9 +1856,9 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
     queue: files.join(r.run, "slot-queue")
     files.create_dir_all(queue) ?? fail("cannot create `{queue}`: {err}")
     class := if small -> 1 else -> 2
-    if env_or("SLOT_PRIORITY", "0") == "1" {
+    if (process.env_nonempty("SLOT_PRIORITY") ?? "0") == "1" {
         key: first_line(files.join(r.state, "scratch/Main/.slot-key"))
-        offered: env_or("SLOT_PRIORITY_KEY", "")
+        offered: process.env_nonempty("SLOT_PRIORITY_KEY") ?? ""
         if offered != "" && offered == key {
             class = 0
         } else {
@@ -1894,7 +1888,9 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
                 if name == "D" && !(short && mem > 30) -> next
                 if name != "D" && !head -> next
                 if name == "C" && mem <= 26 -> next
-                if files.exists(files.join(r.run, "slot-{name}-reserved")) && env_or("SLOT_RESERVED", "0") != "1" -> next
+                if files.exists(files.join(r.run, "slot-{name}-reserved")) && (process.env_nonempty("SLOT_RESERVED") ?? "0") != "1" {
+                    next
+                }
                 lock: files.try_lock(files.join(r.run, "build-slot-{name}.lock")) ?? next
                 files.remove(ticket) ?? ()
                 locks := [files.FileLock]{}
@@ -1966,7 +1962,7 @@ ledger: fn(r: Roots, slot: String, queued: Int, lane: String, started: Int, code
 // CAP_CPUS to it; SLOT_SMALL=1 is --small. --release takes the release slot
 // (take_release_slot).
 slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    small := env_or("SLOT_SMALL", "0") == "1"
+    small := (process.env_nonempty("SLOT_SMALL") ?? "0") == "1"
     release := false
     at := 0
     if args.len() > 0 && args[0] == "--small" {
@@ -1982,7 +1978,7 @@ slot_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
     r: roots()
     slot: if release -> take_release_slot(r) else -> take_slot(r, small, false)
     export_slot(slot.cpus)
-    memory: env_or("SLOT_MEMORY_MAX", if release -> "24G" else -> "16G")
+    memory: process.env_nonempty("SLOT_MEMORY_MAX") ?? (if release -> "24G" else -> "16G")
     if release -> sys.set("SLOT_MEMORY_MAX", memory)
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     argv := [String]{"nice", "-n", "19"}

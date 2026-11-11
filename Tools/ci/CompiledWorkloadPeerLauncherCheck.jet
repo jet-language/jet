@@ -169,21 +169,17 @@ build: fn(layout: Layout, jet: String, stem: String, name: String) -[Env, Exec, 
 }
 
 jet_binary: fn() -[Env, FS]> String? Never! {
-    explicit: env_or("JET", env_or("JET_COMPILED_WORKLOAD_JET_BIN", ""))
+    explicit: process.env_nonempty("JET") ?? (process.env_nonempty("JET_COMPILED_WORKLOAD_JET_BIN") ?? "")
     if explicit != "" -> return Val(explicit)
     process.which("jet")
-}
-
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
 }
 
 // The confined tree sits in the dev scratch root ($JET_SCRATCH_ROOT, else the
 // user cache's jet-dev), outside any tmpfs the sandbox mounts, so a write that
 // escapes it would land on the host.
-scratch_root: fn() -[Env]> String Never! { env_or("JET_SCRATCH_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+scratch_root: fn() -[Env]> String Never! {
+    process.env_nonempty("JET_SCRATCH_ROOT") ?? "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev"
+}
 
 // The checkout holding this script, or else the one around the working directory.
 repo_root: fn() -[Env, FS]> String Problem! {

@@ -65,12 +65,6 @@ run: fn() {
     process.exit(code)
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The checkout holding this script, or else the one around the working directory.
 repo_root: fn() -[Env, FS]> String CheckError! {
     script: sys.executable()
@@ -255,7 +249,7 @@ check_spec: fn(jet: String, root: String, target: String, scratch: String) -> Pr
 
 main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! {
     write: args.contains("--write")
-    jet: env_or("JET", "")
+    jet: process.env_nonempty("JET") ?? ""
     if jet == "" || !files.exists(jet) -> return Err(problem("JET must name the admitted native jet compiler"))
     jobs_text: option(args, "--jobs") ?? "4"
     jobs: Int.parse(jobs_text) ?? 0
@@ -269,7 +263,7 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     ratchet_path: "{root}/{RATCHET}"
     committed: if files.exists(ratchet_path) -> Val(read_ceilings(ratchet_path) ?? return Err(err)) else -> None
     ceilings: committed ?? [Ceiling]{}
-    base: option(args, "--scratch") ?? "{env_or("JET_SCRATCH_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")}"
+    base: option(args, "--scratch") ?? "{process.env_nonempty("JET_SCRATCH_ROOT") ?? "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev"}"
     scratch: "{base}/core-module-check-{sys.pid()}-{time.unix_ns()}"
     files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
     results := [Summary]{}

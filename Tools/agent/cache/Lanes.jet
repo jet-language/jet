@@ -52,13 +52,6 @@ usage: fn() -[Exec, IO]> Never {
 
 // --- roots ------------------------------------------------------------------
 
-// An environment value, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
 // over the environment (the shell tools source the file first), else
 // `fallback`; an empty value is unset. A file sys.env_file refuses leaves the
@@ -70,8 +63,8 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
 }
 
 state_root: fn() -[Env, FS]> String Never! {
-    home: env_or("HOME", "")
-    root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{home}/.cache")}/jet-dev")
+    home: process.env_nonempty("HOME") ?? ""
+    root("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{home}/.cache"}/jet-dev")
 }
 
 scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
@@ -110,9 +103,9 @@ run_in_lane: fn(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait
 // Is a memory-capped systemd user scope available: systemd-run on PATH and
 // the user manager's runtime directory present?
 user_scopes: fn() -[Env, FS]> Bool Never! {
-    runtime: env_or("XDG_RUNTIME_DIR", "")
+    runtime: process.env_nonempty("XDG_RUNTIME_DIR") ?? ""
     if runtime == "" || !files.exists("{runtime}/systemd") -> return false
-    loop dir in env_or("PATH", "").split(":") {
+    loop dir in (process.env_nonempty("PATH") ?? "").split(":") {
         if dir != "" && files.exists("{dir}/systemd-run") -> return true
     }
     false
@@ -179,13 +172,13 @@ refuse: fn(message: String, code: Int) -[IO]> Int Never! {
 
 jet_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     state: state_root()
-    jet: env_or("JET", "{state}/scratch/jet-current")
+    jet: process.env_nonempty("JET") ?? "{state}/scratch/jet-current"
     if files.basename(jet).ends_with(".jet") || files.basename(jet) == "safe-jet.sh" {
         term.eprint("Lanes.jet jet refuses to wrap itself or a script (JET={jet}); point JET at a jet binary")
         return 64
     }
-    memory: env_or("SAFE_JET_MEM", "6G")
-    timeout: digits_value(env_or("SAFE_JET_TIMEOUT", "300")) ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
+    memory: process.env_nonempty("SAFE_JET_MEM") ?? "6G"
+    timeout: digits_value(process.env_nonempty("SAFE_JET_TIMEOUT") ?? "300") ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
     slots: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
     argv := [String]{jet}
     loop arg in args -> argv.push(arg.copy())
@@ -194,7 +187,7 @@ jet_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
 
 small_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     if args.len() == 0 -> usage()
-    mem: env_or("LANES_MEM", "3G")
+    mem: process.env_nonempty("LANES_MEM") ?? "3G"
     gb: if mem.ends_with("G") -> digits_value(mem[0..<mem.len() - 1]) ?? 0 else -> 0
     if gb < 1 || gb > 8 {
         term.eprint("laneS: LANES_MEM must be 1G..8G (got {mem})")

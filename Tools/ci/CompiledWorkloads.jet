@@ -161,12 +161,6 @@ gate_failed: fn(failure: Problem) -[IO]> Int {
 
 // --- helpers -----------------------------------------------------------------
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The checkout holding this script, or else the one around the working directory.
 repo_root: fn() -[Env, FS]> String Problem! {
     script: sys.executable()
@@ -602,7 +596,7 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
     loop name in names {
         if !files.is_file("{root}/{CORPUS}/{name}") -> return Err(problem("missing frozen contract: {CORPUS}/{name}"))
     }
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     checked: process.cmd([String]{jet, "{root}/{CORE_CHECKER}", "--check"}).cwd(root).run() ?? return Err(problem("Core competitor ledger drifted"))
     if checked.errors != "" -> term.eprint(checked.errors.trim_end())
     if checked.code != 0 || checked.signal != None -> return Err(problem("Core competitor ledger drifted"))
@@ -962,7 +956,7 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
 // --- one producer report -----------------------------------------------------
 
 current_candidate: fn(root: String) -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
-    pinned: env_or("JET_COMPILED_WORKLOAD_CANDIDATE_COMMIT", "")
+    pinned: process.env_nonempty("JET_COMPILED_WORKLOAD_CANDIDATE_COMMIT") ?? ""
     candidate: if pinned != "" -> pinned else -> head_commit(root) ?? return Err(problem("current candidate commit is unavailable"))
     if !full("[0-9a-f]{{40}}", candidate) -> return Err(problem("current candidate commit is not immutable"))
     candidate
@@ -1737,10 +1731,10 @@ ReviewInputs: struct {
 
 review_inputs: fn() -[Env]> ReviewInputs Never! {
     ReviewInputs{
-        provenance_file: env_or("REVIEW_PROVENANCE_FILE", ""),
-        candidate_sha: env_or("CANDIDATE_SHA", ""),
-        run: env_or("REVIEW_RUN", env_or("GITHUB_RUN_ID", "")),
-        actor: env_or("REVIEW_ACTOR", env_or("GITHUB_ACTOR", "compiled-workload-review")),
+        provenance_file: process.env_nonempty("REVIEW_PROVENANCE_FILE") ?? "",
+        candidate_sha: process.env_nonempty("CANDIDATE_SHA") ?? "",
+        run: process.env_nonempty("REVIEW_RUN") ?? (process.env_nonempty("GITHUB_RUN_ID") ?? ""),
+        actor: process.env_nonempty("REVIEW_ACTOR") ?? (process.env_nonempty("GITHUB_ACTOR") ?? "compiled-workload-review"),
     }
 }
 
@@ -2025,8 +2019,8 @@ off_native: fn(table: Table, row: [String], has_platform: Bool, platform: String
 // --- the self-check ----------------------------------------------------------
 
 scratch_root: fn() -[Env]> String Never! {
-    state: env_or("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")
-    env_or("TMPDIR", env_or("JET_SCRATCH_ROOT", state))
+    state: process.env_nonempty("JET_STATE_ROOT") ?? "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev"
+    process.env_nonempty("TMPDIR") ?? (process.env_nonempty("JET_SCRATCH_ROOT") ?? state)
 }
 
 SelfCheck: struct {
@@ -2647,7 +2641,7 @@ Setup: struct {
 }
 
 producer_main: fn(root: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
-    platform := env_or("JET_COMPILED_WORKLOAD_PLATFORM", "")
+    platform := process.env_nonempty("JET_COMPILED_WORKLOAD_PLATFORM") ?? ""
     report := ""
     registry := false
     index := 0
@@ -2701,7 +2695,9 @@ producer_failed: fn(failure: Problem, work: String) -[Env, FS, IO]> Int {
 // The scratch tree is removed after the run unless
 // JET_COMPILED_WORKLOAD_KEEP_SCRATCH=1; the report always stays.
 discard_work: fn(work: String) -[Env, FS]> {
-    if work == "" || env_or("JET_COMPILED_WORKLOAD_KEEP_SCRATCH", "") == "1" -> return
+    if work == "" || (process.env_nonempty("JET_COMPILED_WORKLOAD_KEEP_SCRATCH") ?? "") == "1" {
+        return
+    }
     files.remove_all(work) ?? ()
 }
 
@@ -2715,12 +2711,12 @@ producer_setup: fn(root: String, platform: String, report: String) -[Env, FS]> S
     host: host_platform()
     if platform != host -> return Err(problem("report platform does not match the host: {platform} (host={host})"))
     windows: platform == "windows"
-    configured: env_or("JET_COMPILED_WORKLOAD_JET_BIN", env_or("JET", ""))
+    configured: process.env_nonempty("JET_COMPILED_WORKLOAD_JET_BIN") ?? (process.env_nonempty("JET") ?? "")
     found: if configured != "" -> configured.copy() else -> resolve_executable(if windows -> "jet.exe" else -> "jet")
     if found == "" -> return Err(problem("no Jet compiler: set JET_COMPILED_WORKLOAD_JET_BIN or JET, or put jet on PATH"))
-    home: files.home() ?? env_or("HOME", "")
+    home: files.home() ?? (process.env_nonempty("HOME") ?? "")
     cache: "{home}/.cache"
-    scratch_text: env_or("JET_COMPILED_WORKLOAD_SCRATCH", "{cache}/jet-dev/scratch")
+    scratch_text: process.env_nonempty("JET_COMPILED_WORKLOAD_SCRATCH") ?? "{cache}/jet-dev/scratch"
     scratch: files.collapse(absolute(scratch_text))
     if platform == "linux" && (scratch == "/tmp" || scratch.starts_with("/tmp/")) {
         return Err(problem("scratch must not use the RAM-backed system temporary directory: {scratch_text}"))
@@ -2820,7 +2816,7 @@ execute_bits: fn(mode: Int) -> Bool Never! { mode /% 64 % 2 == 1 || mode /% 8 % 
 resolve_executable: fn(candidate: String) -[Env, FS]> String Never! {
     if candidate.starts_with("/") -> return if files.exists(candidate) -> candidate.copy() else -> ""
     separator: if sys.family() == "windows" -> ";" else -> ":"
-    loop directory in env_or("PATH", "").split(separator).to_list() {
+    loop directory in (process.env_nonempty("PATH") ?? "").split(separator).to_list() {
         resolved: if directory == "" -> candidate.copy() else -> "{directory}/{candidate}"
         if files.exists(resolved) -> return absolute(resolved)
     }
@@ -2911,7 +2907,7 @@ toolchain_identity: fn(prefixes: [String: String], language: String, command: St
 // --- measurement
 
 measurement_timeout: fn() -[Env]> Int Problem! {
-    value: Int.parse(env_or("JET_COMPILED_WORKLOAD_TIMEOUT_MS", "180000")) ?? return Err(problem("JET_COMPILED_WORKLOAD_TIMEOUT_MS must be a positive number"))
+    value: Int.parse(process.env_nonempty("JET_COMPILED_WORKLOAD_TIMEOUT_MS") ?? "180000") ?? return Err(problem("JET_COMPILED_WORKLOAD_TIMEOUT_MS must be a positive number"))
     if value <= 0 -> return Err(problem("JET_COMPILED_WORKLOAD_TIMEOUT_MS must be a positive number"))
     value
 }
@@ -3071,7 +3067,7 @@ launcher_kind: fn(launcher: String) Problem! -[Env, FS]> {
 // JET_COMPILED_WORKLOAD_PEER_LAUNCHER, else `.jet/compiled-workload-peer-launcher`
 // built from Tools/ci/CompiledWorkloadPeerLauncher.jet when missing.
 peer_launcher: fn(root: String, jet: String, suffix: String) -[Env, Exec, FS, Time, Time.Wait]> Launcher Problem! {
-    configured: env_or("JET_COMPILED_WORKLOAD_PEER_LAUNCHER", "")
+    configured: process.env_nonempty("JET_COMPILED_WORKLOAD_PEER_LAUNCHER") ?? ""
     path: if configured != "" -> configured.copy() else -> "{root}/.jet/compiled-workload-peer-launcher{suffix}"
     if configured == "" && !files.exists(path) {
         source: "{root}/Tools/ci/CompiledWorkloadPeerLauncher.jet"
@@ -3548,11 +3544,11 @@ jet_build: fn(state: Producer, task: [String: String], project: String, source: 
     args.push(files.relative(staged.entry, project))
     env := [EnvVar]{env_var("JET_STORE_DIR", "{project}/.jet-store"), env_var("JET_FFI_CACHE_DIR", "{project}/.jet-ffi-cache"), env_var("CARGO_NET_OFFLINE", "true")}
     if target == "aarch64-unknown-linux-gnu" {
-        linker: env_or("RUSTC_LINKER_CROSS", "aarch64-linux-gnu-gcc")
+        linker: process.env_nonempty("RUSTC_LINKER_CROSS") ?? "aarch64-linux-gnu-gcc"
         env.push(env_var("RUSTC_LINKER", linker))
         env.push(env_var("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER", linker))
-        env.push(env_var("CC_aarch64_unknown_linux_gnu", env_or("CC_CROSS", linker)))
-        env.push(env_var("AR_aarch64_unknown_linux_gnu", env_or("AR_CROSS", "aarch64-linux-gnu-ar")))
+        env.push(env_var("CC_aarch64_unknown_linux_gnu", process.env_nonempty("CC_CROSS") ?? linker))
+        env.push(env_var("AR_aarch64_unknown_linux_gnu", process.env_nonempty("AR_CROSS") ?? "aarch64-linux-gnu-ar"))
     }
     result: peer_measured(state, task, state.jet, args, project, env) ?? return Err(err)
     if result.status != 0 {
@@ -3573,12 +3569,12 @@ peer_build: fn(state: Producer, task: [String: String], ledger: [String: String]
     args := [String]{}
     env := [EnvVar]{}
     if language == "rust" {
-        command = env_or("RUSTC", at(state.toolchain_command, "rust"))
+        command = process.env_nonempty("RUSTC") ?? at(state.toolchain_command, "rust")
         args = [String]{"--edition=2021", "-O"}
         if cross != "" {
             args.push("--target={cross}")
             args.push("-C")
-            args.push("linker={env_or("RUSTC_LINKER_CROSS", "aarch64-linux-gnu-gcc")}")
+            args.push("linker={process.env_nonempty("RUSTC_LINKER_CROSS") ?? "aarch64-linux-gnu-gcc"}")
         }
         args.push(entry.copy())
         args.push("-o")
@@ -3593,7 +3589,7 @@ peer_build: fn(state: Producer, task: [String: String], ledger: [String: String]
             env.push(env_var("GOARCH", "arm64"))
         }
     } else if language == "cxx" {
-        command = if cross != "" -> env_or("CXX_CROSS", "aarch64-linux-gnu-g++") else -> at(state.toolchain_command, "cxx")
+        command = if cross != "" -> (process.env_nonempty("CXX_CROSS") ?? "aarch64-linux-gnu-g++") else -> at(state.toolchain_command, "cxx")
         args = [String]{"-std=c++20", "-O2", "-pipe", entry.copy(), "-o", output.copy()}
     } else if language == "zig" {
         command = at(state.toolchain_command, "zig")
@@ -3669,7 +3665,7 @@ diagnostic_probe: fn(state: Producer, task: [String: String], language: String, 
         command = state.jet.copy()
         args = [String]{"check", entry.copy()}
     } else if language == "rust" {
-        command = env_or("RUSTC", at(state.toolchain_command, "rust"))
+        command = process.env_nonempty("RUSTC") ?? at(state.toolchain_command, "rust")
         args = [String]{"--edition=2021", entry.copy(), "-o", binary.copy()}
     } else if language == "go" {
         command = at(state.toolchain_command, "go")
@@ -3722,7 +3718,7 @@ deploy_closure: fn(state: Producer, task: [String: String], language: String, cl
 // --- the web tier
 
 chromium_executable: fn() -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
-    configured: env_or("JET_WEB_CHROMIUM", env_or("CHROMIUM", "chromium"))
+    configured: process.env_nonempty("JET_WEB_CHROMIUM") ?? (process.env_nonempty("CHROMIUM") ?? "chromium")
     resolved: resolve_executable(configured)
     if resolved == "" -> return Err(problem("cross-platform-notes web tier requires Chromium/Chrome: {configured}"))
     ran: process.cmd([String]{resolved, "--version"}).run() ?? return Err(problem("configured Chromium/Chrome is unusable: {resolved}"))
@@ -3736,7 +3732,7 @@ chromium_executable: fn() -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
 // The chromedriver that launches the configured Chromium; its major
 // version must match Chromium's.
 chromedriver_executable: fn() -[Env, FS]> String Problem! {
-    configured: env_or("JET_WEB_CHROMEDRIVER", "chromedriver")
+    configured: process.env_nonempty("JET_WEB_CHROMEDRIVER") ?? "chromedriver"
     resolved: resolve_executable(configured)
     if resolved == "" -> return Err(problem("cross-platform-notes web tier requires chromedriver for Chromium: {configured}"))
     resolved
@@ -3755,7 +3751,7 @@ BrowserRun: struct {
 web_browser_run: fn(state: Producer, task: [String: String], build_dir: String, expected: String, peer: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> BrowserRun Problem! {
     chromium: chromium_executable() ?? return Err(err)
     driver: chromedriver_executable() ?? return Err(err)
-    jetpack: resolve_executable(env_or("JETPACK", "jetpack"))
+    jetpack: resolve_executable(process.env_nonempty("JETPACK") ?? "jetpack")
     if jetpack == "" -> return Err(problem("cross-platform-notes web tier requires jetpack to lock Chromium"))
     project: "{build_dir}/.compiled-workload-browser"
     remove_tree(project) ?? return Err(err)
@@ -4321,7 +4317,7 @@ measure_task: fn(state: Producer, rows: &Rows, task: [String: String], adapter: 
     language: at(peer, "language")
     command: at(state.toolchain_command, language)
     executable := command.copy()
-    if language == "rust" -> executable = env_or("RUSTC", command)
+    if language == "rust" -> executable = process.env_nonempty("RUSTC") ?? command
     if language == "domain" -> executable = node_path(state) ?? return Err(err)
     peer_tool: toolchain_identity(state.toolchain_prefix, language, executable, version_args(language)) ?? return Err(err)
     remember_tool(rows, peer_tool.copy())

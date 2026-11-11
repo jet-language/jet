@@ -103,7 +103,7 @@ run: fn() {
         print("CHECK FAILED — personal or machine information in the checkout (see above)")
         process.exit(1)
     }
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     assembly: assembly_spec(jet, repo).run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
@@ -149,7 +149,7 @@ assembly_spec: fn(jet: String, repo: String) -[Exec]> ProcessSpec {
 
 // The unsafe-region ratchet with $JET, else the `jet` on PATH; it never writes.
 unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     ratchet: process.cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
     if ratchet.code == 0 && ratchet.signal == None -> return
     check_refused(process.combined_output(ratchet).trim_end(), "the unsafe-region ratchet differs from Docs/spec/safety.md (see above; record an audited row with jet Tools/agent/UnsafeRatchet.jet --update)")
@@ -157,7 +157,7 @@ unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
 
 // The vocabulary rows check with $JET, else the `jet` on PATH; it never writes.
 vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     rows: process.cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
     if rows.code == 0 && rows.signal == None -> return
     check_refused(process.combined_output(rows).trim_end(), "a generated Source/Vocabulary.jet differs from its Vocabulary.tsv (see above; regenerate with jet Tools/agent/VocabularyRows.jet --write)")
@@ -165,7 +165,7 @@ vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
 
 // The script-pairing guard with $JET, else the `jet` on PATH; it never writes.
 script_pairing: fn(repo: String) -[Env, Exec, FS, IO]> () {
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     pairing: process.cmd([String]{jet, "Tools/agent/ScriptPairing.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/ScriptPairing.jet: {err}")
     if pairing.code == 0 && pairing.signal == None -> return
     check_refused(process.combined_output(pairing).trim_end(), "the change adds a script in another language without its gauntlet pair (see above)")
@@ -180,13 +180,6 @@ check_refused: fn(output: String, reason: String) -[Exec, IO]> () {
 usage: fn(text: String) -[Exec, IO]> Never {
     term.eprint("usage: {text}")
     process.exit(64)
-}
-
-// An environment value, or `fallback` when it is unset or empty.
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
 }
 
 // The checkout holding this tool, else the nearest directory at or above the
@@ -207,7 +200,9 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     dir
 }
 
-user_cache: fn() -[Env]> String Never! { "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet" }
+user_cache: fn() -[Env]> String Never! {
+    "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet"
+}
 
 // --- runtime generators -----------------------------------------------------
 
@@ -215,7 +210,7 @@ user_cache: fn() -[Env]> String Never! { "{env_or("XDG_CACHE_HOME", "{env_or("HO
 // generated tables against their sources. It runs with $JET, else the `jet`
 // on PATH.
 runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    jet: env_or("JET", process.which("jet") ?? "jet")
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
     receipt: process.cmd([String]{jet, "Tools/agent/RuntimeGenerators.jet", "--check"}).cwd(repo).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? {
         print("CHECK FAILED — {jet} could not run Tools/agent/RuntimeGenerators.jet: {err}")
         return 1
@@ -298,7 +293,7 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
 generator_check: fn(repo: String, generator: [String], relative: String) -[Env, Exec]> Ran Never! {
     command: generator.join(" ")
     folder: if generator[1].starts_with("Toolchain/") -> "{repo}/Compiler" else -> repo
-    receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"}
+    receipt: process.cmd(generator).cwd(folder).env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo).output_limit(268435456).run() ?? return Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"}
     output: process.combined_output(receipt)
     if receipt.code != 0 || receipt.signal != None -> return Ran{code: 1, text: "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"}
     Ran{code: 0, text: output}
@@ -320,7 +315,7 @@ core_effects_check: fn(repo: String, jet: String, relative: String, target: Stri
 // --- compiler check ---------------------------------------------------------
 
 compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
-    jet: env_or("JET", "")
+    jet: process.env_nonempty("JET") ?? ""
     if jet == "" || !files.is_file(jet) {
         term.eprint("lane-check: JET must name the admitted native jet compiler binary")
         return 64
@@ -328,7 +323,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // Scratch, the assembled unit and logs stay on disk, never on a RAM-backed
     // /tmp: JET_TEST_SCRATCH, else <JET_SCRATCH_ROOT>/lane-check, else Jet's
     // user cache.
-    scratch: env_or("JET_TEST_SCRATCH", if env_or("JET_SCRATCH_ROOT", "") != "" -> "{env_or("JET_SCRATCH_ROOT", "")}/lane-check" else -> "{user_cache()}/lane-check")
+    scratch: process.env_nonempty("JET_TEST_SCRATCH") ?? (if (process.env_nonempty("JET_SCRATCH_ROOT") ?? "") != "" -> "{process.env_nonempty("JET_SCRATCH_ROOT") ?? ""}/lane-check" else -> "{user_cache()}/lane-check")
     files.create_dir_all(scratch) ?? {
         term.eprint("lane-check: cannot create {scratch}: {err}")
         return 1
@@ -342,7 +337,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // runs with its address space capped (JET_CHECK_MEM, default 20G: the
     // whole-compiler check measured 15.4G resident); JET_CHECK_MEM=off runs
     // it uncapped.
-    slots: int_or(env_or("JET_CHECK_SLOTS", "2"), 2)
+    slots: int_or(process.env_nonempty("JET_CHECK_SLOTS") ?? "2", 2)
     lockdir: "{user_cache()}/lane-check-slots"
     files.create_dir_all(lockdir) ?? {
         term.eprint("lane-check: cannot create {lockdir}: {err}")
@@ -440,20 +435,20 @@ memory_bytes: fn(text: String) -> Int Never! {
 // `jet` with `command` (`check TARGET` or `check --prelude TARGET`), its
 // address space capped at JET_CHECK_MEM (default 20G; `off` for none).
 run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    floor_mb: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
+    floor_mb: int_or(process.env_nonempty("JET_MIN_FREE_MB") ?? "8000", 8000)
     loop _ in 0..<90 {
         available: mem_available_mb()
         if available >= floor_mb -> break
         term.eprint("lane-check: waiting for memory ({available}MB < {floor_mb}MB floor)")
         time.sleep(10s)
     }
-    memory: env_or("JET_CHECK_MEM", "20G")
+    memory: process.env_nonempty("JET_CHECK_MEM") ?? "20G"
     limit: if memory == "off" -> 0 else -> memory_bytes(memory)
     if limit < 0 -> return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
     argv := [String]{jet.copy()}
     argv.extend(command.copy())
     spec := process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
-        .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
+        .env("JET_TOOLCHAIN_ROOT", process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? repo).timeout(1800s).output_limit(1073741824)
     if limit > 0 -> spec = spec.memory_limit(limit)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
     if results[0] == {
@@ -843,10 +838,10 @@ git_config: fn(key: String, dir: String) -[Exec, Time.Wait]> String Never! {
 
 machine_identity: fn(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
     Identity{
-        home: env_or("HOME", ""),
-        user: env_or("USER", env_or("LOGNAME", "")),
+        home: process.env_nonempty("HOME") ?? "",
+        user: process.env_nonempty("USER") ?? (process.env_nonempty("LOGNAME") ?? ""),
         host: sys.hostname().partition(".").head,
-        scratch_root: env_or("JET_SCRATCH_ROOT", ""),
+        scratch_root: process.env_nonempty("JET_SCRATCH_ROOT") ?? "",
         mounts: machine_mounts(),
         email: git_config("user.email", dir),
         name: git_config("user.name", dir),

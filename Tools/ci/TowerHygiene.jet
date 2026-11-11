@@ -29,12 +29,6 @@ Lint: struct {
     errors: String
 }
 
-env_or: fn(name: String, fallback: String) -[Env]> String Never! {
-    value: process.env_get(name) ?? return fallback.copy()
-    if value == "" -> return fallback.copy()
-    value
-}
-
 // The checkout holding this tool, else the working directory.
 repo_root: fn() -[Env, FS]> String Never! {
     tool: "/Tools/ci/TowerHygiene.jet"
@@ -172,10 +166,10 @@ lint: fn(jet: String, board: String, root: String, data: String, docs_root: Stri
 run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
     root: repo_root()
     board: "{root}/Tools/tower/Board.jet"
-    jet: env_or("JET", "jet")
-    scope_input: env_or("JET_TOWER_LINT_SCOPE", "docs")
-    runner_os := env_or("RUNNER_OS", "")
-    runner_arch := env_or("RUNNER_ARCH", "")
+    jet: process.env_nonempty("JET") ?? "jet"
+    scope_input: process.env_nonempty("JET_TOWER_LINT_SCOPE") ?? "docs"
+    runner_os := process.env_nonempty("RUNNER_OS") ?? ""
+    runner_arch := process.env_nonempty("RUNNER_ARCH") ?? ""
     if runner_os == "" -> runner_os = system_name()
     if runner_arch == "" -> runner_arch = sys.arch()
     result := "pass"
@@ -189,7 +183,7 @@ run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
     }
 
     docs_root := absolute(root, scope_input)
-    data_path: absolute(root, env_or("TOWER_DATA", "{root}/Tools/tower/.tower"))
+    data_path: absolute(root, process.env_nonempty("TOWER_DATA") ?? "{root}/Tools/tower/.tower")
     tower_file := if data_path.ends_with(".json") -> data_path.copy() else -> "{data_path}/tower.json"
     tower_dir := if data_path.ends_with(".json") -> files.dirname(data_path) else -> data_path.copy()
     if files.is_dir(tower_dir) {
@@ -198,8 +192,8 @@ run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
         tower_file = "{tower_dir}/{store_name}"
     }
 
-    report_input: env_or("JET_TOWER_HYGIENE_REPORT", "")
-    report_path := if report_input == "" -> "{root}/.tmp/tower-hygiene/{candidate}-{env_or("JET_TEST_SHARD", "local")}.txt" else -> absolute(root, report_input)
+    report_input: process.env_nonempty("JET_TOWER_HYGIENE_REPORT") ?? ""
+    report_path := if report_input == "" -> "{root}/.tmp/tower-hygiene/{candidate}-{process.env_nonempty("JET_TEST_SHARD") ?? "local"}.txt" else -> absolute(root, report_input)
     canonical_report: canonical(report_path)
     if inside(canonical_report, canonical("{root}/Tools/tower")) || inside(canonical_report, canonical(tower_dir)) {
         errors.push("audit report may not be written under Tower data")
