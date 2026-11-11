@@ -34,6 +34,7 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 - [TextTabsTitle](TextTabsTitle.jet)
 - [TypedLiteralRaw](TypedLiteralRaw.jet) — Typed literal bodies own backslashes.
 - [UUID](UUID.jet)
+- [VersionOrder](VersionOrder.jet) — `a.compare_version(b)` is the order of GNU `sort -V`: digit runs compare as numbers, `~` sorts first, and a file suffix only breaks a tie.
 
 ## CheckedText
 

@@ -1,8 +1,8 @@
 // VerifyRows.jet ROWS OUTDIR [JET]: runs every "criterion<TAB>profile<TAB>filter"
 // row of ROWS as `jet test Compiler --profile P --filter F` from the dev
 // worktree, six at a time on CPUs 0-11, each under a 600 s timeout with its
-// output in OUTDIR/C.P.F.out, and prints one line per row: criterion,
-// profile, filter, PASS count, FAIL count, rc. The Jet twin of
+// output in OUTDIR/C.P.F.out, and prints one line per row in `sort -V` order:
+// criterion, profile, filter, PASS count, FAIL count, rc. The Jet twin of
 // verify-rows.sh (gauntlet tool entry verify-rows); the dev worktree is
 // $JET_DEV_WORKTREE as Roots.jet finds it.
 use {
@@ -29,16 +29,19 @@ run: fn() {
     worktree: roots.roots()["JET_DEV_WORKTREE"]
     specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
     results: process.run_all(specs, 6)
+    lines := [String]{}
     loop at in 0..<rows.len() {
         row: rows[at]
         log: "{out}/{row[0]}.{row[1]}.{row[2]}.out"
         receipt: results[at] ?? {
             files.write(log, "{err}\n")
-            print("{row[0]}\t{row[1]}\t{row[2]}\tPASS=0\tFAIL=0\trc=127")
+            lines.push("{row[0]}\t{row[1]}\t{row[2]}\tPASS=0\tFAIL=0\trc=127")
             next
         }
         files.write(log, receipt.output)
         summary: receipt.output.lines().filter(line -> line.starts_with("{{\"PASS\"")).last() ?? ""
-        print("{row[0]}\t{row[1]}\t{row[2]}\tPASS={count(summary, "PASS")}\tFAIL={count(summary, "FAIL")}\trc={if receipt.timed_out -> 124 else -> receipt.code}")
+        lines.push("{row[0]}\t{row[1]}\t{row[2]}\tPASS={count(summary, "PASS")}\tFAIL={count(summary, "FAIL")}\trc={if receipt.timed_out -> 124 else -> receipt.code}")
     }
+    lines.sort_by((a, b) -> a.compare_version(b))
+    loop line in lines -> print(line)
 }

@@ -874,3 +874,115 @@ __string_tsv_records: fn(text: String) -> [[String]] Never! {
     assert_eq(records[1], [String]{"", "empty"})
     assert_eq(records[2], [String]{"lone"})
 }
+
+// `text.compare_version(other)`: the order of GNU `sort -V` in the C locale
+// (gnulib filevercmp, then sort's byte-order last resort). Digit runs compare
+// as numbers, leading zeros aside; outside them a letter sorts by itself, `~`
+// before everything (even the end, so `1.0~rc1` comes before `1.0`) and any
+// other byte after the letters. A trailing file suffix (`.tar.gz`: `.` and a
+// letter or `~`, then letters, digits and `~`) counts only to break a tie.
+// The empty string comes first, then `.`, `..` and the other names that start
+// with a dot. Versions that tie (`a01`, `a1`) fall back to byte order.
+__string_compare_version: fn(text: String, other: String) -> Ordering Never! {
+    order: __version_file_order(text.bytes(), other.bytes())
+    if order != 0 -> return order <=> 0
+    text <=> other
+}
+
+// filevercmp: below zero when `a` sorts first, above zero when `b` does.
+__version_file_order: fn(a: [U8], b: [U8]) -> Int Never! {
+    if a.len() == 0 || b.len() == 0 -> return a.len() - b.len()
+    a_hidden: a[0] == (U8{46})
+    b_hidden: b[0] == (U8{46})
+    if a_hidden != b_hidden -> return if a_hidden -> -1 else -> 1
+    if a_hidden {
+        a_rank: __version_dot_rank(a)
+        b_rank: __version_dot_rank(b)
+        if a_rank < 2 || b_rank < 2 -> return a_rank - b_rank
+    }
+    a_prefix: __version_prefix_len(a)
+    b_prefix: __version_prefix_len(b)
+    order: __version_runs_order(a, a_prefix, b, b_prefix)
+    if order != 0 || (a_prefix == a.len() && b_prefix == b.len()) -> return order
+    __version_runs_order(a, a.len(), b, b.len())
+}
+
+// `.` is 0, `..` is 1 and any other name that starts with a dot is 2.
+__version_dot_rank: fn(name: [U8]) -> Int Never! {
+    if name.len() == 1 -> return 0
+    if name.len() == 2 && name[1] == (U8{46}) -> return 1
+    2
+}
+
+// The length of `name` without its trailing file suffix: the runs of `.`, a
+// letter or `~`, then letters, digits and `~` that end it. The first byte is
+// never part of the suffix.
+__version_prefix_len: fn(name: [U8]) -> Int Never! {
+    at := 0
+    prefix := 0
+    loop at < name.len() {
+        at += 1
+        prefix = at
+        loop at + 1 < name.len() && name[at] == (U8{46}) && (__version_letter(name[at + 1]) || name[at + 1] == (U8{126})) {
+            at += 2
+            loop at < name.len() && (__version_letter(name[at]) || __version_digit(name[at]) || name[at] == (U8{126})) -> at += 1
+        }
+    }
+    prefix
+}
+
+// verrevcmp over `a[0..<a_end]` and `b[0..<b_end]`: alternate runs of
+// non-digits, compared byte by byte by weight, and digit runs, compared as
+// numbers.
+__version_runs_order: fn(a: [U8], a_end: Int, b: [U8], b_end: Int) -> Int Never! {
+    i := 0
+    j := 0
+    loop i < a_end || j < b_end {
+        loop __version_text_at(a, i, a_end) || __version_text_at(b, j, b_end) {
+            difference: __version_weight(a, i, a_end) - __version_weight(b, j, b_end)
+            if difference != 0 -> return difference
+            i += 1
+            j += 1
+        }
+        loop i < a_end && a[i] == (U8{48}) -> i += 1
+        loop j < b_end && b[j] == (U8{48}) -> j += 1
+        first := 0
+        loop i < a_end && j < b_end && __version_digit(a[i]) && __version_digit(b[j]) {
+            if first == 0 -> first = Int.from_u8(a[i]) - Int.from_u8(b[j])
+            i += 1
+            j += 1
+        }
+        if i < a_end && __version_digit(a[i]) -> return 1
+        if j < b_end && __version_digit(b[j]) -> return -1
+        if first != 0 -> return first
+    }
+    0
+}
+
+// A byte's weight outside a digit run: the end -1, a digit 0, a letter
+// itself, `~` -2 and any other byte after every letter.
+__version_weight: fn(name: [U8], at: Int, end: Int) -> Int Never! {
+    if at >= end -> return -1
+    byte: name[at]
+    if __version_digit(byte) -> return 0
+    if __version_letter(byte) -> return Int.from_u8(byte)
+    if byte == (U8{126}) -> return -2
+    Int.from_u8(byte) + 256
+}
+
+__version_digit: fn(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
+
+// Whether `name[at]` is before `end` and outside a digit run.
+__version_text_at: fn(name: [U8], at: Int, end: Int) -> Bool Never! { at < end && !__version_digit(name[at]) }
+
+__version_letter: fn(byte: U8) -> Bool Never! { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) }
+
+#Test("compare_version is GNU sort -V order") {
+    rows := [String]{"6067c10", "file.tar.gz", "a1", "1.10", "", "B", "1.0", "..", "6067c9", "a01", "1.9", ".hidden", "file.tar", "1.0~rc1", "a", ".", "1.2", "x.1", "x-1"}
+    rows.sort_by((left: String, right: String) -> __string_compare_version(left, right))
+    assert_eq(rows, [String]{"", ".", "..", ".hidden", "1.0~rc1", "1.0", "1.2", "1.9", "1.10", "6067c9", "6067c10", "B", "a", "a01", "a1", "file.tar", "file.tar.gz", "x-1", "x.1"})
+    assert_eq(__string_compare_version("a1", "a1"), Ordering.Equal)
+    assert_eq(__string_compare_version("v2", "v010"), Ordering.Less)
+    assert_eq(__string_compare_version("1.0", "1.0~"), Ordering.Greater)
+    assert_eq(__string_compare_version("pkg-1.2.tar.gz", "pkg-1.10.tar"), Ordering.Less)
+}

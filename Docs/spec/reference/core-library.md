@@ -3286,11 +3286,24 @@ compiler loads for the spelling:
 | `text.has_line_prefix(prefix: String)` | `Bool` | `grep -q '^prefix'` | Whether some line starts with `prefix`, read literally. |
 | `text.has_line(pattern: Regex)` | `Bool` | `grep -qE` | Whether some line matches `pattern`; `^` and `$` anchor at each line. |
 | `text.tsv_records()` | `[[String]]` | `cut -f` | Each line split on every tab; empty fields stay, a line with no tab is one field. |
+| `text.compare_version(other: String)` | `Ordering` | `sort -V` | GNU's version order in the C locale; see below. |
 
 `has_line` takes a quoted pattern as a checked `Regex` literal:
 `text.has_line("^(a|b)")` checks the pattern when the program compiles, so
 the call has no compile, flags or failure step, and a bad pattern is E0152 at
 the call. A `Regex` value built at run time is passed as is.
+
+`compare_version` is the order `sort -V` gives (gnulib `filevercmp`, then
+sort's byte-order last resort), so
+`lines.sort_by((a, b) -> a.compare_version(b))` sorts as `sort -V` does.
+Digit runs compare as numbers,
+leading zeros aside (`6067c9` before `6067c10`). Outside them a letter sorts
+by itself, `~` before everything, the end included (`1.0~rc1` before `1.0`),
+and any other byte after the letters. A trailing file suffix (`.` and a
+letter or `~`, then letters, digits and `~`, as in `.tar.gz`) counts only to
+break a tie. The empty string comes first, then `.`, `..` and the other names
+that start with a dot. Versions that tie (`a01`, `a1`) fall back to byte
+order.
 
 ### `core.time` — dates, durations, and clocks
 

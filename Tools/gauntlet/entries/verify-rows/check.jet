@@ -1,16 +1,14 @@
 // The job of a verify-rows case, as facts (PortBars.jet runs it in the case
 // directory with the file holding the program's output): the rows reported,
-// in byte order, and each kept test output (without the runner's notes,
-// which name the case directory).
+// in the `sort -V` order they are printed in, and each kept test output
+// (without the runner's notes, which name the case directory).
 use {
     files: core.files
     process: core.process
 }
 
 run: fn() {
-    rows := files.read(process.args()[0]).lines()
-    rows.sort()
-    loop row in rows -> print(row)
+    loop row in files.read(process.args()[0]).lines() -> print(row)
     kept := loop entry in files.list_dir("out") -> entry.name
     kept.sort()
     loop name in kept -> print("out/{name}: {files.read("out/{name}").lines().filter(line -> !line.starts_with("note: ")).join(" | ")}")
