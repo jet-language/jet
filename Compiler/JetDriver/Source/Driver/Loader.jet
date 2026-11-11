@@ -3818,13 +3818,13 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
     lines: lexed.line_starts.len() - 1
     // A lexer error ends the frontend before the parse.
     if jet_driver_has_errors(lexed.lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.lexed.diagnostics}, demand: jet_driver_empty_core_identifier_demand(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move()}
-    comments: jet_driver_comment_spans(lexed.lexed.tokens)
+    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, retain_demand, true, threads)
     demand := scanned.demand.move()
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
     // A typed `run: fn(args: T)` or typed Output entry gets its generated argv entry.
     if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(parsed.program)
-    words: jet_driver_unit_words(source, comments, [Item]{}, false, [String]{}, jet_driver_core_routes(""))
+    words: jet_driver_unit_words(spellings.move(), [Item]{}, false, [String]{}, jet_driver_core_routes(""))
     JetDriverParsedUnit{parsed: parsed.move(), demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move())}
 }
 
@@ -3950,7 +3950,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     lexed := lex_generated_threads(source, threads)
     tokens: lexed.lexed.tokens.len()
     lines: lexed.line_starts.len() - 1
-    comments: jet_driver_comment_spans(lexed.lexed.tokens)
+    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, entry, threads)
     demand := scanned.demand.move()
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
@@ -3972,7 +3972,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     // A lazy declaration of a Core module (public module, private part or
     // runtime unit) counts once the program reaches it; an entry is reached
     // whole (CoreReach.jet).
-    words: jet_driver_unit_words(source, comments, kept, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{}, jet_driver_core_routes(module_name))
+    words: jet_driver_unit_words(spellings.move(), kept, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{}, jet_driver_core_routes(module_name))
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {

@@ -11,7 +11,7 @@
 // the functions the compiler calls by a name no program spells, and the
 // whole of a module the compiler demands) is reached with its module.
 //
-// Spellings are read from the source bytes outside comments, strings
+// Spellings are read from the unit's tokens outside comments, strings
 // included, so reach is a superset of what the code names. When the load is
 // done, the imports never followed and the unreached constants leave their
 // modules, and so does every unreached declaration that spells one of those
@@ -21,7 +21,7 @@
 use {
     jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, ImportDecl, Item, NameTable, Span, core_call_source_member, name_intern, name_intern_bytes, name_table]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name]
-    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, Token]
+    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_CHAR, TOKEN_FLOAT, TOKEN_INT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING, Token]
     jet_sema.[sema_call_core_f32_source, sema_source_word_byte]
 }
 
@@ -122,11 +122,88 @@ jet_driver_reach_item_name: fn(item: Item) -> String Never! {
     }
 }
 
-// The words of `source`, a parsed unit's bytes, outside its `comments`
-// (jet_driver_comment_spans). With `lazy`, each lazy declaration of `items`
-// gets its own row, in source order; a unit whose lazy spans overlap keeps
-// every word in the rest row, so all of it is reached.
-jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: Bool, part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverUnitWords Never! {
+// The spellings of one lexed unit in source order (jet_driver_unit_spellings):
+// `table` holds each distinct word once, and spelling `n` is `keys[n]`
+// (`word * 4 + kind`, as in JetDriverUnitWords) at byte `starts[n]`.
+JetDriverSpellings: struct {
+    table: NameTable
+    starts: [Int]
+    keys: [Int]
+}
+
+// What `tokens`, the lex of `source`, spell outside comments. A token whose
+// bytes are all word bytes (sema_source_word_byte: an identifier or a
+// keyword) is one word, interned once per lexer name. A whole number spells
+// nothing, and a punctuation token (at most three bytes, none a word byte)
+// is skipped. Any other token's bytes (a string with its interpolations, a
+// unit number) are read as maximal runs of word bytes, so strings spell what
+// they hold. A word that starts with a digit spells nothing.
+jet_driver_unit_spellings: fn(source: [U8], tokens: [Token]) -> JetDriverSpellings Never! {
+    spellings := JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
+    // Per lexer name id, its word in `spellings.table`, or -1 before.
+    local := [Int]{}
+    loop token in tokens {
+        kind: token.kind
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || kind == TOKEN_INT || kind == TOKEN_FLOAT -> next
+        start: token.span.start
+        end: if token.span.end < source.len() -> token.span.end else -> source.len()
+        if start >= end -> next
+        first: source[start]
+        if !sema_source_word_byte(first) {
+            if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR || end - start > 3 -> jet_driver_spell_span(source, start, end, spellings)
+            next
+        }
+        text: Int.from_u32(token.text.id)
+        whole := text > 0 && !(first >= (U8{48}) && first <= (U8{57}))
+        cursor := start + 1
+        loop whole && cursor < end {
+            if !sema_source_word_byte(source[cursor]) -> whole = false
+            cursor += 1
+        }
+        if !whole {
+            jet_driver_spell_span(source, start, end, spellings)
+            next
+        }
+        loop local.len() <= text -> local.push(-1)
+        if local[text] < 0 -> local[text] = Int.from_u32(name_intern_bytes(spellings.table, source, start, end).id)
+        jet_driver_spell_push(source, start, end, local[text], spellings)
+    }
+    spellings
+}
+
+// Each maximal run of word bytes in `source[start..<end]` that doesn't start
+// with a digit.
+jet_driver_spell_span: fn(source: [U8], start: Int, end: Int, spellings: &JetDriverSpellings) Never! {
+    cursor := start
+    loop cursor < end {
+        if !sema_source_word_byte(source[cursor]) {
+            cursor += 1
+            next
+        }
+        word_start: cursor
+        loop cursor < end && sema_source_word_byte(source[cursor]) -> cursor += 1
+        if source[word_start] >= (U8{48}) && source[word_start] <= (U8{57}) -> next
+        word: Int.from_u32(name_intern_bytes(spellings.table, source, word_start, cursor).id)
+        jet_driver_spell_push(source, word_start, cursor, word, spellings)
+    }
+}
+
+// Appends `word`, spelled at `source[start..<end]`, with its kind: bit 0 when
+// a `.` comes right before it, bit 1 when one comes right after it.
+jet_driver_spell_push: fn(source: [U8], start: Int, end: Int, word: Int, spellings: &JetDriverSpellings) Never! {
+    kind := 0
+    if start > 0 && source[start - 1] == (U8{46}) -> kind = 1
+    if end < source.len() && source[end] == (U8{46}) -> kind += 2
+    spellings.starts.push(start)
+    spellings.keys.push(word * 4 + kind)
+}
+
+// A unit's `spellings` (jet_driver_unit_spellings) by declaration. With
+// `lazy`, each lazy declaration of `items` gets its own row, in source order;
+// a unit whose lazy spans overlap keeps every spelling in the rest row, so
+// all of it is reached.
+jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], lazy: Bool, part_members: [String], routes: JetDriverCoreRoutes) -> JetDriverUnitWords Never! {
+    spellings := input.move()
     positions := [Int]{}
     spans := [Span]{}
     if lazy {
@@ -152,78 +229,31 @@ jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: B
             }
         }
     }
+    // A row's spelling is kept once: `seen` stamps a key with its lazy row
+    // plus one (rows fill in source order), `rest_seen` marks it in the rest.
     seen := [Int]{}
-    rest_seen := [Int]{}
+    rest_seen := [Bool]{}
     spells := [[Int]]{}
+    loop _ in spans -> spells.push([Int]{})
     rest := [Int]{}
-    scan := JetDriverWordScan{table: name_table(), comments: comments, comment: 0}
-    cursor := 0
-    loop (row, span) in spans {
-        jet_driver_spell_words(source, cursor, span.start, scan, rest_seen, 1, rest)
-        words := [Int]{}
-        jet_driver_spell_words(source, span.start, span.end, scan, seen, row + 1, words)
-        spells.push(words)
-        cursor = span.end
-    }
-    jet_driver_spell_words(source, cursor, source.len(), scan, rest_seen, 1, rest)
-    spells.push(rest)
-    JetDriverUnitWords{words: scan.table.texts, items: positions, spells: spells}
-}
-
-// The comment spans of a unit's tokens, in source order. Comments name no
-// code, and a doc comment names its neighbours (`sort by collation_key`),
-// so the word scan skips them.
-jet_driver_comment_spans: fn(tokens: [Token]) -> [Span] Never! {
-    spans := [Span]{}
-    loop token in tokens {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> next
-        if spans.len() > 0 && token.span.start < spans[spans.len() - 1].end -> next
-        spans.push(token.span)
-    }
-    spans
-}
-
-// One unit's word scan: the words met so far, and the unit's comments with
-// the first one the scan has not passed.
-JetDriverWordScan: struct {
-    table: NameTable
-    comments: [Span]
-    comment: Int
-}
-
-// Appends to `row` each spelling of `source[start..<end]` that `seen` has not
-// stamped `stamp` yet: maximal runs of word bytes (sema_source_word_byte)
-// that don't start with a digit, outside comments. Calls run in source order.
-jet_driver_spell_words: fn(source: [U8], start: Int, end: Int, scan: &JetDriverWordScan, seen: &[Int], stamp: Int, row: &[Int]) Never! {
-    stop: if end < source.len() -> end else -> source.len()
-    cursor := if start > 0 -> start else -> 0
-    loop cursor < stop {
-        byte: source[cursor]
-        if !sema_source_word_byte(byte) {
-            // Every comment starts with `/`.
-            if byte == (U8{47}) {
-                loop scan.comment < scan.comments.len() && scan.comments[scan.comment].end <= cursor -> scan.comment += 1
-                if scan.comment < scan.comments.len() && scan.comments[scan.comment].start <= cursor {
-                    cursor = scan.comments[scan.comment].end
-                    next
-                }
-            }
-            cursor += 1
-            next
+    row := 0
+    loop (index, start) in spellings.starts {
+        loop row < spans.len() && spans[row].end <= start -> row += 1
+        key: spellings.keys[index]
+        if row < spans.len() && spans[row].start <= start {
+            loop seen.len() <= key -> seen.push(0)
+            if seen[key] == row + 1 -> next
+            seen[key] = row + 1
+            spells[row].push(key)
+        } else {
+            loop rest_seen.len() <= key -> rest_seen.push(false)
+            if rest_seen[key] -> next
+            rest_seen[key] = true
+            rest.push(key)
         }
-        word_start: cursor
-        loop cursor < stop && sema_source_word_byte(source[cursor]) -> cursor += 1
-        if byte >= (U8{48}) && byte <= (U8{57}) -> next
-        kind := 0
-        if word_start > 0 && source[word_start - 1] == (U8{46}) -> kind = 1
-        if cursor < source.len() && source[cursor] == (U8{46}) -> kind += 2
-        name: name_intern_bytes(scan.table, source, word_start, cursor)
-        key: Int.from_u32(name.id) * 4 + kind
-        loop seen.len() <= key -> seen.push(0)
-        if seen[key] == stamp -> next
-        seen[key] = stamp
-        row.push(key)
     }
+    spells.push(rest)
+    JetDriverUnitWords{words: spellings.table.texts.move(), items: positions, spells: spells}
 }
 
 // One lazy declaration of a reached module: its module (`unit`), position in

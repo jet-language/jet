@@ -6,10 +6,11 @@ use {
     fs: core.files
     jet_driver.[
         JET_DRIVER_ROUTED_MODULES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult,
-        jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult, JetDriverParseJob,
+        jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load, jet_driver_parse_one,
     ]
     jet_cli.[jet_cli_driver_request]
+    jet_foundation.[compiler_threads_single]
 }
 
 // A check request for the one user file `source`, with no Core sources yet.
@@ -209,4 +210,17 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     // The rows and calls that route into core.math: `__numeric_stop`, the
     // bit casts and the exact types' crossing to Float.
     assert(checked >= 7, "the scan found {checked} routes")
+}
+
+#Test("a unit's spellings come from its tokens: strings spell what they hold, comments and digit-led words spell nothing") {
+    source: "plain: fn() -> Int Never! {{ other.value() }}\n\n// hidden\nLABEL: \"{{named}} 9lives\"\n"
+    parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    words: parsed.words ?? panic("a Core unit has words")
+    spelled := [String]{}
+    loop row in words.spells {
+        loop key in row -> spelled.push("{words.words[key >> 2]}/{key.bit_and(3)}")
+    }
+    // One row per lazy declaration, then the rest, which is empty.
+    assert_eq(words.spells.len(), 3)
+    assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
 }
