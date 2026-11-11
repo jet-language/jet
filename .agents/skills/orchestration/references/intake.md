@@ -192,3 +192,18 @@ runs and one 39-minute full test pass. These rules bind every train:
     compile-speed plan it serves (#5479). Until the language is stable,
     architectural steps and regression fixes land, and a gain from tuning
     one function, loop or constant waits.
+20. **Express trains and set-aside by reach.** A staged submission enters
+    the express queue at once and never waits for a batch. A direct
+    submission (docs, tools or tests only, with no `Compiler/`, `Core/`,
+    `Jetpack/` or `Examples/` path) runs its own rows and every guard on the
+    current train compiler, then lands under the shared land lock. Any other
+    submission starts its own one-submission train, with its own build,
+    census and rows, and is never held by another owner's red. At most two
+    run at once, each only while the declared memory caps leave its census
+    inside 40 GiB and MemAvailable minus 12 GiB stays at 16 GiB or more. A
+    clean train lands at once. In a multi-submission train, a submission that
+    goes red after the build is set aside. If it touched no compiler input,
+    the rest lands on the same build. If it did, the tree is rebuilt and
+    re-censused by reach (build, guards, self-checks and the Jetpack areas
+    its paths reach), never in full, and then the rest lands. Whole-profile
+    ui and golden runs are sharded four ways.
