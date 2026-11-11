@@ -1,0 +1,133 @@
+// JSON values read the way JavaScript reads them. None is `undefined`: an
+// absent field, or a field of something that is not an object.
+use {
+    math: core.math
+}
+
+// `value?.[key]`: None when the value is not an object or lacks the key; the
+// last of duplicated keys wins, as JSON.parse keeps it.
+field: fn(value: Dyn?, key: String) -> Dyn? Never! {
+    inner: value ?? return None
+    if inner == {
+        .Object(entries) -> {
+            found := Dyn?{None}
+            loop entry in entries {
+                if entry.key == key -> found = Val(entry.value)
+            }
+            found
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
+    }
+}
+
+// The elements of an array (none for another value).
+items: fn(value: Dyn?) -> [Dyn?] Never! {
+    if value == .Val(inner) {
+        if inner == .Array(list) -> return list.map(item -> Val(item))
+    }
+    []
+}
+
+// `typeof value === "number"`: the value as a double.
+as_number: fn(value: Dyn?) -> Float? Never! {
+    inner: value ?? return None
+    if inner == {
+        .Int(whole) -> Val(Float.parse("{whole}") ?? math.NAN)
+        .Float(real) -> Val(real)
+        .Number(lexeme) -> Val(Float.parse(lexeme) ?? math.NAN)
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
+    }
+}
+
+is_number: fn(value: Dyn?) -> Bool Never! { as_number(value) != None }
+
+// The value in JavaScript arithmetic (ToNumber): undefined is NaN, null and
+// false are 0, true is 1, text is Number(text), an array is Number(String(array))
+// and an object is NaN.
+to_number: fn(value: Dyn?) -> Float Never! {
+    inner: value ?? return math.NAN
+    if inner == {
+        .Int(_) | .Float(_) | .Number(_) -> as_number(value) ?? math.NAN
+        .Null -> Float{0.0}
+        .Bool(flag) -> if flag -> Float{1.0} else -> Float{0.0}
+        .Text(text) -> number_from_text(text)
+        .Array(_) -> number_from_text(js_string(value))
+        .Bytes(_) | .DateTime(_) | .Object(_) -> math.NAN
+    }
+}
+
+// String(value) (`undefined` when absent).
+js_string: fn(value: Dyn?) -> String Never! {
+    inner: value ?? return "undefined"
+    if inner == {
+        .Text(text) -> text
+        .Int(_) | .Number(_) -> js_number(as_number(value) ?? math.NAN)
+        .Float(real) -> js_number(real)
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Null -> "null"
+        .Array(list) -> list.map(item -> if item == .Null -> "" else -> js_string(Val(item))).join(",")
+        .Bytes(_) | .DateTime(_) | .Object(_) -> "[object Object]"
+    }
+}
+
+// Present and not null: `value ?? fallback` keeps the value.
+present: fn(value: Dyn?) -> Bool Never! {
+    inner: value ?? return false
+    inner != .Null
+}
+
+// The value when it is a string.
+text_of: fn(value: Dyn?) -> String? Never! {
+    if value == .Val(inner) {
+        if inner == .Text(text) -> return Val(text)
+    }
+    None
+}
+
+// `value === word`.
+is_text: fn(value: Dyn?, word: String) -> Bool Never! { text_of(value) == Val((word)) }
+
+truthy: fn(value: Dyn?) -> Bool Never! {
+    inner: value ?? return false
+    if inner == {
+        .Bool(flag) -> flag
+        .Null -> false
+        .Text(text) -> text != ""
+        .Int(_) | .Float(_) | .Number(_) -> math.abs(as_number(value) ?? math.NAN) > Float{0.0}
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
+    }
+}
+
+// String(element) of each element of an array (none for another value).
+texts: fn(value: Dyn?) -> [String] Never! { items(value).map(item -> js_string(item)) }
+
+// `a === b`. Two parsed objects or arrays are never the same object.
+same: fn(a: Dyn?, b: Dyn?) -> Bool Never! {
+    if is_number(a) || is_number(b) {
+        if !is_number(a) || !is_number(b) -> return false
+        left: to_number(a)
+        right: to_number(b)
+        // NaN is never equal; otherwise neither is below the other.
+        return !math.is_nan(left) && !math.is_nan(right) && !(left < right) && !(left > right)
+    }
+    left: a ?? return b == None
+    right: b ?? return false
+    if left == {
+        .Null -> right == .Null
+        .Text(_) | .Bool(_) -> left == right
+        .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
+    }
+}
+
+// A JavaScript Map key for a JSON value (SameValueZero over primitives);
+// `unique` tells apart objects, which are keys by identity.
+map_key: fn(value: Dyn?, unique: Int) -> String Never! {
+    inner: value ?? return "undefined"
+    if inner == {
+        .Text(text) -> "s:{text}"
+        .Int(_) | .Float(_) | .Number(_) -> "n:{js_number(as_number(value) ?? math.NAN)}"
+        .Bool(flag) -> "b:{flag}"
+        .Null -> "null"
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> "o:{unique}"
+    }
+}

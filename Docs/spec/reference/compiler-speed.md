@@ -5,7 +5,7 @@ compile at O0 through it and run the linked image from memory, without writing
 an executable (D-EXEC2=A); the release profile produces an optimized artifact. This page is
 for compiler contributors and users reasoning
 about build/run trade-offs. The phase budget gate is
-[`Tools/perf/budget/Check.jet`](../../../Tools/perf/budget/Check.jet), which
+[`Tools/perf/budget/check`](../../../Tools/perf/budget/check/run.jet), which
 `Compiler/test.jet` runs; [R12 and I9](../philosophy.md) are the semantic
 constraints.
 
@@ -123,7 +123,7 @@ and none runs twice. If a milestone lands short of its lines-per-second target,
 the measured number is what ships (`D-SPEED-CHECKS1`).
 
 `Tools/perf/budget/budget.json` marks the rows that carry these checks
-`always_on`. `Tools/perf/budget/Check.jet` prints their subtotal. It fails a
+`always_on`. `Tools/perf/budget/check` prints their subtotal. It fails a
 full-unit trace (the compile reached `lower`) that lacks any always-on span.
 
 ## Compile throughput

@@ -1,0 +1,101 @@
+// JSON.stringify(value, null, space) of a JSON value.
+use {
+    math: core.math
+}
+
+// JSON.stringify's string literal: `"`, `\` and the control characters
+// escaped, every other byte as is.
+json_quote: fn(text: String) -> String Never! {
+    hex: "0123456789abcdef".bytes()
+    out := [U8]{}
+    out.push(34)
+    loop byte in text.bytes() {
+        code: Int.from_u8(byte)
+        escaped: if {
+            code == 34 -> "\\\""
+            code == 92 -> "\\\\"
+            code == 8 -> "\\b"
+            code == 9 -> "\\t"
+            code == 10 -> "\\n"
+            code == 12 -> "\\f"
+            code == 13 -> "\\r"
+            code < 32 -> "\\u00"
+            else -> ""
+        }
+        if escaped == "" -> out.push(byte) else -> out.extend(escaped.bytes())
+        if code < 32 && escaped == "\\u00" -> out.extend([hex[code /% 16], hex[code % 16]])
+    }
+    out.push(34)
+    String.from_bytes_lossy(out)
+}
+
+// A canonical array index ("0" to "4294967294"), which JavaScript orders
+// before every other key.
+array_index: fn(key: String) -> Int? Never! {
+    bytes: key.bytes()
+    if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int.from_u8(bytes[0]) == 48) -> return None
+    value := 0
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        value = value * 10 + code - 48
+    }
+    if value > 4294967294 -> return None
+    Val(value)
+}
+
+// An object's keys in JavaScript property order: array indices ascending,
+// then the rest in first-seen order; a duplicated key keeps its last value.
+ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)] Never! {
+    indexed := [(index: Int, key: String, value: Dyn)]{}
+    named := [(key: String, value: Dyn)]{}
+    loop entry in entries {
+        index: array_index(entry.key) ?? -1
+        at := -1
+        if index >= 0 {
+            loop i in 0..<indexed.len() {
+                if indexed[i].index == index -> at = i
+            }
+            if at >= 0 -> indexed[at] = (index: index, key: entry.key, value: entry.value) else -> indexed.push((index: index, key: entry.key, value: entry.value))
+            next
+        }
+        loop i in 0..<named.len() {
+            if named[i].key == entry.key -> at = i
+        }
+        if at >= 0 -> named[at] = (key: entry.key, value: entry.value) else -> named.push((key: entry.key, value: entry.value))
+    }
+    indexed.sort_by(row -> row.index)
+    out := indexed.map(row -> (key: row.key, value: row.value))
+    out.extend(named)
+    out
+}
+
+// JSON.stringify(value, null, space): NaN and the infinities are null, and
+// with a space each element and member sits on its own indented line.
+json_stringify: fn(value: Dyn, space: Int) -> String Never! { json_write(value, " ".repeat(space), "") }
+
+json_write: fn(value: Dyn, step: String, indent: String) -> String Never! {
+    inner: "{indent}{step}"
+    open: if step == "" -> "" else -> "\n{inner}"
+    close: if step == "" -> "" else -> "\n{indent}"
+    comma: if step == "" -> "," else -> ",\n{inner}"
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Int(_) | .Float(_) | .Number(_) -> {
+            real: as_number(Val(value)) ?? math.NAN
+            if math.is_finite(real) -> js_number(real) else -> "null"
+        }
+        .Text(text) -> json_quote(text)
+        .Array(list) -> {
+            if list.len() == 0 -> return "[]"
+            "[{open}{list.map(item -> json_write(item, step, inner)).join(comma)}{close}]"
+        }
+        .Object(entries) -> {
+            if entries.len() == 0 -> return "{{}}"
+            colon: if step == "" -> ":" else -> ": "
+            "{{{open}{ordered(entries).map(entry -> "{json_quote(entry.key)}{colon}{json_write(entry.value, step, inner)}").join(comma)}{close}}}"
+        }
+        .Bytes(_) | .DateTime(_) -> json_quote(js_string(Val(value)))
+    }
+}

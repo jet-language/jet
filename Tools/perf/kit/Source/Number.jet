@@ -1,0 +1,247 @@
+// JavaScript number semantics: Number.prototype.toString, toFixed and
+// StringToNumber, exactly, over IEEE doubles.
+use {
+    math: core.math
+}
+
+KIT_ZERO: Float{0.0}
+
+pow_int: fn(base: Int, exponent: Int) -> Int Never! {
+    out := 1
+    loop _ in 0..<exponent -> out *= base
+    out
+}
+
+// The exact value of a finite non-negative double: mantissa * 2^exponent.
+Exact: struct {
+    mantissa: Int
+    exponent: Int
+}
+
+exact: fn(value: Float) -> Exact Never! {
+    bits: math.to_bits(value)
+    raw: if bits < 0 -> bits + pow_int(2, 64) else -> bits
+    field: (raw /% pow_int(2, 52)) % 2048
+    fraction: raw % pow_int(2, 52)
+    if field == 0 -> return Exact{mantissa: fraction, exponent: -1074}
+    Exact{mantissa: fraction + pow_int(2, 52), exponent: field - 1075}
+}
+
+// The integer a finite integral double holds, exactly.
+integral: fn(value: Float) -> Int Never! {
+    if value < KIT_ZERO -> return -integral(-value)
+    parts: exact(value)
+    if parts.exponent >= 0 -> return parts.mantissa * pow_int(2, parts.exponent)
+    parts.mantissa /% pow_int(2, -parts.exponent)
+}
+
+Shortest: struct {
+    digits: String
+    point: Int
+}
+
+// The shortest round-trip digits of a finite positive double and the position
+// of the decimal point (value = 0.digits * 10^point).
+shortest: fn(value: Float) -> Shortest Never! {
+    text: "{value:Debug}"
+    bytes: text.bytes()
+    mantissa := [U8]{}
+    exponent := 0
+    exponent_sign := 1
+    in_exponent := false
+    point_at := -1
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if in_exponent {
+            if {
+                code == 45 -> exponent_sign = -1
+                code >= 48 && code <= 57 -> exponent = exponent * 10 + code - 48
+                else -> {}
+            }
+            next
+        }
+        if code == 101 || code == 69 {
+            in_exponent = true
+            next
+        }
+        if code == 46 {
+            point_at = mantissa.len()
+            next
+        }
+        if code >= 48 && code <= 57 -> mantissa.push(byte)
+    }
+    if point_at < 0 -> point_at = mantissa.len()
+    point := point_at + exponent_sign * exponent
+    start := 0
+    loop start < mantissa.len() && Int.from_u8(mantissa[start]) == 48 {
+        start += 1
+        point -= 1
+    }
+    end := mantissa.len()
+    loop end > start && Int.from_u8(mantissa[end - 1]) == 48 -> end -= 1
+    Shortest{digits: String.from_bytes_lossy(mantissa[start..<end]), point: point}
+}
+
+// Number.prototype.toString().
+js_number: fn(value: Float) -> String Never! {
+    if math.is_nan(value) -> return "NaN"
+    if !(math.abs(value) > KIT_ZERO) -> return "0"
+    if !math.is_finite(value) -> return if value > KIT_ZERO -> "Infinity" else -> "-Infinity"
+    if value < KIT_ZERO -> return "-{js_number(-value)}"
+    parts: shortest(value)
+    k: parts.digits.bytes().len()
+    n: parts.point
+    if k <= n && n <= 21 -> return "{parts.digits}{"0".repeat(n - k)}"
+    if 0 < n && n <= 21 {
+        bytes: parts.digits.bytes()
+        return "{String.from_bytes_lossy(bytes[0..<n])}.{String.from_bytes_lossy(bytes[n..<k])}"
+    }
+    if -6 < n && n <= 0 -> return "0.{"0".repeat(-n)}{parts.digits}"
+    bytes: parts.digits.bytes()
+    head: String.from_bytes_lossy(bytes[0..<1])
+    tail: if k > 1 -> ".{String.from_bytes_lossy(bytes[1..<k])}" else -> ""
+    sign: if n - 1 >= 0 -> "+" else -> "-"
+    magnitude: if n - 1 >= 0 -> n - 1 else -> 1 - n
+    "{head}{tail}e{sign}{magnitude}"
+}
+
+// Number.prototype.toFixed(digits): the exact double rounded half up (away
+// from zero) at `digits` decimals; NaN, infinities and values from 1e21 print
+// as toString does.
+to_fixed: fn(value: Float, digits: Int) -> String Never! {
+    if math.is_nan(value) -> return "NaN"
+    if value < KIT_ZERO -> return "-{to_fixed(-value, digits)}"
+    limit: Float.parse("1e21") ?? KIT_ZERO
+    if value >= limit -> return js_number(value)
+    parts: exact(value)
+    scaled: if {
+        parts.exponent >= 0 -> parts.mantissa * pow_int(2, parts.exponent) * pow_int(10, digits)
+        else -> (2 * parts.mantissa * pow_int(10, digits) + pow_int(2, -parts.exponent)) /% (2 * pow_int(2, -parts.exponent))
+    }
+    text := "{scaled}"
+    if digits == 0 -> return text
+    if text.bytes().len() <= digits -> text = "{"0".repeat(digits + 1 - text.bytes().len())}{text}"
+    bytes: text.bytes()
+    cut: bytes.len() - digits
+    "{String.from_bytes_lossy(bytes[0..<cut])}.{String.from_bytes_lossy(bytes[cut..<bytes.len()])}"
+}
+
+// The byte length of the JavaScript white space or line terminator at `at`,
+// or 0.
+js_space_len: fn(bytes: [U8], at: Int) -> Int Never! {
+    first: Int.from_u8(bytes[at])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if first == 194 && at + 1 < bytes.len() && Int.from_u8(bytes[at + 1]) == 160 -> return 2
+    if at + 2 >= bytes.len() -> return 0
+    second: Int.from_u8(bytes[at + 1])
+    third: Int.from_u8(bytes[at + 2])
+    if {
+        first == 225 && second == 154 && third == 128 -> 3
+        first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> 3
+        first == 226 && second == 129 && third == 159 -> 3
+        first == 227 && second == 128 && third == 128 -> 3
+        first == 239 && second == 187 && third == 191 -> 3
+        else -> 0
+    }
+}
+
+// String.prototype.trim().
+js_trim: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    start := 0
+    loop start < bytes.len() {
+        width: js_space_len(bytes, start)
+        if width == 0 -> break
+        start += width
+    }
+    end := bytes.len()
+    loop end > start {
+        // Find the sequence that ends at `end`.
+        lead := end - 1
+        loop lead > start && Int.from_u8(bytes[lead]) >= 128 && Int.from_u8(bytes[lead]) < 192 -> lead -= 1
+        width: js_space_len(bytes, lead)
+        if width == 0 || lead + width != end -> break
+        end = lead
+    }
+    String.from_bytes_lossy(bytes[start..<end])
+}
+
+digit_value: fn(code: Int, radix: Int) -> Int Never! {
+    value: if {
+        code >= 48 && code <= 57 -> code - 48
+        code >= 97 && code <= 122 -> code - 87
+        code >= 65 && code <= 90 -> code - 55
+        else -> 99
+    }
+    if value < radix -> value else -> -1
+}
+
+// The end of the run of decimal digits that starts at `at`.
+digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    end := at
+    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+    end
+}
+
+// Number(text): JavaScript's StringToNumber.
+number_from_text: fn(raw: String) -> Float Never! {
+    text: js_trim(raw)
+    if text == {
+        "" -> return KIT_ZERO
+        "Infinity" | "+Infinity" -> return math.INFINITY
+        "-Infinity" -> return -math.INFINITY
+        else -> {}
+    }
+    bytes: text.bytes()
+    if bytes.len() > 2 && Int.from_u8(bytes[0]) == 48 {
+        marker: Int.from_u8(bytes[1])
+        radix: if {
+            marker == 120 || marker == 88 -> 16
+            marker == 111 || marker == 79 -> 8
+            marker == 98 || marker == 66 -> 2
+            else -> 0
+        }
+        if radix > 0 {
+            value := 0
+            loop at in 2..<bytes.len() {
+                digit: digit_value(Int.from_u8(bytes[at]), radix)
+                if digit < 0 -> return math.NAN
+                value = value * radix + digit
+            }
+            return Float.parse("{value}") ?? math.NAN
+        }
+    }
+    // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
+    at := 0
+    sign := ""
+    if Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45 {
+        if Int.from_u8(bytes[0]) == 45 -> sign = "-"
+        at = 1
+    }
+    whole_end: digits_end(bytes, at)
+    whole: String.from_bytes_lossy(bytes[at..<whole_end])
+    at = whole_end
+    fraction := ""
+    if at < bytes.len() && Int.from_u8(bytes[at]) == 46 {
+        fraction_end: digits_end(bytes, at + 1)
+        fraction = String.from_bytes_lossy(bytes[at + 1..<fraction_end])
+        at = fraction_end
+    }
+    if whole == "" && fraction == "" -> return math.NAN
+    exponent := "0"
+    if at < bytes.len() && (Int.from_u8(bytes[at]) == 101 || Int.from_u8(bytes[at]) == 69) {
+        at += 1
+        exponent_sign := ""
+        if at < bytes.len() && (Int.from_u8(bytes[at]) == 43 || Int.from_u8(bytes[at]) == 45) {
+            if Int.from_u8(bytes[at]) == 45 -> exponent_sign = "-"
+            at += 1
+        }
+        digits_stop: digits_end(bytes, at)
+        if digits_stop == at -> return math.NAN
+        exponent = "{exponent_sign}{String.from_bytes_lossy(bytes[at..<digits_stop])}"
+        at = digits_stop
+    }
+    if at != bytes.len() -> return math.NAN
+    canonical: "{sign}{if whole == "" -> "0" else -> whole}.{if fraction == "" -> "0" else -> fraction}e{exponent}"
+    Float.parse(canonical) ?? math.NAN
+}

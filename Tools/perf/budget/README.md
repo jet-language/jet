@@ -1,6 +1,6 @@
 # Compiler phase budget checker
 
-`Check.jet` reads a compiler trace (`JET_TRACE_FILE=<path> jet build …`) and
+`check/run.jet` reads a compiler trace (`JET_TRACE_FILE=<path> jet build …`) and
 `budget.json` (per-phase ns per source line) and prints, per phase, its
 seconds, ns per source line, the budget of the chosen column and the ratio,
 then the subtotal of the always-on check rows. It exits 1 when any phase, the
@@ -23,13 +23,14 @@ Columns:
   `JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --budget 30M-wall`.
 
 ```
-jet run Tools/perf/budget/Check.jet -- build.trace.jsonl --column 2.5s-wall --clock wall
-jet run Tools/perf/budget/Check.jet -- build.trace.jsonl --column 1M
-jet test Tools/perf/budget/Check.jet
+jet Tools/perf/budget/check build.trace.jsonl --column 2.5s-wall --clock wall
+jet Tools/perf/budget/check build.trace.jsonl --column 1M
+jet test Tools/perf/budget/check/run.jet
 ```
 
 Run it from the repository root: the default `--budget` is
-`Tools/perf/budget/budget.json` relative to the working directory.
+`Tools/perf/budget/budget.json` relative to the working directory. Its
+JavaScript number text and JSON reads come from the Tools/perf/kit package.
 
 The rows follow the current pipeline: load and parse, register, comptime, sema
 bodies, effects, failure inference, other finalize, `lower`, `ir.build`,

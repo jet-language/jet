@@ -832,7 +832,7 @@ digest: fn(path: String) -> String {
 
 // ---------------------------------------------------------------------------
 // perf: a cold self-compile by the jet under test, traced, held to the
-// PERF_COLUMN budget of Tools/perf/budget/Check.jet. One row per budget row
+// PERF_COLUMN budget of Tools/perf/budget/check. One row per budget row
 // (`phase <id> <phase>`) and per counter row (`unit <id> <counter>`).
 perf_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
@@ -855,8 +855,8 @@ perf_rows: fn(rows: TestRows) {
         return
     }
     rows.pass("self-compile")
-    checked: jet_command(setup, setup.jet, [String]{"run", "Tools/perf/budget/Check.jet", "--", trace, "--column", PERF_COLUMN}).run() ?? {
-        rows.fail("budget", "couldn't run Tools/perf/budget/Check.jet: {err}")
+    checked: jet_command(setup, setup.jet, [String]{"run", "Tools/perf/budget/check/run.jet", "--", trace, "--column", PERF_COLUMN}).run() ?? {
+        rows.fail("budget", "couldn't run Tools/perf/budget/check: {err}")
         return
     }
     table := ""
