@@ -1,0 +1,84 @@
+// The public metadata contract: every fact, operation, phase and failure of
+// compile-time preparation, reflection, publishing and advanced program
+// control, each with the card that delivers it and the test that witnesses
+// its behavior. A Built row's witness is a test file in the repository that
+// passes today; an Owed row names the witness its delivery card will add.
+// Tests/MetadataContract.jet checks every row.
+
+MetadataSurface: enum { Preparation Reflection Publishing Control }
+
+MetadataItemKind: enum { Fact Operation Phase Failure }
+
+MetadataDelivery: enum { Built Owed }
+
+MetadataContractRow: struct {
+    // The public spelling, as a program writes it.
+    spelling: String
+    kind: MetadataItemKind
+    surface: MetadataSurface
+    // The card that delivers the row, `#N`.
+    owner: String
+    // Built: the repository path of the passing witness. Owed: the witness
+    // the owner card names.
+    witness: String
+    delivery: MetadataDelivery
+}
+
+METADATA_CONTRACT_ROWS: [MetadataContractRow]{
+    {spelling: "comptime {{ … }}", kind: .Operation, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/PrepBlock.jet", delivery: .Built},
+    {spelling: "NAME: comptime {{ value }}", kind: .Operation, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/PrepBlock.jet", delivery: .Built},
+    {spelling: "comptime if", kind: .Operation, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/ComptimeIf.jet", delivery: .Built},
+    {spelling: "comptime loop", kind: .Operation, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/PrepLoop.jet", delivery: .Built},
+    {spelling: "comptime fn", kind: .Operation, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/PrepFn.jet", delivery: .Built},
+    {spelling: "#phase", kind: .Fact, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/Phase.jet", delivery: .Built},
+    {spelling: "Phase.Preparation", kind: .Phase, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/Phase.jet", delivery: .Built},
+    {spelling: "Phase.Build", kind: .Phase, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/Phase.jet", delivery: .Built},
+    {spelling: "Phase.Runtime", kind: .Phase, surface: .Preparation, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/Phase.jet", delivery: .Built},
+    {spelling: "a failed comptime check stops the build", kind: .Failure, surface: .Preparation, owner: "#3520", witness: "tests/ui/comptime_panic_stops_build.jet", delivery: .Built},
+    {spelling: "comptime code reads no runtime input", kind: .Failure, surface: .Preparation, owner: "#3520", witness: "tests/ui/prep_runtime_input.jet", delivery: .Built},
+    {spelling: "comptime fuel runs out", kind: .Failure, surface: .Preparation, owner: "#3520", witness: "tests/ui/comptime_fuel.jet", delivery: .Built},
+    {spelling: "comptime I/O needs the gate", kind: .Failure, surface: .Preparation, owner: "#3520", witness: "tests/ui/comptime_io_rejected.jet", delivery: .Built},
+    {spelling: "T.reflect()", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/MarkerViews.jet", delivery: .Built},
+    {spelling: "TypeInfo.fields", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Derives/FieldTypes.jet", delivery: .Built},
+    {spelling: "TypeInfo.methods", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/Reflect.jet", delivery: .Built},
+    {spelling: "TypeInfo.markers", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/MarkerViews.jet", delivery: .Built},
+    {spelling: "TypeInfo.expanded_markers", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/MarkerViews.jet", delivery: .Built},
+    {spelling: "T.reflect().layout", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/LayoutFacts.jet", delivery: .Built},
+    {spelling: "x.reflect().fact", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/Reflect.jet", delivery: .Built},
+    {spelling: "FunctionInfo", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/MarkerSites.jet", delivery: .Built},
+    {spelling: "ModuleInfo", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/MarkerSites.jet", delivery: .Built},
+    {spelling: "b.program.types()", kind: .Operation, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/Reflect.jet", delivery: .Built},
+    {spelling: "reflect.of(x)", kind: .Operation, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/ReflectNested.jet", delivery: .Built},
+    {spelling: "#here", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/CallerLocation.jet", delivery: .Built},
+    {spelling: "#caller", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/CallerLocation.jet", delivery: .Built},
+    {spelling: "#build", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "Examples/Metaprogramming/Comptime/BuildFactPrecedence.jet", delivery: .Built},
+    {spelling: "a fact read at run time", kind: .Failure, surface: .Reflection, owner: "#3520", witness: "tests/ui/fact_read_runtime.jet", delivery: .Built},
+    {spelling: "an unknown fact root", kind: .Failure, surface: .Reflection, owner: "#3520", witness: "tests/ui/fact_root_unknown.jet", delivery: .Built},
+    {spelling: "a reflected record's retired `ty` field", kind: .Failure, surface: .Reflection, owner: "#3520", witness: "tests/ui/reflected_field_ty_is_e0302.jet", delivery: .Built},
+    {spelling: "reflect.of on a value that can't display", kind: .Failure, surface: .Reflection, owner: "#3520", witness: "tests/ui/reflect_of_not_displayable.jet", delivery: .Built},
+    {spelling: "FieldInfo.default", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "tests/cases/fact_reads/field_default_and_offset_read_in_templates_code_and_build.case", delivery: .Owed},
+    {spelling: "FieldInfo.offset", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "tests/cases/fact_reads/field_default_and_offset_read_in_templates_code_and_build.case", delivery: .Owed},
+    {spelling: "TypeInfo.traits", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "tests/cases/fact_reads/type_info_lists_traits_constants_and_generic_bindings.case", delivery: .Owed},
+    {spelling: "f.reflect()", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "tests/run/Comptime/DeclarationLocationPlacesTheWrittenName.jet", delivery: .Owed},
+    {spelling: "T.reflect().location", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "tests/run/Comptime/DeclarationLocationPlacesTheWrittenName.jet", delivery: .Owed},
+    {spelling: "CallableSignature", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "callable_catalog", delivery: .Owed},
+    {spelling: "ClosureInfo", kind: .Fact, surface: .Reflection, owner: "#3520", witness: "callable_catalog", delivery: .Owed},
+    {spelling: "MetadataError", kind: .Failure, surface: .Reflection, owner: "#3520", witness: "tests/run/Comptime/DeclarationLocationPlacesTheWrittenName.jet", delivery: .Owed},
+    {spelling: "target.marker(T)", kind: .Operation, surface: .Reflection, owner: "#6039", witness: "Examples/Metaprogramming/Reflection/ReflectionRungs.jet", delivery: .Owed},
+    {spelling: "PackageInfo", kind: .Fact, surface: .Reflection, owner: "#6039", witness: "Examples/Metaprogramming/Reflection/ReflectionRungs.jet", delivery: .Owed},
+    {spelling: "M.reflect().uses", kind: .Fact, surface: .Reflection, owner: "#6039", witness: "tests/ui/marker_uses_", delivery: .Owed},
+    {spelling: "b.generate(name) {{ items }}", kind: .Operation, surface: .Publishing, owner: "#3520", witness: "Examples/Metaprogramming/BuildTime/ProgrammableBuild/run.jet", delivery: .Built},
+    {spelling: "expand: fn(self, target: Target)", kind: .Operation, surface: .Publishing, owner: "#3520", witness: "Examples/Metaprogramming/Reflection/GeneratingMarker.jet", delivery: .Built},
+    {spelling: "derive T.Name {{ … }}", kind: .Operation, surface: .Publishing, owner: "#3520", witness: "Examples/Metaprogramming/Derives/UserDerive.jet", delivery: .Built},
+    {spelling: "core.compiler lex and parse", kind: .Operation, surface: .Publishing, owner: "#3520", witness: "Examples/Metaprogramming/BuildTime/CompilerAPI/run.jet", delivery: .Built},
+    {spelling: "two generated declarations collide", kind: .Failure, surface: .Publishing, owner: "#3520", witness: "tests/ui/derive_generated_collision.jet", delivery: .Built},
+    {spelling: "a generated module fails its check", kind: .Failure, surface: .Publishing, owner: "#3520", witness: "tests/ui/build_generated_module_type_error/run.jet", delivery: .Built},
+    {spelling: "b.compiler(output)", kind: .Operation, surface: .Control, owner: "#3526", witness: "meta_hook_fixture", delivery: .Owed},
+    {spelling: "meta.events(watch:, handler)", kind: .Operation, surface: .Control, owner: "#3526", witness: "meta_hook_fixture", delivery: .Owed},
+    {spelling: "meta.rewrite_body(f, code)", kind: .Operation, surface: .Control, owner: "#3526", witness: "tests/ui/changeset_", delivery: .Owed},
+    {spelling: "meta.add(code, scope:)", kind: .Operation, surface: .Control, owner: "#3526", witness: "tests/ui/code_value_", delivery: .Owed},
+    {spelling: "#code {{ … }}", kind: .Operation, surface: .Control, owner: "#3526", witness: "tests/ui/code_value_", delivery: .Owed},
+    {spelling: "a Compiler value kept past its build", kind: .Failure, surface: .Control, owner: "#3526", witness: "meta_hook_fixture", delivery: .Owed},
+    {spelling: "a failed handler publishes none of its actions", kind: .Failure, surface: .Control, owner: "#3526", witness: "tests/ui/changeset_", delivery: .Owed},
+    {spelling: "an action without its Meta case", kind: .Failure, surface: .Control, owner: "#3526", witness: "meta_hook_fixture", delivery: .Owed},
+}

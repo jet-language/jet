@@ -1,0 +1,51 @@
+// The metadata contract registry names a delivery card and a witness for
+// every row, and every Built row's witness is a file in the repository.
+use {
+    metadata_contract_files: core.files
+    jet_foundation.[METADATA_CONTRACT_ROWS, MetadataDelivery, MetadataItemKind, MetadataSurface]
+}
+
+metadata_contract_card: fn(owner: String) -> Bool Never! {
+    bytes: owner.bytes()
+    if bytes.len() < 2 || bytes[0] != (U8{35}) -> return false
+    loop (index, byte) in bytes {
+        if index == 0 -> next
+        if byte < (U8{48}) || byte > (U8{57}) -> return false
+    }
+    true
+}
+
+#Test("every metadata contract row names its card and a witness, and a built row's witness exists") {
+    violations := [String]{}
+    seen := [String]{}
+    loop row in METADATA_CONTRACT_ROWS {
+        if row.spelling.is_empty() -> violations.push("a row has no spelling")
+        if seen.contains(row.spelling) -> violations.push("`{row.spelling}` is registered twice")
+        seen.push(row.spelling.copy()) // copy: the duplicate check keeps every spelling.
+        if !metadata_contract_card(row.owner) -> violations.push("`{row.spelling}` names the owner `{row.owner}`, which is not a card")
+        if row.witness.is_empty() -> violations.push("`{row.spelling}` names no witness")
+        if row.delivery == MetadataDelivery.Built && !metadata_contract_files.exists(row.witness) {
+            violations.push("`{row.spelling}` is Built, but its witness `{row.witness}` is not a file")
+        }
+    }
+    assert(violations.is_empty(), violations.join("\n"))
+}
+
+#Test("the metadata contract covers every surface and every kind of item") {
+    surfaces: [MetadataSurface]{.Preparation, .Reflection, .Publishing, .Control}
+    kinds: [MetadataItemKind]{.Fact, .Operation, .Phase, .Failure}
+    loop surface in surfaces {
+        found := false
+        loop row in METADATA_CONTRACT_ROWS {
+            if row.surface == surface -> found = true
+        }
+        assert(found, "a metadata surface has no contract row")
+    }
+    loop kind in kinds {
+        found := false
+        loop row in METADATA_CONTRACT_ROWS {
+            if row.kind == kind -> found = true
+        }
+        assert(found, "a metadata item kind has no contract row")
+    }
+}
