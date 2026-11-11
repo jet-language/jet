@@ -557,3 +557,21 @@ IR_RUNTIME_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_R
 ir_runtime_handle_row: fn(name: String) -> Int? Never! {
     ir_key_row(IR_RUNTIME_HANDLE_KEYS, IR_RUNTIME_HANDLE_KEY_ROWS, name)
 }
+
+// A compiler value with no declaration that build and comptime code hold
+// (the build context and its handles, `Dev`, the ProgramInfo snapshot and
+// its reflection records, the `core.compiler` query results and their
+// records): a word naming the value in the evaluator's host table, whose
+// methods and fields the evaluator answers (JetIR ir_host_method). The IR lays
+// it out as that word and the checker copies it as that word.
+ir_host_value_name: fn(name: String) -> Bool Never! {
+    if name == {
+        "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildFile" | "BuildError" | "Dev" | "SourceSpan" -> true
+        "ProgramInfo" | "TypeInfo" | "FunctionInfo" | "PackageInfo" | "CompilerDefinition" | "CompilerReference" | "CompilerCall" | "CompilerStructuralNode" -> true
+        "LayoutInfo" | "FieldInfo" | "MethodInfo" | "TypeParamInfo" | "MarkerInfo" | "StateInfo" | "TransitionInfo" | "FactInfo" | "DimensionInfo" | "DimensionAxis" | "EffectInfo" | "ArithmeticOperationInfo" -> true
+        "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
+        "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
+        "CompilerLock" | "CompilerLockedPackage" | "CompilerProfileSet" | "CompilerProfile" | "CompilerKeyValue" -> true
+        else -> false
+    }
+}

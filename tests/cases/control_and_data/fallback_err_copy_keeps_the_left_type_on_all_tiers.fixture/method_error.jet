@@ -1,0 +1,35 @@
+// After a `??` fallback built from `err.copy()`, a method the rows don't have
+// is reported against `[Fact]`, and the pattern below still binds `fact`.
+Fact: enum {
+    Program(String)
+    Note(String)
+}
+
+#Error
+LoadError: struct {
+    reason: String
+    source: SourceSpan?
+}
+
+Answer: struct {
+    rows: [Fact]
+    failure: LoadError?
+}
+
+load: fn(ok: Bool) -> [Fact] LoadError! {
+    if !ok -> return Err(LoadError{reason: "no input", source: None})
+    [Fact]{.Program("main")}
+}
+
+collect: fn(ok: Bool) -> Answer {
+    rows: load(ok) ?? return Answer{rows: [Fact]{}, failure: Val(err.copy())}
+    rows.zz()
+    loop row in rows {
+        if row == .Program(fact) -> print("program {fact}")
+    }
+    Answer{rows: rows, failure: None}
+}
+
+run: fn() {
+    print("kept {collect(true).rows.len()}")
+}

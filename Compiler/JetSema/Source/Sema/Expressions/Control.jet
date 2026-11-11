@@ -1384,13 +1384,31 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
     // clears the flag.
     saved_safe_panic_context: context.autodiff_safe_panic_context
     context.autodiff_safe_panic_context = is_compute_tensor_family(payload) && sema_control_is_core_compute_call(value, environment, program)
+    // copy: the route sets context.fallback_err_denial for its own frame, and
+    // the enclosing one comes back on every path, a failed route's too. Jet has
+    // no exchange on a field of the write-borrowed `context`.
+    enclosing_err_denial: context.fallback_err_denial.copy()
+    route_diagnostics: diagnostics.len()
+    route_reasons: context.incomplete_reasons.len()
     route: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, program, scopes, state, tail_store, context, diagnostics)
     context.autodiff_safe_panic_context = saved_safe_panic_context
+    context.fallback_err_denial = enclosing_err_denial
     sema_scope_rollback(scopes, fallback_mark)
     fallback_path: sema_ownership_fork_path(state, fork)
     checked_route: route ?? {
         sema_ownership_fork_drop(state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
-        return None
+        // A fallback that reported an error leaves the `??` the success
+        // payload's type: the left side checked, so the binding it initializes
+        // stays typed and its later reads report their own faults, and the
+        // error stops the build before lowering. One that failed without an
+        // error leaves no tree and records why.
+        if !sema_has_error_since(diagnostics, route_diagnostics) {
+            if context.incomplete_reasons.len() == route_reasons -> sema_check_unsupported(context, "the `??` fallback at offset {span.start} checked to nothing without a report")
+            return None
+        }
+        if payload == (Type.Named{name: "Never"}) -> return None
+        failed: sema_tree_node(payload, TExprKind.OrFallback{value: subject, fallback: TOrFallback.Value{value: sema_node(context, payload, NodeKind.Unit, span)}, ambient_err: None}, span)
+        return sema_expr_expected(failed, expected, environment, program, diagnostics)
     }
     if checked_route.reaches_merge {
         sema_ownership_fork_rollback(state, fork)
@@ -1485,9 +1503,6 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_type))
     }
     fallback_reaches_merge := false
-    // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback, which
-    // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
-    enclosing_err_denial: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     // Ok(None) shares the mixed carrier's fallback but carries no report.
     if subject_ty == .Result(ok, _) && ok == .Option(_) -> context.fallback_err_denial = Val("E0408")
@@ -1629,20 +1644,20 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         }
         .BreakLabel(label, route_span) -> {
             if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
-                diagnostics.push(sema_error("E0405", route_span, "the `or break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
+                diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
             fallback_tree = Val(TOrFallback.BreakLabel{label: label})
         }
         .ContinueLabel(label, route_span) -> {
             if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
+                diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 return None
             }
             if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(fallback_state, context.loop_value_frames[frame_index], diagnostics)
             fallback_tree = Val(TOrFallback.ContinueLabel{label: label})
         }
     }
-    context.fallback_err_denial = enclosing_err_denial
     sema_single_use_leave_scope(scopes, fallback_state, diagnostics)
     Val(SemaOrFallbackRoute{payload: fallback_payload, value: fallback_tree, reaches_merge: fallback_reaches_merge, ambient_err: ambient_err})
 }
@@ -2008,7 +2023,11 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     // An `.Ok`/`.Err` pattern consumes the subject's
     // Result carrier, so its call root must not propagate.
     subject_value: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
-    checked_subject: subject_value ?? return sema_expression_condition_failed([SemaConditionBinding]{})
+    checked_subject: subject_value ?? {
+        names := [BindName]{}
+        sema_pattern_test_binding_names(pattern, names)
+        return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), environment))
+    }
     source: sema_expression_window_source(subject, scopes)
     window_names := [String]{}
     if source != None -> sema_expression_window_names(pattern, window_names)
@@ -2064,6 +2083,28 @@ sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], wi
     bindings
 }
 
+// The bindings of a condition that never checked (its subject failed, or an
+// earlier test of its `&&` chain did): each of `names`, the names its pattern
+// tests bind, declared with no type the way an unchecked `name: value`
+// binding is (sema_stmt_declare_unchecked_binding). Reads of them check to
+// nothing and add no report, so the subject's own fault is the only one
+// instead of an E0107 per name. Names `bound` already declares are skipped.
+sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [SemaConditionBinding], owner: String, environment: SemaScopeEnvironment) -> [SemaConditionBinding] {
+    bindings := [SemaConditionBinding]{}
+    loop name in names {
+        if name.name == "" || name.name == "_" -> next
+        declared := false
+        loop binding in bound {
+            if binding.symbol.name == name.name -> declared = true
+        }
+        if declared -> next
+        id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name.name)
+        symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_name: environment.module_identity, owner: Val(owner), span: name.span, ty: None, visibility: 0}
+        bindings.push(SemaConditionBinding{symbol: symbol, window: false, sources: [Expr]{}})
+    }
+    bindings
+}
+
 sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     if condition == {
         .Paren(inner, _, _) -> return sema_expression_check_condition_inner(inner, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -2071,7 +2112,14 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
         .Binary(op, left, right, span, _) -> {
             if op == BinOp.And && sema_expression_condition_binds(condition) {
                 left_check: sema_expression_check_condition_inner(left, environment, program, scopes, state, tail_store, context, diagnostics)
-                left_checked: left_check.checked ?? return left_check
+                left_checked: left_check.checked ?? {
+                    names := [BindName]{}
+                    sema_expression_condition_binding_names(right, names)
+                    unchecked: sema_expression_unchecked_condition_bindings(names, left_check.bindings, sema_scope_local_owner_key(scopes), environment)
+                    bindings := left_check.bindings
+                    loop binding in unchecked -> bindings.push(binding)
+                    return sema_expression_condition_failed(bindings)
+                }
                 // The right side of `&&` reads the names the left side bound.
                 sema_expression_declare_condition_bindings(left_checked.bindings, scopes, state, false, diagnostics)
                 right_check: sema_expression_check_condition_inner(right, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -2230,7 +2278,7 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
             sema_scope_refine_local(scopes, binding.symbol)
         }
         if in_place -> sema_scope_mark_place_alias(scopes, binding.symbol.name)
-        if track -> sema_ownership_declare_binding(state, binding.symbol, false)
+        if track && binding.symbol.ty != None -> sema_ownership_declare_binding(state, binding.symbol, false)
         // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         _ := sema_ownership_record_pattern_views(state, binding.symbol.name, binding.symbol.span, binding.sources, access, scopes)

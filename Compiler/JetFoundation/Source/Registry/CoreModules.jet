@@ -487,6 +487,23 @@ core_record_field_in: fn(rows: [CoreRecordFieldRow], owner: String, field: Strin
     None
 }
 
+// The types of Core record `owner`'s fields, one per field name in row order
+// (the first row of a field wins, as in core_record_field). None when no row
+// names the record.
+core_record_field_types: fn(owner: String) -> [Type]? {
+    leaf: core_record_leaf(owner)
+    fields := [String]{}
+    types := [Type]{}
+    loop row in CORE_RECORD_FIELD_ROWS {
+        if row.owner != leaf || fields.contains(row.field) -> next
+        // copy: the global row table can't be moved from.
+        fields.push(row.field.copy())
+        types.push(row.ty.copy())
+    }
+    if types.len() == 0 -> return None
+    Val(types)
+}
+
 // The field types of many Core records in one pass over the rows:
 // `table[k][f]` is the first matching row's type of `owners[k]`.`fields[k][f]`,
 // None when no row types it. `owners` are distinct record leaves. JetIR adds

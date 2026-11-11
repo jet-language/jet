@@ -1,0 +1,38 @@
+Error [jet.ReturnTypeMismatch]: This value is String (text), but `fallback_fails` returns Int
+  --> {work}/pattern_bind.jet:21:30
+    |
+ 21 |     rows: load(ok) ?? return "none"
+    |                              ^^^^^^
+ Why: `fallback_fails` declares Int as its result, so the value it hands back must be Int
+ Fix: Hand back a Int value: convert this value to Int, or return the value you meant
+More: jet-lang.dev/e/E0113
+
+Error [jet.UnknownMethod]: `zz` isn't a method on this value
+  --> {work}/pattern_bind.jet:25:10
+    |
+ 25 |     rows.zz()
+    |          ^^
+ Why: This `List` value has no instance method named `zz`
+ Fix: Check the spelling of `zz`
+More: jet-lang.dev/e/E0311
+
+Error [jet.UnknownFunction]: Nothing named `missing_one` exists here
+  --> {work}/pattern_bind.jet:30:10
+    |
+ 30 |     one: missing_one()
+    |          ^^^^^^^^^^^
+ Why: Only functions that have been defined (or built in, like `print` / `panic`) can be called
+ Fix: Define it first (fn missing_one() { ... }), or call one that exists
+More: jet-lang.dev/e/E0102
+
+Error [jet.FallbackTypeMismatch]: The `?? next` label is not an enclosing loop
+  --> {work}/pattern_bind.jet:38:19
+    |
+ 38 |         n: row ?? next(outer)
+    |                   ^^^^^^^^^^^
+ Why: The fallback route must name an active loop label
+ Fix: Use an enclosing loop label
+More: jet-lang.dev/e/E0405
+
+4 problems found
+run `jet explain E0113` to learn more

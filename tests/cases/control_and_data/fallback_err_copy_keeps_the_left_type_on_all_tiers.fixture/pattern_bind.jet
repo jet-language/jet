@@ -1,0 +1,47 @@
+// A fallback that fails its own check still leaves the `??` the left side's
+// type, and a pattern test whose subject failed still binds its names: each
+// fault is reported once, with no unknown-name report for `fact` or `m`.
+Fact: enum {
+    Program(String)
+    Note(String)
+}
+
+#Error
+LoadError: struct {
+    reason: String
+    source: SourceSpan?
+}
+
+load: fn(ok: Bool) -> [Fact] LoadError! {
+    if !ok -> return Err(LoadError{reason: "no input", source: None})
+    [Fact]{.Program("main")}
+}
+
+fallback_fails: fn(ok: Bool) -> Int {
+    rows: load(ok) ?? return "none"
+    loop row in rows {
+        if row == .Program(fact) -> print("program {fact}")
+    }
+    rows.zz()
+    rows.len()
+}
+
+subject_fails: fn() {
+    one: missing_one()
+    if one == .Program(m) {
+        print("{m}")
+    }
+}
+
+label_fails: fn(rows: [Int?]) {
+    loop row in rows {
+        n: row ?? next(outer)
+        print("{n}")
+    }
+}
+
+run: fn() {
+    print(fallback_fails(true))
+    subject_fails()
+    label_fails([Int?]{Val(1)})
+}
