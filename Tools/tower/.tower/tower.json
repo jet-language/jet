@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99284,
+    "rev": 99292,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56957,12 +56957,12 @@
         },
         {
           "n": 18,
-          "text": "The nine Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built, each under a ratified API ballot (one ballot may cover several): (1) a tally (Counter) over an iterator; (2) a bounded split into a checked tuple; (3) regex full-match with typed captures; (4) width and zero-pad format specs in interpolation; (5) several aggregates per group in one pass and a grouped .to_map(); (6) whole-unit Duration accessors with no error path; (7) find-and-update of the first matching element; (8) whole-tensor reductions and negative indices in core.compute; (9) infallible forms where the type proves success. The two rewrites that need no new API (counts.top_n in wordfreq, text.count in regex-find-all-4mb) are applied, and each of the nine entries then uses no more source tokens than its Python twin (c14 bar 3).",
+          "text": "The nine Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built, each built with no ballot per the owner's instruction of 2026-11-10 (Core API gaps are built; only syntax goes to a ballot), with names that follow existing Core conventions: (1) a tally (Counter) over an iterator; (2) a bounded split into a checked tuple; (3) regex full-match with typed captures; (4) width and zero-pad format specs in interpolation; (5) several aggregates per group in one pass and a grouped .to_map(); (6) whole-unit Duration accessors with no error path; (7) find-and-update of the first matching element; (8) whole-tensor reductions and negative indices in core.compute; (9) infallible forms where the type proves success. The two rewrites that need no new API (counts.top_n in wordfreq, text.count in regex-find-all-4mb) are applied, and each of the nine entries then uses no more source tokens than its Python twin (c14 bar 3).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:18:41.218Z"
+          "at": "2026-11-11T12:02:06.290Z"
         },
         {
           "n": 19,
@@ -57245,12 +57245,12 @@
         },
         {
           "n": 51,
-          "text": "fmt.decimal's handling of a negative value that rounds to zero is pinned by a #Test. Rust's {:.2} and JS toFixed both print \"-0.00\", and Jet's current output differs (found by G1Lead4 on the scaling-report twin, 2026-11-11). If matching them changes existing output, that's a behavior change that goes to a ballot first.",
+          "text": "fmt.decimal prints a negative value that rounds to zero with its sign, \"-0.00\" for decimal(-0.001, 2), as Rust's {:.2}, JS toFixed and Python's :.2f all do. Decided by Main on 2026-11-11: every peer agrees, and the sign of an IEEE negative value is kept. A #Test pins it, and every existing golden whose output changes is updated in the same patch. Found by G1Lead4 on the scaling-report twin, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:25:03.523Z"
+          "at": "2026-11-11T12:02:07.419Z"
         },
         {
           "n": 52,
@@ -57281,57 +57281,57 @@
         },
         {
           "n": 55,
-          "text": "Core reads a POSIX shell environment file as `.` would source it, into a name-to-value map: assignment-only commands, export and readonly, +=, quoting, ~, $N, and ${NAME[:]-=+?word}. Today orchestrator/Roots.jet hand-writes about 330 lines of this. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "text": "Core reads a POSIX shell environment file as `.` would source it, into a name-to-value map: assignment-only commands, export and readonly, +=, quoting, ~, $N, and ${NAME[:]-=+?word}. Today orchestrator/Roots.jet hand-writes about 330 lines of this. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:11.506Z"
+          "at": "2026-11-11T12:01:58.494Z"
         },
         {
           "n": 56,
-          "text": "core.files gains lexical path normalize, join and resolve with the semantics of node's path.normalize, path.join and path.resolve: . and .. collapse, and a trailing slash is kept. Today files.join neither normalizes nor keeps the left side when the right side is absolute, and roots-mjs and run-cold-context hand-write node_normal, node_join and node_resolve. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "text": "core.files gains lexical path normalize, join and resolve with the semantics of node's path.normalize, path.join and path.resolve: . and .. collapse, and a trailing slash is kept. Today files.join neither normalizes nor keeps the left side when the right side is absolute, and roots-mjs and run-cold-context hand-write node_normal, node_join and node_resolve. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:12.716Z"
+          "at": "2026-11-11T12:02:00.072Z"
         },
         {
           "n": 57,
-          "text": "Core has an environment read where empty means unset, and XDG base directories (cache, data and config homes honoring XDG_*_HOME, with the $HOME/.cache, .local/share and .config fallbacks). roots-sh, roots-mjs and run-cold-context each hand-write these. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "text": "Core has an environment read where empty means unset, and XDG base directories (cache, data and config homes honoring XDG_*_HOME, with the $HOME/.cache, .local/share and .config fallbacks). roots-sh, roots-mjs and run-cold-context each hand-write these. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:14.039Z"
+          "at": "2026-11-11T12:02:01.512Z"
         },
         {
           "n": 58,
-          "text": "Core has a Latin-1 bytes-to-String decode, a clamped list slice (out-of-range bounds clamp like JS subarray or a Python slice), and a leading-integer parse with parseInt semantics (leading whitespace, a sign and digits, None when there are no digits). runtime-c-census hand-writes latin1, part, js_space, trimmed_end and parse_int in about 60 lines. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "text": "Core has a Latin-1 bytes-to-String decode, a clamped list slice (out-of-range bounds clamp like JS subarray or a Python slice), and a leading-integer parse with parseInt semantics (leading whitespace, a sign and digits, None when there are no digits). runtime-c-census hand-writes latin1, part, js_space, trimmed_end and parse_int in about 60 lines. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:15.424Z"
+          "at": "2026-11-11T12:02:02.748Z"
         },
         {
           "n": 59,
-          "text": "core.encoding.json has typed Dyn path getters: a string, integer, list or string list read at a path such as \"a/b/0\", with the path in the error. run-cold-context hand-writes str, integer, items and strings in about 100 lines, and this pairs with c53's error path. New public names go to the batch Core API ballot (exact signatures, the beginner and expert paths) before they land; the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "text": "core.encoding.json has typed Dyn path getters: a string, integer, list or string list read at a path such as \"a/b/0\", with the path in the error. run-cold-context hand-writes str, integer, items and strings in about 100 lines, and this pairs with c53's error path. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:50:16.829Z"
+          "at": "2026-11-11T12:02:03.996Z"
         },
         {
           "n": 60,
-          "text": "Core API gap from the port bars (G1Lead4, 2026-11-11, runtime-allocator twin: 6760 tokens vs 1292, of which 3994 is a hand emulation of JSON.stringify and most of the rest is Dyn.Object pair lists standing in for JS object literals). core.encoding.json writes a value as JSON.stringify(value, null, indent) does: ECMAScript Number-to-String text (shortest round-trip, no trailing .0, the same exponent thresholds), objects in insertion order, and the same escapes and indentation. It also has a literal way to build an ordered Dyn object, extending the existing Dyn and JSON surface rather than adding a second JSON mechanism. New public names go to the batch Core API ballot first. Proof: a Core #Test compares the output with node's on a fixture set covering integers, fractions, 1e21, -0, NaN and nested objects, and the runtime-allocator twin names this criterion in tool.token_gaps until it lands.",
+          "text": "Core API gap from the port bars (G1Lead4, 2026-11-11, runtime-allocator twin: 6760 tokens vs 1292, of which 3994 is a hand emulation of JSON.stringify and most of the rest is Dyn.Object pair lists standing in for JS object literals). core.encoding.json writes a value as JSON.stringify(value, null, indent) does: ECMAScript Number-to-String text (shortest round-trip, no trailing .0, the same exponent thresholds), objects in insertion order, and the same escapes and indentation. It also has a literal way to build an ordered Dyn object, extending the existing Dyn and JSON surface rather than adding a second JSON mechanism. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Proof: a Core #Test compares the output with node's on a fixture set covering integers, fractions, 1e21, -0, NaN and nested objects, and the runtime-allocator twin names this criterion in tool.token_gaps until it lands.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T11:31:03.363Z"
+          "at": "2026-11-11T12:02:05.139Z"
         }
       ],
       "refs": [],
@@ -57344,7 +57344,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T11:40:12.583Z",
+      "updated": "2026-11-11T12:02:07.419Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -197683,6 +197683,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T12:02:07.419Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#51: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: fmt.decimal's handling of a negative value that rounds to zero is pinned by a #Test. Rust's {:.2} and JS toFixed both print \"-0.00\", and Jet's current output differs (found by G1Lead4 on the scaling-r"
+    },
+    {
+      "at": "2026-11-11T12:02:06.290Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#18: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: The nine Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built, each under a ratified API ballot (one ballot may cover several): (1) a tally (Counter) o"
+    },
+    {
+      "at": "2026-11-11T12:02:05.139Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#60: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: Core API gap from the port bars (G1Lead4, 2026-11-11, runtime-allocator twin: 6760 tokens vs 1292, of which 3994 is a hand emulation of JSON.stringify and most of the rest is Dyn.Object pair lists sta"
+    },
+    {
+      "at": "2026-11-11T12:02:03.996Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#59: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: core.encoding.json has typed Dyn path getters: a string, integer, list or string list read at a path such as \"a/b/0\", with the path in the error. run-cold-context hand-writes str, integer, items and s"
+    },
+    {
+      "at": "2026-11-11T12:02:02.748Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#58: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: Core has a Latin-1 bytes-to-String decode, a clamped list slice (out-of-range bounds clamp like JS subarray or a Python slice), and a leading-integer parse with parseInt semantics (leading whitespace,"
+    },
+    {
+      "at": "2026-11-11T12:02:01.512Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#57: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: Core has an environment read where empty means unset, and XDG base directories (cache, data and config homes honoring XDG_*_HOME, with the $HOME/.cache, .local/share and .config fallbacks). roots-sh, "
+    },
+    {
+      "at": "2026-11-11T12:02:00.072Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#56: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: core.files gains lexical path normalize, join and resolve with the semantics of node's path.normalize, path.join and path.resolve: . and .. collapse, and a trailing slash is kept. Today files.join nei"
+    },
+    {
+      "at": "2026-11-11T12:01:58.494Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#55: Owner instruction 2026-11-10: Core API gaps are built without a ballot; was: Core reads a POSIX shell environment file as `.` would source it, into a name-to-value map: assignment-only commands, export and readonly, +=, quoting, ~, $N, and ${NAME[:]-=+?word}. Today orchestrato"
+    },
     {
       "at": "2026-11-11T12:01:10.908Z",
       "by": "Main",
