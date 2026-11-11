@@ -283,7 +283,7 @@ sema_guest_runtime_binding: fn(package_identity: String, function: Func) -> Bool
 sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) -> true
-        else -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -291,7 +291,7 @@ sema_guest_runtime_value: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String -> true
         .List(item) -> sema_guest_runtime_scalar(item)
-        else -> sema_guest_runtime_scalar(ty)
+        .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_scalar(ty)
     }
 }
 
@@ -303,7 +303,7 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
         .Tuple(fields) -> loop field in fields {
             if !sema_guest_runtime_scalar(field.ty) -> break false
         } ?? true
-        else -> sema_guest_runtime_value(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
     }
 }
 
