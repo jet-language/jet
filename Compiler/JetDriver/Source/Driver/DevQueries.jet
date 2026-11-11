@@ -22,7 +22,19 @@ jet_driver_dev_config_stock: fn() -> JetDriverDevConfig Never! {
     {watch: [String]{}, port: None, reload: "Hot", configured: false}
 }
 
-JetDriverDevAdapter: struct { state: Shared<JetDriverDevConfig> }
+JetDriverDevAdapter: struct {
+    state: Shared<JetDriverDevConfig>
+
+    impl JetEvalBuildHostAdapter {
+        clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter {
+            JetDriverDevAdapter{state: self.state}
+        }
+        build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
+            // The dev adapter records configuration only.
+            jet_driver_dev_host_call(self.state, member, args)
+        }
+    }
+}
 
 jet_driver_dev_host_call: fn(state: Shared<JetDriverDevConfig>, member: String, args: [TComptimeValue]) -> JetEvalBuildReply? {
     if !member.starts_with("Dev.") || args.len() != 2 -> return None
@@ -45,16 +57,6 @@ jet_driver_dev_host_call: fn(state: Shared<JetDriverDevConfig>, member: String, 
         else -> return None
     }
     Val(JetEvalBuildReply.Value{value: TComptimeValue.Unit})
-}
-
-impl JetDriverDevAdapter.JetEvalBuildHostAdapter {
-    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter {
-        JetDriverDevAdapter{state: self.state}
-    }
-    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
-        // The dev adapter records configuration only.
-        jet_driver_dev_host_call(self.state, member, args)
-    }
 }
 
 JetDriverDevQueryResult: struct {

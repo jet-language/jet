@@ -16,21 +16,21 @@ package: {
 Ledger: struct {
     name: String
     balance: Int
+
+    impl Rollback {
+        Snapshot: LedgerSnap
+
+        snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+
+        restore: fn(&self, snap: &&LedgerSnap) {
+            print("  {self.name}: balance {self.balance} restored to {snap.balance}")
+            self.balance = snap.balance
+        }
+    }
 }
 
 LedgerSnap: struct {
     balance: Int
-}
-
-impl Ledger.Rollback {
-    Snapshot: LedgerSnap
-
-    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
-
-    restore: fn(&self, snap: &&LedgerSnap) {
-        print("  {self.name}: balance {self.balance} restored to {snap.balance}")
-        self.balance = snap.balance
-    }
 }
 
 #Error

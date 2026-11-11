@@ -2,11 +2,11 @@
 Version: struct {
     number: Int
     build: String
-}
 
-impl Version.Equatable {
-    equal: fn(self, rhs: Version) -> Bool {
-        self.number == rhs.number
+    impl Equatable {
+        equal: fn(self, rhs: Version) -> Bool {
+            self.number == rhs.number
+        }
     }
 }
 
@@ -15,20 +15,20 @@ impl Version.Equatable {
 Box: struct {
     size: Int
     label: String
-}
 
-impl Box.Equatable {
-    equal: fn(self, rhs: Box) -> Bool {
-        self.size == rhs.size
+    impl Equatable {
+        equal: fn(self, rhs: Box) -> Bool {
+            self.size == rhs.size
+        }
     }
-}
 
-impl Box.Comparable {
-    compare: fn(self, rhs: Box) -> Ordering {
-        if {
-            self.label < rhs.label -> Ordering.Less
-            self.label > rhs.label -> Ordering.Greater
-            else -> Ordering.Equal
+    impl Comparable {
+        compare: fn(self, rhs: Box) -> Ordering {
+            if {
+                self.label < rhs.label -> Ordering.Less
+                self.label > rhs.label -> Ordering.Greater
+                else -> Ordering.Equal
+            }
         }
     }
 }
@@ -37,14 +37,14 @@ impl Box.Comparable {
 Ranked: struct {
     rank: Int
     note: String
-}
 
-impl Ranked.Comparable {
-    compare: fn(self, rhs: Ranked) -> Ordering {
-        if {
-            self.rank < rhs.rank -> Ordering.Less
-            self.rank > rhs.rank -> Ordering.Greater
-            else -> Ordering.Equal
+    impl Comparable {
+        compare: fn(self, rhs: Ranked) -> Ordering {
+            if {
+                self.rank < rhs.rank -> Ordering.Less
+                self.rank > rhs.rank -> Ordering.Greater
+                else -> Ordering.Equal
+            }
         }
     }
 }

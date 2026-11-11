@@ -8,8 +8,10 @@ MAX_RECORDING_TEXT_BYTES: Int{16384}
 MAX_RECORDING_ID_BYTES: Int{1024}
 
 // The source and build a recording belongs to; replay refuses any other.
-SessionRecordingIdentity: struct { source_id: String, build_id: String }
-impl SessionRecordingIdentity {
+SessionRecordingIdentity: struct {
+    source_id: String
+    build_id: String
+
     new: fn(source_id: String, build_id: String) -> SessionRecordingIdentity RecordingError! {
         recording_validate_id(source_id, "source_id")
         recording_validate_id(build_id, "build_id")
@@ -17,17 +19,17 @@ impl SessionRecordingIdentity {
     }
     matches: fn(self, other: SessionRecordingIdentity) -> Bool { self.source_id == other.source_id && self.build_id == other.build_id }
 }
+SessionRecordingLimits: struct {
+    max_events: Int
+    max_bytes: Int
 
-SessionRecordingLimits: struct { max_events: Int, max_bytes: Int }
-SESSION_RECORDING_DEFAULT_LIMITS: SessionRecordingLimits{SessionRecordingLimits{max_events: MAX_RECORDING_EVENTS, max_bytes: MAX_RECORDING_BYTES}}
-impl SessionRecordingLimits {
     validate: fn(self) RecordingError! {
         if self.max_events < 1 || self.max_events > MAX_RECORDING_EVENTS || self.max_bytes < 1 || self.max_bytes > MAX_RECORDING_BYTES {
             return Err(RecordingError.InvalidLimits(max_events: self.max_events, max_bytes: self.max_bytes))
         }
     }
 }
-
+SESSION_RECORDING_DEFAULT_LIMITS: SessionRecordingLimits{SessionRecordingLimits{max_events: MAX_RECORDING_EVENTS, max_bytes: MAX_RECORDING_BYTES}}
 // fields_json is a canonical JSON object; payload_json is a canonical object or absent.
 SessionEvent: struct {
     sequence: Int
@@ -37,8 +39,7 @@ SessionEvent: struct {
     entity: String
     fields_json: String
     payload_json: String?
-}
-impl SessionEvent {
+
     new: fn(sequence: Int, timestamp_ms: Int, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> SessionEvent RecordingError! {
         recording_validate_text(source, "event source")
         recording_validate_text(kind, "event kind")
@@ -63,7 +64,6 @@ impl SessionEvent {
         "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{foundation_json_quote(self.source)},\"kind\":{foundation_json_quote(self.kind)},\"entity\":{foundation_json_quote(self.entity)},\"fields\":{self.fields_json},\"payload\":{payload}}}".bytes().len()
     }
 }
-
 TruncationFacts: struct {
     event_limit: Int
     byte_limit: Int
@@ -77,11 +77,9 @@ TruncationFacts: struct {
     last_dropped_sequence: Int?
     first_retained_sequence: Int?
     last_retained_sequence: Int?
-}
-impl TruncationFacts {
+
     truncated: fn(self) -> Bool { self.dropped_events != 0 }
 }
-
 #Error
 RecordingError: enum {
     InvalidIdentity(message: String)
@@ -98,8 +96,7 @@ RecordingError: enum {
     CursorUnavailable(sequence: Int)
     ReplayAtBeginning
     ReplayAtEnd
-}
-impl RecordingError {
+
     message: fn(self) -> String {
         if self == {
             .InvalidIdentity(message) -> "invalid session identity: {message}"
@@ -118,14 +115,18 @@ impl RecordingError {
             .ReplayAtEnd -> "replay cursor is already at the end"
         }
     }
-}
-impl RecordingError.Display { display: fn(&&self) -> String { self.message() } }
 
+    impl Display { display: fn(&&self) -> String { self.message() } }
+}
 ReplayStep: enum { Forward Backward }
 
 // position counts the retained events already replayed; sequence is the last one's.
-ReplayCursor: struct { identity: SessionRecordingIdentity, generation: Int, position: Int, sequence: Int? }
-impl ReplayCursor {
+ReplayCursor: struct {
+    identity: SessionRecordingIdentity
+    generation: Int
+    position: Int
+    sequence: Int?
+
     seek: fn(&self, recording: SessionRecording, sequence: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
         index := -1
@@ -176,7 +177,6 @@ impl ReplayCursor {
         if self.position > recording.events.len() -> return Err(RecordingError.CheckpointUnavailable)
     }
 }
-
 SessionCheckpoint: struct {
     identity: SessionRecordingIdentity
     generation: Int
@@ -215,8 +215,7 @@ SessionRecording: struct {
     last_timestamp_ms: Int?
     // Advances on every append; cursors and checkpoints from an older generation are refused.
     generation: Int
-}
-impl SessionRecording {
+
     new: fn(identity: SessionRecordingIdentity) -> SessionRecording RecordingError! { SessionRecording.with_limits(identity, SESSION_RECORDING_DEFAULT_LIMITS) }
     with_limits: fn(identity: SessionRecordingIdentity, limits: SessionRecordingLimits) -> SessionRecording RecordingError! {
         recording_validate_id(identity.source_id, "source_id")
@@ -347,7 +346,6 @@ impl SessionRecording {
         self.generation += 1
     }
 }
-
 recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIdentity) -> [SessionEvent] RecordingError! {
     text: String.from_bytes(bytes) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope is not UTF-8"))
     root: recording_parse_json(text, "devtools envelope")

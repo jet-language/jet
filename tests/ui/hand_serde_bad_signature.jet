@@ -5,16 +5,16 @@
 // program never reaches rustc as broken Rust (I2/I4).
 Email: struct {
     addr: String
-}
 
-// `encode` must return `Dyn`, not `String`.
-impl Email.Encode {
-    encode: fn(self) -> String { self.addr.copy() }
-}
+    // `encode` must return `Dyn`, not `String`.
+    impl Encode {
+        encode: fn(self) -> String { self.addr.copy() }
+    }
 
-// `decode` is static — a `self` receiver is not part of its shape.
-impl Email.Decode {
-    decode: fn(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
+    // `decode` is static — a `self` receiver is not part of its shape.
+    impl Decode {
+        decode: fn(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
+    }
 }
 
 run: fn() { print("ok") }

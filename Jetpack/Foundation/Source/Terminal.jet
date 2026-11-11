@@ -195,14 +195,14 @@ DiagnosticCollector: struct {
 // with `with_invocation` record into it; closing it flushes every card once.
 DiagnosticInvocation: struct {
     collector: Shared<DiagnosticCollector>
-}
 
-impl DiagnosticInvocation.Close {
-    close: fn(&&self) {
-        collector: self.collector
-        permit: collector.guard_read()
-        rendered: permit.value.render()
-        if rendered != "" -> terminal_write_output(rendered)
+    impl Close {
+        close: fn(&&self) {
+            collector: self.collector
+            permit: collector.guard_read()
+            rendered: permit.value.render()
+            if rendered != "" -> terminal_write_output(rendered)
+        }
     }
 }
 
@@ -768,15 +768,15 @@ SpinnerState: struct {
 Spinner: struct {
     priv stop: Shared<SpinnerState>?
     priv running: Task<Unit>?
-}
 
-impl Spinner.Close {
-    close: fn(&&self) {
-        if self.stop == .Val(flag) {
-            permit: flag.guard_edit()
-            permit.value.stop = true
+    impl Close {
+        close: fn(&&self) {
+            if self.stop == .Val(flag) {
+                permit: flag.guard_edit()
+                permit.value.stop = true
+            }
+            if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
         }
-        if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
     }
 }
 

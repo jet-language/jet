@@ -19,15 +19,15 @@ PackageSourceSnapshot: struct {
     name: String
 
     path: fn(self) -> String Never! { self.directory.path() }
-}
-impl PackageSourceSnapshot.Close {
-    close: fn(&&self) -[FS]> {
-        // Never remove a replacement bound at the private snapshot name.
-        self.directory.revalidate() ?? return
-        self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            // Never remove a replacement bound at the private snapshot name.
+            self.directory.revalidate() ?? return
+            self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
+        }
     }
 }
-
 PackageSourceEntry: struct {
     path: String
     content_hash: String

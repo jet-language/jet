@@ -1,16 +1,23 @@
 // Standalone checker fixture: both front ends must retain distinct hook rows.
-OperatorVector: struct { value: Int }
-impl OperatorVector.Mul(Float) {
-    mul: fn(self, rhs: Float) -> Float { return Float{self.value} * rhs }
-}
-impl OperatorVector.Mul(OperatorVector) {
-    mul: fn(self, rhs: OperatorVector) -> OperatorVector {
-        return OperatorVector{value: self.value * rhs.value}
+OperatorVector: struct {
+    value: Int
+
+    impl Mul(Float) {
+        mul: fn(self, rhs: Float) -> Float { return Float{self.value} * rhs }
+    }
+
+    impl Mul(OperatorVector) {
+        mul: fn(self, rhs: OperatorVector) -> OperatorVector {
+            return OperatorVector{value: self.value * rhs.value}
+        }
     }
 }
-OperatorPrice: struct { value: Int }
-impl OperatorPrice.Mul(Decimal) {
-    mul: fn(self, rhs: Decimal) -> Decimal { return rhs.copy() }
+OperatorPrice: struct {
+    value: Int
+
+    impl Mul(Decimal) {
+        mul: fn(self, rhs: Decimal) -> Decimal { return rhs.copy() }
+    }
 }
 impl Int.Mul(OperatorPrice) {
     mul: fn(self, rhs: OperatorPrice) -> OperatorPrice {

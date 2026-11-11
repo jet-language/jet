@@ -3,6 +3,8 @@
 # Claim: a target-specific impl (exception rule d) is not flagged
 fixture: check_style_flags_a_detached_impl_only_under_the_flag.fixture
 env: NO_COLOR=1
+# The fixture keeps its detached impls in main.source, outside the .jet corpus the impl placement guard sweeps.
+copy: main.source main.jet
 step: jet check main.jet
 exit: 0 # a plain check passes
 stderr: !~ "L0535" # the style lint is off by default

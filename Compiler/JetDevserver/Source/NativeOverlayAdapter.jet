@@ -42,11 +42,9 @@ NativeOverlayActionRequest: struct {
     node_id: String
     action_id: String
     required_grant: NativeOverlayGrant
-}
-impl NativeOverlayActionRequest {
+
     cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
-
 NativeOverlaySelectionRequest: struct {
     protocol: String
     session_id: String
@@ -54,11 +52,9 @@ NativeOverlaySelectionRequest: struct {
     sequence: Int
     panel_id: String
     item_key: String
-}
-impl NativeOverlaySelectionRequest {
+
     cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
-
 // Event is absent only for an empty canonical cursor; never synthesize a sequence.
 NativeOverlayUpdate: struct {
     identity: NativeOverlayIdentity
@@ -108,9 +104,9 @@ NativeOverlayAdapterError: enum {
             .ActionMismatch(action_id) -> "native overlay action `{action_id}` is stale or no longer matches the node"
         }
     }
-}
-impl NativeOverlayAdapterError.Display { display: fn(&&self) -> String { self.message() } }
 
+    impl Display { display: fn(&&self) -> String { self.message() } }
+}
 // The current request context: the revision and cursor a request must name.
 NativeOverlayContext: struct { revision: String, sequence: Int }
 NativeOverlayRenderedPanels: struct { panels: [NativeOverlayPanelFact], dropped_for_nodes: Bool }
@@ -125,8 +121,7 @@ NativeOverlayAdapter: struct {
     typed_panels: [String: NativeOverlayPanelFact]
     history_truncated: Bool
     last_update: NativeOverlayUpdate?
-}
-impl NativeOverlayAdapter {
+
     new: fn(session_id: String) -> NativeOverlayAdapter {
         NativeOverlayAdapter{session_id: session_id, revision: None, sequence: None, release_build: false,
             event_facts: [JetDevtoolsEvent]{}, typed_panels: [String: NativeOverlayPanelFact]{}, history_truncated: false, last_update: None}
@@ -303,7 +298,6 @@ impl NativeOverlayAdapter {
         NativeOverlayRenderedPanels{panels: panels, dropped_for_nodes: dropped_for_nodes}
     }
 }
-
 node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayAdapterError! {
     if event.sequence() == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
     validate_event_text(event)

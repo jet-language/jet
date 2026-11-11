@@ -3567,7 +3567,11 @@ sema_checked_generated_helper: fn(method: SemaRegistrationFunction) -> Bool Neve
 sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     sema_checked_member_names(graph, module_row, diagnostics)
     state := sema_checked_coherence_state(module_row)
-    loop implementation_index in 0..<module_row.impls.len() -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
+    // Written impls claim their traits first: the top-level ones, then the
+    // inline trait blocks; a generated codec repeating one reports the repeat.
+    loop implementation_index in 0..<module_row.impls.len() {
+        if !module_row.impls[implementation_index].declaration.is_generated_serde -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
+    }
     // The struct and enum sources are read in place (derives first, then
     // the inline trait blocks), never copied out of their nominal rows.
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -3587,6 +3591,9 @@ sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRe
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
+    }
+    loop implementation_index in 0..<module_row.impls.len() {
+        if module_row.impls[implementation_index].declaration.is_generated_serde -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
     }
     loop implementation_index in 0..<module_row.impls.len() -> sema_checked_validate_delegation(graph, module_row, module_row.impls[implementation_index], diagnostics)
     loop nominal_index in 0..<module_row.nominals.len() {

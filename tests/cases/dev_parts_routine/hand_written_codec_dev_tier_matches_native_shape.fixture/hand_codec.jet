@@ -1,20 +1,22 @@
 
 use json: core.encoding.json
 
-Email: struct { addr: String }
+Email: struct {
+    addr: String
 
-impl Email.Encode {
-    encode: fn(self) -> Dyn {
-        m: [String:Dyn]{ "email": Dyn.Text(self.addr.copy()) }
-        return Dyn.Object(m)
+    impl Encode {
+        encode: fn(self) -> Dyn {
+            m: [String:Dyn]{ "email": Dyn.Text(self.addr.copy()) }
+            return Dyn.Object(m)
+        }
     }
-}
 
-impl Email.Decode {
-    decode: fn(tree: Dyn) -> Email [FieldError]! {
-        f := tree.field("email") ?? Dyn.Text("")
-        s := f.text() ?? ""
-        return Ok(Email{addr: s})
+    impl Decode {
+        decode: fn(tree: Dyn) -> Email [FieldError]! {
+            f := tree.field("email") ?? Dyn.Text("")
+            s := f.text() ?? ""
+            return Ok(Email{addr: s})
+        }
     }
 }
 

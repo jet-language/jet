@@ -24,12 +24,12 @@ stdout: ~ "effects at pricing.jet:3, in `rates`, nearest first" # a module file 
 stdout: ~ "  function  (none written)  pricing.jet:3\n  type      (none written)\n" # no row is written on `rates`, and it is no method
 stdout: ~ "  module    #FX(!Net)       main.jet:1" # the cap written where pricing is declared
 stdout: ~ "reaches: FS.Read(\"rates.txt\") (pricing.jet:3)" # `rates` reads the file itself
-step method: jet explain effects receipt.jet:15
+step method: jet explain effects receipt.jet:14
 exit: 0
-stdout: ~ "effects at receipt.jet:15, in `render`, nearest first" # a trait method of a capped type
-stdout: ~ "  function  (none written)    receipt.jet:15\n  trait     #FX(FS.Read, IO)  receipt.jet:4\n  type      #FX(FS.Read)      receipt.jet:9\n" # no row on `render`, then the cap of the trait it implements, then its type's cap
+stdout: ~ "effects at receipt.jet:14, in `render`, nearest first" # a trait method of a capped type
+stdout: ~ "  function  (none written)    receipt.jet:14\n  trait     #FX(FS.Read, IO)  receipt.jet:4\n  type      #FX(FS.Read)      receipt.jet:9\n" # no row on `render`, then the cap of the trait it implements, then its type's cap
 stdout: ~ "  module    #FX(!Exec)        receipt.jet:1\n  package" # the file-head cap is the module rung; `receipt: module` is declared with no cap
-stdout: ~ "reaches: FS.Read(\"receipt.txt\") (receipt.jet:15)" # `render` reads the file itself
+stdout: ~ "reaches: FS.Read(\"receipt.txt\") (receipt.jet:14)" # `render` reads the file itself
 step caps: jet explain effects --caps
 exit: 0
 stdout: ~ "main.jet:1  #FX(!Net)  module pricing" # the module cap where pricing is declared

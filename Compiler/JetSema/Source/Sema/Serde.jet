@@ -63,6 +63,16 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
                 if target_module == definition.module_identity && graph.modules[module_row_index].impls[implementation_index].target_type_name == definition.name -> return true
             }
         }
+        // An `impl Decode { … }` block in the type's own body. Read in place.
+        module_index: sema_registration_module_index(graph, definition.module_identity) ?? return false
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            if graph.modules[module_index].nominals[nominal_index].symbol.name != definition.name -> next
+            if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if sema_serde_named_leaf(block.trait_name) == wanted -> return true
+                }
+            }
+        }
     }
     false
 }

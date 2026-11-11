@@ -222,16 +222,16 @@ PolicyError: enum {
     ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
     Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration)
     Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration)
-}
 
-// Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
-// print it verbatim).
-impl PolicyError.Debug {
-    debug: fn(self) -> String {
-        if self == {
-            .ProhibitedScope(key, scope, span) -> "ProhibitedScope {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, span: {policy_span_debug_text(span)} }}"
-            .Conflict(key, scope, first, second, _) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
-            .Widening(key, outer, inner, span, _) -> "Widening {{ key: {policy_key_debug_text(key)}, outer: {policy_value_debug_text(outer)}, inner: {policy_value_debug_text(inner)}, span: {policy_span_debug_text(span)} }}"
+    // Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
+    // print it verbatim).
+    impl Debug {
+        debug: fn(self) -> String {
+            if self == {
+                .ProhibitedScope(key, scope, span) -> "ProhibitedScope {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, span: {policy_span_debug_text(span)} }}"
+                .Conflict(key, scope, first, second, _) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
+                .Widening(key, outer, inner, span, _) -> "Widening {{ key: {policy_key_debug_text(key)}, outer: {policy_value_debug_text(outer)}, inner: {policy_value_debug_text(inner)}, span: {policy_span_debug_text(span)} }}"
+            }
         }
     }
 }

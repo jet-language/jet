@@ -8,31 +8,31 @@ package: {
 
 Inner: struct {
     label: String
-}
 
-impl Inner.Close {
-    close: fn(&&self) -[IO]> { print("close inner {self.label}") }
+    impl Close {
+        close: fn(&&self) -[IO]> { print("close inner {self.label}") }
+    }
 }
 
 Direct: struct {
     inner: Inner
-}
 
-impl Direct.Close {
-    close: fn(&&self) -[IO]> {
-        print("close direct")
-        close(self.inner)
+    impl Close {
+        close: fn(&&self) -[IO]> {
+            print("close direct")
+            close(self.inner)
+        }
     }
 }
 
 Bound: struct {
     inner: Inner
-}
 
-impl Bound.Close {
-    close: fn(&&self) -[IO]> {
-        inner := self.inner.move()
-        close(inner)
+    impl Close {
+        close: fn(&&self) -[IO]> {
+            inner := self.inner.move()
+            close(inner)
+        }
     }
 }
 

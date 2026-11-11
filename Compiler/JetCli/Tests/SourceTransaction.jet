@@ -13,13 +13,13 @@ use {
 
 JetCLITransactionFixtureRoot: struct {
     path: String
-}
-impl JetCLITransactionFixtureRoot.Close {
-    close: fn(&&self) -[FS]> {
-        cli_files.remove_all(self.path).drop("test project cleanup")
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            cli_files.remove_all(self.path).drop("test project cleanup")
+        }
     }
 }
-
 #Test("source_transaction") {
     root: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")

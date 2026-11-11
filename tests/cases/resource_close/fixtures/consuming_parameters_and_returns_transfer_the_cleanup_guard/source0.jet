@@ -1,9 +1,11 @@
 
-Resource: struct { name: String }
-impl Resource.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
-impl Resource {
+Resource: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+
     handoff: fn(&&self) -> Resource { return self }
 }
 relay: fn(&&resource: Resource) -> Resource { return resource }

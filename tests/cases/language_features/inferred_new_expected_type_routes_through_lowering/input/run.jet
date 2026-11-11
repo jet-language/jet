@@ -1,6 +1,10 @@
 
 Counter: struct {
     value: Int
+
+    new: fn(value: Int) -> Counter {
+        return Counter{ value: value }
+    }
 }
 
 Holder: struct {
@@ -10,21 +14,13 @@ Holder: struct {
 GenericHolder: struct<T> {
     value: T
     step: fn(Int) -> Int
-}
 
-impl GenericHolder {
     new: fn(value: &&T) -> GenericHolder<T> {
         return GenericHolder<T>{ value: value, step: (n: Int) -> n + 9 }
     }
 
     marker: fn(self) -> Int {
         return self.step(0)
-    }
-}
-
-impl Counter {
-    new: fn(value: Int) -> Counter {
-        return Counter{ value: value }
     }
 }
 

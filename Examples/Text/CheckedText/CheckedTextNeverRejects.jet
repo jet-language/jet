@@ -4,18 +4,18 @@
 
 Words: struct {
     text: String
-}
 
-impl Words.CheckedText {
-    Error: Never
-    Hole: String
+    impl CheckedText {
+        Error: Never
+        Hole: String
 
-    check: fn(_text: String) Never! -[]> { Ok() }
+        check: fn(_text: String) Never! -[]> { Ok() }
 
-    encode_hole: fn<T: Printable>(value: T) -[]> String { "<{value}>" }
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "<{value}>" }
 
-    build: fn(parts: [String], holes: [String]) -[]> Words {
-        Words{text: "{parts.join("|")} [{holes.join(",")}]"}
+        build: fn(parts: [String], holes: [String]) -[]> Words {
+            Words{text: "{parts.join("|")} [{holes.join(",")}]"}
+        }
     }
 }
 

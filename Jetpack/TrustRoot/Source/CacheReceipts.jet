@@ -78,12 +78,12 @@ TrustKey: struct {
     sign: fn(self, message: [U8]) -> TrustSignature Never! {
         TrustSignature{key_id: self.key_id, algorithm: self.algorithm, sig_hex: hex.encode(crypto.hmac_sha256(self.secret, message))}
     }
-}
 
-// The secret is never rendered.
-impl TrustKey.Debug {
-    debug: fn(self) -> String {
-        "TrustKey {{ key_id: {self.key_id:Debug}, algorithm: {self.algorithm:Debug}, secret: \"<redacted>\" }}"
+    // The secret is never rendered.
+    impl Debug {
+        debug: fn(self) -> String {
+            "TrustKey {{ key_id: {self.key_id:Debug}, algorithm: {self.algorithm:Debug}, secret: \"<redacted>\" }}"
+        }
     }
 }
 

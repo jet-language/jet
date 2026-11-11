@@ -1,16 +1,16 @@
 // A trait impl on a generic struct applies to every instance: `Slot<Int>`,
 // `Slot<String>` and `Slot<Slot<Int>>` each get their own `size` method.
-Slot: struct<T> { value: T }
+Slot: struct<T> {
+    value: T
 
-impl Slot {
     get: fn(self) -> T { self.value }
+
+    impl Counted {
+        size: fn(self) -> Int { 1 }
+    }
 }
 
 Counted: trait { size: fn(self) -> Int }
-
-impl Slot.Counted {
-    size: fn(self) -> Int { 1 }
-}
 
 run: fn() {
     number: Slot<Int>{value: 41}

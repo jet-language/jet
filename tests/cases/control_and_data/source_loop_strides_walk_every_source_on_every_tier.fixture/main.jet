@@ -1,27 +1,27 @@
 Words: struct {
     data: [String]
+
+    impl Iterable {
+        Iter: WordsIter
+
+        iter: fn(&&self) -> WordsIter { WordsIter{words: self, idx: 0} }
+    }
 }
 
 WordsIter: struct {
     words: Words
     idx: Int
-}
 
-impl WordsIter.Iterator {
-    Item: String
+    impl Iterator {
+        Item: String
 
-    next: fn(&self) -> String? {
-        if self.idx >= self.words.data.len() -> return None
-        v: self.words.data[self.idx]
-        self.idx += 1
-        Val(v)
+        next: fn(&self) -> String? {
+            if self.idx >= self.words.data.len() -> return None
+            v: self.words.data[self.idx]
+            self.idx += 1
+            Val(v)
+        }
     }
-}
-
-impl Words.Iterable {
-    Iter: WordsIter
-
-    iter: fn(&&self) -> WordsIter { WordsIter{words: self, idx: 0} }
 }
 
 #Layout(columnar)

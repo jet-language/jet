@@ -2289,8 +2289,6 @@ prerequisites do not substitute for a fixture's intended web semantic diagnostic
 `@a11y_cli` uses public `jet lint --a11y FILE`, the only surface of the
 accessibility lints (E2930/E2931), requires a nonzero exit, and compares the
 rendered stderr with the accessibility summary line.
-`@style_cli` uses public `jet check --style FILE`, the only surface of the
-opt-in style lints (impl placement, L0535), and compares the rendered stderr.
 
 Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
 in the existing case-disposition table. They remain in the active testkit corpus

@@ -27,8 +27,9 @@ EditorHost: enum {
             else -> Err(EditorHostError.UnsupportedEditor(value.copy()))
         }
     }
+
+    impl Display { display: fn(&&self) -> String { self.wire_name() } }
 }
-impl EditorHost.Display { display: fn(&&self) -> String { self.wire_name() } }
 EditorCommand: enum {
     Check Build Test Run Debug
     wire_name: fn(self) -> String Never! { if self == {
@@ -55,8 +56,9 @@ EditorCommand: enum {
             else -> Err(EditorHostError.UnsupportedCommand(value.copy()))
         }
     }
+
+    impl Display { display: fn(&&self) -> String { self.wire_name() } }
 }
-impl EditorCommand.Display { display: fn(&&self) -> String { self.wire_name() } }
 #Error
 EditorHostError: enum {
     InvalidRequest(String) InvalidEnvelope(String) UnsupportedEditor(String) UnsupportedCommand(String) UnsupportedMethod(String) LoopbackViolation(String) SourcePathRejected(String)

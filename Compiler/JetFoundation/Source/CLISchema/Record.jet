@@ -18,8 +18,9 @@ CLI_SCHEMA_BYTE_3: U8{3}
 CLI_SCHEMA_BYTE_4: U8{4}
 
 #Error
-MetadataError: enum { UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16) }
-impl MetadataError {
+MetadataError: enum {
+    UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16)
+
     display: fn(self) -> String Never! {
         if self == {
             .UnknownFormat -> "the file is not an ELF, PE, Mach-O, or Wasm executable"
@@ -30,8 +31,10 @@ impl MetadataError {
         }
     }
 }
-CLIRecordCursor: struct { bytes: View<U8>, at: Int }
-impl CLIRecordCursor {
+CLIRecordCursor: struct {
+    bytes: View<U8>
+    at: Int
+
     byte: fn(&self) -> U8 MetadataError! {
         if self.at >= self.bytes.len() -> return Err(MetadataError.Malformed{why: "truncated payload"})
         value: self.bytes[self.at]

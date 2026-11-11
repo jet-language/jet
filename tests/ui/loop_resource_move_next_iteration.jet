@@ -1,11 +1,13 @@
 // E0121: a resource declared before the loop and moved inside it would be
 // given away again (and closed again) by the next iteration. The `next` route
 // reaches the back edge too.
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 keep: fn(r: &&Res) { print("keep {r.name}") }
 
 run: fn() {

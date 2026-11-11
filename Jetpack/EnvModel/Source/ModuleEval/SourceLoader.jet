@@ -43,64 +43,64 @@ FileSystemSourceLoader: struct {
         if !envmodel_path_within(canonical, self.root) -> return Err(envmodel_source_loader_error(path, "source import resolves outside the environment root"))
         Ok(canonical)
     }
-}
 
-impl FileSystemSourceLoader.SourceLoader {
-    read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {
-        path: self.checked_path(relative)
-        text: envmodel_source_files.read(path) ?? return Err(envmodel_source_loader_error(path, "{err}"))
-        Ok(text)
-    }
-
-    list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
-        directory: self.checked_path(relative)
-        entries: envmodel_source_files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
-        found := [String]{}
-        loop entry in entries {
-            if !entry.name.ends_with(".{FILE_EXT}") || entry.name == (".{FILE_EXT}") -> next
-            canonical: envmodel_source_files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
-            if !envmodel_path_within(canonical, self.root) || !envmodel_source_files.is_file(canonical) {
-                return Err(envmodel_source_loader_error(entry.path, "source import resolves outside the environment root"))
-            }
-            if canonical == self.root -> return Err(envmodel_source_loader_error(canonical, "source import escapes root"))
-            found.push(canonical.removeprefix("{self.root}/"))
+    impl SourceLoader {
+        read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {
+            path: self.checked_path(relative)
+            text: envmodel_source_files.read(path) ?? return Err(envmodel_source_loader_error(path, "{err}"))
+            Ok(text)
         }
-        found.sort()
-        Ok(found)
-    }
 
-    // Source.rs `package_facts`: an inline `package: { … }` in the entry file,
-    // else the package root, for the `.Oci` image cross-check (E1267).
-    package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
-        entry_files: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
-        loop relative in entry_files {
-            path: envmodel_source_files.join(self.root, relative)
-            source := ""
-            if envmodel_source_files.read(path) == {
-                .Ok(text) -> source = text
-                .Err(error) -> {
-                    if error == {
-                        .NotFound(_) -> next
-                        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(envmodel_source_loader_error(path, "{error}")) }
+        list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
+            directory: self.checked_path(relative)
+            entries: envmodel_source_files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
+            found := [String]{}
+            loop entry in entries {
+                if !entry.name.ends_with(".{FILE_EXT}") || entry.name == (".{FILE_EXT}") -> next
+                canonical: envmodel_source_files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
+                if !envmodel_path_within(canonical, self.root) || !envmodel_source_files.is_file(canonical) {
+                    return Err(envmodel_source_loader_error(entry.path, "source import resolves outside the environment root"))
+                }
+                if canonical == self.root -> return Err(envmodel_source_loader_error(canonical, "source import escapes root"))
+                found.push(canonical.removeprefix("{self.root}/"))
+            }
+            found.sort()
+            Ok(found)
+        }
+
+        // Source.rs `package_facts`: an inline `package: { … }` in the entry file,
+        // else the package root, for the `.Oci` image cross-check (E1267).
+        package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
+            entry_files: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
+            loop relative in entry_files {
+                path: envmodel_source_files.join(self.root, relative)
+                source := ""
+                if envmodel_source_files.read(path) == {
+                    .Ok(text) -> source = text
+                    .Err(error) -> {
+                        if error == {
+                            .NotFound(_) -> next
+                            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(envmodel_source_loader_error(path, "{error}")) }
+                        }
                     }
                 }
+                extracted := InlinePackageBlock?{None}
+                if pkg_extract_inline_package(source) == {
+                    .Ok(found) -> extracted = found
+                    .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.diagnostic()}) }
+                }
+                block: extracted ?? next
+                if envmodel_load_package_root(self.root) == {
+                    .Absent -> {}
+                    .Loaded(_) | .Malformed -> { return Err(envmodel_error("E1363", "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block", Val(block.span))) }
+                }
+                facts: PackageFacts.parse(block.body(source), path) ?? return Err(envmodel_error("E1362", "the inline Package body is malformed", err.message(), "fix the inline Package fields, then retry", Val(block.body_span)))
+                return Ok(Val(facts))
             }
-            extracted := InlinePackageBlock?{None}
-            if pkg_extract_inline_package(source) == {
-                .Ok(found) -> extracted = found
-                .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.diagnostic()}) }
-            }
-            block: extracted ?? next
             if envmodel_load_package_root(self.root) == {
-                .Absent -> {}
-                .Loaded(_) | .Malformed -> { return Err(envmodel_error("E1363", "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block", Val(block.span))) }
+                .Loaded(facts) -> Ok(Val(facts))
+                .Absent | .Malformed -> Ok(None)
             }
-            facts: PackageFacts.parse(block.body(source), path) ?? return Err(envmodel_error("E1362", "the inline Package body is malformed", err.message(), "fix the inline Package fields, then retry", Val(block.body_span)))
-            return Ok(Val(facts))
-        }
-        if envmodel_load_package_root(self.root) == {
-            .Loaded(facts) -> Ok(Val(facts))
-            .Absent | .Malformed -> Ok(None)
         }
     }
 }

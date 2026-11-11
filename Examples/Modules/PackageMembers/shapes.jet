@@ -1,10 +1,12 @@
-Shape: struct { mass: Int }
+Shape: struct {
+    mass: Int
+
+    impl Weighted {
+        weight: fn(self) -> Int { self.mass }
+    }
+}
 Stage: enum { Ready(Int) Waiting }
 Weighted: trait { weight: fn(self) -> Int }
-
-impl Shape.Weighted {
-    weight: fn(self) -> Int { self.mass }
-}
 
 stage_weight: fn(stage: Stage) -> Int {
     if stage == {

@@ -4,18 +4,16 @@
 Box: struct {
     name: String
     p: [U64]
-}
 
-impl Box.Close {
-    close: fn(&&self) {
-        p := self.p.move()
-        sum := U64{0}
-        loop i in 0..<p.len() -> sum = sum.wrapping_add(p[i])
-        print("close {self.name} len {p.len()} sum {sum}")
+    impl Close {
+        close: fn(&&self) {
+            p := self.p.move()
+            sum := U64{0}
+            loop i in 0..<p.len() -> sum = sum.wrapping_add(p[i])
+            print("close {self.name} len {p.len()} sum {sum}")
+        }
     }
-}
 
-impl Box {
     renew: fn(&self, name: String) {
         self = Box{name: name, p: [U64]{U64{4}, U64{4}}}
     }

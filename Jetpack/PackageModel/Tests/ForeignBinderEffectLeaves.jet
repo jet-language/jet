@@ -36,6 +36,8 @@ pkg_test_binder_effect_problem: fn(binder: BinderDescriptor) -> String {
 #Test("ForeignLanguage is checked against the FFI cases, naming each difference") {
     leaves: [String]{"FS.Read", "FFI.C", "FFI.Rust"}
     assert_eq(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Rust\n}}\n", [String]{"C", "Rust"}, leaves), "")
+    // The cases end at the blank line before the enum's own methods.
+    assert_eq(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Rust\n\n    all: fn() -> [ForeignLanguage] Never! {{\n    }}\n}}\n", [String]{"C", "Rust"}, leaves), "")
     assert_eq(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Go\n}}\n", [String]{"C", "Rust"}, leaves), "ForeignLanguages.jet: the cases of ForeignLanguage differ from the `FFI` cases of Compiler/Prelude/Effects.jet: missing [Rust], extra [Go] (the order must match too)")
     assert(pkg_foreign_language_problem("ForeignLanguage: enum {{\n    C\n    Rust\n}}\n", [String]{"Rust", "C"}, leaves).starts_with("ForeignLanguages.jet: ForeignLanguage.all() differ"))
     assert_eq(FOREIGN_LANGUAGE_COUNT, ForeignLanguage.all().len())

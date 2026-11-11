@@ -32,9 +32,10 @@ publication_registry_artifact_hash: fn(root: String) -[FS, Env]> String IOError!
 PublicationArtifactSnapshot: struct {
     source: PackageSourceSnapshot
     path: fn(self) -> String Never! { self.source.path() }
-}
-impl PublicationArtifactSnapshot.Close {
-    close: fn(&&self) -[FS]> { close(self.source) }
+
+    impl Close {
+        close: fn(&&self) -[FS]> { close(self.source) }
+    }
 }
 publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> PublicationArtifactSnapshot IOError! {
     path: publication_artifact_path(repo, entry.name, entry.version)

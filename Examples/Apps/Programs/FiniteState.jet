@@ -34,9 +34,7 @@ Build: struct {
     state { Queued, Running, Finished }
 
     name: String
-}
 
-impl Build {
     #State(_ -> Queued) queue: fn(name: String) -> Build { {name: name.copy()} }
 
     #State(Queued -> Running) start: fn(self: &&Build) -> Build { self }

@@ -1,8 +1,11 @@
 #FX(Net)
 Source: trait { text: fn(self) -> String }
-Doc: struct { path: String }
-impl Doc.Source {
-    text: fn(self) -> String { self.path }
+Doc: struct {
+    path: String
+
+    impl Source {
+        text: fn(self) -> String { self.path }
+    }
 }
 show: fn(source: Source) -[Net]> String { source.text() }
 run: fn() { print(Doc{path: "notes.txt"}.text()) }

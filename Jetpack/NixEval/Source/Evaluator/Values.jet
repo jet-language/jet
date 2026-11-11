@@ -17,9 +17,7 @@ NixEvalFetcher: enum {
     FetchTarball
     FetchTree
     FetchGit
-}
 
-impl NixEvalFetcher {
     name: fn(self) -> String Never! {
         if self == {
             .Fetchurl -> "fetchurl"
@@ -70,9 +68,7 @@ NixEvalOperation: enum {
     ConcatStringsSep
     ReplaceStrings
     Substring
-}
 
-impl NixEvalOperation {
     arity: fn(self) -> Int Never! {
         if self == {
             .ReplaceStrings | .Substring -> 3
@@ -112,9 +108,7 @@ NixEvalValue: enum {
     Derivation(fields: [String: Int], request: NixEvalDerivation?)
     Function(lambda: Int, frame: Int)
     Native(NixEvalNative)
-}
 
-impl NixEvalValue {
     type_name: fn(self) -> String Never! {
         if self == {
             .Null -> "null"
@@ -235,9 +229,7 @@ nixeval_same_text: fn(text: String?, expected: String) -> Bool Never! {
 NixEvalText: struct {
     value: String
     contexts: [String]
-}
 
-impl NixEvalText {
     into_value: fn(self) -> NixEvalValue Never! {
         if self.contexts.len() == 0 -> return NixEvalValue.Str(self.value)
         NixEvalValue.Contextual{value: self.value, contexts: self.contexts}

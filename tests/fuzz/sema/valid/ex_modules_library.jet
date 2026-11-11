@@ -18,12 +18,12 @@ Greetable: trait {
 
 Person: struct {
     name: String
-}
 
-impl Person.Greetable {
-    greeting: fn(self) -> String {
-        n: self.name
-        return "hi, I'm {n}"
+    impl Greetable {
+        greeting: fn(self) -> String {
+            n: self.name
+            return "hi, I'm {n}"
+        }
     }
 }
 
@@ -45,20 +45,20 @@ Logger: trait {
 
 ConsoleLogger: struct {
     prefix: String
-}
 
-impl ConsoleLogger.Logger {
-    log: fn(self, msg: String) {
-        p: self.prefix
-        print("{p}: {msg}")
+    impl Logger {
+        log: fn(self, msg: String) {
+            p: self.prefix
+            print("{p}: {msg}")
+        }
     }
 }
 
 App: struct {
     logger: ConsoleLogger
-}
 
-impl App.Logger using logger  // S62: forwards Logger methods to `logger`
+    impl Logger using logger  // S62: forwards Logger methods to `logger`
+}
 
 run: fn() {
     // S61 labels + defaults

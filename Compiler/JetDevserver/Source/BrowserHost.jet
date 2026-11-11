@@ -11,8 +11,9 @@ MAX_BROWSER_VALUE: Int{4096}
 // Panels outside the canonical catalog sort after every catalog panel.
 BROWSER_UNLISTED_PANEL_RANK: Int{9223372036854775807}
 
-BrowserPlacement: enum { InApp Workbench }
-impl BrowserPlacement {
+BrowserPlacement: enum {
+    InApp Workbench
+
     as_str: fn(self) -> String {
         if self == {
             .InApp -> "in-app"
@@ -32,7 +33,6 @@ impl BrowserPlacement {
         }
     }
 }
-
 impl DevtoolsNodeKind {
     as_str: fn(self) -> String {
         if self == {
@@ -82,22 +82,31 @@ impl BrowserSessionState {
     }
 }
 
-BrowserSourceLocation: struct { source_id: String, line: Int, column: Int, function: String? }
-impl BrowserSourceLocation {
+BrowserSourceLocation: struct {
+    source_id: String
+    line: Int
+    column: Int
+    function: String?
+
     validate: fn(self) BrowserHostError! {
         validate_source_id(self.source_id)
         if self.line < 1 -> return Err(BrowserHostError.InvalidSource(message: "source line must be one-based"))
         if self.function == .Val(function) -> validate_browser_text(function, "source function", MAX_BROWSER_TEXT)
     }
 }
-
 // Source navigation is granted for one session revision, panel and node.
 BrowserSourceGrant: struct { session_id: String, revision: Int, panel_id: String, node_id: String, source: BrowserSourceLocation }
 // Action invocation is granted for one session revision, panel, node and action.
 BrowserActionGrant: struct { session_id: String, revision: Int, panel_id: String, node_id: String, action_id: String }
 
-BrowserNode: struct { id: String, kind: DevtoolsNodeKind, label: String, value: String?, status: String?, children: [BrowserNode] }
-impl BrowserNode {
+BrowserNode: struct {
+    id: String
+    kind: DevtoolsNodeKind
+    label: String
+    value: String?
+    status: String?
+    children: [BrowserNode]
+
     new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> BrowserNode {
         BrowserNode{id: id, kind: kind, label: label, value: None, status: None, children: [BrowserNode]{}}
     }
@@ -117,9 +126,14 @@ impl BrowserNode {
         node
     }
 }
+BrowserPanelFact: struct {
+    panel_id: String
+    title: String
+    freshness_ms: Int
+    status: String
+    cursor: Int?
+    nodes: [BrowserNode]
 
-BrowserPanelFact: struct { panel_id: String, title: String, freshness_ms: Int, status: String, cursor: Int?, nodes: [BrowserNode] }
-impl BrowserPanelFact {
     new: fn(panel_id: String, title: String, freshness_ms: Int, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
         BrowserPanelFact{panel_id: panel_id, title: title, freshness_ms: freshness_ms, status: status, cursor: None, nodes: nodes}
     }
@@ -129,9 +143,14 @@ impl BrowserPanelFact {
         panel
     }
 }
+BrowserHostEvent: struct {
+    protocol: String
+    session_id: String
+    revision: Int
+    sequence: Int
+    observed_at_ms: Int
+    panels: [BrowserPanelFact]
 
-BrowserHostEvent: struct { protocol: String, session_id: String, revision: Int, sequence: Int, observed_at_ms: Int, panels: [BrowserPanelFact] }
-impl BrowserHostEvent {
     new: fn(session_id: String, revision: Int, sequence: Int, observed_at_ms: Int, panels: [BrowserPanelFact]) -> BrowserHostEvent {
         BrowserHostEvent{protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: panels}
     }
@@ -148,7 +167,6 @@ impl BrowserHostEvent {
         }
     }
 }
-
 BrowserReconnectCursor: struct { sequence: Int }
 BrowserReconnect: struct {
     session_id: String
@@ -220,8 +238,7 @@ BrowserHostError: enum {
     ActionNotGranted(message: String)
     InvalidSource(message: String)
     InvalidAction(message: String)
-}
-impl BrowserHostError {
+
     message: fn(self) -> String {
         if self == {
             .InvalidEvent(message) -> "invalid browser event: {message}"
@@ -237,9 +254,9 @@ impl BrowserHostError {
             .InvalidAction(message) -> "invalid browser action: {message}"
         }
     }
-}
-impl BrowserHostError.Display { display: fn(&&self) -> String { self.message() } }
 
+    impl Display { display: fn(&&self) -> String { self.message() } }
+}
 // Layout is indexed by BrowserPlacement.index(): in-app, then workbench.
 BrowserPanelLayout: struct { open: Bool, dock: DevtoolsDock }
 BrowserPanelState: struct { fact: BrowserPanelFact, layout: [BrowserPanelLayout] }
@@ -255,8 +272,7 @@ BrowserHost: struct {
     panels: [String: BrowserPanelState]
     // Oldest first; bounded by MAX_RECONNECT_EVENTS.
     history: [BrowserHostEvent]
-}
-impl BrowserHost {
+
     new: fn(session_id: String) -> BrowserHost {
         BrowserHost{session_id: session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: [String: BrowserPanelState]{}, history: [BrowserHostEvent]{}}
     }
@@ -411,7 +427,6 @@ impl BrowserHost {
         _: self.require_node(panel_id, node_id)
     }
 }
-
 // Catalog position of each canonical panel; the first listing of an id wins.
 browser_catalog_ranks: fn() -> [String: Int] {
     ranks := [String: Int]{}

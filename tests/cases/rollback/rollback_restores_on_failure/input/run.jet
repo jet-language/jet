@@ -2,20 +2,21 @@
 Counter: struct {
     value: Int
     ops: Int
+
+    impl Rollback {
+        Snapshot: CounterSnap
+        snapshot: fn(self) -> CounterSnap {
+            return CounterSnap{ value: self.value, ops: self.ops }
+        }
+        restore: fn(&self, snap: &&CounterSnap) {
+            self.value = snap.value
+            self.ops = snap.ops
+        }
+    }
 }
 CounterSnap: struct {
     value: Int
     ops: Int
-}
-impl Counter.Rollback {
-    Snapshot: CounterSnap
-    snapshot: fn(self) -> CounterSnap {
-        return CounterSnap{ value: self.value, ops: self.ops }
-    }
-    restore: fn(&self, snap: &&CounterSnap) {
-        self.value = snap.value
-        self.ops = snap.ops
-    }
 }
 #Error
 Fail: enum { Bad }

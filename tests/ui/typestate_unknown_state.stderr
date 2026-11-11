@@ -1,16 +1,16 @@
 Error [jet.TypestateUnknownState]: `Stuffed` is not a declared state of `Crate`
-  --> tests/ui/typestate_unknown_state.jet:13:5
+  --> tests/ui/typestate_unknown_state.jet:11:5
     |
- 13 |     #State(Stuffed) get: fn(self) -> Int { return self.data }
+ 11 |     #State(Stuffed) get: fn(self) -> Int { return self.data }
     |     ^^^^^^^^^^^^^^^
  Why: Typestate: `Crate: struct { state { … } }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
  Fix: Add `Stuffed` inside `Crate: struct { state { … } }`, or correct the spelling
 More: jet-lang.dev/e/E0151
 
 Error [jet.TypestateWrongState]: `get` needs `Crate` in state `Stuffed`, but `b` is in state `Full`
-  --> tests/ui/typestate_unknown_state.jet:18:13
+  --> tests/ui/typestate_unknown_state.jet:16:13
     |
- 18 |     print(b.get())
+ 16 |     print(b.get())
     |             ^^^
  Why: Typestate: `get` is only valid in state `Stuffed`; calling it in `Full` is the out-of-order-events bug it prevents
  Fix: Transition `b` into state `Stuffed` before calling `get`

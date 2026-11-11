@@ -33,6 +33,7 @@ use jet_foundation.[
     body_each_pattern_child,
     body_each_stmt_child,
     NamedSpan,
+    NamedType,
     OrFallback,
     Pattern,
     PlaceAccess,
@@ -1856,6 +1857,49 @@ sema_stmt_for_in_encoding_item_type: fn(name: String) -> Type? {
     None
 }
 
+// The associated types and method symbol keys of the `trait_name` impl of
+// the nominal `identity` keys, and the module that writes it: a top-level
+// impl row (the last one, as the loop source reads it), else an
+// `impl Trait { … }` block in the nominal's own body, whose methods the
+// nominal registers.
+SemaForInTraitImpl: struct {
+    module_index: Int
+    associated_types: [NamedType]
+    method_keys: [String: String]
+}
+
+sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String, identity: String) -> SemaForInTraitImpl? {
+    found := SemaForInTraitImpl?{None}
+    loop module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[implementation_index].trait_name != (Val(trait_name)) || graph.modules[module_index].impls[implementation_index].target_identity_key != identity -> next
+            associated: loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.copy()
+            keys := [String: String]{}
+            loop method in graph.modules[module_index].impls[implementation_index].methods -> keys[method.declaration.name] = method.symbol.id.key.copy()
+            found = Val(SemaForInTraitImpl{module_index: module_index, associated_types: associated, method_keys: keys})
+        }
+    }
+    if found != None -> return found
+    loop module_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            if graph.modules[module_index].nominals[nominal_index].identity_key != identity -> next
+            if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if block.trait_name != trait_name -> next
+                    keys := [String: String]{}
+                    loop method in graph.modules[module_index].nominals[nominal_index].methods {
+                        loop written in block.methods {
+                            if written.span == method.declaration.span -> keys[method.declaration.name] = method.symbol.id.key.copy()
+                        }
+                    }
+                    return Val(SemaForInTraitImpl{module_index: module_index, associated_types: block.assoc_type_impls, method_keys: keys})
+                }
+            }
+        }
+    }
+    None
+}
+
 sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
     if program.registration_graph == .Val(graph) {
@@ -1864,49 +1908,25 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
         // type written by its bare name, `HTTPBodyChunks`, included).
         collection_identity := type_identity_key(collection_type)
         if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) -> collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
-        iterable_impl := SemaRegistrationImpl?{None}
-        iterable_module := -1
-        loop module_row_index in 0..<graph.modules.len() {
-            loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
-                if graph.modules[module_row_index].impls[implementation_index].trait_name != (Val("Iterable")) || graph.modules[module_row_index].impls[implementation_index].target_identity_key != collection_identity -> next
-                iterable_impl = Val(graph.modules[module_row_index].impls[implementation_index])
-                iterable_module = module_row_index
-            }
-        }
-        iterable: iterable_impl ?? return None
+        iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
         iter_type := Type?{None}
-        iter_symbol := String?{None}
         loop associated in iterable.associated_types {
-            if associated.symbol.name == "Iter" -> iter_type = Val(associated.ty)
-        }
-        loop method in iterable.methods {
-            if method.declaration.name == "iter" -> iter_symbol = Val(method.symbol.id.key)
+            if associated.name == "Iter" -> iter_type = Val(associated.ty)
         }
         resolved_iter_type: iter_type ?? return None
         if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
         iterator_identity := type_identity_key(resolved_iter_type)
-        if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable_module) == .Val(iter_row) -> iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
-        iterator_impl := SemaRegistrationImpl?{None}
-        loop module_row_index in 0..<graph.modules.len() {
-            loop implementation_index in 0..<graph.modules[module_row_index].impls.len() {
-                if graph.modules[module_row_index].impls[implementation_index].trait_name != (Val("Iterator")) || graph.modules[module_row_index].impls[implementation_index].target_identity_key != iterator_identity -> next
-                iterator_impl = Val(graph.modules[module_row_index].impls[implementation_index])
-            }
-        }
-        iterator: iterator_impl ?? return None
+        if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable.module_index) == .Val(iter_row) -> iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
+        iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
         item_type := Type?{None}
-        next_symbol := String?{None}
         loop associated in iterator.associated_types {
-            if associated.symbol.name == "Item" -> item_type = Val(associated.ty)
-        }
-        loop method in iterator.methods {
-            if method.declaration.name == "next" -> next_symbol = Val(method.symbol.id.key)
+            if associated.name == "Item" -> item_type = Val(associated.ty)
         }
         item: item_type ?? return None
-        iter_key: iter_symbol ?? return None
-        next_key: next_symbol ?? return None
+        iter_key: iterable.method_keys.get("iter") ?? return None
+        next_key: iterator.method_keys.get("next") ?? return None
         return Val(SemaForInIterableFact{
-            method_kind: TForInMethod.Iterable{coll_type: iterable.target_identity_key, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item},
+            method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item},
             item_type: item,
         })
     }
@@ -6091,6 +6111,29 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, environment: SemaScopeEnvir
                     restore: restore_method ?? return None
                     return Val(SemaStatementRollbackMethods{snapshot: snapshot, restore: restore})
                 }
+            }
+        }
+        // An `impl Rollback { … }` block in the type's own body, whose
+        // methods the nominal registers.
+        if nominal.source == .SourceAST(item) {
+            loop block in sema_registration_item_trait_blocks(item) {
+                if block.trait_name != "Rollback" -> next
+                resolved := sema_registration_lookup_name(graph, nominal.symbol.module_name, "Rollback")
+                trait_owner := SymbolID?{None}
+                if resolved == .Val(found) && sema_resolved_kind(graph, found) == SymbolKind.Trait -> trait_owner = Val(sema_resolved_symbol(graph, found).id)
+                snapshot_method := TMethodRef?{None}
+                restore_method := TMethodRef?{None}
+                loop method in nominal.methods {
+                    loop written in block.methods {
+                        if written.span != method.declaration.span -> next
+                        method_ref := TMethodRef{symbol: method.symbol.id, name: method.symbol.name, mangled: false, trait_owner: trait_owner, operator_identity: None}
+                        if method.symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
+                        if method.symbol.name == "restore" -> restore_method = Val(method_ref)
+                    }
+                }
+                snapshot: snapshot_method ?? next
+                restore: restore_method ?? next
+                return Val(SemaStatementRollbackMethods{snapshot: snapshot, restore: restore})
             }
         }
     }

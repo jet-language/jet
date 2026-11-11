@@ -106,14 +106,14 @@ ArtifactLease: struct {
     is_live: fn(self) -[FS, Env]> Bool Never! {
         store_artifact_owner_liveness(self.owner_value, self.owner_value) ?? true
     }
-}
 
-impl ArtifactLease.Close {
-    close: fn(&&self) -[FS]> {
-        expected: self.owner_value.owner_line("lease").bytes()
-        bytes: files.read_bytes(self.path_value) ?? return
-        if !pkg_bytes_starts_with(bytes, 0, expected) -> return
-        files.remove(self.path_value).drop("lease release is best-effort; a lease of a dead owner is reclaimed")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            expected: self.owner_value.owner_line("lease").bytes()
+            bytes: files.read_bytes(self.path_value) ?? return
+            if !pkg_bytes_starts_with(bytes, 0, expected) -> return
+            files.remove(self.path_value).drop("lease release is best-effort; a lease of a dead owner is reclaimed")
+        }
     }
 }
 
@@ -122,13 +122,13 @@ impl ArtifactLease.Close {
 ArtifactStoreLock: struct {
     path: String
     owner_line: [U8]
-}
 
-impl ArtifactStoreLock.Close {
-    close: fn(&&self) -[FS]> {
-        bytes: files.read_bytes(self.path) ?? return
-        if bytes != self.owner_line -> return
-        files.remove(self.path).drop("lock release is best-effort; a lock of a dead owner is reclaimed")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            bytes: files.read_bytes(self.path) ?? return
+            if bytes != self.owner_line -> return
+            files.remove(self.path).drop("lock release is best-effort; a lock of a dead owner is reclaimed")
+        }
     }
 }
 

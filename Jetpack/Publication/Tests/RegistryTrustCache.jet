@@ -156,17 +156,18 @@ publication_trust_cache_test_git: fn(args: [String], cwd: String) -[Env, Exec, T
 PublicationTrustCacheTestNet: struct {
     host: String
     bare: String
-}
-impl PublicationTrustCacheTestNet.PublicationRegistryNet {
-    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
-        assert_eq(host, self.host)
-        assert(port == 9418 || port == 22)
-        Ok([[U8]]{[U8]{93, 184, 216, 34}})
-    }
 
-    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
-        if transport == .Local -> panic("{url} is a network registry")
-        "file://{self.bare}"
+    impl PublicationRegistryNet {
+        resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
+            assert_eq(host, self.host)
+            assert(port == 9418 || port == 22)
+            Ok([[U8]]{[U8]{93, 184, 216, 34}})
+        }
+
+        fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
+            if transport == .Local -> panic("{url} is a network registry")
+            "file://{self.bare}"
+        }
     }
 }
 publication_trust_cache_test_publish: fn(seed: String, bare: String, review: String, text: String) -[FS, Env, Exec, Time.Wait]> {

@@ -508,10 +508,14 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
 // `.trace-workspaces` until the audit; otherwise its owner removes it when
 // the run ends. The caller holds the full-key OS lock, so any other workspace
 // under the key is a killed run's leftover, removed before this one is made.
-JetCLIRustForeignWorkspace: struct { path: String, retain: Bool }
-impl JetCLIRustForeignWorkspace.Close {
-    close: fn(&&self) -[FS]> {
-        if !self.retain -> cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+JetCLIRustForeignWorkspace: struct {
+    path: String
+    retain: Bool
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            if !self.retain -> cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+        }
     }
 }
 jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeignWorkspace JetDriverRustForeignError! {

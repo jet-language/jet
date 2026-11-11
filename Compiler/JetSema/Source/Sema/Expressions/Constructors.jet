@@ -1362,6 +1362,40 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
             }
         }
     }
+    // An `impl CheckedText { … }` block in the type's own body, whose
+    // methods the nominal registers, unless a user trait shares the name.
+    if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
+        if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(registered_row) {
+            registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
+            if registered.source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if block.trait_name != "CheckedText" || sema_type_graph_trait_symbol(graph, graph.modules[registered_row.module_index].module_identity, "CheckedText") != None -> next
+                    check := SemaRegistrationFunction?{None}
+                    encode_hole := SemaRegistrationFunction?{None}
+                    build := SemaRegistrationFunction?{None}
+                    loop method in registered.methods {
+                        written := false
+                        loop declared in block.methods {
+                            if declared.span == method.declaration.span -> written = true
+                        }
+                        if !written -> next
+                        if method.symbol.name == "check" -> check = Val(method)
+                        if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
+                        if method.symbol.name == "build" -> build = Val(method)
+                    }
+                    if check != None && encode_hole != None && (string_backed || build != None) {
+                        return Val(SemaExpressionCheckedTextTarget{
+                            owner: registered.symbol,
+                            implementation_module_identity: graph.modules[registered_row.module_index].module_identity,
+                            check: check ?? return None,
+                            encode_hole: encode_hole ?? return None,
+                            build: build,
+                        })
+                    }
+                }
+            }
+        }
+    }
     }
     None
 }

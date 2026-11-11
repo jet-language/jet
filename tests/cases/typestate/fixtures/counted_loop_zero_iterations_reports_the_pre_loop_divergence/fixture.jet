@@ -2,9 +2,7 @@
 Order: struct {
     state { Draft, Confirmed, Cancelled, Closed }
     id: Int
-}
 
-impl Order {
     #State(_ -> Draft) start: fn(id: Int) -[]> Order { return Order{ id: id } }
     #State(Draft -> Confirmed) confirm: fn(self: &&Order) -[]> Order { return self }
     #State(Draft -> Cancelled) cancel: fn(self: &&Order) -[]> Order { return self }

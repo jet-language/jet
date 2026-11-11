@@ -46,6 +46,12 @@ RuntimeLock: struct {
         self.authority.revalidate()
         env_lock_validate_marker(self.marker_parent, self.marker, self.marker_name, self.path)
     }
+
+    // Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
+    // Both files stay on disk so every later opener locks the same owner inode.
+    impl Close {
+        close: fn(&&self) {}
+    }
 }
 
 RuntimeLockScope: struct {
@@ -54,12 +60,6 @@ RuntimeLockScope: struct {
     marker: FileReader
     name: String
     path: String
-}
-
-// Rust `drop(lock)`: release the kernel lock now instead of at scope exit.
-// Both files stay on disk so every later opener locks the same owner inode.
-impl RuntimeLock.Close {
-    close: fn(&&self) {}
 }
 
 // Rust `lock_path_for_scope`.

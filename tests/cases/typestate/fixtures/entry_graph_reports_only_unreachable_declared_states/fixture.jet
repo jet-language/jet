@@ -1,8 +1,7 @@
 
 Flow: struct {
     state { Start, Done, Cancelled, Orphan }
-}
-impl Flow {
+
     #State(_ -> Start) start: fn() -[]> Flow { return Flow{} }
     #State(Start -> Done) done: fn(self: &&Flow) -[]> Flow { return self }
     #State(Start -> Cancelled) cancel: fn(self: &&Flow) -[]> Flow { return self }

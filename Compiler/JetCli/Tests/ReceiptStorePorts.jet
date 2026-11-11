@@ -18,13 +18,15 @@ use {
 // Host terminal bits for a piped run: stdin, stdout and stderr are not terminals.
 RSP_TERMINAL: [U8]{U8{48}, U8{48}, U8{48}}
 
-RspFixtureRoot: struct { path: String }
-impl RspFixtureRoot.Close {
-    close: fn(&&self) -[FS]> {
-        rsp_files.remove_all(self.path).drop("test root cleanup")
+RspFixtureRoot: struct {
+    path: String
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            rsp_files.remove_all(self.path).drop("test root cleanup")
+        }
     }
 }
-
 rsp_root: fn(label: String) -[FS, Env]> String {
     root: rsp_files.join(rsp_sys.temp_dir(), "jet-receipts-{label}-{rsp_process.current_pid()}")
     rsp_files.remove_all(root).drop("a stale test root may be absent")

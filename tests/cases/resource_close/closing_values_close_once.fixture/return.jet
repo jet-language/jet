@@ -1,11 +1,13 @@
 // Each value below closes exactly once: `return held` leaves while the variable is live.
 use files: core.files
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 // Closes through the FileReader it holds, and the Res beside it.
 Checked: struct {
     tracer: Res

@@ -17,15 +17,15 @@ use {
 CoreInputsTestReader: struct {
     file: String
     bytes: [U8]
-}
 
-impl CoreInputsTestReader.JetDriverCoreSourceReader {
-    read: fn(self, file: String) -[FS.Read]> String? {
-        None
-    }
-    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
-        if file != self.file -> return Err(JetDriverBuildInputError{message: "No such file or directory (os error 2)"})
-        Ok(self.bytes.copy())
+    impl JetDriverCoreSourceReader {
+        read: fn(self, file: String) -[FS.Read]> String? {
+            None
+        }
+        read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
+            if file != self.file -> return Err(JetDriverBuildInputError{message: "No such file or directory (os error 2)"})
+            Ok(self.bytes.copy())
+        }
     }
 }
 

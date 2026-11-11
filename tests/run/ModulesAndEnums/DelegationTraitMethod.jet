@@ -3,17 +3,19 @@ Speaker: trait {
 }
 Voice: struct {
     prefix: String
-}
-impl Voice.Speaker {
-    say: fn(self, msg: String) -> String {
-        p: self.prefix
-        return "{p}: {msg}"
+
+    impl Speaker {
+        say: fn(self, msg: String) -> String {
+            p: self.prefix
+            return "{p}: {msg}"
+        }
     }
 }
 Megaphone: struct {
     inner: Voice
+
+    impl Speaker using inner
 }
-impl Megaphone.Speaker using inner
 run: fn() {
     v := Voice{ prefix: "HEY" }
     m := Megaphone{ inner: v }

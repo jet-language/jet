@@ -113,10 +113,10 @@ ComMethod: struct {
 // The per-bind scratch directory, removed on every exit path.
 ComBuildDirectory: struct {
     path: String
-}
 
-impl ComBuildDirectory.Close {
-    close: fn(&&self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
+    impl Close {
+        close: fn(&&self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
+    }
 }
 
 ComSchema: struct {

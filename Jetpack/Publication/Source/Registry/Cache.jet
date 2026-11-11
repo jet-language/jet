@@ -64,10 +64,11 @@ publication_registry_clone_arguments: fn(url: String, pinned: String, path: Stri
 PublicationRegistryMarkerLock: struct {
     authority: FoundationDirectoryAuthority
     name: String
-}
-impl PublicationRegistryMarkerLock.Close {
-    close: fn(&&self) -[FS]> {
-        self.authority.remove(self.name).drop("release the owned registry marker on every result")
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            self.authority.remove(self.name).drop("release the owned registry marker on every result")
+        }
     }
 }
 publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: Int, wait_ms: Int, busy: String) -[FS, Env, Time, Time.Wait]> PublicationRegistryMarkerLock IOError! {

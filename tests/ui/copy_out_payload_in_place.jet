@@ -3,11 +3,13 @@
 // payload and a loop name over such a payload can't be copied out. A loop
 // over a `:` field binding reads the field in place, so its names can't be
 // moved out either.
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 keep: fn(r: &&Res) -> Int { r.name.len() }
 
 from_param: fn(env: Res?) -> Int {

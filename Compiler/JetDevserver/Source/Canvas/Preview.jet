@@ -26,8 +26,7 @@ CanvasPreviewSourceIdentity: struct {
     build_id: String
     revision: String
     span: JetDevtoolsSourceSpan
-}
-impl CanvasPreviewSourceIdentity {
+
     validate: fn(self) CanvasPreviewError! {
         preview_text(self.source_id, "source id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
         preview_text(self.build_id, "build id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
@@ -40,12 +39,10 @@ impl CanvasPreviewSourceIdentity {
         "{{\"source_id\":\"{foundation_json_escape(self.source_id)}\",\"build_id\":\"{foundation_json_escape(self.build_id)}\",\"revision\":\"{foundation_json_escape(self.revision)}\",\"span\":{{\"source_id\":\"{foundation_json_escape(span.source_id)}\",\"file\":\"{foundation_json_escape(span.file)}\",\"start_line\":{span.start_line},\"start_column\":{span.start_column},\"end_line\":{span.end_line},\"end_column\":{span.end_column}}}}}"
     }
 }
-
 CanvasPreviewKind: enum {
     Preview
     Playground
-}
-impl CanvasPreviewKind {
+
     as_str: fn(self) -> String {
         if self == {
             .Preview -> "preview"
@@ -53,7 +50,6 @@ impl CanvasPreviewKind {
         }
     }
 }
-
 canvas_preview_device_text: fn(device: UIPreviewDevice) -> String {
     if device == {
         .Phone -> "phone"
@@ -67,8 +63,7 @@ CanvasPreviewViewport: struct {
     width: Int
     height: Int
     scale: Int
-}
-impl CanvasPreviewViewport {
+
     new: fn(device: UIPreviewDevice, width: Int, height: Int, scale: Int) -> CanvasPreviewViewport CanvasPreviewError! {
         viewport: CanvasPreviewViewport{device: device, width: width, height: height, scale: scale}
         viewport.validate()
@@ -83,7 +78,6 @@ impl CanvasPreviewViewport {
         if self.scale <= 0 || self.scale > CANVAS_PREVIEW_MAX_SCALE -> return Err(CanvasPreviewError.InvalidViewport(reason: "viewport scale is outside the preview bound"))
     }
 }
-
 impl CanvasPreviewTheme {
     as_str: fn(self) -> String {
         if self == {
@@ -128,8 +122,7 @@ CanvasPreviewTraits: struct {
     locale: String
     accessibility: CanvasPreviewAccessibility
     lifecycle: CanvasPreviewLifecycle
-}
-impl CanvasPreviewTraits {
+
     default: fn() -> CanvasPreviewTraits { CanvasPreviewTraits{theme: .System, locale: "en-US", accessibility: .Default, lifecycle: .Initial} }
     validate: fn(self) CanvasPreviewError! {
         preview_text(self.locale, "locale", 128)
@@ -138,7 +131,6 @@ impl CanvasPreviewTraits {
         preview_text(self.lifecycle.as_str(), "lifecycle", 128)
     }
 }
-
 impl CanvasPreviewEffect {
     capability: fn(self) -> String {
         if self == {
@@ -167,8 +159,7 @@ CanvasPreviewAuthority: struct {
     loopback_only: Bool
     // Sorted and unique.
     capabilities: [String]
-}
-impl CanvasPreviewAuthority {
+
     development: fn() -> CanvasPreviewAuthority { CanvasPreviewAuthority.new(true) }
     new: fn(loopback_only: Bool) -> CanvasPreviewAuthority { CanvasPreviewAuthority{loopback_only: loopback_only, capabilities: [String]{}} }
     with_capability: fn(self, capability: String) -> CanvasPreviewAuthority CanvasPreviewError! {
@@ -196,7 +187,6 @@ impl CanvasPreviewAuthority {
         narrowed
     }
 }
-
 impl CanvasPreviewInput {
     validate: fn(self) CanvasPreviewError! {
         if self == .Text(value) -> preview_text(value, "preview input", CANVAS_PREVIEW_MAX_INPUT_BYTES)
@@ -217,8 +207,7 @@ impl CanvasPreviewInput {
 CanvasPreviewInputOverride: struct {
     name: String
     value: CanvasPreviewInput
-}
-impl CanvasPreviewInputOverride {
+
     new: fn(name: String, value: CanvasPreviewInput) -> CanvasPreviewInputOverride CanvasPreviewError! {
         input: CanvasPreviewInputOverride{name: name, value: value}
         input.validate()
@@ -229,14 +218,12 @@ impl CanvasPreviewInputOverride {
         self.value.validate()
     }
 }
-
 CanvasPreviewContext: struct {
     id: String
     source: CanvasPreviewSourceIdentity
     values: [String: CanvasPreviewInput]
     resident_bytes: Int
-}
-impl CanvasPreviewContext {
+
     new: fn(id: String, source: CanvasPreviewSourceIdentity, values: [CanvasPreviewInputOverride]) -> CanvasPreviewContext CanvasPreviewError! {
         preview_text(id, "preview context id", 256)
         source.validate()
@@ -252,16 +239,15 @@ impl CanvasPreviewContext {
         context
     }
 }
+CanvasPreviewCallback: struct {
+    id: String
 
-CanvasPreviewCallback: struct { id: String }
-impl CanvasPreviewCallback {
     checked: fn(id: String) -> CanvasPreviewCallback CanvasPreviewError! {
         preview_text(id, "preview callback id", 256)
         CanvasPreviewCallback{id: id}
     }
     validate: fn(self) CanvasPreviewError! { preview_text(self.id, "preview callback id", 256) }
 }
-
 CanvasPreviewDescriptor: struct {
     kind: CanvasPreviewKind
     name: String
@@ -274,8 +260,7 @@ CanvasPreviewDescriptor: struct {
     authority: CanvasPreviewAuthority
     inputs: [String: CanvasPreviewInput]
     context_id: String?
-}
-impl CanvasPreviewDescriptor {
+
     new: fn(kind: CanvasPreviewKind, name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> CanvasPreviewDescriptor {
         CanvasPreviewDescriptor{kind: kind, name: name, callback: callback, source: source, viewport: CanvasPreviewViewport.desktop(), traits: CanvasPreviewTraits.default(), effects: [CanvasPreviewEffect]{}, authority: CanvasPreviewAuthority.development(), inputs: [String: CanvasPreviewInput]{}, context_id: None}
     }
@@ -320,7 +305,6 @@ impl CanvasPreviewDescriptor {
         if self.context_id == .Val(context_id) -> preview_text(context_id, "preview context id", 256)
     }
 }
-
 CanvasPreviewPolicy: struct {
     max_previews: Int
     max_selected: Int
@@ -331,8 +315,7 @@ CanvasPreviewPolicy: struct {
     max_diagnostic_bytes: Int
     max_clients: Int
     client_idle_secs: Int
-}
-impl CanvasPreviewPolicy {
+
     default: fn() -> CanvasPreviewPolicy {
         CanvasPreviewPolicy{max_previews: CANVAS_PREVIEW_MAX_PREVIEWS, max_selected: CANVAS_PREVIEW_MAX_SELECTED, max_contexts: CANVAS_PREVIEW_MAX_CONTEXTS, max_inputs: CANVAS_PREVIEW_MAX_INPUTS, max_frame_bytes: CANVAS_PREVIEW_MAX_FRAME_BYTES, max_resident_bytes: CANVAS_PREVIEW_MAX_RESIDENT_BYTES, max_diagnostic_bytes: CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES, max_clients: CANVAS_PREVIEW_MAX_CLIENTS, client_idle_secs: CANVAS_PREVIEW_CLIENT_IDLE_SECS}
     }
@@ -346,7 +329,6 @@ impl CanvasPreviewPolicy {
         if self.max_clients <= 0 || self.max_clients > CANVAS_PREVIEW_MAX_CLIENTS || self.client_idle_secs <= 0 -> return Err(CanvasPreviewError.InvalidPolicy)
     }
 }
-
 impl CanvasPreviewStatus {
     as_str: fn(self) -> String {
         if self == {
@@ -364,8 +346,7 @@ CanvasPreviewDiagnostic: struct {
     code: String
     message: String
     source: CanvasPreviewSourceIdentity
-}
-impl CanvasPreviewDiagnostic {
+
     new: fn(code: String, message: String, source: CanvasPreviewSourceIdentity, max_bytes: Int) -> CanvasPreviewDiagnostic CanvasPreviewError! {
         preview_text(code, "preview diagnostic code", 128)
         preview_text(message, "preview diagnostic", max_bytes)
@@ -373,7 +354,6 @@ impl CanvasPreviewDiagnostic {
         CanvasPreviewDiagnostic{code: code, message: message, source: source}
     }
 }
-
 CanvasPreviewRendered: struct<T> {
     value: T
     bytes: Int
@@ -382,15 +362,13 @@ CanvasPreviewRendered: struct<T> {
 CanvasPreviewRenderError: struct {
     code: String
     message: String
-}
-impl CanvasPreviewRenderError {
+
     new: fn(code: String, message: String) -> CanvasPreviewRenderError CanvasPreviewError! {
         preview_text(code, "preview render error code", 128)
         preview_text(message, "preview render error", CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES)
         CanvasPreviewRenderError{code: code, message: message}
     }
 }
-
 CanvasPreviewFrame: struct<T> {
     value: T
     source: CanvasPreviewSourceIdentity
@@ -409,8 +387,7 @@ CanvasPreviewSnapshot: struct<T> {
     last_good: CanvasPreviewFrame<T>?
     diagnostic: CanvasPreviewDiagnostic?
     sequence: Int
-}
-impl CanvasPreviewSnapshot {
+
     to_json: fn(self) -> String {
         diagnostic := "null"
         if self.diagnostic == .Val(value) -> diagnostic = "{{\"code\":\"{foundation_json_escape(value.code)}\",\"message\":\"{foundation_json_escape(value.message)}\",\"source\":{value.source.to_json()}}}"
@@ -421,7 +398,6 @@ impl CanvasPreviewSnapshot {
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{foundation_json_escape(self.session_id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"kind\":\"{self.kind.as_str()}\",\"status\":\"{self.status.as_str()}\",\"freshness\":\"{self.freshness.as_str()}\",\"current\":{self.current != None},\"last_good\":{self.last_good != None},\"current_source\":{current_source},\"last_good_source\":{last_good_source},\"diagnostic\":{diagnostic},\"sequence\":{self.sequence}}}"
     }
 }
-
 CanvasPreviewRecord: struct<T> {
     descriptor: CanvasPreviewDescriptor
     status: CanvasPreviewStatus
@@ -458,8 +434,7 @@ CanvasPreviewSession: struct<T> {
     resident_bytes: Int
     sequence: Int
     closed: Bool
-}
-impl CanvasPreviewSession {
+
     new: fn(id: String, secret: String, authority: CanvasPreviewAuthority) -> CanvasPreviewSession<T> CanvasPreviewError! {
         CanvasPreviewSession<T>.with_policy(id, secret, authority, CanvasPreviewPolicy.default())
     }
@@ -684,14 +659,12 @@ impl CanvasPreviewSession {
         if self.closed -> return Err(CanvasPreviewError.SessionClosed)
     }
 }
-
 CanvasPreviewRegistry: struct {
     descriptors: [String: CanvasPreviewDescriptor]
     contexts: [String: CanvasPreviewContext]
     // Sorted and unique.
     selected: [String]
-}
-impl CanvasPreviewRegistry {
+
     empty: fn() -> CanvasPreviewRegistry { CanvasPreviewRegistry{descriptors: [String: CanvasPreviewDescriptor]{}, contexts: [String: CanvasPreviewContext]{}, selected: [String]{}} }
     new: fn(descriptors: [CanvasPreviewDescriptor]) -> CanvasPreviewRegistry CanvasPreviewError! {
         registry := CanvasPreviewRegistry.empty()
@@ -765,7 +738,6 @@ impl CanvasPreviewRegistry {
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"selected\":[{selected.join(",")}],\"contexts\":{self.contexts.len()},\"descriptors\":[{descriptors.join(",")}]}}"
     }
 }
-
 impl CanvasPreviewError {
     message: fn(self) -> String {
         if self == {

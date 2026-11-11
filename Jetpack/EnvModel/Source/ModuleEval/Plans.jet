@@ -75,30 +75,30 @@ SecretSpec: struct {
         }
         "{self.name}|{declaration}|{self.required}|{allowed.join(",")}|{rotation}|{default_profiles}|{generator}"
     }
-}
 
-// Descriptions, defaults, and templates can carry sensitive material, so the
-// debug rendering names only their shape.
-impl SecretSpec.Debug {
-    debug: fn(self) -> String {
-        description: if self.description == {
-            .Val(_) -> "Some(\"<redacted>\")"
-            .None -> "None"
+    // Descriptions, defaults, and templates can carry sensitive material, so the
+    // debug rendering names only their shape.
+    impl Debug {
+        debug: fn(self) -> String {
+            description: if self.description == {
+                .Val(_) -> "Some(\"<redacted>\")"
+                .None -> "None"
+            }
+            "SecretSpec {{ name: {self.name:Debug}, description: {description}, required: {self.required}, allowed_environments: {self.allowed_environments:Debug}, rotation: {self.rotation:Debug}, default: {self.default:Debug}, generate: {self.generate:Debug}, declaration: {self.declaration:Debug}, implicit: {self.implicit} }}"
         }
-        "SecretSpec {{ name: {self.name:Debug}, description: {description}, required: {self.required}, allowed_environments: {self.allowed_environments:Debug}, rotation: {self.rotation:Debug}, default: {self.default:Debug}, generate: {self.generate:Debug}, declaration: {self.declaration:Debug}, implicit: {self.implicit} }}"
     }
 }
 
 SecretDeclaration: enum {
     Stored
     Compose(template: String, from: [String])
-}
 
-impl SecretDeclaration.Debug {
-    debug: fn(self) -> String {
-        if self == {
-            .Stored -> "Stored"
-            .Compose(_, from) -> "Compose {{ from: {from:Debug} }}"
+    impl Debug {
+        debug: fn(self) -> String {
+            if self == {
+                .Stored -> "Stored"
+                .Compose(_, from) -> "Compose {{ from: {from:Debug} }}"
+            }
         }
     }
 }
@@ -108,13 +108,13 @@ impl SecretDeclaration.Debug {
 SecretRotationPolicy: enum {
     Unset
     MaxAge(seconds: Int)
-}
 
-impl SecretRotationPolicy.Debug {
-    debug: fn(self) -> String {
-        if self == {
-            .Unset -> "None"
-            .MaxAge(seconds) -> "MaxAge {{ seconds: {seconds} }}"
+    impl Debug {
+        debug: fn(self) -> String {
+            if self == {
+                .Unset -> "None"
+                .MaxAge(seconds) -> "MaxAge {{ seconds: {seconds} }}"
+            }
         }
     }
 }
@@ -123,13 +123,13 @@ impl SecretRotationPolicy.Debug {
 SecretDefault: enum {
     Unset
     PerProfile(values: [String: String])
-}
 
-impl SecretDefault.Debug {
-    debug: fn(self) -> String {
-        if self == {
-            .Unset -> "None"
-            .PerProfile(values) -> "PerProfile {{ profiles: {envmodel_sorted_keys_of(values):Debug} }}"
+    impl Debug {
+        debug: fn(self) -> String {
+            if self == {
+                .Unset -> "None"
+                .PerProfile(values) -> "PerProfile {{ profiles: {envmodel_sorted_keys_of(values):Debug} }}"
+            }
         }
     }
 }
@@ -138,13 +138,13 @@ impl SecretDefault.Debug {
 SecretGenerator: enum {
     Unset
     Random(length: Int)
-}
 
-impl SecretGenerator.Debug {
-    debug: fn(self) -> String {
-        if self == {
-            .Unset -> "None"
-            .Random(length) -> "Random {{ length: {length} }}"
+    impl Debug {
+        debug: fn(self) -> String {
+            if self == {
+                .Unset -> "None"
+                .Random(length) -> "Random {{ length: {length} }}"
+            }
         }
     }
 }

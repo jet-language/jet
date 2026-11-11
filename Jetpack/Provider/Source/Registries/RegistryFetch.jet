@@ -150,10 +150,10 @@ provider_registry_scratch: fn(store: String, label: String, context: String) -[F
 // A provider's build scratch tree, removed when the realization ends.
 RegistryScratch: struct {
     path: String
-}
 
-impl RegistryScratch.Close {
-    close: fn(&&self) -[FS]> { provider_remove_tree_quiet(self.path) }
+    impl Close {
+        close: fn(&&self) -[FS]> { provider_remove_tree_quiet(self.path) }
+    }
 }
 
 // One preserved source archive of a resolved closure.

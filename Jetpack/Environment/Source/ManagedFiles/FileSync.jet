@@ -68,13 +68,13 @@ PlannedFile: struct {
     digest: String
     destination: String
     action: FileActionKind
-}
 
-// Sensitive bytes never reach debug output.
-impl PlannedFile.Debug {
-    debug: fn(self) -> String {
-        bytes: if self.declaration.sensitive -> "\"<redacted>\"" else -> "{self.bytes:Debug}"
-        "PlannedFile {{ declaration: {self.declaration:Debug}, bytes: {bytes}, digest: {self.digest:Debug}, destination: {self.destination:Debug}, action: {self.action:Debug} }}"
+    // Sensitive bytes never reach debug output.
+    impl Debug {
+        debug: fn(self) -> String {
+            bytes: if self.declaration.sensitive -> "\"<redacted>\"" else -> "{self.bytes:Debug}"
+            "PlannedFile {{ declaration: {self.declaration:Debug}, bytes: {bytes}, digest: {self.digest:Debug}, destination: {self.destination:Debug}, action: {self.action:Debug} }}"
+        }
     }
 }
 

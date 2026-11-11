@@ -12,30 +12,30 @@ use {
     jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_handle_request, lsp_member, lsp_server, lsp_update_document]
 }
 
-LSPFixtureChecker: struct {}
-
-impl LSPFixtureChecker.LSPChecker {
-    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
-        modules := [JetDriverDocModule]{}
-        diagnostics := [Diagnostic]{}
-        loop overlay in overlays {
-            parsed: parse_source(overlay.source.bytes())
-            alias: lsp_fixture_alias(overlay.path)
-            modules.push(JetDriverDocModule{
-                path: overlay.path.copy(),
-                physical_path: overlay.path.copy(),
-                alias: alias.copy(),
-                source: overlay.source.copy(),
-                items: parsed.program.items.copy(),
-                block_spans: parsed.program.block_spans.copy(),
-                imports: parsed.program.imports.copy(),
-                module_name: alias,
-            })
-            if overlay.path == entry -> diagnostics = parsed.diagnostics.copy()
+LSPFixtureChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+            modules := [JetDriverDocModule]{}
+            diagnostics := [Diagnostic]{}
+            loop overlay in overlays {
+                parsed: parse_source(overlay.source.bytes())
+                alias: lsp_fixture_alias(overlay.path)
+                modules.push(JetDriverDocModule{
+                    path: overlay.path.copy(),
+                    physical_path: overlay.path.copy(),
+                    alias: alias.copy(),
+                    source: overlay.source.copy(),
+                    items: parsed.program.items.copy(),
+                    block_spans: parsed.program.block_spans.copy(),
+                    imports: parsed.program.imports.copy(),
+                    module_name: alias,
+                })
+                if overlay.path == entry -> diagnostics = parsed.diagnostics.copy()
+            }
+            index: semindex_build(modules, SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+            symbols: semindex_build_symbols(index, modules)
+            LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
         }
-        index: semindex_build(modules, SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
-        symbols: semindex_build_symbols(index, modules)
-        LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
     }
 }
 

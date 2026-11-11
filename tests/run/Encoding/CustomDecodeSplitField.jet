@@ -5,13 +5,13 @@ use json: core.encoding.json
 Handle: struct {
     name: String
     host: String
-}
 
-impl Handle.Decode {
-    decode: fn(tree: Dyn) -> Handle [FieldError]! {
-        text: tree.text()
-        parts: text.split("@").to_list()
-        return Ok(Handle{name: parts[0], host: parts[1]})
+    impl Decode {
+        decode: fn(tree: Dyn) -> Handle [FieldError]! {
+            text: tree.text()
+            parts: text.split("@").to_list()
+            return Ok(Handle{name: parts[0], host: parts[1]})
+        }
     }
 }
 

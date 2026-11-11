@@ -8,7 +8,16 @@
 }
 use abi: c.jet_cs_counter
 
-Handle: struct { priv value: Int }
+Handle: struct {
+    priv value: Int
+
+    impl Close {
+        close: fn(&&self) {
+            abi.close(self.value)
+            if abi.take_error() != 0 { panic(".NET handle close failed") }
+        }
+    }
+}
 #Error
 DotNetError: enum { Exception InvalidHandle ResourceLimit }
 
@@ -22,13 +31,6 @@ new: fn(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
 }
 
 close: fn(&&handle: Handle) -[FFI.DotNet]> {}
-
-impl Handle.Close {
-    close: fn(&&self) {
-        abi.close(self.value)
-        if abi.take_error() != 0 { panic(".NET handle close failed") }
-    }
-}
 
 add: fn(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
     value: abi.add(handle.value, arg0)

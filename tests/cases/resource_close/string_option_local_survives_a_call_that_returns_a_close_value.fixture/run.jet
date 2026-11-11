@@ -4,11 +4,13 @@
 // around it, and the lease built from both reads it afterwards.
 use files: core.files
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Held: struct {
     tracer: Res
     directory: Directory?

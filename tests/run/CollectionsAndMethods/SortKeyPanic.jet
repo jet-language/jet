@@ -2,19 +2,19 @@
 // keys. Later key callbacks do not run and the receiver is not reordered.
 Rows: struct {
     values: [Int]
-}
 
-impl Rows.Close {
-    close: fn(&&self) { print("receiver: {self.values}") }
+    impl Close {
+        close: fn(&&self) { print("receiver: {self.values}") }
+    }
 }
 
 OwnedKey: struct {
     rank: Int
     label: String
-}
 
-impl OwnedKey.Close {
-    close: fn(&&self) { print("close {self.label}") }
+    impl Close {
+        close: fn(&&self) { print("close {self.label}") }
+    }
 }
 
 key: fn(value: Int, label: String) -> OwnedKey {

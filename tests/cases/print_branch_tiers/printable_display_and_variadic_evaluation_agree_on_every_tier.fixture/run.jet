@@ -1,6 +1,13 @@
 
 D: struct {
     value: Int
+
+    impl Add {
+        add: fn(self, rhs: D) -> D {
+            pair: align(self, rhs)
+            return D{value: pair.a + pair.b}
+        }
+    }
 }
 
 Pair: struct {
@@ -10,23 +17,16 @@ Pair: struct {
 
 align: fn(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 
-impl D.Add {
-    add: fn(self, rhs: D) -> D {
-        pair: align(self, rhs)
-        return D{value: pair.a + pair.b}
-    }
-}
-
 Envelope: enum {
     Pair(left: D, right: D)
 }
 
 Shown: struct {
     value: Int
-}
 
-impl Shown.Display {
-    display: fn(self) -> String { "shown={self.value}" }
+    impl Display {
+        display: fn(self) -> String { "shown={self.value}" }
+    }
 }
 
 mark: fn(label: String, value: Int) -[IO]> D {

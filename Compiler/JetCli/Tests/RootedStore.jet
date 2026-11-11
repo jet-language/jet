@@ -6,10 +6,13 @@ use {
     cli_process: core.process
 }
 
-JetCLIRootedFixtureRoot: struct { path: String }
-impl JetCLIRootedFixtureRoot.Close {
-    close: fn(&&self) -[FS]> {
-        cli_files.remove_all(self.path).drop("test root cleanup")
+JetCLIRootedFixtureRoot: struct {
+    path: String
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            cli_files.remove_all(self.path).drop("test root cleanup")
+        }
     }
 }
 #Test("rooted_store") {

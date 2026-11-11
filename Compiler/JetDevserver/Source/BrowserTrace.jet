@@ -47,8 +47,7 @@ BrowserTraceRelay: struct {
     path: String
     rows: Int
     started: Instant
-}
-impl BrowserTraceRelay {
+
     new: fn(manifest: String) -> BrowserTraceRelay BrowserTraceError! {
         browser_trace_supported()
         identity: browser_trace_identity_from_manifest(manifest)
@@ -106,7 +105,6 @@ impl BrowserTraceRelay {
     // Ends the relay: the file is removed so no reader sees a stale session.
     close: fn(self) { browser_trace_remove_quietly(self.path) }
 }
-
 // One shared status line: `{"schema":"jet.status/v1","action":…,"ok":true,"reports":[],…fields}`.
 browser_trace_status_line: fn(action: String, fields: [String]) -> String {
     rendered := "{{\"schema\":{foundation_json_quote(BROWSER_TRACE_STATUS_SCHEMA)},\"action\":{foundation_json_quote(action)},\"ok\":true,\"reports\":[]"

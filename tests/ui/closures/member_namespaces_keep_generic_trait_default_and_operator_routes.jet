@@ -7,11 +7,17 @@ Generic: struct<T> {
 Step: trait {
     step: fn(self, amount: Int) -> Int Never! { amount + 5 }
 }
-DefaultWorker: struct { step: fn(Int) -> Int }
-impl DefaultWorker.Step {}
-Hook: struct { mul: fn(Int) -> Int }
-impl Hook.Mul(Int) {
-    mul: fn(self, rhs: Int) -> Int Never! { rhs + 10 }
+DefaultWorker: struct {
+    step: fn(Int) -> Int
+
+    impl Step {}
+}
+Hook: struct {
+    mul: fn(Int) -> Int
+
+    impl Mul(Int) {
+        mul: fn(self, rhs: Int) -> Int Never! { rhs + 10 }
+    }
 }
 MutableWorker: struct {
     value: Int

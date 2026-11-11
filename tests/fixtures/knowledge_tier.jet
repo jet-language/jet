@@ -8,9 +8,7 @@
 Reservation: struct {
     state { Pending, Confirmed }
     guest: String
-}
 
-impl Reservation {
     #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
 
     #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation { self }

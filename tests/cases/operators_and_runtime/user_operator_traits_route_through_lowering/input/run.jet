@@ -1,5 +1,25 @@
 
-Vec2: struct { x: Int y: Int }
+Vec2: struct {
+    x: Int y: Int
+
+    impl Add {
+        add: fn(self, rhs: Vec2) -> Vec2 {
+            return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
+        }
+    }
+
+    impl Equatable {
+        equal: fn(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Vec2) -> Ordering {
+            if self.x < rhs.x { return Ordering.Less }
+            if self.x > rhs.x { return Ordering.Greater }
+            return Ordering.Equal
+        }
+    }
+}
 Holder: struct { value: Vec2 }
 EqBox: struct<T: Equatable> { value: T }
 #Comparable
@@ -10,24 +30,6 @@ NestedTier: struct<T: Comparable> {
     tail: [T]
 }
 Adder: struct<T: Add> { value: T }
-
-impl Vec2.Add {
-    add: fn(self, rhs: Vec2) -> Vec2 {
-        return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
-    }
-}
-
-impl Vec2.Equatable {
-    equal: fn(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
-}
-
-impl Vec2.Comparable {
-    compare: fn(self, rhs: Vec2) -> Ordering {
-        if self.x < rhs.x { return Ordering.Less }
-        if self.x > rhs.x { return Ordering.Greater }
-        return Ordering.Equal
-    }
-}
 
 add_generic: fn<T: Add>(left: T, right: T) -> T { return left + right }
 equal_generic: fn<T: Equatable>(left: T, right: T) -> Bool { return left == right }

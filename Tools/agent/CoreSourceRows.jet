@@ -1600,9 +1600,12 @@ owned_source_problem: fn(declared: CoreDeclarations, runtime: [CoreSourceRow]) -
         body_start: if open == 0 -> byte_len(head) else -> open + 1 + byte_len(head)
         close: byte_tail(encoding, body_start).find("\n}}")
         if close < 0 -> return Ok("{ENCODING_PATH} declares no EncodingFormat enum")
+        // The cases are the body's first lines; a blank line ends them, and the
+        // enum's own methods and impls follow it.
         cases := [String]{}
         loop line in byte_slice(encoding, body_start, body_start + close).split("\n") {
             trimmed: line.trim()
+            if trimmed == "" && cases.len() > 0 -> break
             if trimmed != "" -> cases.push(trimmed)
         }
         variants: loop format in declared.format_rows -> format.variant
@@ -2430,6 +2433,7 @@ ffi_languages: fn(rows: [EffectRow]) -> [String] Never! {
     }
     out
 }
+
 
 CoreSourceViews: struct {
     files: [GeneratedFile]

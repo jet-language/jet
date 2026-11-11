@@ -130,11 +130,11 @@ NativeRuntimeMaterializedRoot: struct {
     }
 
     path: fn(self) -> String Never! { self.path }
-}
 
-impl NativeRuntimeMaterializedRoot.Close {
-    close: fn(&&self) -[FS]> {
-        files.remove_all(self.path).drop("the staging directory is scratch; a leftover is harmless")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            files.remove_all(self.path).drop("the staging directory is scratch; a leftover is harmless")
+        }
     }
 }
 
@@ -184,17 +184,17 @@ PreparedRuntime: struct {
             .None -> spec
         }
     }
-}
 
-impl PreparedRuntime.Close {
-    close: fn(&&self) -[FS]> {
-        if self.lease == {
-            .Val(lease) -> close(lease)
-            .None -> {}
-        }
-        if self.materialized_root == {
-            .Val(root) -> close(root)
-            .None -> {}
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            if self.lease == {
+                .Val(lease) -> close(lease)
+                .None -> {}
+            }
+            if self.materialized_root == {
+                .Val(root) -> close(root)
+                .None -> {}
+            }
         }
     }
 }

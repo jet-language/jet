@@ -62,13 +62,13 @@ ManagedFile: struct {
         generation: self.generation ?? ""
         "{self.destination}\t{source}\t{self.source_digest}\t{self.mode.as_str()}\t{permissions}\t{visibility}\t{generation}\t{self.conflict.as_str()}"
     }
-}
 
-// Sensitive inline content never reaches debug output.
-impl ManagedFile.Debug {
-    debug: fn(self) -> String {
-        content: if self.sensitive -> "\"<redacted>\"" else -> "{self.content:Debug}"
-        "ManagedFile {{ destination: {self.destination:Debug}, source: {self.source:Debug}, content: {content}, mode: {self.mode:Debug}, permissions: {self.permissions:Debug}, sensitive: {self.sensitive}, generation: {self.generation:Debug}, source_digest: {self.source_digest:Debug}, conflict: {self.conflict:Debug} }}"
+    // Sensitive inline content never reaches debug output.
+    impl Debug {
+        debug: fn(self) -> String {
+            content: if self.sensitive -> "\"<redacted>\"" else -> "{self.content:Debug}"
+            "ManagedFile {{ destination: {self.destination:Debug}, source: {self.source:Debug}, content: {content}, mode: {self.mode:Debug}, permissions: {self.permissions:Debug}, sensitive: {self.sensitive}, generation: {self.generation:Debug}, source_digest: {self.source_digest:Debug}, conflict: {self.conflict:Debug} }}"
+        }
     }
 }
 

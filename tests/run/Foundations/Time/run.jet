@@ -6,15 +6,15 @@ BusinessCalendar: trait {
 
 ExchangeCalendar: struct {
     holidays: [LocalDate]
-}
 
-impl ExchangeCalendar.BusinessCalendar {
-    is_business_day: fn(self, date: LocalDate) -> Bool {
-        if date.iso_weekday() > 5 -> return false
-        loop holiday in self.holidays {
-            if holiday == date -> return false
+    impl BusinessCalendar {
+        is_business_day: fn(self, date: LocalDate) -> Bool {
+            if date.iso_weekday() > 5 -> return false
+            loop holiday in self.holidays {
+                if holiday == date -> return false
+            }
+            return true
         }
-        return true
     }
 }
 

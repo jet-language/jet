@@ -8,8 +8,10 @@ MAX_NATIVE_SWAP_ID_BYTES: Int{256}
 MAX_NATIVE_SWAP_DETAIL_BYTES: Int{1024}
 MAX_NATIVE_SWAP_FACTS: Int{1024}
 
-NativeSwapSourceIdentity: struct { source_id: String, module_ref: String }
-impl NativeSwapSourceIdentity {
+NativeSwapSourceIdentity: struct {
+    source_id: String
+    module_ref: String
+
     new: fn(source_id: String) -> NativeSwapSourceIdentity NativeSwapError! {
         NativeSwapSourceIdentity.new_with_module(source_id, source_id)
     }
@@ -24,31 +26,35 @@ impl NativeSwapSourceIdentity {
     matches: fn(self, other: NativeSwapSourceIdentity) -> Bool {
         self.source_id == other.source_id && self.module_ref == other.module_ref
     }
-}
-impl NativeSwapSourceIdentity.Display { display: fn(&&self) -> String { self.canonical() } }
 
-NativeSwapCodeRevision: struct { value: String }
-impl NativeSwapCodeRevision {
+    impl Display { display: fn(&&self) -> String { self.canonical() } }
+}
+NativeSwapCodeRevision: struct {
+    value: String
+
     new: fn(value: String) -> NativeSwapCodeRevision NativeSwapError! {
         _: validate_revision(value, "code revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
         NativeSwapCodeRevision{value: value}
     }
     as_str: fn(self) -> String { self.value }
-}
-impl NativeSwapCodeRevision.Display { display: fn(&&self) -> String { self.value } }
 
-NativeSwapDataRevision: struct { value: String }
-impl NativeSwapDataRevision {
+    impl Display { display: fn(&&self) -> String { self.value } }
+}
+NativeSwapDataRevision: struct {
+    value: String
+
     new: fn(value: String) -> NativeSwapDataRevision NativeSwapError! {
         _: validate_revision(value, "data revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
         NativeSwapDataRevision{value: value}
     }
     as_str: fn(self) -> String { self.value }
-}
-impl NativeSwapDataRevision.Display { display: fn(&&self) -> String { self.value } }
 
-NativeSwapRevision: struct { code: NativeSwapCodeRevision, data: NativeSwapDataRevision }
-impl NativeSwapRevision {
+    impl Display { display: fn(&&self) -> String { self.value } }
+}
+NativeSwapRevision: struct {
+    code: NativeSwapCodeRevision
+    data: NativeSwapDataRevision
+
     new: fn(code: String, data: String) -> NativeSwapRevision NativeSwapError! {
         NativeSwapRevision{code: NativeSwapCodeRevision.new(code), data: NativeSwapDataRevision.new(data)}
     }
@@ -57,13 +63,11 @@ impl NativeSwapRevision {
     code_unchanged: fn(self, other: NativeSwapRevision) -> Bool { self.code.value == other.code.value }
     data_unchanged: fn(self, other: NativeSwapRevision) -> Bool { self.data.value == other.data.value }
 }
-
 NativeSwapExecutable: struct {
     source: NativeSwapSourceIdentity
     revision: NativeSwapRevision
     generation: U64
-}
-impl NativeSwapExecutable {
+
     new: fn(source: NativeSwapSourceIdentity, revision: NativeSwapRevision, generation: U64) -> NativeSwapExecutable NativeSwapError! {
         _: validate_source_identity(source, "executable") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
         NativeSwapExecutable{source: source, revision: revision, generation: generation}
@@ -73,7 +77,6 @@ impl NativeSwapExecutable {
         self.source.matches(other.source) && self.revision.code_unchanged(other.revision) && self.revision.data_unchanged(other.revision) && self.generation == other.generation
     }
 }
-
 impl NativeSwapCodePolicy {
     as_str: fn(self) -> String {
         if self == {
@@ -94,8 +97,9 @@ impl NativeSwapDataPolicy {
         }
     }
 }
-NativeSwapHandlePolicy: enum { Never ExplicitCompatible }
-impl NativeSwapHandlePolicy {
+NativeSwapHandlePolicy: enum {
+    Never ExplicitCompatible
+
     as_str: fn(self) -> String {
         if self == {
             .Never -> "never"
@@ -103,8 +107,9 @@ impl NativeSwapHandlePolicy {
         }
     }
 }
-NativeSwapQuiescencePolicy: enum { Required NotRequired }
-impl NativeSwapQuiescencePolicy {
+NativeSwapQuiescencePolicy: enum {
+    Required NotRequired
+
     as_str: fn(self) -> String {
         if self == {
             .Required -> "required"
@@ -141,21 +146,18 @@ NativeSwapRelocationFacts: struct {
     strategy: NativeSwapRelocationStrategy
     code_symbols: [String]
     data_slots: [String]
-}
-impl NativeSwapRelocationFacts {
+
     new: fn(strategy: NativeSwapRelocationStrategy) -> NativeSwapRelocationFacts {
         NativeSwapRelocationFacts{strategy: strategy, code_symbols: [String]{}, data_slots: [String]{}}
     }
     // Resident code and data keep their identities unless a producer says otherwise.
     stable: fn() -> NativeSwapRelocationFacts { NativeSwapRelocationFacts.new(.StableIdentity) }
 }
-
 NativeSwapLinkFacts: struct {
     strategy: NativeSwapLinkStrategy
     resident_identity: String
     candidate_identity: String
-}
-impl NativeSwapLinkFacts {
+
     new: fn(strategy: NativeSwapLinkStrategy, resident_identity: String, candidate_identity: String) -> NativeSwapLinkFacts NativeSwapError! {
         _: validate_identity(resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(resident_identity, .InvalidIdentity, err))
         _: validate_identity(candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(candidate_identity, .InvalidIdentity, err))
@@ -167,15 +169,16 @@ impl NativeSwapLinkFacts {
         NativeSwapLinkFacts{strategy: .ReuseResident, resident_identity: "resident", candidate_identity: "candidate"}
     }
 }
+NativeSwapQuiescence: struct {
+    required: Bool
+    active_operations: U64
+    reached: Bool
 
-NativeSwapQuiescence: struct { required: Bool, active_operations: U64, reached: Bool }
-impl NativeSwapQuiescence {
     ready: fn() -> NativeSwapQuiescence { NativeSwapQuiescence{required: true, active_operations: 0, reached: true} }
     pending: fn(active_operations: U64) -> NativeSwapQuiescence { NativeSwapQuiescence{required: true, active_operations: active_operations, reached: false} }
     not_required: fn() -> NativeSwapQuiescence { NativeSwapQuiescence{required: false, active_operations: 0, reached: true} }
     is_ready: fn(self) -> Bool { self.reached && self.active_operations == 0 }
 }
-
 // `Unblocked` is the fact a compatible plan carries; it renders as "none".
 impl NativeSwapBlockingFact {
     as_str: fn(self) -> String {
@@ -236,8 +239,7 @@ NativeSwapExplanation: struct {
     disposition: NativeSwapDisposition
     blocking_fact: NativeSwapBlockingFact
     detail: String
-}
-impl NativeSwapExplanation {
+
     new: fn(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapExplanation {
         NativeSwapExplanation{source_id: bounded_text(source_id, MAX_NATIVE_SWAP_ID_BYTES), disposition: disposition, blocking_fact: blocking_fact, detail: bounded_text(detail, MAX_NATIVE_SWAP_DETAIL_BYTES)}
     }
@@ -247,12 +249,13 @@ impl NativeSwapExplanation {
     render: fn(self) -> String {
         "reload disposition={self.disposition.as_str()} source={self.source_id} blocking_fact={self.blocking_fact.as_str()} detail={self.detail}"
     }
-}
-impl NativeSwapExplanation.Display { display: fn(&&self) -> String { self.render() } }
 
+    impl Display { display: fn(&&self) -> String { self.render() } }
+}
 #Error
-NativeSwapError: struct { explanation: NativeSwapExplanation }
-impl NativeSwapError {
+NativeSwapError: struct {
+    explanation: NativeSwapExplanation
+
     input: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
         NativeSwapError{explanation: NativeSwapExplanation.new(source_id, .Rejected, blocking_fact, detail)}
     }
@@ -262,11 +265,12 @@ impl NativeSwapError {
     source_id: fn(self) -> String { self.explanation.source_id }
     blocking_fact: fn(self) -> NativeSwapBlockingFact { self.explanation.blocking_fact }
     render: fn(self) -> String { self.explanation.render() }
-}
-impl NativeSwapError.Display { display: fn(&&self) -> String { self.render() } }
 
-NativeSwapHandleCompatibility: enum { Compatible Incompatible }
-impl NativeSwapHandleCompatibility {
+    impl Display { display: fn(&&self) -> String { self.render() } }
+}
+NativeSwapHandleCompatibility: enum {
+    Compatible Incompatible
+
     as_str: fn(self) -> String {
         if self == {
             .Compatible -> "compatible"
@@ -275,14 +279,12 @@ impl NativeSwapHandleCompatibility {
     }
     is_compatible: fn(self) -> Bool { self == .Compatible }
 }
-
 NativeSwapListenerHandle: struct {
     id: String
     source: NativeSwapSourceIdentity
     generation: U64
     compatibility: NativeSwapHandleCompatibility
-}
-impl NativeSwapListenerHandle {
+
     new: fn(id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapListenerHandle NativeSwapError! {
         _: validate_identity(id, "listener handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
         _: validate_source_identity(source, "listener") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
@@ -296,15 +298,13 @@ impl NativeSwapListenerHandle {
     }
     is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
 }
-
 NativeSwapConnectionHandle: struct {
     id: String
     listener_id: String
     source: NativeSwapSourceIdentity
     generation: U64
     compatibility: NativeSwapHandleCompatibility
-}
-impl NativeSwapConnectionHandle {
+
     new: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapConnectionHandle NativeSwapError! {
         _: validate_identity(id, "connection handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
         _: validate_identity(listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
@@ -319,7 +319,6 @@ impl NativeSwapConnectionHandle {
     }
     is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
 }
-
 NativeSwapCapability: struct {
     code: NativeSwapCodePolicy
     data: NativeSwapDataPolicy
@@ -329,8 +328,7 @@ NativeSwapCapability: struct {
     quiescence: NativeSwapQuiescencePolicy
     relocation: NativeSwapRelocationStrategy
     link: NativeSwapLinkStrategy
-}
-impl NativeSwapCapability {
+
     resident: fn() -> NativeSwapCapability {
         NativeSwapCapability{code: .Replace, data: .Preserve, listeners: .ExplicitCompatible, connections: .ExplicitCompatible,
             restart: true, quiescence: .Required, relocation: .StableIdentity, link: .ReuseResident}
@@ -347,15 +345,13 @@ impl NativeSwapCapability {
     }
     allows_restart: fn(self) -> Bool { self.restart }
 }
-
 NativeSwapRestartBoundary: struct {
     required: Bool
     reason: NativeSwapBlockingFact?
     affected: [String]
     kept: [String]
     reset: [String]
-}
-impl NativeSwapRestartBoundary {
+
     in_place: fn() -> NativeSwapRestartBoundary {
         NativeSwapRestartBoundary{required: false, reason: None, affected: [String]{}, kept: [String]{}, reset: [String]{}}
     }
@@ -382,7 +378,6 @@ impl NativeSwapRestartBoundary {
         }
     }
 }
-
 NativeSwapPlan: struct {
     source: NativeSwapSourceIdentity
     from: NativeSwapExecutable
@@ -398,8 +393,7 @@ NativeSwapPlan: struct {
     changed_items: [String]
     removed_definitions: [String]
     blocking_fact: NativeSwapBlockingFact?
-}
-impl NativeSwapPlan {
+
     new: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> NativeSwapPlan NativeSwapError! {
         source_id: source.canonical()
         validate_hot_swap_decision(source_id, source, decision)
@@ -492,7 +486,6 @@ impl NativeSwapPlan {
         _: validate_identity(self.link.candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
     }
 }
-
 impl NativeSwapOutcome {
     as_str: fn(self) -> String {
         if self == {
@@ -518,8 +511,7 @@ NativeSwapReceipt: struct {
     reset_connections: [String]
     restart_boundary: NativeSwapRestartBoundary
     explanation: NativeSwapExplanation?
-}
-impl NativeSwapReceipt {
+
     committed: fn(self) -> Bool { self.outcome == .Committed }
     rolled_back: fn(self) -> Bool { self.outcome == .RolledBack }
     rejected: fn(self) -> Bool { self.outcome == .Rejected || self.outcome == .RestartRequired }
@@ -531,7 +523,6 @@ impl NativeSwapReceipt {
         "native-swap outcome={self.outcome.as_str()} source={self.source.canonical()} before={before} after={after} {handles} restart={self.restart_boundary.required} explanation={explanation}"
     }
 }
-
 impl NativeSwapPhase {
     as_str: fn(self) -> String {
         if self == {
@@ -566,8 +557,7 @@ NativeSwapState: struct {
     checkpoint: NativeSwapCheckpoint?
     pending_plan: NativeSwapPlan?
     working_receipt: NativeSwapWorkingReceipt?
-}
-impl NativeSwapState {
+
     new: fn(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> NativeSwapState NativeSwapError! {
         source_id: executable.source.canonical()
         _: validate_source_identity(executable.source, "executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))

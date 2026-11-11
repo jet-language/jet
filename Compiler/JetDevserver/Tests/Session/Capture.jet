@@ -7,23 +7,25 @@ CaptureTestRecord: struct {
     seq: U64
     bytes: U64
     protected: Bool
-}
-impl CaptureTestRecord.RecordIndexRetention {
-    artifact_id: fn(self) -> String Never! { self.id.copy() }
-    recorded_sequence: fn(self) -> U64 Never! { self.seq }
-    size_bytes: fn(self) -> U64 Never! { self.bytes }
-    saved: fn(self) -> Bool Never! { self.protected }
+
+    impl RecordIndexRetention {
+        artifact_id: fn(self) -> String Never! { self.id.copy() }
+        recorded_sequence: fn(self) -> U64 Never! { self.seq }
+        size_bytes: fn(self) -> U64 Never! { self.bytes }
+        saved: fn(self) -> Bool Never! { self.protected }
+    }
 }
 CaptureProtectedRecord: struct {
     id: String
     bytes: U64
-}
-impl CaptureProtectedRecord.RecordIndexRetention {
-    artifact_id: fn(self) -> String Never! { self.id.copy() }
-    recorded_sequence: fn(self) -> U64 Never! { U64{0} }
-    size_bytes: fn(self) -> U64 Never! { self.bytes }
-    saved: fn(self) -> Bool Never! { false }
-    evictable: fn(self) -> Bool Never! { false }
+
+    impl RecordIndexRetention {
+        artifact_id: fn(self) -> String Never! { self.id.copy() }
+        recorded_sequence: fn(self) -> U64 Never! { U64{0} }
+        size_bytes: fn(self) -> U64 Never! { self.bytes }
+        saved: fn(self) -> Bool Never! { false }
+        evictable: fn(self) -> Bool Never! { false }
+    }
 }
 capture_test_record: fn(id: String, seq: U64, bytes: U64, protected: Bool) -> CaptureTestRecord Never! {
     CaptureTestRecord{id: id.copy(), seq, bytes, protected}

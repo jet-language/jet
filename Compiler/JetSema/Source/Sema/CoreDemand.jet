@@ -70,8 +70,11 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
                 }
             }
             loop nominal in graph.modules[module_index].nominals {
+                // A trait impl written in the type's body stays checked like a
+                // top-level one: its methods sit among the nominal's own.
+                nested: sema_core_demand_nested_trait_spans(nominal)
                 loop method in nominal.methods {
-                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None -> next
+                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
                     rows[method.symbol.id.key] = module_index
                 }
             }
@@ -89,6 +92,18 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
 // An inherent, authored impl: no trait, operator, delegation or generator.
 sema_core_demand_impl_deferrable: fn(implementation: SemaRegistrationImpl) -> Bool Never! {
     implementation.trait_name == None && implementation.operator_marker == None && implementation.delegation_field == None && !implementation.compiler_generated
+}
+
+// The spans (`start:end`) of the methods of the `impl Trait { … }` blocks a
+// struct or enum writes in its body.
+sema_core_demand_nested_trait_spans: fn(nominal: SemaRegistrationNominal) -> [String:Bool] Never! {
+    spans := [String:Bool]{}
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            loop method in block.methods -> spans["{method.span.start}:{method.span.end}"] = true
+        }
+    }
+    spans
 }
 
 // Whether the body of function `key` waits for demand: it is deferred and no

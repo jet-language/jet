@@ -1,9 +1,11 @@
-Parser: struct { text: String }
-impl Parser {
+Parser: struct {
+    text: String
+
     words: fn(self) -> [String] { self.text.split(" ").to_list() }
     count: fn(self) -> Int { self.words().len() }
-}
-impl Parser.Display {
-    display: fn(self) -> String { "Parser of {self.count()} words" }
+
+    impl Display {
+        display: fn(self) -> String { "Parser of {self.count()} words" }
+    }
 }
 run: fn() { print(Parser{text: "a b c"}) }

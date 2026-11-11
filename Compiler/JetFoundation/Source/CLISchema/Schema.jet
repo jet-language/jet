@@ -7,8 +7,7 @@ CLIValueKind: enum {
     Float
     String
     Path
-}
-impl CLIValueKind {
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Bool -> "Bool"
@@ -22,8 +21,7 @@ impl CLIValueKind {
 CLIDefault: enum {
     TypeDefault
     Recorded(value: String)
-}
-impl CLIDefault {
+
     display: fn(self) -> String Never! {
         if self == {
             .TypeDefault -> "type default"
@@ -44,8 +42,7 @@ CLIInputSchema: struct {
     metavar: String?
     shape: CLIInputShape
     positional: U16?
-}
-impl CLIInputSchema {
+
     required: fn(self) -> Bool Never! {
         if self.shape == {
             .Value(_, optional, default) -> !optional && default == None
@@ -364,23 +361,7 @@ CLICommandSchema: struct {
     jobs: [JobFact]
     standard: Bool
     version: String?
-}
-cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
-    positionals := [Int]{}
-    loop index in 0..<inputs.len() {
-        if inputs[index].positional != None -> positionals.push(index)
-    }
-    // Rust's positional sort is stable: equal positions retain written order.
-    positionals.sort_by((a: Int, b: Int) -> (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}))
-    words := [String]{}
-    loop index in positionals -> words.push(inputs[index].flag)
-    loop input in inputs -> words.push("--{input.flag}")
-    loop input in inputs {
-        if input.short == .Val(short) -> words.push("-{short}")
-    }
-    words
-}
-impl CLICommandSchema {
+
     standard_completion_words: fn(self) -> [String] Never! {
         if !self.standard -> return [String]{}
         words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
@@ -418,4 +399,19 @@ impl CLICommandSchema {
         words.extend(self.job_completion_words())
         words
     }
+}
+cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
+    positionals := [Int]{}
+    loop index in 0..<inputs.len() {
+        if inputs[index].positional != None -> positionals.push(index)
+    }
+    // Rust's positional sort is stable: equal positions retain written order.
+    positionals.sort_by((a: Int, b: Int) -> (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}))
+    words := [String]{}
+    loop index in positionals -> words.push(inputs[index].flag)
+    loop input in inputs -> words.push("--{input.flag}")
+    loop input in inputs {
+        if input.short == .Val(short) -> words.push("-{short}")
+    }
+    words
 }

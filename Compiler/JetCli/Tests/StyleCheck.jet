@@ -4,8 +4,8 @@
 // stays (rule g: its markers would become the type's); a trait impl moves
 // with its own markers where they were written, above it or in its head.
 use {
-    jet_cli.[JetCLIImplPlacementRule, jet_cli_fix_style, jet_cli_impl_placement_exception, jet_cli_impl_placement_lints]
-    jet_parser.[parse_source]
+    jet_cli.[jet_cli_fix_style]
+    jet_parser.[JetParserImplPlacementRule, parse_source, parser_impl_placement_exception, parser_impl_placement_lints]
 }
 
 // A struct with a marked trait impl and a marked inherent impl outside it.
@@ -16,14 +16,14 @@ style_marked_source: fn() -> String Never! {
 #Test("impl placement: a marked inherent impl stays, a marked trait impl is flagged") {
     source: style_marked_source()
     parsed: parse_source(source.bytes())
-    lints: jet_cli_impl_placement_lints(parsed.program)
+    lints: parser_impl_placement_lints(parsed.program, source.bytes(), parsed.diagnostics)
     assert_eq(lints.len(), 1)
     assert(lints[0].what.contains("`impl Meters.Add"))
     rules := [String]{}
     loop item in parsed.program.items {
         if item == .Impl(value) {
-            rule: jet_cli_impl_placement_exception(value)
-            rules.push(if rule == Val(JetCLIImplPlacementRule.MarkedInherent) -> "g" else if rule == None -> "-" else -> "other")
+            rule: parser_impl_placement_exception(value)
+            rules.push(if rule == Val(JetParserImplPlacementRule.MarkedInherent) -> "g" else if rule == None -> "-" else -> "other")
         }
     }
     assert_eq(rules.join(" "), "- g")

@@ -66,11 +66,11 @@ FFIBuildLock: struct {
             time.sleep(time.duration_ms(50))
         }
     }
-}
 
-impl FFIBuildLock.Close {
-    close: fn(&&self) -[FS]> {
-        files.remove_dir(self.dir).drop("the lock directory may already be gone")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            files.remove_dir(self.dir).drop("the lock directory may already be gone")
+        }
     }
 }
 

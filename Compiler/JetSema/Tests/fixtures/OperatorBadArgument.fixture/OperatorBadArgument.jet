@@ -1,8 +1,11 @@
 // An operator hook called with an unknown argument name reports that name
 // once (E0107); the hook's receiver and declared rhs add no second error.
-BadArgumentHook: struct { value: Int }
-impl BadArgumentHook.Mul(Int) {
-    mul: fn(self, rhs: Int) -> Int { return rhs }
+BadArgumentHook: struct {
+    value: Int
+
+    impl Mul(Int) {
+        mul: fn(self, rhs: Int) -> Int { return rhs }
+    }
 }
 run: fn() {
     a: BadArgumentHook{value: 1}

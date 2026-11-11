@@ -1,8 +1,7 @@
 Build: struct {
     state { Queued, Running, Finished }
     name: String
-}
-impl Build {
+
     #State(_ -> Queued) queue: fn(name: String) -> Build { Build{name: name.copy()} }
     #State(Queued -> Running) start: fn(self: &&Build) -> Build { self }
     #State(Running -> Finished) finish: fn(self: &&Build) -> Build { self }

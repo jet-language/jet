@@ -1,9 +1,12 @@
 Owner: trait {
     identity: fn(self) -> Int Never!
 }
-TokenOwner: struct { token: Int }
-impl TokenOwner.Owner {
-    identity: fn(self) -> Int Never! { self.token }
+TokenOwner: struct {
+    token: Int
+
+    impl Owner {
+        identity: fn(self) -> Int Never! { self.token }
+    }
 }
 Carrier: struct { owner: Owner, adopted: Bool }
 HostValue: enum {

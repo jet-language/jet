@@ -1001,6 +1001,15 @@ sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaP
             return true
         }
     }
+    // An `impl Index { … }` block in the type's own body is the hook the
+    // same way, unless the name is a user trait of the type's module.
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != trait_name -> next
+            if sema_type_graph_trait_symbol(graph, graph.modules[row.module_index].module_identity, trait_name) != None -> next
+            return true
+        }
+    }
     false
 }
 

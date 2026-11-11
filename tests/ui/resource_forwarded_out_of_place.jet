@@ -4,11 +4,13 @@
 // holder or parameter into an owned position is refused, so the holder stays
 // its one owner. A loop name over a list of resources read in place (no `^`
 // drive) is such a place read too, whoever owns the list.
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Holder: struct {
     first: Res?
     second: Res?

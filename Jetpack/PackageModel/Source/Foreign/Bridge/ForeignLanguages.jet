@@ -38,9 +38,7 @@ ForeignLanguage: enum {
     Rust
     JS
     Swift
-}
 
-impl ForeignLanguage {
     // Every language in declaration order.
     all: fn() -> [ForeignLanguage] Never! {
         [ForeignLanguage]{
@@ -113,8 +111,10 @@ pkg_foreign_language_count: fn(text: String, leaves: [String]) -> Int {
 }
 
 // What is wrong with the cases of `ForeignLanguage: enum { … }` in `text`
-// and with `named` (the names `all()` gives) against the `FFI.*` leaves of
-// `leaves`, naming each missing and each extra language, or "".
+// (the lines from the head to the first blank line, where the enum's methods
+// start, or its closing brace) and with `named` (the names `all()` gives)
+// against the `FFI.*` leaves of `leaves`, naming each missing and each extra
+// language, or "".
 pkg_foreign_language_problem: fn(text: String, named: [String], leaves: [String]) -> String {
     declared := [String]{}
     loop leaf in leaves {
@@ -127,8 +127,8 @@ pkg_foreign_language_problem: fn(text: String, named: [String], leaves: [String]
             inside = true
             next
         }
-        if inside && line == "}}" -> break
-        if inside && line.trim() != "" -> cases.push(line.trim())
+        if inside && (line == "}}" || line.trim() == "") -> break
+        if inside -> cases.push(line.trim())
     }
     problem: pkg_foreign_language_difference("the cases of ForeignLanguage", cases, declared)
     if problem != "" -> return problem

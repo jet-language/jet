@@ -51,6 +51,36 @@ JetDriverComptimeCompilerContext: struct {
 
 JetDriverComptimeCompiler: struct {
     context: Shared<JetDriverComptimeCompilerContext>
+
+    impl JetEvalCompilerQueryHost {
+        clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost {
+            // copy: the evaluator forks the host for each machine; the forks share one context.
+            JetDriverComptimeCompiler{context: self.context.copy()}
+        }
+        compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply? {
+            if query == "lex" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                lexed: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: lexed.value}})
+            }
+            if query == "parse" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: parsed.value}})
+            }
+            if query == "check" -> return Val(jet_driver_compiler_query_check(self.context, args, span))
+            if query == "source_map" {
+                source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                map: jet_eval_compiler_services_source_map_value(jet_eval_compiler_services_source_map(source))
+                return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: map}})
+            }
+            if query == "manifest" || query == "package" || query == "lock" || query == "profiles" {
+                permit: self.context.guard_read()
+                return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
+            }
+            None
+        }
+    }
 }
 
 // A compiler query's source input: its inline `package: { }` carrier masked
@@ -85,36 +115,6 @@ jet_driver_comptime_compiler_for: fn(request: JetDriverCompileRequest) -> JetEva
         compiler_threads: request.compiler_threads.copy(),
     }
     JetDriverComptimeCompiler{context: context}
-}
-
-impl JetDriverComptimeCompiler.JetEvalCompilerQueryHost {
-    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost {
-        // copy: the evaluator forks the host for each machine; the forks share one context.
-        JetDriverComptimeCompiler{context: self.context.copy()}
-    }
-    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply? {
-        if query == "lex" {
-            source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
-            lexed: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
-            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: lexed.value}})
-        }
-        if query == "parse" {
-            source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
-            parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
-            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: parsed.value}})
-        }
-        if query == "check" -> return Val(jet_driver_compiler_query_check(self.context, args, span))
-        if query == "source_map" {
-            source: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
-            map: jet_eval_compiler_services_source_map_value(jet_eval_compiler_services_source_map(source))
-            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: map}})
-        }
-        if query == "manifest" || query == "package" || query == "lock" || query == "profiles" {
-            permit: self.context.guard_read()
-            return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
-        }
-        None
-    }
 }
 
 // The String argument of `lex(source)` / `parse(source)`.

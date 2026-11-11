@@ -6,34 +6,34 @@ Count: struct {
     priv at: Int
     priv end: Int
     priv name: String
-}
 
-impl Count.Iterator {
-    Item: Int
+    impl Iterator {
+        Item: Int
 
-    next: fn(&self) -> Int? {
-        if self.at >= self.end -> return None
-        self.at += 1
-        Val(self.at)
+        next: fn(&self) -> Int? {
+            if self.at >= self.end -> return None
+            self.at += 1
+            Val(self.at)
+        }
     }
-}
 
-impl Count.Close {
-    close: fn(&&self) {
-        print("close {self.name} at {self.at}")
+    impl Close {
+        close: fn(&&self) {
+            print("close {self.name} at {self.at}")
+        }
     }
 }
 
 Counts: struct {
     priv end: Int
     priv name: String
-}
 
-impl Counts.Iterable {
-    Iter: Count
+    impl Iterable {
+        Iter: Count
 
-    iter: fn(&&self) -> Count {
-        Count{at: 0, end: self.end, name: self.name}
+        iter: fn(&&self) -> Count {
+            Count{at: 0, end: self.end, name: self.name}
+        }
     }
 }
 

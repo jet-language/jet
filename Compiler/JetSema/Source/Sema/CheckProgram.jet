@@ -4521,13 +4521,19 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
     core_wave: graph.core_wave_rows.len() > 0
     if !codec_wave {
         loop (nominal_index, nominal) in source_module.nominals {
+            // An impl method's nominal row shares its key and declaration span; a
+            // method of a nested `impl Trait { … }` block that only shares the key
+            // (a user codec beside a generated one, E0105) is still its own job.
             impl_method_keys := [String:Bool]{}
             loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
                 if count_work -> impl_rows_scanned += 1
-                loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() -> impl_method_keys[graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index].symbol.id.key] = true
+                loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() {
+                    impl_method: graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index]
+                    impl_method_keys["{impl_method.symbol.id.key}@{impl_method.declaration.span.start}:{impl_method.declaration.span.end}"] = true
+                }
             }
             loop (method_index, method) in nominal.methods {
-                if impl_method_keys.get(method.symbol.id.key) != None -> next
+                if impl_method_keys.get("{method.symbol.id.key}@{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
                 if core_wave {
                     if graph.core_wave_rows.get(method.symbol.id.key) == None -> next
                 } else if method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.key) != None {
@@ -7209,6 +7215,24 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
                     if method.symbol.name == method_name -> found.push((module_identity: graph.modules[reference.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
                 }
             }
+            // An `impl Encode { … }` or `impl Decode { … }` block in the
+            // type's own body, whose methods the nominal registers.
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    method_name: if {
+                        decode && block.trait_name == "Decode" -> "decode"
+                        encode && block.trait_name == "Encode" -> "encode"
+                        else -> ""
+                    }
+                    if method_name == "" -> next
+                    loop method in graph.modules[row.module_index].nominals[row.row].methods {
+                        if method.symbol.name != method_name -> next
+                        loop written in block.methods {
+                            if written.span == method.declaration.span -> found.push((module_identity: graph.modules[row.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+                        }
+                    }
+                }
+            }
         }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
@@ -8116,20 +8140,33 @@ sema_effect_module_input: fn(graph: SemaRegistrationGraph, source_index: Int, mo
         source_segments: source.source_segments.copy(),
         trait_bounds: sema_effect_trait_bounds(source.program.items),
         trait_implementers: sema_effect_trait_implementers(source.program.items),
-        owned_trait_hooks: sema_effect_owned_trait_hooks(source),
+        owned_trait_hooks: sema_effect_owned_trait_hooks(graph, source),
         library_effects: sema_library_effect_view(library, source),
     }
 }
 
 // The owned trait each method of an `impl Owner.Add` or `impl
-// Owner.CheckedText` block implements, by function key (E0742 bounds those
-// methods to `-[]>`).
-sema_effect_owned_trait_hooks: fn(source: SemaRegistrationModule) -> [String:String] Never! {
+// Owner.CheckedText` block, or of such an `impl Add { … }` block in a struct
+// or enum body, implements, by function key (E0742 bounds those methods to
+// `-[]>`). A block naming a user trait of the module is that trait's.
+sema_effect_owned_trait_hooks: fn(graph: SemaRegistrationGraph, source: SemaRegistrationModule) -> [String:String] Never! {
     hooks := [String:String]{}
     loop implementation in source.impls {
         trait_name: implementation.trait_name ?? next
         if implementation.trait_symbol != None || !owned_trait_bounds_pure(trait_name) -> next
         loop function in implementation.methods -> hooks[function.symbol.id.key] = trait_name
+    }
+    loop nominal in source.nominals {
+        if nominal.source == .SourceAST(item) {
+            loop block in sema_registration_item_trait_blocks(item) {
+                if !owned_trait_bounds_pure(block.trait_name) || sema_type_graph_trait_symbol(graph, source.module_identity, block.trait_name) != None -> next
+                loop method in nominal.methods {
+                    loop written in block.methods {
+                        if written.span == method.declaration.span -> hooks[method.symbol.id.key] = block.trait_name
+                    }
+                }
+            }
+        }
     }
     hooks
 }

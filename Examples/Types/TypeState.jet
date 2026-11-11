@@ -18,57 +18,7 @@ Reservation: struct {
     state { Pending, Confirmed, CheckedIn }
 
     guest: String
-}
 
-// Terminal outcomes are ordinary states. Success, failure, and cancellation
-// stop the workflow, and read-only reporting remains legal in each terminal state.
-Workflow: struct {
-    state { Pending, Success, Failure, Cancelled, Orphan }
-}
-
-impl Workflow {
-    #State(_ -> Pending) begin: fn() -> Workflow { Workflow{} }
-
-    #State(Pending -> Success) succeed: fn(self: &&Workflow) -> Workflow { self }
-
-    #State(Pending -> Failure) fail: fn(self: &&Workflow) -> Workflow { self }
-
-    #State(Pending -> Cancelled) cancel: fn(self: &&Workflow) -> Workflow { self }
-
-    #State(Success) success_report: fn(self) -> String { "success" }
-
-    #State(Failure) failure_report: fn(self) -> String { "failure" }
-
-    #State(Cancelled) cancel_report: fn(self) -> String { "cancelled" }
-}
-
-// Self-loops and reopen edges keep their source state nonterminal.
-Session: struct {
-    state { Open, Closed, Reopened }
-}
-
-impl Session {
-    #State(_ -> Open) open: fn() -> Session { Session{} }
-
-    #State(Open -> Open) heartbeat: fn(self: &&Session) -> Session { self }
-
-    #State(Open -> Closed) close: fn(self: &&Session) -> Session { self }
-
-    #State(Closed -> Reopened) reopen: fn(self: &&Session) -> Session { self }
-
-    #State(Reopened) audit: fn(self) -> String { "reopened" }
-}
-
-// No entry means no initial state and no reachability warning.
-Unseeded: struct {
-    state { Raw, Done }
-}
-
-impl Unseeded {
-    #State(Raw -> Done) finish: fn(self: &&Unseeded) -> Unseeded { self }
-}
-
-impl Reservation {
     // Entry transition: a fresh booking starts life in `Pending`.
     #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
 
@@ -89,6 +39,48 @@ impl Reservation {
 
     // A plain guarded read: only legal once checked in. No state change.
     #State(CheckedIn) room_key: fn(self) -> String { "key for {self.guest}" }
+}
+
+// Terminal outcomes are ordinary states. Success, failure, and cancellation
+// stop the workflow, and read-only reporting remains legal in each terminal state.
+Workflow: struct {
+    state { Pending, Success, Failure, Cancelled, Orphan }
+
+    #State(_ -> Pending) begin: fn() -> Workflow { Workflow{} }
+
+    #State(Pending -> Success) succeed: fn(self: &&Workflow) -> Workflow { self }
+
+    #State(Pending -> Failure) fail: fn(self: &&Workflow) -> Workflow { self }
+
+    #State(Pending -> Cancelled) cancel: fn(self: &&Workflow) -> Workflow { self }
+
+    #State(Success) success_report: fn(self) -> String { "success" }
+
+    #State(Failure) failure_report: fn(self) -> String { "failure" }
+
+    #State(Cancelled) cancel_report: fn(self) -> String { "cancelled" }
+}
+
+// Self-loops and reopen edges keep their source state nonterminal.
+Session: struct {
+    state { Open, Closed, Reopened }
+
+    #State(_ -> Open) open: fn() -> Session { Session{} }
+
+    #State(Open -> Open) heartbeat: fn(self: &&Session) -> Session { self }
+
+    #State(Open -> Closed) close: fn(self: &&Session) -> Session { self }
+
+    #State(Closed -> Reopened) reopen: fn(self: &&Session) -> Session { self }
+
+    #State(Reopened) audit: fn(self) -> String { "reopened" }
+}
+
+// No entry means no initial state and no reachability warning.
+Unseeded: struct {
+    state { Raw, Done }
+
+    #State(Raw -> Done) finish: fn(self: &&Unseeded) -> Unseeded { self }
 }
 
 run_terminal_outcomes: fn() {

@@ -1,7 +1,7 @@
 Error [jet.ReadOnlyValueNotOwned]: `.move()` cannot take a value out of a guard
-  --> tests/ui/ownership/move_out_of_shared_guard_is_rejected.jet:14:22
+  --> tests/ui/ownership/move_out_of_shared_guard_is_rejected.jet:16:22
     |
- 14 |     keep(guard.value.res.move())
+ 16 |     keep(guard.value.res.move())
     |                      ^^^
  Why: The shared storage keeps owning the guard's payload; a move would leave it without that value while its other guards and its cleanup still use it
  Fix: Copy the value with `.copy()` when it supports copying, or assign a new value through the guard to replace it in place

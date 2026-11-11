@@ -23,6 +23,24 @@ JetDriverBuildAdapter: struct {
     // directory, which `b.find`, `b.embed` and `b.fetch` paths are relative to.
     inputs: JetDriverSharedBuildInputs?
     base_dir: String
+
+    impl JetEvalBuildHostAdapter {
+        // Fork the adapter without changing its invocation-owned session authority.
+        // Raw transports remain host-owned; build policy stays in this adapter.
+        clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter {
+            // copy: clone_adapter exists to fork the adapter: the machine keeps this adapter and
+            // answers each host call on a fork, so each needs its own session handle, inputs and
+            // base_dir.
+            JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), network_declared: self.network_declared, base_dir: self.base_dir.copy()}
+        }
+        build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
+            // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
+            // (`&`). This call writes a session of its own, and the adapter keeps its session for the
+            // next build_call.
+            session := self.session.copy()
+            jet_driver_build_host_call(session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, member, args, fallible, impure, span)
+        }
+    }
 }
 
 jet_driver_build_host_failure: fn(session: BuildSession, span: Span, message: String) -> JetEvalBuildReply Never! {
@@ -151,24 +169,6 @@ jet_driver_build_names_file: fn(host: JetDriverSharedBuildInputs, base_dir: Stri
             false
         }
         .Err(_) -> false
-    }
-}
-
-impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
-    // Fork the adapter without changing its invocation-owned session authority.
-    // Raw transports remain host-owned; build policy stays in this adapter.
-    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter {
-        // copy: clone_adapter exists to fork the adapter: the machine keeps this adapter and
-        // answers each host call on a fork, so each needs its own session handle, inputs and
-        // base_dir.
-        JetDriverBuildAdapter{session: self.session.copy(), inputs: self.inputs.copy(), http_inputs: self.http_inputs.copy(), network_declared: self.network_declared, base_dir: self.base_dir.copy()}
-    }
-    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
-        // copy: build_call has a read `self`, but jet_driver_build_host_call writes its session
-        // (`&`). This call writes a session of its own, and the adapter keeps its session for the
-        // next build_call.
-        session := self.session.copy()
-        jet_driver_build_host_call(session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, member, args, fallible, impure, span)
     }
 }
 

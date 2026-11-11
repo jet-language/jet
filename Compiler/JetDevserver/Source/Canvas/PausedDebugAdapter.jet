@@ -23,22 +23,7 @@ PausedDebugSessionAdapter: struct {
     snapshot: DebugSnapshot
     authority: AuthoritySet
     state: SessionState
-}
 
-paused_debug_session_adapter: fn(identity: SessionIdentity, source: PausedDebugSource, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter PausedEvaluateError! {
-    adapter: PausedDebugSessionAdapter{identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused}
-    adapter.validate()
-    Ok(adapter)
-}
-
-// Read-only inspection and evaluation in the stop's one lexical scope.
-paused_debugger_authority: fn(scope_id: String) -> AuthoritySet PausedEvaluateError! {
-    inspect: AuthorityGrant.new(INSPECT_AUTHORITY, scope_id)
-    evaluate: AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)
-    Ok(AuthoritySet.new([AuthorityGrant]{inspect, evaluate}))
-}
-
-impl PausedDebugSessionAdapter {
     is_paused: fn(self) -> Bool Never! { self.state == .Paused }
 
     refresh_snapshot: fn(&self, identity: SessionIdentity, snapshot: DebugSnapshot) PausedEvaluateError! {
@@ -180,6 +165,19 @@ impl PausedDebugSessionAdapter {
     clear_if_current: fn(self, host: &PausedEvaluateHost) Never! {
         if self.host_is_current(host) -> host.clear_session()
     }
+}
+
+paused_debug_session_adapter: fn(identity: SessionIdentity, source: PausedDebugSource, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter PausedEvaluateError! {
+    adapter: PausedDebugSessionAdapter{identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused}
+    adapter.validate()
+    Ok(adapter)
+}
+
+// Read-only inspection and evaluation in the stop's one lexical scope.
+paused_debugger_authority: fn(scope_id: String) -> AuthoritySet PausedEvaluateError! {
+    inspect: AuthorityGrant.new(INSPECT_AUTHORITY, scope_id)
+    evaluate: AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)
+    Ok(AuthoritySet.new([AuthorityGrant]{inspect, evaluate}))
 }
 
 paused_debug_bounded_component: fn(value: String) -> Bool Never! {

@@ -17,6 +17,13 @@ PascalError: enum {
 
 Counter: struct {
     priv value: Int
+
+    impl Close {
+        close: fn(&&self) {
+            abi.counter_close(self.value)
+            if abi.take_error() != 0 -> panic("invalid Pascal handle")
+        }
+    }
 }
 
 error: fn(code: Int) -> PascalError {
@@ -48,10 +55,3 @@ counter_add: fn(handle: Counter, delta: Int) -> Int PascalError! {
 }
 
 close: fn(&&handle: Counter) {}
-
-impl Counter.Close {
-    close: fn(&&self) {
-        abi.counter_close(self.value)
-        if abi.take_error() != 0 -> panic("invalid Pascal handle")
-    }
-}

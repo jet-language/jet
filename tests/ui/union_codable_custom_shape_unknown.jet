@@ -1,15 +1,15 @@
 Token: struct {
     raw: String
-}
 
-impl Token.Encode {
-    encode: fn(self) -> Dyn { Dyn.Text(self.raw.copy()) }
-}
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.Text(self.raw.copy()) }
+    }
 
-impl Token.Decode {
-    decode: fn(tree: Dyn) -> Token [FieldError]! {
-        raw: tree.text()?
-        return Ok(Token{raw: raw})
+    impl Decode {
+        decode: fn(tree: Dyn) -> Token [FieldError]! {
+            raw: tree.text()?
+            return Ok(Token{raw: raw})
+        }
     }
 }
 

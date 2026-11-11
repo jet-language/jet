@@ -2,11 +2,13 @@
 // write through an edit guard replaces it in place: the old value closes
 // once, at the write, and the new value closes once, when the storage ends.
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Slot: struct { res: Res?, tag: Int }
 
 // The whole payload replaced through the guard.

@@ -45,6 +45,21 @@ JetDriverComptimeInputs: struct {
     // tree its `toolchain:` inputs read (None: the compile has none).
     file: String
     toolchain: Shared<JetDriverToolchainTree>?
+
+    impl JetEvalComptimeInputAdapter {
+        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
+            // copy: the evaluator forks the adapter for each machine; the forks share the input
+            // transport, the one input log and the one toolchain tree.
+            JetDriverComptimeInputs{inputs: self.inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
+        }
+        comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+            if path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) -> return jet_driver_comptime_toolchain_input(self, builtin, path.removeprefix(JET_COMPTIME_TOOLCHAIN_PREFIX), span)
+            if builtin == "find" -> return jet_driver_comptime_find(self, self.base_dir, path, "", span)
+            bytes: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
+            jet_driver_comptime_input_record(self.log, self.base_dir, "", path, bytes)
+            jet_driver_comptime_input_value(builtin, path, bytes, span)
+        }
+    }
 }
 
 // A Core file's comptime inputs: files in its own directory of the
@@ -54,6 +69,21 @@ JetDriverComptimeInputs: struct {
 JetDriverCoreComptimeInputs: struct {
     text: Shared<JetDriverCoreText>
     base_dir: String
+
+    impl JetEvalComptimeInputAdapter {
+        clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
+            // copy: the forks share the Core row's text cell and so its reader.
+            JetDriverCoreComptimeInputs{text: self.text.copy(), base_dir: self.base_dir.copy()}
+        }
+        comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
+            if path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) -> return Err(jet_driver_comptime_toolchain_fail("`{builtin}` can't read `{path}` from Core", "a Core file is part of the toolchain tree and embeds its assets beside it", "name the asset beside the Core file, `{builtin}(\"{path.removeprefix(JET_COMPTIME_TOOLCHAIN_PREFIX)}\")`", span))
+            if builtin == "find" -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{path}` in Core", "a Core file embeds each of its assets by name", "name each asset with `embed_bytes(\"path\")`", span))
+            permit: self.text.guard_read()
+            reader: permit.value.reader ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(span), "a Core comptime input lost its reader", "the driver reads a Core file's inputs with the reader of its row", "report this compiler bug")})
+            bytes: reader.read_bytes("{self.base_dir}/{path}") ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
+            jet_driver_comptime_input_value(builtin, path, bytes, span)
+        }
+    }
 }
 
 jet_driver_comptime_input_fail: fn(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
@@ -73,21 +103,6 @@ jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>
 // rebuild's test of a comptime input it watches (JetCli `jet dev`).
 jet_driver_comptime_input_unchanged: fn(record: JetDriverComptimeInputRecord, bytes: [U8]) -> Bool Never! {
     comptime_inputs_crypto.sha256(bytes).hex() == record.sha256
-}
-
-impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
-    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
-        // copy: the evaluator forks the adapter for each machine; the forks share the input
-        // transport, the one input log and the one toolchain tree.
-        JetDriverComptimeInputs{inputs: self.inputs.copy(), base_dir: self.base_dir.copy(), log: self.log.copy(), file: self.file.copy(), toolchain: self.toolchain.copy()}
-    }
-    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-        if path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) -> return jet_driver_comptime_toolchain_input(self, builtin, path.removeprefix(JET_COMPTIME_TOOLCHAIN_PREFIX), span)
-        if builtin == "find" -> return jet_driver_comptime_find(self, self.base_dir, path, "", span)
-        bytes: self.inputs.read_rooted(self.base_dir, path, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
-        jet_driver_comptime_input_record(self.log, self.base_dir, "", path, bytes)
-        jet_driver_comptime_input_value(builtin, path, bytes, span)
-    }
 }
 
 jet_driver_comptime_toolchain_fail: fn(what: String, why: String, fix: String, span: Span) -> JetEvalComptimeInputError Never! {
@@ -123,21 +138,6 @@ jet_driver_toolchain_admits: fn(tree: Shared<JetDriverToolchainTree>, file: Stri
         if packages.contains(package) -> return Val(root)
     }
     None
-}
-
-impl JetDriverCoreComptimeInputs.JetEvalComptimeInputAdapter {
-    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter {
-        // copy: the forks share the Core row's text cell and so its reader.
-        JetDriverCoreComptimeInputs{text: self.text.copy(), base_dir: self.base_dir.copy()}
-    }
-    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
-        if path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) -> return Err(jet_driver_comptime_toolchain_fail("`{builtin}` can't read `{path}` from Core", "a Core file is part of the toolchain tree and embeds its assets beside it", "name the asset beside the Core file, `{builtin}(\"{path.removeprefix(JET_COMPTIME_TOOLCHAIN_PREFIX)}\")`", span))
-        if builtin == "find" -> return Err(jet_driver_comptime_input_fail("`find` can't walk `{path}` in Core", "a Core file embeds each of its assets by name", "name each asset with `embed_bytes(\"path\")`", span))
-        permit: self.text.guard_read()
-        reader: permit.value.reader ?? return Err(JetEvalComptimeInputError{diagnostic: diagnostic_from_registry("E0003", Val(span), "a Core comptime input lost its reader", "the driver reads a Core file's inputs with the reader of its row", "report this compiler bug")})
-        bytes: reader.read_bytes("{self.base_dir}/{path}") ?? return Err(jet_driver_comptime_input_fail("`{builtin}` can't open `{path}`", "{err.message} (looked next to the file doing the embedding)", "check the path — it is relative to the file's own directory", span))
-        jet_driver_comptime_input_value(builtin, path, bytes, span)
-    }
 }
 
 // The value `builtin` makes of an input's bytes: the bytes for `embed_bytes`,

@@ -37,9 +37,7 @@ canvas_debug_error: fn(kind: String, message: String) -> CanvasDebugError Never!
 // Canvas debugs on the native tier only.
 DebugTier: enum {
     NativeLldb
-}
 
-impl DebugTier {
     parse: fn(value: String?) -> DebugTier CanvasDebugError! {
         if value == {
             .Val(name) -> {
@@ -110,17 +108,7 @@ DebugSessions: struct {
     next_id: Int
     sessions: [String: DebugSession]
     pause_on_input_end: Bool
-}
 
-debug_sessions: fn() -> DebugSessions Never! {
-    DebugSessions{jet: canvas_sys.executable(), next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
-}
-
-debug_identity_text_valid: fn(value: String) -> Bool Never! {
-    value != "" && value.len() <= 256 && !paused_has_control(value)
-}
-
-impl DebugSessions {
     execute: fn(&self, path: String, source_id: String, revision: String, requested_id: String?, commands: [String], breakpoints: [Int], watches: [String], tier: DebugTier) -> DebugExecution CanvasDebugError! {
         if !debug_identity_text_valid(source_id) -> return Err(canvas_debug_error("bad_request", "Canvas debug source_id must be bounded source identity text"))
         if !debug_identity_text_valid(revision) -> return Err(canvas_debug_error("bad_request", "Canvas debug revision must be bounded source identity text"))
@@ -314,6 +302,14 @@ impl DebugSessions {
             }
         }
     }
+}
+
+debug_sessions: fn() -> DebugSessions Never! {
+    DebugSessions{jet: canvas_sys.executable(), next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
+}
+
+debug_identity_text_valid: fn(value: String) -> Bool Never! {
+    value != "" && value.len() <= 256 && !paused_has_control(value)
 }
 
 debug_clear_host_session: fn(host: &PausedEvaluateHost, id: String) Never! {
