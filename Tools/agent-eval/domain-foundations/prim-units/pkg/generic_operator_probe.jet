@@ -1,13 +1,20 @@
+// The probe asked for `+` on one instantiation (`Quantity<MeterDim>` only).
+// An impl sits in its type's body, so it covers every `Quantity<D>`.
 Quantity: struct<D> {
     value: Float
-}
-MeterDim: struct {}
 
-impl Quantity<MeterDim>.Add {
-    add: fn(self, rhs: Quantity<MeterDim>) -> Quantity<MeterDim> { Quantity<MeterDim>{ value: self.value + rhs.value } }
+    impl Add {
+        add: fn(self, rhs: Quantity<D>) -> Quantity<D> {
+            Quantity<D>{value: self.value + rhs.value}
+        }
+    }
 }
 
-meter: fn(value: Float) -> Quantity<MeterDim> { Quantity<MeterDim>{ value: value } }
+MeterDim: struct {
+
+}
+
+meter: fn(value: Float) -> Quantity<MeterDim> { Quantity<MeterDim>{value: value} }
 
 run: fn() {
     a: meter(1.0)

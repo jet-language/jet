@@ -1,4 +1,4 @@
-build: fn(b: BuildContext) BuildPlan -[IO]> {
+build: fn(b: BuildContext) -[IO]> BuildPlan {
     #Impure("build action writes declared output") {
         shell: b.probe("shell", "find_program", "sh")
         action: b.run("stamp", b.found(shell), ["IO"])
@@ -11,6 +11,4 @@ build: fn(b: BuildContext) BuildPlan -[IO]> {
     }
 }
 
-run: fn() {
-    print("graph probe")
-}
+run: fn() { print("graph probe") }

@@ -3,13 +3,6 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Time, Mem.Alloc] }
 }
-
-package: {
-    name: "prim-realtime"
-    version: "0.1.0"
-    authority: { allow: [IO, Time, Mem.Alloc] }
-}
-
 use time: core.time
 
 AudioStats: struct {
@@ -31,10 +24,8 @@ ControlStats: struct {
 
 // The hot callback takes a caller-owned fixed buffer and only writes samples.
 // The !Mem.Alloc contract rejects a growable collection operation here.
-fill_audio: fn(&buffer: [Float#256], sample: Float) -[!Mem.Alloc]> {
-    loop i in 0..<buffer.len() {
-        buffer[i] = sample
-    }
+fill_audio: fn(buffer: &[Float#256], sample: Float) -[!Mem.Alloc]> {
+    loop i in 0..<buffer.len() -> buffer[i] = sample
 }
 
 audio_loop: fn() -> AudioStats {
@@ -72,7 +63,7 @@ audio_loop: fn() -> AudioStats {
         min_jitter_us: min_jitter,
         max_jitter_us: max_jitter,
         sum_jitter_us: sum_jitter,
-        max_callback_us: max_callback
+        max_callback_us: max_callback,
     }
 }
 
@@ -103,7 +94,7 @@ control_loop: fn() -> ControlStats {
         missed: missed,
         min_jitter_us: min_jitter,
         max_jitter_us: max_jitter,
-        sum_jitter_us: sum_jitter
+        sum_jitter_us: sum_jitter,
     }
 }
 

@@ -17,12 +17,12 @@ source_map: fn(offset: Int) -> Span {
 }
 
 run: fn() {
-    source: "run: fn() {\n    pirnt(\"hi\")\n}"
+    source: "run: fn() {{\n    pirnt(\"hi\")\n}}"
     offset: source.index_of("pirnt")
     diagnostic: Diagnostic{
         code: "E0102",
         message: "nothing named `pirnt` exists here",
-        span: source_map(offset)
+        span: source_map(offset),
     }
     print("diagnostic={diagnostic.code} line={diagnostic.span.line} col={diagnostic.span.col} span={diagnostic.span.start}..{diagnostic.span.end}")
     print("fix=print source_map=stable")

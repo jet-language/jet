@@ -8,16 +8,15 @@ Row: struct {
 
 scale: fn(value: Float, factor: Float) -> Float { value * factor }
 
-greet: fn(name: String) -> String { name }}!"
+greet: fn(name: String) -> String { "hello, {name}!" }
 
 index: fn(rows: [Row]) -> Int {
     total := 0
-    loop row in rows {
-        total += row.score
-    }
+    loop row in rows -> total += row.score
     return total
 }
 
 read: fn(path: String) -> String String! {
     text: fs.read(path) ?? return Err("{err}")
     return Ok(text)
+}

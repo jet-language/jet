@@ -1,17 +1,13 @@
 use core.mem
 
-make_buffer: fn() [Float#4] -[!Mem.Alloc]> {
+make_buffer: fn() -[!Mem.Alloc]> [Float#4] {
     buffer := [Float#4]{ uninit }
-    loop i in 0..<buffer.len() {
-        buffer[i] = 0.0
-    }
+    loop i in 0..<buffer.len() -> buffer[i] = 0.0
     return buffer
 }
 
-fill: fn(&buffer: [Float#4]) -[!Mem.Alloc]> {
-    loop i in 0..<buffer.len() {
-        buffer[i] = 0.25
-    }
+fill: fn(buffer: &[Float#4]) -[!Mem.Alloc]> {
+    loop i in 0..<buffer.len() -> buffer[i] = 0.25
 }
 
 run: fn() {

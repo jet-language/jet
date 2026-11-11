@@ -6,13 +6,13 @@ Module: struct {
 
 invalidated: fn(modules: [Module], changed: Int) -> [Int] {
     dirty := [Int]{changed}
-    loop module in modules {
-        if !dirty.contains(module.id) {
+    loop entry in modules {
+        if !dirty.contains(entry.id) {
             depends_on_dirty := false
-            loop dependency in module.deps {
+            loop dependency in entry.deps {
                 if dirty.contains(dependency) -> depends_on_dirty = true
             }
-            if depends_on_dirty -> dirty.push(module.id)
+            if depends_on_dirty -> dirty.push(entry.id)
         }
     }
     return dirty
@@ -24,7 +24,7 @@ run: fn() {
         {id: 1, name: "ast", deps: [0]},
         {id: 2, name: "sema", deps: [1]},
         {id: 3, name: "codegen", deps: [2]},
-        {id: 4, name: "docs", deps: []}
+        {id: 4, name: "docs", deps: []},
     }
     dirty: invalidated(modules, 1)
     print("changed=ast invalidated=ast,sema,codegen retained=parse,docs")

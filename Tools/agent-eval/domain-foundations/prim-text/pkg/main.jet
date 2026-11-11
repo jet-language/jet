@@ -19,7 +19,7 @@ ScanResult: struct {
     millis: Int
 }
 
-pair_key: fn(left: String, right: String) -> String { left}|{right }}"
+pair_key: fn(left: String, right: String) -> String { "{left}|{right}" }
 
 merge_sequence: fn(sequence: [String], key: String) -> [String] {
     pieces: key.split("|").to_list()
@@ -50,9 +50,7 @@ merge_sequence: fn(sequence: [String], key: String) -> [String] {
 train_bpe: fn(corpus: String) -> BPEModel {
     words: text.words(corpus)
     sequences := [[String]]{}
-    loop word in words {
-        sequences.push(text.graphemes(word))
-    }
+    loop word in words -> sequences.push(text.graphemes(word))
     merges := [String]{}
     loop _round in 0..<12 {
         counts := [String:Int]{}
@@ -74,20 +72,14 @@ train_bpe: fn(corpus: String) -> BPEModel {
                 best_count = count
             }
         }
-        if best_count == 0 {
-            break
-        }
+        if best_count == 0 { break }
         merges.push(best)
         next_sequences := [[String]]{}
-        loop sequence in sequences {
-            next_sequences.push(merge_sequence(sequence, best))
-        }
+        loop sequence in sequences -> next_sequences.push(merge_sequence(sequence, best))
         sequences = next_sequences
     }
     token_count := 0
-    loop sequence in sequences {
-        token_count += sequence.len()
-    }
+    loop sequence in sequences -> token_count += sequence.len()
     return BPEModel{merges: merges, words: words.len(), tokens: token_count}
 }
 
@@ -95,12 +87,8 @@ encode_text: fn(source: String, model: BPEModel) -> [String] {
     encoded := [String]{}
     loop word in text.words(source) {
         sequence := text.graphemes(word)
-        loop merge in model.merges {
-            sequence = merge_sequence(sequence, merge)
-        }
-        loop token in sequence {
-            encoded.push(token)
-        }
+        loop merge in model.merges -> sequence = merge_sequence(sequence, merge)
+        loop token in sequence -> encoded.push(token)
     }
     return encoded
 }
@@ -113,15 +101,13 @@ scan_logs: fn(path: String) -> ScanResult {
     match_count := 0
     loop line in source.lines() {
         line_count += 1
-        if pattern.is_match(line) {
-            match_count += 1
-        }
+        if pattern.is_match(line) -> match_count += 1
     }
     return ScanResult{
         bytes: text.byte_count(source),
         lines: line_count,
         matches: match_count,
-        millis: started.elapsed_millis()
+        millis: started.elapsed_millis(),
     }
 }
 

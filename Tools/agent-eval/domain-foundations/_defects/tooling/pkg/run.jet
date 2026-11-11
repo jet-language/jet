@@ -9,12 +9,10 @@ build: fn(b: BuildContext) -> BuildPlan {
     @items: @parsed.items().len()
     @functions: @checked.functions().len()
     b.generate("facts") {
-        tooling_facts: fn() -> String { @tokens}; items={@items}; functions={@functions }}"
+        tooling_facts: fn() -> String { "tokens={@tokens}; items={@items}; functions={@functions}" }
     }
     app: b.add_executable("prim_tooling_hooks", ["run.jet", ".jet/generated/prim_tooling_hooks/facts.jet"], [])
     b.default(app)
 }
 
-run: fn() {
-    print("tooling probe")
-}
+run: fn() { print("tooling probe") }
