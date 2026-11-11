@@ -4277,6 +4277,13 @@ The syntax:
 - `.` (any scalar except `\n`), `^` (start of text), `$` and `\z` (end of
   text), `\A` (start of text), and `\b`/`\B` (an ASCII word boundary, or its
   absence).
+- lookahead `(?=…)` and its negation `(?!…)`, which ask whether the pattern
+  inside matches starting at the position, and lookbehind `(?<=…)` and
+  `(?<!…)`, which ask whether it matches ending there. A lookaround consumes
+  nothing, may hold any pattern of any length (another lookaround included)
+  except a capture group, and may itself be repeated. Before the scan, one
+  pass per lookaround (backward for a lookahead, forward for a lookbehind)
+  answers it at every position of the text, so the linear bound holds.
 - classes over scalars: `[]`, `[^]`, ranges, and a `]` written first as a
   member (`[]a]`). A literal `[` inside a class is written `\[`.
 - the class escapes `\d` and `\w` (ASCII), `\s` (Unicode White_Space), and
@@ -4292,8 +4299,8 @@ when either its lowercase or its uppercase form is in the range.
 `multiline` lets `^` match after a newline. `dot_matches_newline` lets `.`
 match `\n`. A `RegexFlags` value displays as its inline-flag letters (`"im"`).
 
-Backreferences, lookaround and inline flags (`(?i)`) are syntax errors: the
-first two would break the linear bound, and flags go through `compile_with`.
+Backreferences and inline flags (`(?i)`) are syntax errors: the first would
+break the linear bound, and flags go through `compile_with`.
 Groups nest at most 250 deep, and a compiled program holds at most 100000
 instructions (nested counted repetitions multiply), so compile time and
 memory stay proportional to a bounded pattern.

@@ -40,7 +40,11 @@ use {
 //   `\p{White_Space}`/`\p{Whitespace}`, and the negations `\D \W \S \P{…}`,
 //   inside `[]` too;
 // - `ignore_case` compares Unicode simple lowercase mappings;
-// - backreferences, lookaround and inline flags are syntax errors.
+// - lookahead `(?=…)`/`(?!…)` and lookbehind `(?<=…)`/`(?<!…)` of any length
+//   and nesting, holding no capture group: before the scan, one pass of its
+//   own (backward for a lookahead, forward for a lookbehind) answers each
+//   lookaround at every position of the text, so matching stays linear;
+// - backreferences and inline flags are syntax errors.
 // Match.start and Match.end count characters (Unicode scalars), so they
 // compose with String indexing. A pattern that does not compile fails with
 // a RegexError naming the character position and the reason, never a panic.
@@ -99,6 +103,11 @@ Regex: struct {
     priv needle_text: String
     priv prefix: [U8]
     priv dfa: Dfa
+    // Each lookaround: its body's first instruction, whether it looks behind
+    // (a lookahead's body is compiled reversed), and whether it is negated.
+    priv look_starts: [Int]
+    priv look_behind: [Bool]
+    priv look_neg: [Bool]
 
     is_match: fn(self, text: String) -> Bool Never! { is_match(self, text) }
     full_match: fn(self, text: String) -> Bool Never! { full_match(self, text) }
@@ -213,6 +222,9 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     his: [Int]{},
     groups: 0,
     names: [String]{},
+    looks: [Int]{},
+    look_behind: [Bool]{},
+    look_neg: [Bool]{},
     }
     root: p.parse_alt(-1)
     if p.i != p.cps.len() -> return Err(fail(p.i, "this `)` has no matching `(`"))
@@ -229,11 +241,22 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     xs: [Int]{},
     ys: [Int]{},
     too_big: false,
+    reverse: false,
     }
     frag: c.compile(root)
-    if c.too_big -> return Err(fail(0, "the pattern compiles to more than {MAX_PROGRAM} instructions; use smaller repetition counts"))
     done: c.push(OP_MATCH, 0, 0, false)
     c.patch(frag.outs, done)
+    // Each lookaround's body is a program of its own after the main one,
+    // ending in its own Match; a lookahead's body reads the text backward.
+    look_starts := [Int]{}
+    loop look in 0..<p.looks.len() {
+        c.reverse = !p.look_behind[look]
+        body: c.compile(p.looks[look])
+        accept: c.push(OP_MATCH, 0, 0, false)
+        c.patch(body.outs, accept)
+        look_starts.push(body.start)
+    }
+    if c.too_big -> return Err(fail(0, "the pattern compiles to more than {MAX_PROGRAM} instructions; use smaller repetition counts"))
     first: frag.start
     // Only an absolute start anchor pins every match to position 0.
     anchored: c.ops[first] == OP_ASSERT && (c.args[first] == A_TEXT_START || (c.args[first] == A_LINE_START && !flags.multiline))
@@ -257,6 +280,9 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     needle_text: String.from_bytes(scalars_utf8(facts.best)) ?? "",
     prefix: scalars_utf8(facts.prefix),
     dfa: no_dfa(),
+    look_starts: look_starts,
+    look_behind: p.look_behind,
+    look_neg: p.look_neg,
     }
     if with_dfa -> re.dfa = build_dfa(re)
     Ok(re)
@@ -521,6 +547,8 @@ N_STAR: 8
 N_PLUS: 9
 N_OPT: 10
 N_RANGE: 11
+// A lookaround: `a` is its index, `left` its body.
+N_LOOK: 12
 
 // Zero-width assertion kinds: `^` (start of text, or after `\n` under
 // multiline), `\A`, `$` and `\z` (end of text), `\b` (an ASCII word
@@ -530,6 +558,8 @@ A_TEXT_START: 1
 A_TEXT_END: 2
 A_WORD: 3
 A_NOT_WORD: 4
+// A lookaround's assertion kind is A_LOOK plus its index.
+A_LOOK: 16
 
 // Class member kinds; `kind + K_NEGATED` is the member's complement, as in
 // `[\D]` or `[\P{L}]`.
@@ -563,6 +593,12 @@ PatternParser: struct {
     his: [Int]
     groups: Int
     names: [String]
+    // Each lookaround's body node, in the order they close (a nested one
+    // before the one around it), whether it looks behind, and whether it is
+    // negated.
+    looks: [Int]
+    look_behind: [Bool]
+    look_neg: [Bool]
 
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
@@ -630,7 +666,7 @@ PatternParser: struct {
                 self.i = self.i + 2
                 name = self.parse_group_name(open)
             } else if kind == 61 || kind == 33 || kind == 60 {
-                return Err(fail(open, "lookaround is not supported; the engine stays linear in the text"))
+                return self.parse_look(open, kind, after)
             } else if kind == 105 || kind == 109 || kind == 115 || kind == 120 || kind == 85 || kind == 45 {
                 return Err(fail(open, "inline flags are not supported; pass the flags to `compile_with`"))
             } else if kind < 0 {
@@ -650,6 +686,25 @@ PatternParser: struct {
         self.depth = self.depth - 1
         if !capture -> return Ok(inner)
         Ok(self.emit(N_GROUP, index, 0, inner, false))
+    }
+
+    /// A lookaround after its `(?`: `=` and `!` look ahead, `<=` and `<!`
+    /// behind. Its body holds no capture group, so every group of a match
+    /// comes from the text the match consumes.
+    parse_look: fn(&self, open: Int, kind: Int, after: Int) -> Int RegexError! {
+        behind: kind == 60
+        test: if behind -> after else -> kind
+        self.i = if behind -> self.i + 2 else -> self.i + 1
+        groups: self.groups
+        self.depth = self.depth + 1
+        inner: self.parse_alt(open)
+        self.depth = self.depth - 1
+        if self.groups != groups -> return Err(fail(open, "a lookaround holds no capture group; write `(?:…)` inside it"))
+        self.looks.push(inner)
+        self.look_behind.push(behind)
+        self.look_neg.push(test == 33)
+        look: self.looks.len() - 1
+        Ok(self.emit(N_LOOK, look, 0, inner, false))
     }
 
     parse_group_name: fn(&self, open: Int) -> String RegexError! {
@@ -976,6 +1031,9 @@ Compiler: struct {
     xs: [Int]
     ys: [Int]
     too_big: Bool
+    // Whether the node being compiled is a lookahead's body, which the
+    // lookaround pass reads backward: its sequences run last part first.
+    reverse: Bool
 
     push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
@@ -1048,11 +1106,13 @@ Compiler: struct {
         if n.kind == N_ANY -> return self.single(OP_ANY, 0, 0, false)
         if n.kind == N_CLASS -> return self.single(OP_CLASS, n.lo, n.hi, n.neg)
         if n.kind == N_ASSERT -> return self.single(OP_ASSERT, n.a, 0, false)
+        if n.kind == N_LOOK -> return self.single(OP_ASSERT, A_LOOK + n.a, 0, false)
         if n.kind == N_SEQ {
             frag := Frag{start: -1, outs: [Int]{}}
-            k := n.lo
-            loop k < n.hi {
-                piece: self.compile(self.kids[k])
+            k := 0
+            loop k < n.hi - n.lo {
+                at: if self.reverse -> n.hi - 1 - k else -> n.lo + k
+                piece: self.compile(self.kids[at])
                 frag = self.then(frag, piece)
                 k = k + 1
             }
@@ -1132,7 +1192,8 @@ Compiler: struct {
 // Literal pre-checks. Over the parse tree, `literal_facts` finds scalars
 // every match contains (`best`, the longest such run) and scalars every
 // match starts with (`prefix`); `exact` marks a node that always consumes
-// exactly `text`. Assertions consume nothing, so they are exact and empty.
+// exactly `text`. Assertions and lookarounds consume nothing, so they are
+// exact and empty.
 // The scan looks for `needle` (the UTF-8 of `best`) once before it builds
 // its VM, and while no thread is live it jumps to the next `prefix`.
 LitFacts: struct {
@@ -1150,7 +1211,7 @@ exact_facts: fn(text: [Int]) -> LitFacts Never! { LitFacts{exact: true, text: te
 literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
     n: nodes[node].copy()
     if n.kind == N_LIT -> return exact_facts([Int]{n.a})
-    if n.kind == N_EMPTY || n.kind == N_ASSERT -> return exact_facts([Int]{})
+    if n.kind == N_EMPTY || n.kind == N_ASSERT || n.kind == N_LOOK -> return exact_facts([Int]{})
     if n.kind == N_GROUP -> return literal_facts(nodes, kids, n.left)
     if n.kind == N_PLUS || (n.kind == N_RANGE && n.a > 0) {
         // At least one copy: its facts hold, but not its exact text.
@@ -1231,7 +1292,8 @@ find_bytes: fn(text: [U8], needle: [U8], from: Int) -> Int Never! {
     -1
 }
 
-// The DFA. For a program without `\b`/`\B`, compile also builds a DFA over
+// The DFA. For a program without `\b`/`\B` or a lookaround, compile also
+// builds a DFA over
 // ASCII bytes that answers whether any match exists; is_match, full_match
 // and the scan's first check use it. Existence does not depend on thread
 // priority, so a state is the sorted set of consuming instructions live
@@ -1379,7 +1441,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     pc := 0
     loop pc < re.ops.len() {
         op: re.ops[pc]
-        if op == OP_ASSERT && (re.args[pc] == A_WORD || re.args[pc] == A_NOT_WORD) -> return no_dfa()
+        if op == OP_ASSERT && (re.args[pc] == A_WORD || re.args[pc] == A_NOT_WORD || re.args[pc] >= A_LOOK) -> return no_dfa()
         if op == OP_LIT || op == OP_ANY || op == OP_CLASS -> consuming.push(pc)
         pc = pc + 1
     }
@@ -1546,6 +1608,8 @@ VM: struct {
     aslot: [Int]
     apos: [Int]
     aprev: [Int]
+    // The lookaround rows of `look_tables` for this text.
+    looks: [Bool]
 
     /// Drop every thread and capture record; the scan restarts afresh.
     reset: fn(&self) Never! {
@@ -1598,7 +1662,7 @@ VM: struct {
                 next
             }
             if op == OP_ASSERT {
-                if assert_holds(re, text, re.args[p], pos, self.hi) -> self.push_edge(re.xs[p], s, c)
+                if assert_holds(re, text, re.args[p], pos, self.hi, self.looks) -> self.push_edge(re.xs[p], s, c)
                 next
             }
             if op == OP_MATCH {
@@ -1667,7 +1731,7 @@ Run: struct {
     caps: [Int]
 }
 
-new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
+new_vm: fn(size: Int, hi: Int, full: Bool, looks: [Bool]) -> VM Never! {
     seen: filled(size, -1)
     // Every pc is entered once per epoch and pushes at most two edges, and
     // the current and next thread sets hold at most one thread per pc, so
@@ -1692,10 +1756,12 @@ new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
     aslot: [Int]{},
     apos: [Int]{},
     aprev: [Int]{},
+    looks: looks,
     }
 }
 
-assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int) -> Bool Never! {
+assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int, looks: [Bool]) -> Bool Never! {
+    if kind >= A_LOOK -> return looks[(kind - A_LOOK) * (hi + 1) + pos]
     if kind == A_LINE_START -> return pos == 0 || (re.flags.multiline && text[pos - 1] == (U8{10}))
     if kind == A_TEXT_START -> return pos == 0
     if kind == A_TEXT_END -> return pos == hi
@@ -1703,6 +1769,86 @@ assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int) -> Bool Ne
     after: pos < hi && is_group_name_char(Int.from_u8(text[pos]))
     if kind == A_WORD -> return before != after
     before == after
+}
+
+/// Each lookaround's answer at every byte offset of `text`: look `k`'s at
+/// `k * (text.len() + 1) + offset`; empty for a pattern without one. The
+/// rows are filled in the order the looks close, so a nested look's row is
+/// ready before the look around it reads it.
+look_tables: fn(re: Regex, text: [U8]) -> [Bool] Never! {
+    looks := [Bool]{}
+    loop look in 0..<re.look_starts.len() {
+        _ := look_pass(re, text, look, looks)
+    }
+    looks
+}
+
+/// One pass that answers lookaround `look` at every scalar boundary of
+/// `text`, appending its row to `looks`; returns the instructions it ran.
+/// It asks only whether the body matches, so its threads are a set with no
+/// priority or captures: each boundary adds one thread at the body's start,
+/// and each instruction runs at most once per boundary, so the pass is
+/// linear in the text. A lookbehind's body runs forward from the start and
+/// holds where a match of it ends; a lookahead's body is compiled reversed
+/// and runs back from the end, so it holds where a match of it starts.
+look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
+    hi: text.len()
+    base: looks.len()
+    k := 0
+    loop k <= hi {
+        looks.push(false)
+        k = k + 1
+    }
+    behind: re.look_behind[look]
+    last: if behind -> hi else -> 0
+    seen := filled(re.ops.len(), -1)
+    live := [Int]{}
+    moved := [Int]{}
+    stack := [Int]{}
+    steps := 0
+    pos := if behind -> 0 else -> hi
+    loop {
+        moved.clear()
+        matched := false
+        loop pc in live -> stack.push(pc)
+        stack.push(re.look_starts[look])
+        loop {
+            p: stack.pop() ?? break
+            if seen[p] == pos -> next
+            seen[p] = pos
+            steps = steps + 1
+            op: re.ops[p]
+            if {
+                op == OP_SAVE -> stack.push(re.xs[p])
+                op == OP_SPLIT -> {
+                    stack.push(re.ys[p])
+                    stack.push(re.xs[p])
+                }
+                op == OP_ASSERT -> {
+                    if assert_holds(re, text, re.args[p], pos, hi, looks) -> stack.push(re.xs[p])
+                }
+                op == OP_MATCH -> matched = true
+                else -> moved.push(p)
+            }
+        }
+        looks[base + pos] = matched != re.look_neg[look]
+        if pos == last -> return steps
+        from: if behind -> pos else -> prev_boundary(text, pos)
+        cp: decode_at(text, from)
+        pos = if behind -> pos + lead_width(text[pos]) else -> from
+        live.clear()
+        loop pc in moved {
+            if consumes(re, pc, cp) -> live.push(re.xs[pc])
+        }
+    }
+}
+
+/// The byte offset where the scalar that ends at `pos` (above 0) starts in
+/// the UTF-8 `text`.
+prev_boundary: fn(text: [U8], pos: Int) -> Int Never! {
+    at := pos - 1
+    loop at > 0 && Int.from_u8(text[at]).bit_and(192) == 128 -> at = at - 1
+    at
 }
 
 filled: fn(n: Int, value: Int) -> [Int] Never! {
@@ -1736,8 +1882,9 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
     if verdict == 0 -> return out
     if verdict < 0 && re.needle.len() > 0 && find_bytes(text, re.needle, 0) < 0 -> return out
     hi: text.len()
-    if limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS -> return backtrack(re, text, anchored || re.anchored_start, full, capture)
-    vm := new_vm(re.ops.len(), hi, full)
+    looks: look_tables(re, text)
+    if limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS -> return backtrack(re, text, anchored || re.anchored_start, full, capture, looks)
+    vm := new_vm(re.ops.len(), hi, full, looks)
     pos := 0
     has_last := false
     last_start := 0
@@ -1869,7 +2016,7 @@ BACKTRACK_CELLS: 32768
 /// as a later arrival would. So each (instruction, position) pair runs at
 /// most once per call, the same linear bound as the thread VM, with no
 /// thread rows to move at each scalar. `single` starts only at 0.
-backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool) -> [Run] Never! {
+backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool, looks: [Bool]) -> [Run] Never! {
     hi: text.len()
     visited := filled((re.ops.len() * (hi + 1) + 31) >> 5, 0)
     caps := if capture -> filled((re.groups + 1) * 2, -1) else -> [Int]{}
@@ -1880,7 +2027,7 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool) ->
             pos = find_bytes(text, re.prefix, pos)
             if pos < 0 -> break
         }
-        end: backtrack_from(re, text, pos, full, capture, visited, jobs, caps)
+        end: backtrack_from(re, text, pos, full, capture, visited, jobs, caps, looks)
         if end >= 0 {
             if capture {
                 caps[0] = pos
@@ -1898,7 +2045,7 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool) ->
 /// or -1. `jobs` holds pairs: a branch still to try (pc, position), or a
 /// capture slot to restore (-slot - 1, its earlier position), so `caps` is
 /// back to all -1 when the walk fails.
-backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: &[Int], jobs: &[Int], caps: &[Int]) -> Int Never! {
+backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: &[Int], jobs: &[Int], caps: &[Int], looks: [Bool]) -> Int Never! {
     hi: text.len()
     width: hi + 1
     pc := re.start
@@ -1926,7 +2073,7 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
                 next
             }
             if op == OP_ASSERT {
-                if !assert_holds(re, text, re.args[pc], pos, hi) -> break
+                if !assert_holds(re, text, re.args[pc], pos, hi, looks) -> break
                 pc = re.xs[pc]
                 next
             }
@@ -2190,4 +2337,82 @@ sub: fn(pattern: Regex, text: String, replacement: String) -> String Never! {
 subn: fn(pattern: Regex, text: String, replacement: String) -> (text: String, count: Int) Never! {
     ms: matches(pattern, text)
     (text: replace(pattern, text, replacement), count: ms.len())
+}
+
+#Test("lookahead and lookbehind, plain and negated, nested and over scalars") {
+    ahead: compile("foo(?=bar)") ?? panic("compiles")
+    assert_eq((match(ahead, "foobaz foobar") ?? panic("found")).start, 7)
+    not_ahead: compile("foo(?!bar)") ?? panic("compiles")
+    assert_eq((match(not_ahead, "foobar foobaz") ?? panic("found")).start, 7)
+    behind: compile("(?<=\\$)\\d+") ?? panic("compiles")
+    assert_eq(find_all(behind, "cost $42 and 7"), [String]{"42"})
+    not_behind: compile("(?<!\\$)\\b\\d+") ?? panic("compiles")
+    assert_eq(find_all(not_behind, "$42 and 7"), [String]{"7"})
+    nested: compile("(?<=a(?=b))b") ?? panic("compiles")
+    assert_eq(find_all(nested, "ab cb ab"), [String]{"b", "b"})
+    unbounded: compile("(?<=^a+)b") ?? panic("compiles")
+    assert_eq(find(unbounded, "aaab") ?? "none", "b")
+    assert(!is_match(unbounded, "cab"))
+    scalars: compile("(?<=é)x|x(?=😀)") ?? panic("compiles")
+    found: matches(scalars, "éx ex x😀")
+    assert_eq(found.len(), 2)
+    assert_eq(found[0].start, 1)
+    assert_eq(found[1].start, 6)
+    anchored: compile("\\w+(?=\\.$)") ?? panic("compiles")
+    assert_eq(find(anchored, "the end.") ?? "none", "end")
+    groups: compile("(\\w+)(?=:)") ?? panic("compiles")
+    assert_eq((match(groups, "key: v") ?? panic("found")).groups, [String]{"key"})
+    folded: compile_with("(?<=A)b", flags(true, false, false)) ?? panic("compiles")
+    assert_eq(find(folded, "ab") ?? "none", "b")
+    version: compile("(?<![\\w.{{])(\\d+\\.\\d+)(?![\\w.])") ?? panic("compiles")
+    assert_eq(find_all(version, "v1.2 3.45 x6.7 8.9.1 {{1.5}} 2.50."), [String]{"3.45"})
+}
+
+#Test("lookarounds in full_match, replace and split; a capture inside one is an error") {
+    password: compile("(?=.*\\d)(?=.*[a-z]).{{6,}}") ?? panic("compiles")
+    assert(full_match(password, "abc123"))
+    assert(!full_match(password, "abcdef"))
+    clean: compile("^(?!.*bad).*$") ?? panic("compiles")
+    assert(is_match(clean, "good"))
+    assert(!is_match(clean, "so bad"))
+    thousands: compile("(?<=\\d)(?=(?:\\d{{3}})+$)") ?? panic("compiles")
+    assert_eq(replace(thousands, "1234567", ","), "1,234,567")
+    camel: compile("(?=[A-Z])") ?? panic("compiles")
+    assert_eq(split(camel, "helloWorldFoo"), [String]{"hello", "World", "Foo"})
+    if compile("(?=(a))") == {
+        .Ok(_) -> panic("a capture inside a lookaround compiled")
+        .Err(err) -> {
+            assert_eq(err.offset, 0)
+            assert_eq(err.reason, "a lookaround holds no capture group; write `(?:…)` inside it")
+        }
+    }
+    if compile("a(?<!b") == {
+        .Ok(_) -> panic("an unclosed lookbehind compiled")
+        .Err(err) -> assert_eq(err.offset, 1)
+    }
+}
+
+#Test("a lookaround pass is linear: doubling an adversarial text at most doubles its steps") {
+    // A backtracking engine takes exponential or quadratic time on each of
+    // these over a run of `a`.
+    patterns: [String]{"(?=(?:a|aa)*c)a", "(?<=(?:a*)*b)a", "(?=(?:a+)+$)(?!(?:a|a)*b)a"}
+    answers: [Bool]{false, false, true}
+    loop k in 0..<patterns.len() {
+        re: compile(patterns[k]) ?? panic("{patterns[k]} compiles")
+        last := 0
+        n := 1000
+        loop n <= 64000 {
+            text: "a".repeat(n)
+            raw: text.bytes()
+            looks := [Bool]{}
+            steps := 0
+            loop look in 0..<re.look_starts.len() {
+                steps = steps + look_pass(re, raw, look, looks)
+            }
+            if last > 0 && steps > 2 * last + 64 -> panic("{patterns[k]}: {n} scalars took {steps} steps, half as many took {last}")
+            assert_eq(is_match(re, text), answers[k])
+            last = steps
+            n = n * 2
+        }
+    }
 }

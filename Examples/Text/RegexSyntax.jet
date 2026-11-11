@@ -1,13 +1,18 @@
 // core.regex matches leftmost-first, as RE2 and Rust do. The leftmost match
 // wins; alternation prefers its earlier arm, a greedy repetition its largest
 // count and a lazy one (`*?`, `+?`, `??`, `{n,m}?`) its smallest. The
-// example also covers the assertions `\b \B \A \z`, the escapes, class
-// escapes inside `[]`, and the positioned RegexError a bad pattern reports.
+// example also covers the assertions `\b \B \A \z`, lookahead and
+// lookbehind, the escapes, class escapes inside `[]`, and the positioned
+// RegexError a bad pattern reports.
 use rx: core.regex
 
 show: fn(label: String, re: rx.Regex, text: String) {
     found: re.find(text) ?? "none"
     print("{label}: find='{found}' full={re.full_match(text)} all={re.find_all(text)}")
+}
+
+look: fn(label: String, pattern: String, text: String) {
+    show(label, rx.compile(pattern) ?? panic("{pattern} compiles"), text)
 }
 
 verdict: fn(pattern: String) {
@@ -38,13 +43,20 @@ run: fn() {
     show("escapes", Regex{"\x41\u00e9\x{{1F600}}\x21"}, "Aé😀!")
     show("punctuation", Regex{"\.\-\#\ "}, "a.-# b")
     show("python name", Regex{"(?P<year>\d{{4}})"}, "in 2026")
+    // Run-time patterns go through the same parser as checked literals.
+    look("lookahead", "\\w+(?=:)", "key: value")
+    look("negative lookahead", "\\d+(?!px)\\b", "12px 30em 7")
+    look("lookbehind", "(?<=\\$)\\d+", "$5 and $12")
+    look("negative lookbehind", "(?<!-)\\b\\d+", "-3 4 -5 6")
+    thousands: rx.compile("(?<=\\d)(?=(?:\\d{{3}})+$)") ?? panic("the pattern compiles")
+    print(thousands.replace("1234567", ","))
     m: Regex{"(?P<key>\w+)=(?<value>\w*)"}.match("set mode=fast") ?? panic("no match")
     print("key={m.name("key") ?? "none"} value={m.name("value") ?? "none"}")
     verdict("(a")
     verdict("a)")
     verdict("a**")
     verdict("(?i)abc")
-    verdict("(?=a)")
+    verdict("(?=(a))")
     verdict("(a)\\1")
     verdict("[z-a]")
     verdict("\\q")
