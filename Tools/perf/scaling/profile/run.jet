@@ -20,7 +20,6 @@ use {
     math: core.math
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 TOOL: "/Tools/perf/scaling/profile/run.jet"
@@ -274,20 +273,12 @@ print_rows: fn(rows: [Row]) {
     loop row in rows -> print("{fmt.decimal(row.share * Float{100.0}, 1).pad_start(5, " ")}%  {row.symbol.slice(0..<min(120, row.symbol.len()))}  {row.source ?? ""}")
 }
 
-// An unreadable trace or a perf that cannot start ends the run with exit 1,
-// as an uncaught error ends profile.mjs.
-fail: fn(message: String) -> Never {
-    term.eprint(message)
-    process.exit(1)
-}
-
 run: fn() {
     args: process.args()
-    if args.len() < 3 || args[0] == "" || args[1] == "" {
-        term.eprint("Usage: jet Tools/perf/scaling/profile BUILD_DIR TRACE_FILE PHASE...   (BUILD_DIR holds perf.data)")
-        process.exit(2)
-    }
-    phases: profile(args[0], args[1], args[2..<args.len()], sys.executable().removesuffix(TOOL)) ?? fail(err.message)
+    if args.len() < 3 || args[0] == "" || args[1] == "" -> process.fail(2, "Usage: jet Tools/perf/scaling/profile BUILD_DIR TRACE_FILE PHASE...   (BUILD_DIR holds perf.data)")
+    // An unreadable trace or a perf that cannot start ends the run with exit 1,
+    // as an uncaught error ends profile.mjs.
+    phases: profile(args[0], args[1], args[2..<args.len()], sys.executable().removesuffix(TOOL)) ?? process.fail(1, err.message)
     loop phase in phases {
         print("== {phase.phase}: {phase.samples} samples")
         print("-- self")
