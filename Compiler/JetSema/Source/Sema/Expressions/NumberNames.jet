@@ -1,0 +1,167 @@
+// A name for a number reads as its number would. A `:` name bound to a number
+// literal (`y: 2.5`), or to arithmetic on such literals and names, keeps that
+// literal; where a use refuses the name's own type, the name reads as the
+// literal written at that use, checked as the literal would be there:
+// `half(y)` with `half: fn(x: Float)` reads `y` as the Float 2.5, and `n: 200`
+// passed to a U8 parameter reads as the U8 200. A use the name's own type
+// serves reads the name, so a program that checked before means the same.
+//
+// A `:=` name keeps its default type (Int or Decimal) unless a use refuses
+// it. The first refusing use whose type the literal takes decides the
+// binding's type: the function is checked again with the binding declared at
+// that type (sema_function_check_passes). A later use that needs yet another
+// type is one E0112 that names both uses.
+use jet_foundation.[
+    BinOp,
+    Diagnostic,
+    Expr,
+    Span,
+    Type,
+    UnOp,
+    diagnostic_with_label,
+    type_identity_equal,
+    type_name,
+]
+
+// The read of a number name at one use: `handled` when this module decided
+// it, with the checked literal, or None after an error.
+SemaNumberNameRead: struct {
+    handled: Bool
+    value: TExpr?
+}
+
+// The literal a binding of `init` keeps: `init` itself when it is a number
+// literal with no width or type suffix, a negated one, or arithmetic on them,
+// with each immutable number name replaced by its own literal. None for any
+// other initializer.
+sema_expr_number_literal_init: fn(init: Expr, scopes: SemaScopeTable) -> Expr? Never! {
+    if init == .Int(_, _, width, _, _) {
+        if width != None -> return None
+        // copy: the binding statement keeps its initializer; the scope row keeps this one.
+        return Val(init.copy())
+    }
+    if init == .Float(_, _, is_f32, _, _) {
+        if is_f32 -> return None
+        // copy: the binding statement keeps its initializer; the scope row keeps this one.
+        return Val(init.copy())
+    }
+    if init == .Unary(op, operand, span, id) {
+        if op != UnOp.Neg -> return None
+        inner: sema_expr_number_literal_init(operand, scopes) ?? return None
+        return Val(Expr.Unary{op: op, operand: inner, span: span, id: id})
+    }
+    if init == .Binary(op, left, right, span, id) {
+        if !sema_expr_number_literal_operator(op) -> return None
+        left_literal: sema_expr_number_literal_init(left, scopes) ?? return None
+        right_literal: sema_expr_number_literal_init(right, scopes) ?? return None
+        return Val(Expr.Binary{op: op, left: left_literal, right: right_literal, span: span, id: id})
+    }
+    if init == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(scopes, name) ?? return None
+        if scopes.bindings[index].mutable -> return None
+        // copy: the named binding's row keeps its literal for its own uses.
+        return Val((scopes.bindings[index].number_literal ?? return None).copy())
+    }
+    None
+}
+
+// The operators of number arithmetic: a literal on each side gives a number.
+sema_expr_number_literal_operator: fn(op: BinOp) -> Bool Never! {
+    if op == {
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow -> true
+        .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> false
+    }
+}
+
+// Whether `name` is a number name whose own type a numeric slot of type
+// `required` refuses: neither that type nor one that widens into it.
+sema_expr_number_name_refused: fn(name: String, required: Type, scopes: SemaScopeTable) -> Bool Never! {
+    index: sema_scope_resolve_index(scopes, name) ?? return false
+    if scopes.bindings[index].number_literal == None -> return false
+    own: scopes.bindings[index].symbol.ty ?? return false
+    !type_identity_equal(own, required) && sema_expr_numeric_widening_to(own, required) != (Val(true))
+}
+
+// Reads the number name `name` (scope row `index`) at `span`, where `expected`
+// is asked for. Not handled when the name's own type serves the use or its
+// literal doesn't fit there either: the caller reads the name as usual and
+// reports the mismatch.
+sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+    unhandled: SemaNumberNameRead{handled: false, value: None}
+    wanted: expected ?? return unhandled
+    // copy: the scope row keeps its literal for the name's other uses.
+    literal: (scopes.bindings[index].number_literal ?? return unhandled).copy()
+    own: sema_scope_binding_type(environment, scopes, index) ?? return unhandled
+    // A use the name's own type serves, or widens into, reads the name.
+    required: sema_call_resolved_type(wanted, environment, program)
+    if sema_call_type_assignable(required, own, environment, program) ?? true -> return unhandled
+    if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
+    // A literal's check opens no statement tail.
+    tail_store := sema_statement_tail_store_init()
+    trial := [Diagnostic]{}
+    fitted: sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return unhandled
+    if sema_has_error_since(trial, 0) -> return unhandled
+    binding: scopes.bindings[index].symbol.span
+    if scopes.bindings[index].mutable {
+        loop decided in context.number_retypes_known {
+            if sema_expr_number_same_binding(decided.binding, binding) {
+                diagnostics.push(sema_expr_number_retype_conflict(name, decided, fitted.ty, span, environment))
+                return SemaNumberNameRead{handled: true, value: None}
+            }
+        }
+        // copy: the probe's type is recorded for the next pass; the probe's result is dropped.
+        context.number_retypes_found.push(SemaNumberRetype{binding: binding, ty: fitted.ty.copy(), use_span: span})
+        return unhandled
+    }
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: sema_scope_binding_symbol(environment, scopes, index), kind: "local"})
+    if !sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return SemaNumberNameRead{handled: true, value: None}
+    value := sema_check_expression(literal, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaNumberNameRead{handled: true, value: None}
+    value.span = span
+    SemaNumberNameRead{handled: true, value: Val(value)}
+}
+
+// The type an earlier pass decided for the `:=` number binding `binding`, or
+// None.
+sema_expr_number_retype: fn(binding: Span, known: [SemaNumberRetype]) -> Type? Never! {
+    loop decided in known {
+        // copy: the decided type stays in the pass's list; the binding declares its own.
+        if sema_expr_number_same_binding(decided.binding, binding) -> return Val(decided.ty.copy())
+    }
+    None
+}
+
+// The refusals found by a check pass become known decisions: the earliest
+// use of each binding not yet decided. Returns whether one was added, which is
+// when another pass is due.
+sema_expr_number_accept_retypes: fn(known: &[SemaNumberRetype], found: [SemaNumberRetype]) -> Bool Never! {
+    known_before: known.len()
+    loop retype in found {
+        decided := -1
+        loop index in 0..<known.len() {
+            if sema_expr_number_same_binding(known[index].binding, retype.binding) {
+                decided = index
+                break
+            }
+        }
+        if decided < 0 {
+            // copy: `found` is the pass's list, which the pass drops.
+            known.push(retype.copy())
+        } else if decided >= known_before && retype.use_span.start < known[decided].use_span.start {
+            // copy: `found` is the pass's list, which the pass drops.
+            known[decided] = retype.copy()
+        }
+    }
+    known.len() > known_before
+}
+
+// E0112 for a `:=` number name that an earlier use already made `decided.ty`,
+// at a use that needs `wanted`: one error that names both uses.
+sema_expr_number_retype_conflict: fn(name: String, decided: SemaNumberRetype, wanted: Type, span: Span, environment: SemaScopeEnvironment) -> Diagnostic {
+    line: sema_source_line_at(environment.source_segments, decided.use_span) ?? 0
+    report: sema_error("E0112", span, "`{name}` is a {type_name(decided.ty)} for its use on line {line}, but this use needs a {type_name(wanted)}", "a `:=` number name takes the type of the first use that refuses its default, and one name holds one type", "convert the value at one of the two uses, or give each use its own name")
+    diagnostic_with_label(report, decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
+}
+
+sema_expr_number_same_binding: fn(left: Span, right: Span) -> Bool Never! {
+    left.start == right.start && left.end == right.end
+}

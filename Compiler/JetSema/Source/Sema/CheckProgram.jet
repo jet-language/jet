@@ -1826,10 +1826,12 @@ sema_function_check_generics: fn(func: Func, environment: SemaScopeEnvironment, 
 }
 
 // The checks of one function (sema_function_check): again while share sites
-// are found, then its last pass's reports and facts are kept.
+// are found or a use decides a `:=` number name's type
+// (Expressions/NumberNames.jet), then its last pass's reports and facts are kept.
 sema_function_check_passes: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     sema_comptime_body_work_count(environment.comptime_body_values, SemaComptimeBodyWorkOperation.FunctionsStarted)
     share_known := [Span]{}
+    number_known := [SemaNumberRetype]{}
     loop {
         sema_comptime_body_work_count(environment.comptime_body_values, SemaComptimeBodyWorkOperation.CheckPassStarted)
         // copy: every pass starts from the generic checks' reports; a rechecked
@@ -1839,11 +1841,13 @@ sema_function_check_passes: fn(func: Func, owner_id: SymbolID, function_kind: TF
         pass_comptime_requests := [SemaComptimeRequest]{}
         pass_name_references := [SemaNameReferenceFact]{}
         share_found := [SemaOwnershipShareSite]{}
+        number_found := [SemaNumberRetype]{}
         mark: sema_scope_mark(module_scopes)
-        checked := sema_function_check_pass(func, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, share_known, share_found, pass_diagnostics, pass_call_facts, pass_comptime_requests, pass_name_references)
+        checked := sema_function_check_pass(func, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, share_known, share_found, number_known, number_found, pass_diagnostics, pass_call_facts, pass_comptime_requests, pass_name_references)
         sema_scope_rollback(module_scopes, mark)
-        rechecks: sema_function_accept_share_sites(share_known, share_found, environment, program)
-        if !rechecks {
+        shares: sema_function_accept_share_sites(share_known, share_found, environment, program)
+        retypes: sema_expr_number_accept_retypes(number_known, number_found)
+        if !shares && !retypes {
             instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
             loop diagnostic in pass_diagnostics {
                 if instance == .Val(line) {
@@ -1993,7 +1997,7 @@ sema_function_declares_span: fn(methods: [Func], span: Span) -> Bool Never! {
 
 // One check of `func` (sema_function_check_passes). `updated` already carries
 // the function's merged generic parameters (`generics.merged`) and name.
-sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: &[SemaOwnershipShareSite], number_known: [SemaNumberRetype], number_found: &[SemaNumberRetype], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     diagnostics_start: diagnostics.len()
     module_identity := updated.module_identity
     module_name := updated.module_name
@@ -2023,6 +2027,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     if func.is_comptime -> scopes.comptime_execution_depth = 1
     context := sema_check_context_init()
     context.host_hooks = host_hooks
+    context.number_retypes_known = number_known
     context.generic_params = generic_params
     if func.return_type != None -> context.failure_contract_source = sema_failure_contract_source(func.return_type)
     if func.return_type == .Val(.Result(success, _)) {
@@ -2253,6 +2258,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> share_found.push(site)
+    loop retype in context.number_retypes_found -> number_found.push(retype)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, updated, program, scopes, diagnostics) -> complete = false
     sema_lint_inferred_never_return(func, owner_id.key, updated, program, diagnostics)

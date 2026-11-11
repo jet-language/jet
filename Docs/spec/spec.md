@@ -128,6 +128,15 @@ vocabulary](vocabulary.md).
   otherwise it remains `Int`. Ordinary numeric widening then applies. A typed
   or destination-owned literal is checked against that destination's range
   (D-INTLIT-WIDTH1, D-NUMLIT-PEER1).
+- A local name for a number reads as its number would (D-LIT-ADAPT1=A). A
+  `:` binding of a number literal with no width or type suffix, a negated
+  one, or arithmetic on such literals and names keeps that literal; a use
+  that refuses the name's own type reads it as the literal written there:
+  `y: 2.5` passed to a `Float` parameter is the `Float` 2.5. A use its own
+  type serves reads the name unchanged. A `:=` binding takes the type of the
+  first use that refuses its default, where the literal fits; a second use
+  that needs another type is one E0112 naming both uses. Module constants
+  keep their registered type.
 - Explicit conversion is destination-owned:
   `Target.from_source(value)`. Numeric narrowing is fallible; safe widening is
   implicit where the numeric decisions allow it. Numeric-backed distinct and

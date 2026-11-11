@@ -4250,6 +4250,12 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
             }
         }
     }
+    // A name bound to a number literal reads, where its own type is refused,
+    // as that literal written here (Expressions/NumberNames.jet).
+    if unresolved_index == .Val(number_index) && scopes.bindings[number_index].number_literal != None {
+        number_read: sema_expr_number_name_read(name, span, number_index, expected, environment, program, scopes, state, context, diagnostics)
+        if number_read.handled -> return number_read.value
+    }
     // E0420: a `Type{ uninit }` binding read before
     // every path wrote it reports once, then the read resolves as usual.
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].symbol.id.key) != None {

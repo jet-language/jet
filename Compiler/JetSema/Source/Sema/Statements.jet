@@ -5367,8 +5367,10 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     deferred_before: state.deferred_view_opens.len()
     if sema_stmt_binding_is_place_view(binding_expr) -> state.deferred_view_opens.push(expr_span(binding_expr))
     // A declared type (a generated binding's) resolves in this module's scope,
-    // so an alias-qualified name such as `crypto.Secret` names its nominal.
-    declared: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, environment, program)) else -> None
+    // so an alias-qualified name such as `crypto.Secret` names its nominal. A
+    // `:=` number name a use decided on an earlier pass declares that type
+    // (Expressions/NumberNames.jet).
+    declared: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, environment, program)) else if binding.mutable -> sema_expr_number_retype(binding.name_span, context.number_retypes_known) else -> None
     checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, declared, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, declared, environment, program, scopes, state, tail_store, context, lambda_escapes, diagnostics)
     loop state.deferred_view_opens.len() > deferred_before -> _ := state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
@@ -5422,6 +5424,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // the build on, at every tier (tree_expr_fold_int).
     folded: if binding.mutable -> None else -> tree_expr_fold_int(init)
     bounds: if folded == .Val(number) -> Val(integer_bounds_exact(number)) else if binding.mutable -> None else -> checked_cost_integer_bounds(init)
+    number_literal: if binding.ty == None -> sema_expr_number_literal_init(binding.init, scopes) else -> None
     if !sema_scope_declare_local(scopes, symbol, binding.mutable, AccessConvention.Read, bounds, string_view) {
         diagnostics.push(sema_already_defined(binding.name, binding.name_span))
         sema_stmt_shadow_refused_binding(symbol, binding.mutable, scopes, state)
@@ -5432,6 +5435,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // place through a view; an exact `name.move()` later would copy it (E0201).
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(scopes, binding.name)
     if !binding.mutable && binding.sigil_span == .Val(sigil) -> sema_scope_mark_binding_sigil(scopes, binding.name, Span{start: binding.name_span.end, end: sigil.end})
+    if number_literal != None -> sema_scope_mark_number_literal(scopes, binding.name, number_literal)
     sema_ownership_note_frozen_binding(state, symbol.id.key, binding.init, scopes)
     // A bound lambda that takes a capture runs once; one that writes a
     // capture changes it at each call.
@@ -5832,7 +5836,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if !sema_hardware_note_cpu_use(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, scopes, state, context, diagnostics) -> return None
     required: binding.symbol.ty ?? Type.Named{name: "Unit"}
     expected := Type?{None}
-    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, required)
+    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, required, scopes)
     if op == None && !plain_self_typed -> expected = Val(required)
     // The Rust `Stmt::Assign` feeds the place type into the RHS for compound
     // updates too, so `price *= 2.0` with `price: Float` reads the literal as
@@ -5986,12 +5990,14 @@ sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
 // field, or index read, and a typed literal with a written numeric head
 // (`F32{1.5}` into a `Float` parameter), has its own type whatever the hint,
 // so it checks without one and `sema_stmt_numeric_slot_value` fits it into
-// the slot.
-sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type) -> Bool Never! {
+// the slot. A number name whose own type the slot refuses has the type of
+// its use, so it reads with the slot type (Expressions/NumberNames.jet).
+sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type, scopes: SemaScopeTable) -> Bool Never! {
     if !sema_expr_is_numeric(required) -> return false
     if expr == {
-        .Ident(_, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) -> return true
-        .Paren(inner, _, _) -> return sema_stmt_numeric_slot_self_typed(inner, required)
+        .Ident(name, _, _) -> return !sema_expr_number_name_refused(name, required, scopes)
+        .Field(_, _, _, _) | .Index(_, _, _, _, _) -> return true
+        .Paren(inner, _, _) -> return sema_stmt_numeric_slot_self_typed(inner, required, scopes)
         .TypedLit(head, _, _, _) -> {
             if head == .Val(written) -> return sema_expr_is_numeric(written)
             return false
@@ -7088,7 +7094,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: &&TExpr, op:
         }
     }
     expected := Type?{None}
-    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty)
+    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty, scopes)
     if op == None && !plain_self_typed -> expected = Val(place.ty)
     // Same compound contract as `sema_stmt_check_local_assignment`.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)

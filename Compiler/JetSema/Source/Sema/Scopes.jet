@@ -112,6 +112,11 @@ SemaScopeBinding: struct {
     // `:`: the E0111 machine edit replaces it with ` :=`, so `x: 1` becomes
     // `x := 1`.
     binding_sigil: Span?{None}
+    // A name bound to a number literal, or to arithmetic on such literals and
+    // names, keeps that literal (with each name replaced by its own): where a
+    // use refuses the name's type, it reads as the literal written there
+    // (Expressions/NumberNames.jet).
+    number_literal: Expr?{None}
 }
 
 SemaOriginFact: struct {
@@ -747,6 +752,20 @@ SemaCheckContext: struct {
     // keep a view into their source inside the literal; any other field owns
     // its value (sema_stmt_local_view_facts_fields).
     view_field_values: [Span]{[Span]{}}
+    // The `:=` number names whose type a use decided on an earlier check pass
+    // of this function, and the refusals this pass found. A probe's rollback
+    // keeps the refusals it found: each is a use the source writes, and the
+    // earliest one decides (Expressions/NumberNames.jet).
+    number_retypes_known: [SemaNumberRetype]{[SemaNumberRetype]{}}
+    number_retypes_found: [SemaNumberRetype]{[SemaNumberRetype]{}}
+}
+
+// A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
+// at `use_span` needs where its default type is refused.
+SemaNumberRetype: struct {
+    binding: Span
+    ty: Type
+    use_span: Span
 }
 
  
@@ -1373,7 +1392,8 @@ sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 
 // Restores `context` to `mark`: appended rows are dropped (a check only appends
 // to these lists; the one in-place row edit, a discarded call fact, stays
-// inside the rows its statement appended) and every other field is restored.
+// inside the rows its statement appended) and every other field is restored,
+// except the number-name refusals, which stay (number_retypes_found).
 sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
     loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
@@ -2242,6 +2262,14 @@ sema_scope_mark_fresh_cell: fn(table: &SemaScopeTable, name: String, init: Expr)
     sema_scope_note_binding_edit(table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Keeps `literal` on the binding `name` just declared (see
+// SemaScopeBinding.number_literal).
+sema_scope_mark_number_literal: fn(table: &SemaScopeTable, name: String, literal: &&Expr?) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].number_literal = literal
 }
 
 // Keeps the name-end-through-`:` span of the binding `name` just declared
