@@ -1613,7 +1613,10 @@ uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
 An `#Import(c)` that names one of the Jet runtime's own C exports (the generated
 RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
-declaration, or it is E3101. Ordinary C symbols stay ungated.
+declaration, or it is E3101. Ordinary C symbols stay ungated. An `#Import(c)`
+has no Jet body, so the effect row it declares is the effect each call
+performs: a caller whose row lacks it is E0740. The `jet.runtime` interface
+modules are `#Import(c)` declarations of this kind (core-library.md).
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

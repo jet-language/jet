@@ -1,0 +1,21 @@
+Error [jet.EffectBoundExceeded]: `stamp` uses the effect `Time`, which its signature doesn't allow
+  --> jet_runtime_call_carries_its_effect_row.jet:6:15
+    |
+  6 | stamp: fn() -[IO]> Int {
+    |               ^^
+ Why: The signature declares `-[IO]>`, so the body may only use those; `Time` is outside that set
+ Fix: Add `Time` to the effect list, or stop using it in `stamp`
+ Denial: invocation
+ Call chain: stamp
+More: jet-lang.dev/e/E0740
+
+Error [jet.EffectBoundExceeded]: `run` uses the effect `Time`, which its signature doesn't allow
+  --> jet_runtime_call_carries_its_effect_row.jet:10:13
+    |
+ 10 | run: fn() -[IO]> {
+    |             ^^
+ Why: The signature declares `-[IO]>`, so the body may only use those; `Time` is outside that set
+ Fix: Add `Time` to the effect list, or stop using it in `run`
+ Denial: invocation
+ Call chain: run
+More: jet-lang.dev/e/E0740

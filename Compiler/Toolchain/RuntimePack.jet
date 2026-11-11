@@ -61,6 +61,10 @@ PACKAGE: "Compiler"
 RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
 RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 RUNTIME_LIFECYCLE: "Compiler/JetRuntime/lifecycle.list"
+// The embedded jet.runtime interface (JetDriver RuntimeInterface.jet): the
+// runtime production renders it from the runtime source, and the pack fails
+// when this copy disagrees.
+RUNTIME_INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
 RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
 DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
 // The runtime's folder; every other `--tree` folder is its producer's.
@@ -438,6 +442,17 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     thread_rows: threads.split("\n").to_list()
     thread_names: loop name in thread_rows if name != "" -> name.copy()
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(name -> !exports.contains(name)) -> fail("runtime thread receipt names a symbol the checked exports lack")
+    // The jet.runtime interface the runtime source renders (Request.jet
+    // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
+    // the pack with the rendered file beside the outputs.
+    rendered: files.read("{prefix}.interface.jet") ?? fail("cannot read the rendered runtime interface: {err}")
+    embedded: files.read(at(tool.root, RUNTIME_INTERFACE)) ?? fail("cannot read `{RUNTIME_INTERFACE}`: {err}")
+    if rendered != embedded {
+        files.create_dir_all(tool.out) ?? ()
+        stale: files.join(tool.out, "runtime.interface.jet")
+        copy_into("{prefix}.interface.jet", stale)
+        fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
+    }
     threads_sha256: sha256_file("{prefix}.threads")
     key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256)
     out: tool.out

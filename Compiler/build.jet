@@ -5,7 +5,9 @@
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
 // rewritten and a hand edit is refused. The `runtime` step puts jet's runtime
 // pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet this build
-// made lowers the runtime, and no C compiler runs. The pack carries no C or
+// made lowers the runtime, and no C compiler runs. It also fails when the
+// jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
+// disagrees with the one the runtime source renders. The pack carries no C or
 // libc: a program's C closure links the musl sysroot of jet's C toolchain
 // pack (JetCli ForeignLink.jet).
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
@@ -57,6 +59,7 @@ build: fn(b: Build) -[Exec, FS]> {
         runtime.arg("pack")
         runtime.file(b.host(jet), flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
+        runtime.reads("JetFoundation/Source/Registry/RuntimeInterface.jet")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")

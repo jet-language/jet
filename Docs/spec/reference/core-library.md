@@ -260,6 +260,28 @@ use "core/files"
 The first form is an ordinary import error under D-S14-PAUSE; the second uses
 the file-import grammar.
 
+The `jet.runtime` root holds the runtime's public interface: one module per
+inline module of the runtime source, each member that module's `#Export(c)`
+function with its Jet signature and declared effect row, less the `FFI` leaves
+of the runtime's own host calls. The runtime pack build renders the interface
+from the runtime source and fails when the copy jet embeds disagrees, so no
+hand-written copy exists. A call to a member is checked against that
+signature, and the member's row is the effect the call performs:
+
+```jet
+use rt: jet.runtime.time
+
+nap: fn(nanos: Int) -[Time]> {
+    rt.sleep_ns(nanos)
+}
+```
+
+`jet.runtime.time` holds `host_monotonic_ns: fn() -[Time]> Int`,
+`sleep_ns: fn(nanos: Int) -[Time.Wait]>` and
+`task_timeout: fn(nanos: Int) -[Time]>`. A runtime member keeps the name of
+the Core leaf it replaces without the `__` (`core.time.__sleep_ns` becomes
+`rt.sleep_ns`). A `jet.runtime` path that names no interface module is E1001.
+
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
 `Compiler/Prelude/Core.jet`. Every other declaration in its source belongs to

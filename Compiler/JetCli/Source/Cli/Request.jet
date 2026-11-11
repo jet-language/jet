@@ -24,6 +24,7 @@ use {
         compiler_transfer_rows,
         foundation_json_quote,
         Program,
+        RuntimeInterfaceRow,
         build_options_value,
         target_os_native,
         target_os_parse,
@@ -60,6 +61,8 @@ use {
         jet_driver_shared_build_inputs,
         jet_driver_shared_build_http_inputs,
         jet_driver_core_text_file,
+        jet_driver_runtime_interface_file,
+        jet_driver_runtime_interface_sources,
         jet_driver_dependency_selector,
         jet_driver_version_selector_matches,
         JetDriverScriptDependency,
@@ -153,7 +156,10 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // from its `#Export(c)` rows (ir_build_library) at O1, checked by IR Lint
 // after the build and after the optimizer, and written as `{prefix}.o` with
 // its export list, ABI receipt and thread receipt (ir_thread_exports: the
-// exports that can start a second thread). The rows alone root the library:
+// exports that can start a second thread), and `{prefix}.interface.jet`: the
+// jet.runtime interface its inline-module exports render
+// (jet_driver_runtime_interface_file), which Toolchain/RuntimePack.jet checks
+// against the embedded copy. The rows alone root the library:
 // an entry module's `run: fn` is no startup here, only an export when it is
 // `#Export(c)`. `lifecycle` is the lifecycle list's path
 // (JET_FRONT_LIBRARY_LIFECYCLE).
@@ -165,6 +171,13 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     lifecycle_path: lifecycle ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+    interface_rows := [RuntimeInterfaceRow]{}
+    loop row in checked.c_exports {
+        found: row.runtime_interface ?? next
+        if found.declaration == "" -> return jet_driver_compile_escaped_failure("the runtime's public function `{found.module_name}.{found.member}` has a signature the jet.runtime interface can't render (type parameters, or a parameter convention, default or variadic)")
+        interface_rows.push(RuntimeInterfaceRow{module_name: found.module_name.copy(), member: found.member.copy(), declaration: found.declaration.copy(), symbol: found.symbol.copy()})
+    }
+    interface_text: jet_driver_runtime_interface_file(interface_rows)
     declarations := jet_driver_checked_declarations(checked)
     library := ir_build_library(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_text.split("\n").to_list())
     issues := compiler_take_rows<String>(library.errors)
@@ -202,6 +215,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
             cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
             cli_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime thread receipt: {err}")
+            cli_files.write("{prefix}.interface.jet", interface_text) ?? return jet_driver_compile_escaped_failure("cannot write the runtime interface: {err}")
             return jet_cli_runtime_pack(result, prefix, object.bytes.move())
         }
         compiler_transfer_rows<String>(issues, object.errors)
@@ -1059,6 +1073,9 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
             core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
         }
     }
+    // The jet.runtime interface modules ride with Core: they are embedded in
+    // jet whether or not a toolchain tree is present (RuntimeInterface.jet).
+    core_sources.extend(jet_driver_runtime_interface_sources())
     JetCLICoreSources.Loaded{sources: core_sources}
 }
 

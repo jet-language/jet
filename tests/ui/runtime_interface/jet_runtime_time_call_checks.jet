@@ -1,0 +1,14 @@
+// A program reaches the runtime's public time functions through the
+// jet.runtime interface: each call is checked against the member's Jet
+// signature and effect row.
+use rt: jet.runtime.time
+
+nap: fn(nanos: Int) -[Time]> Int {
+    rt.sleep_ns(nanos)
+    rt.task_timeout(nanos)
+    rt.host_monotonic_ns()
+}
+
+run: fn() -[IO, Time]> {
+    print(nap(1) >= 0)
+}

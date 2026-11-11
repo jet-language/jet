@@ -1,0 +1,26 @@
+// `jet.runtime.time` (#6615): the runtime's public time functions, in Jet
+// types with their declared effect rows. The runtime pack build renders each
+// member into the jet.runtime interface that jet embeds
+// (Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet), so a program
+// reaches them with `use rt: jet.runtime.time`. A row names the `FFI.Asm` its
+// host calls perform; the interface leaves the runtime's own machine code out
+// (jet_driver_runtime_interface_declaration).
+time: module {
+    // The host's monotonic clock in nanoseconds, saturating at the largest
+    // I64 (292 years of uptime).
+    #Export(c) host_monotonic_ns: fn() -[Time, FFI.Asm]> Int {
+        Int.from_i64(time_host_monotonic_i64())
+    }
+
+    // Sleeps `nanos` nanoseconds under the shared scheduler's wait policy
+    // (deadline checks, clamping, cancellation); a negative delay sleeps none.
+    #Export(c) sleep_ns: fn(nanos: Int) -[Time.Wait, FFI.Asm]> {
+        jet_task_sleep_duration_ns_defaulted(I64.from_int(nanos) ?? I64{9223372036854775807})
+    }
+
+    // Moves the task deadline to the earlier of the installed one and now
+    // plus `nanos` in whole milliseconds; a negative delay counts as none.
+    #Export(c) task_timeout: fn(nanos: Int) -[Time, FFI.Asm]> {
+        jet_task_timeout_duration_ns(I64.from_int(nanos) ?? I64{9223372036854775807})
+    }
+}

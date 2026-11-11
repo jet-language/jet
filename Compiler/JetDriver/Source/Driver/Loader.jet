@@ -2892,7 +2892,8 @@ jet_driver_core_source_owner_key: fn(module_name: String) -> String Never! {
 }
 
 // Rust `core_source_import_module`: the Core module an import names, including
-// a selective `use core.x.[T]` import.
+// a selective `use core.x.[T]` import. A `jet.runtime.<m>` interface module
+// loads through the same Core unit lookup (RuntimeInterface.jet).
 jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
     name := ""
     if declaration.kind == {
@@ -2900,7 +2901,7 @@ jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
         .Unqualified(module_alias, _, _, _, _) -> name = module_alias
         .File(_, _) -> return None
     }
-    if name == "core" || name == "app" || name.starts_with("core.") -> return Val(name)
+    if name == "core" || name == "app" || name.starts_with("core.") || jet_driver_runtime_interface_module(name) -> return Val(name)
     None
 }
 
@@ -4491,6 +4492,10 @@ jet_driver_core_unit: fn(
             pending.push(part_unit)
         }
         return Val(target)
+    }
+    if jet_driver_runtime_interface_module(module_name) {
+        diagnostics.push(jet_driver_unknown_runtime_interface_module(module_name, span))
+        return None
     }
     if core_module_export(module_name) == None {
         diagnostics.push(jet_driver_unknown_core_module(module_name, span, "use"))

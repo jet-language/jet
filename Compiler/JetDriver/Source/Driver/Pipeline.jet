@@ -170,6 +170,7 @@ use {
         name_rows_get_text,
         name_rows_set_first,
         ast_job_metadata,
+        RuntimeInterfaceRow,
     ]
     jet_parser.[
         parse_source,
@@ -2799,10 +2800,13 @@ jet_driver_test_plan: fn(test_modules: [String:Bool], graph: SemaGraphResult, fu
     }
 }
 
-// One `#Export(c)` function of the entry module: its symbol key and name.
+// One `#Export(c)` function of the entry module: its symbol key and name,
+// and its jet.runtime interface row when it is an inline-module member
+// (jet_driver_runtime_interface_row).
 JetDriverCExportRow: struct {
     key: String
     name: String
+    runtime_interface: RuntimeInterfaceRow?
 }
 
 // The entry module's `#Export(c)` functions in declaration order, read from
@@ -2817,7 +2821,7 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
             loop marker in row.declaration.markers {
                 if sema_marker_is_guest_export(marker) -> exported = true
             }
-            if exported -> rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name})
+            if exported -> rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, runtime_interface: jet_driver_runtime_interface_row(row.declaration, jet_driver_c_symbol(row.declaration.name))})
         }
     }
     rows
