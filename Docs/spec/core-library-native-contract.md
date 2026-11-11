@@ -712,10 +712,7 @@ and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and packed byte buffer allocated at alignment eight;
 the empty header has all three words zero. Native list destruction releases
 `capacity` bytes at that same alignment. Neither conversion transfers or frees
-its borrowed input. Compiled `core.mem.__bytes_unpack` calls reach the same
-copy through `jet_rt_bytes_unpack_route`, which takes the route's exact Int
-carriers and returns the List by the route convention: the length, with the
-fresh packed buffer written through the out word.
+its borrowed input.
 `Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
 `host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
 the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.

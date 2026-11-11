@@ -365,19 +365,6 @@ coll_list_drop: fn(header: I64, meta: I64, start: I64) {
     if (len != I64{0}) { jet_rt_free(ptr, len, I64{1}) }
 }
 
-// The `core.mem.__bytes_pack` route: native_lists passes the borrowed [U8]
-// as its element data and length, not a list header.
-#Export(c) jet_rt_bytes_pack_route: fn(data: I64, length: I64) -> I64 {
-    if (length == I64{0}) { return I64{1} }
-    packed: jet_rt_alloc(length, I64{1})
-    at := I64{0}
-    loop at < length {
-        trap_put(wrapping(packed + at), host_u8_get(data, at))
-        at += I64{1}
-    }
-    packed
-}
-
 #Export(c) jet_rt_bytes_unpack: fn(ptr: I64, len: I64) -> I64 {
     header: coll_list_new()
     if (len == I64{0}) { return header }
@@ -385,19 +372,6 @@ coll_list_drop: fn(header: I64, meta: I64, start: I64) {
     trap_store(wrapping(header + I64{8}), len)
     trap_store(wrapping(header + I64{16}), coll_bytes_copy(ptr, len))
     header
-}
-
-// The `core.mem.__bytes_unpack` route: its Word arguments arrive as exact Int
-// carriers, and the List result follows the route convention (a native length
-// returned, the fresh packed buffer transferred through out_data).
-#Export(c) jet_rt_bytes_unpack_route: fn(ptr: I64, len: I64, out_data: I64) -> I64 {
-    length: jet_int_owned_to_i64(len)
-    if (length == I64{0}) {
-        trap_store(out_data, I64{0})
-        return I64{0}
-    }
-    trap_store(out_data, coll_bytes_copy(jet_int_owned_to_i64(ptr), length))
-    length
 }
 
 coll_bytes_copy: fn(ptr: I64, len: I64) -> I64 {

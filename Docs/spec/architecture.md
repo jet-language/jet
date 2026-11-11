@@ -1576,18 +1576,16 @@ E2105 error naming the symbol and the foreign function that names it
 (`jet_cli_native_unprovided` in `Compiler/JetCli/Source/Cli/Host.jet`), not an
 internal compiler error. Platform archives are never runtime-pack exports.
 
-The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
-existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller
-keeps that home alive and unmodified through its audited byte-span use.
-Evaluator routes walk the original frame/place and read-parameter provenance;
-comptime expression fragments borrow the original scope before snapshotting.
-Neither path keeps a second String/pointer registry. `__bytes_pack` allocates
-one packed byte buffer (empty sentinel 1), `__bytes_unpack` makes an independent
-owned copy, and `__bytes_free` releases the pack once with its original length.
-C String parameters instead use per-call NUL-terminated copies; their String
-results are copied before those temporaries are released.
-`Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
-embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
+Core reaches no String or packed-byte carrier of its own: `jet_rt_string_data`
+and `jet_rt_string_byte_len` lend the existing UTF-8 String home only to the
+compiler's foreign-call lowering (a declared C `ptr`/`len` span), not as a
+NUL-terminated or copied carrier, and the caller keeps that home alive and
+unmodified through the call. Evaluator routes walk the original frame/place
+and read-parameter provenance; comptime expression fragments borrow the
+original scope before snapshotting. Neither path keeps a second
+String/pointer registry. C String parameters instead use per-call
+NUL-terminated copies; their String results are copied before those
+temporaries are released.
 `Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI against
 exact tier-parity output.
 
