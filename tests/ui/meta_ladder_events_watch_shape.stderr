@@ -1,0 +1,17 @@
+Error [jet.ArgumentCountMismatch]: `meta.events` takes `watch: .Functions{marked: m}` and a handler
+  --> tests/ui/meta_ladder_events_watch_shape.jet:12:5
+    |
+ 12 |     meta.events(.Functions{marked: Traced{}}, (event) -> {})
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: The watch names what the handler hears: each checked function that carries a marker of the type of the marker value `m`
+ Fix: Write `meta.events(watch: .Functions{marked: Traced{}}, (event) -> { … })`
+More: jet-lang.dev/e/E0104
+
+Error [jet.MarkerLookupNotMarker]: `Plain` is not a marker
+  --> tests/ui/meta_ladder_events_watch_shape.jet:13:43
+    |
+ 13 |     meta.events(watch: .Functions{marked: Plain{}}, (event) -> {})
+    |                                           ^^^^^^^
+ Why: `meta.events` watches the functions that carry the marker of the watched value's type, so the value is a marker struct's (one with an `impl Marker` block)
+ Fix: Watch a marker struct value visible here, as in `.Functions{marked: Traced{}}`
+More: jet-lang.dev/e/E1134

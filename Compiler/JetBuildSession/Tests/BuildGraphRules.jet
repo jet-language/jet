@@ -3,7 +3,7 @@
 // nothing is executed.
 use jet_build_session.[
     BuildSession, BuildSessionError, BuildSessionPolicy, BuildSessionReply, BuildSessionValue,
-    build_session_call, build_session_compiler_node, build_session_graph, build_session_new, build_session_set_dependencies,
+    build_session_abort, build_session_call, build_session_compiler_node, build_session_graph, build_session_new, build_session_set_dependencies,
 ]
 
 build_graph_rules_session: fn(id: Int) -> BuildSession Never! {
@@ -160,6 +160,24 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_failed(build_session_call(a, "found", [BuildSessionValue]{probe}, None, true, 13, 14)))
     permit: a.storage.guard_read()
     assert_eq(permit.value.targets.len(), 0)
+}
+
+// `meta.events` reads a `Compiler` value's checked program only after
+// `compiler.live` accepts the value: one of this build's, while it runs.
+#Test("meta_events_read_only_a_live_compiler_value_of_this_build") {
+    a := build_graph_rules_session(187)
+    b := build_graph_rules_session(188)
+    empty: build_graph_rules_list([String]{})
+    app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    other: build_graph_rules_value(build_session_call(b, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 3, 4))
+    meta: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app.copy()}, None, false, 5, 6))
+    foreign: build_graph_rules_value(build_session_call(b, "compiler", [BuildSessionValue]{other}, None, false, 7, 8))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.live", [BuildSessionValue]{meta.copy()}, None, false, 9, 10)))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.live", [BuildSessionValue]{foreign}, None, false, 11, 12)))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.live", [BuildSessionValue]{app}, None, false, 13, 14)))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.live", [BuildSessionValue]{}, None, false, 15, 16)))
+    build_session_abort(a)
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.live", [BuildSessionValue]{meta}, None, false, 17, 18)))
 }
 
 #Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {

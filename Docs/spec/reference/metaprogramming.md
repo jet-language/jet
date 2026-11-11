@@ -401,6 +401,13 @@ and the function that made it, with its place: the root's own `build`, or a
 dependency's function the root handed the value to. The build's provenance
 records the same handoff as the module's `made_by`, in `jet inspect graph
 --json` and in `jet inspect explain-build <module>`.
+`meta.events(watch: .Functions{marked: Traced{}}, handler)` on the value calls
+the handler with `.Checked(.Function(f))`, a `CompilerEvent`, once for each
+function of the build's checked program that carries the marker of the
+watched value's type, in the order the program lists them; the value's fields
+filter nothing, and a value that is no marker struct's is E1134. Watching only
+reads, so it needs no Meta effect, and the build refuses a value whose build
+has returned.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.
@@ -418,9 +425,8 @@ affects and recorded in a receipt that does not promise equivalence. Some
 limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
 facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`,
-`meta.add`, `meta.rewrite_body`, its `#{f.body}` paste and
-`meta.allow_rewrite` are built;
-`meta.events` and the other operations on the value are ratified contract and
-not yet built.
+`meta.add`, `meta.rewrite_body`, its `#{f.body}` paste, `meta.allow_rewrite`
+and `meta.events` watching marked functions are built; the other operations
+on the value are ratified contract and not yet built.
 The source examples and the two executable registries linked above are the
 evidence; this page does not turn a schema row into an implementation claim.

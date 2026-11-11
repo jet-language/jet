@@ -450,6 +450,13 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if !build_session_contains_string(state.compilers[compiler].rewritable, name) -> state.compilers[compiler].rewritable.push(name)
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
+    // The check `meta.events` makes before it reads a `Compiler` value's
+    // checked program: the value belongs to this build, which still runs.
+    if method == "compiler.live" {
+        if args.len() != 1 -> return build_session_fail(state, "a `Compiler` value check takes one value")
+        _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
     // `meta.rewrite_body(f, code)` on a `Compiler` value: the code's formatted
     // statements become the body of the function `f` of the package that
     // declares it, carried as the generated module

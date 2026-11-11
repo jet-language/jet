@@ -701,10 +701,12 @@ JetDriverLoadResult: struct {
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
     build_program: TComptimeValue?{None}
-    // Whether a loaded unit outside Core spells the word `program` outside
-    // its comments, strings included (Loader.jet). A body can read the
-    // Build context's whole-program view only by naming its `program` field,
-    // so the staging compile of `build: fn` snapshots that view only then.
+    // Whether a loaded unit outside Core spells the word `program` or
+    // `compiler` outside its comments, strings included (Loader.jet). A body
+    // reads the whole-program view only by naming the Build context's
+    // `program` field, or through the `Compiler` value `b.compiler` makes,
+    // whose `meta.events` hears that program's functions; the staging
+    // compile of `build: fn` snapshots the view only then.
     spells_program: Bool{true}
     build_nodes: [BuildGraphNode]?{None}
     // The entry package's member files that declare a top-level `run: fn`

@@ -1,0 +1,19 @@
+# #3526 c3: `meta.events(watch: .Functions{marked: m}, handler)` on the
+# root's `Compiler` value hands the handler `.Checked(.Function(f))` for each
+# checked function carrying the marker of m's type, and for no other. In
+# `heard` the handler stops the build at the first function it hears, so
+# `plain` (listed first, unmarked) would show if the watch didn't filter. In
+# `quiet` no function carries the marker, so the handler never runs and the
+# program builds and runs.
+fixture: meta_events_hear_marked_functions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build heard/main.jet
+exit: nonzero
+stderr: ~ "heard greet" # the handler hears the marked function
+stderr: !~ "heard plain" # and never the unmarked one listed before it
+step: jet build quiet/main.jet
+exit: 0
+step: {work}/quiet/.jet/build/app
+exit: 0
+stdout: = "3\n"

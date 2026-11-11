@@ -1,0 +1,23 @@
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+plain: fn() -> Int { 2 }
+
+#Traced greet: fn() -> Int { 1 }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) -> panic("heard {f.name}")
+        },
+    )
+    b.default(app)
+}
+
+run: fn() { print(plain() + greet()) }

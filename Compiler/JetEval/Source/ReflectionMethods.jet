@@ -71,6 +71,32 @@ jet_eval_reflection_marker_value: fn(owner: String, args: [TComptimeValue]) -> J
     absent
 }
 
+// `meta.events` with a marker: the FunctionInfo rows of a checked
+// ProgramInfo whose written markers include `wanted` (compared by its last
+// segment, as `info.marker(T)` does), in the program's function order. A
+// program without a `functions` list gives None.
+jet_eval_reflection_marked_functions: fn(program: TComptimeValue, wanted: String) -> TComptimeValue? Never! {
+    program_fields: if program == .Struct(_, values) -> values else -> { return None }
+    listed: jet_eval_compiler_value_field(program_fields, "functions") ?? return None
+    functions: if listed == .List(values) -> values else -> { return None }
+    leaf: jet_eval_reflection_marker_leaf(wanted)
+    marked := [TComptimeValue]{}
+    loop function in functions {
+        function_fields: if function == .Struct(_, values) -> values else -> { next }
+        markers: jet_eval_compiler_value_field(function_fields, "markers") ?? next
+        rows: if markers == .List(values) -> values else -> { next }
+        loop row in rows {
+            marker_fields: if row == .Struct(_, values) -> values else -> { next }
+            name: jet_eval_compiler_value_field(marker_fields, "name") ?? next
+            if name == .String(written) && jet_eval_reflection_marker_leaf(written) == leaf {
+                marked.push(function.copy())
+                break
+            }
+        }
+    }
+    Val(TComptimeValue.List{values: marked})
+}
+
 jet_eval_reflection_metadata_string_list_contains: fn(fields: [TComptimeField], field_name: String, wanted: String) -> Bool Never! {
     list: jet_eval_compiler_value_field(fields, field_name) ?? return false
     if list == {

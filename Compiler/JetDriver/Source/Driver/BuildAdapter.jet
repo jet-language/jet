@@ -2,8 +2,8 @@
 // code (JetEval Native.jet) reaches every Build and BuildPlan host method of
 // the invocation through it.
 use {
-    jet_foundation.[Span, TComptimeValue]
-    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
+    jet_foundation.[Span, TComptimeField, TComptimeValue]
+    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_field, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value, jet_eval_reflection_marked_functions]
 
     build_input_crypto: core.crypto
     build_input_url: core.net.url
@@ -103,6 +103,7 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
     if reply == {
         .Value(value) -> {
             data := jet_eval_build_session_output(value)
+            if method == "compiler" -> data = jet_driver_build_compiler_value(data, args[0])
             if fallible -> data = TComptimeValue.Present{value: data.move()}
             return Val(JetEvalBuildReply.Value{value: data.move()})
         }
@@ -117,6 +118,18 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         }
         .HostRequest(service_method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable"))
     }
+}
+
+// A `Compiler` value carries its build's checked program (the `program` of
+// the `Build` it was made from), which `meta.events` watches.
+jet_driver_build_compiler_value: fn(handle: TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
+    program: jet_eval_build_field(context, "program") ?? return handle.copy()
+    if handle == .Struct(name, fields) {
+        carried := fields.copy()
+        carried.push(TComptimeField{name: "program", value: program.copy()})
+        return TComptimeValue.Struct{type_name: name.copy(), fields: carried}
+    }
+    handle.copy()
 }
 
 // One spliced build value as the Jet literal the generated items read.
@@ -166,9 +179,21 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // (JetBuildSession `compiler.rewrite_body`). Each sends the calling function
 // and its place, which reports from the module name.
 // `meta.allow_rewrite` sends the dependency's name (JetBuildSession
-// `compiler.allow_rewrite`).
+// `compiler.allow_rewrite`). `meta.events` sends the marker's name and reads
+// the functions of the value's checked program that carry that marker, once
+// the session accepts the value as one of its own while it runs
+// (JetBuildSession `compiler.live`).
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
     compiler: if args.len() > 0 -> jet_eval_build_session_input(args[0]) else -> None
+    if member == "Compiler.events.functions" && args.len() == 2 {
+        held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+        checked: build_session_call(session, "compiler.live", [BuildSessionValue]{held}, None, false, span.start, span.end)
+        if checked == .Failure(error) -> return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+        marker: if args[1] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its marker's name") }
+        functions: jet_eval_reflection_marked_functions(program, marker) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost its functions")
+        return JetEvalBuildReply.Value{value: functions}
+    }
     if member == "Compiler.allow_rewrite" && args.len() == 2 {
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
         package: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its package name")

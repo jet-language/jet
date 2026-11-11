@@ -133,8 +133,9 @@ sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int
 
 // Rust `build_function_type_info`: a function rule sees the target's stable
 // source shape; program-wide effect facts stay a separate reflection input,
-// so `effects` lists the declared row.
-sema_user_template_function_info: fn(function: Func) -> CtValue? {
+// so `effects` lists the declared row. `markers` are the function's written
+// MarkerInfo rows (sema_comptime_reflection_written_markers).
+sema_user_template_function_info: fn(function: Func, markers: [TComptimeValue]) -> CtValue? {
     effects := [TComptimeValue]{}
     if function.declared_effects == .Val(rows) {
         loop row in rows -> effects.push(TComptimeValue.String{value: row.name})
@@ -153,6 +154,7 @@ sema_user_template_function_info: fn(function: Func) -> CtValue? {
         SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
         SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
+        SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
     })
     sema_user_template_ct_value(info)
 }
@@ -480,12 +482,14 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
         }
     }
     // Function-site rules see a FunctionInfo and may emit any top-level item.
+    registry := SemaScopeMembersMarkerRegistry?{None}
     loop item in items {
         if item == .Func(function) {
             loop marker in function.markers {
                 if marker.negated -> next
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-                info: sema_user_template_function_info(function) ?? next
+                markers: sema_comptime_reflection_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, sema_user_template_catalog(), function.markers, registry) ?? next
+                info: sema_user_template_function_info(function, markers) ?? next
                 expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
                 if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 loop expanded_item in expanded -> generated.push(expanded_item)
@@ -577,7 +581,7 @@ sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_inde
     loop marker in code_module.markers {
         if marker.negated -> next
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        if module_info == None -> module_info = Val(sema_user_template_module_info(graph, module_index, code_module))
+        if module_info == None -> module_info = sema_user_template_module_info(graph, module_index, code_module)
         info: module_info ?? next
         expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), diagnostics) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
@@ -585,7 +589,9 @@ sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_inde
     }
 }
 
-sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule) -> CtValue {
+sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule) -> CtValue? {
+    module_row: graph.modules[module_index]
+    registry := SemaScopeMembersMarkerRegistry?{None}
     types := [CtValue]{}
     functions := [CtValue]{}
     if code_module.body == .Val(body) {
@@ -594,18 +600,19 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
                 .Struct(definition) -> types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
                 .Enum(definition) -> types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
                 .Func(function) -> {
-                    if sema_user_template_function_info(function) == .Val(info) -> functions.push(info)
+                    function_markers: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), function.markers, registry) ?? return None
+                    if sema_user_template_function_info(function, function_markers) == .Val(info) -> functions.push(info)
                 }
                 .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
-    CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
+    Val(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
         NamedCtValue{name: "name", value: CtValue.Str{value: code_module.name}},
-        NamedCtValue{name: "identity", value: CtValue.Str{value: "{graph.modules[module_index].module_name}::{code_module.name}"}},
+        NamedCtValue{name: "identity", value: CtValue.Str{value: "{module_row.module_name}::{code_module.name}"}},
         NamedCtValue{name: "types", value: CtValue.List{values: types}},
         NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
-    }}
+    }})
 }
 
 // The record named `member` in the `list` field ("fields" or "methods") of

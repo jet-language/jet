@@ -788,6 +788,24 @@ sema_comptime_reflection_member_markers: fn(markers: [Marker], registry: SemaSco
     infos
 }
 
+// The MarkerInfo rows of `markers` written on a function in the module
+// `module_identity` whose program is `program` (a FunctionInfo's `markers`).
+// The module's marker registry is built for its first marked function and
+// kept in `registry` for the rest; None when the graph cannot build it.
+sema_comptime_reflection_written_markers: fn(
+    graph: SemaRegistrationGraph,
+    module_identity: String,
+    program: Program,
+    catalog: TAppliedRuleCatalog,
+    markers: [Marker],
+    registry: &SemaScopeMembersMarkerRegistry?,
+) -> [TComptimeValue]? {
+    if markers.len() == 0 -> return Val([TComptimeValue]{})
+    if registry == None -> registry = sema_scope_members_build_marker_registry(graph, module_identity, program, catalog)
+    if registry == .Val(known) -> return Val(sema_comptime_reflection_member_markers(markers, known))
+    None
+}
+
 // One stored field or payload field, at `index` among its owner's fields. A
 // field row has no nested `fields`; those are an enum variant's payload rows
 // (sema_comptime_reflection_enum_variant_info).

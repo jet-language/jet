@@ -1,0 +1,16 @@
+// `meta.events` takes `watch: .Functions{marked: m}` and a handler (E0104
+// otherwise), and `m` is a marker struct's value (E1134 otherwise).
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+Plain: struct {}
+
+listen: fn(meta: Compiler) {
+    meta.events(.Functions{marked: Traced{}}, (event) -> {})
+    meta.events(watch: .Functions{marked: Plain{}}, (event) -> {})
+}
+
+run: fn() {}
