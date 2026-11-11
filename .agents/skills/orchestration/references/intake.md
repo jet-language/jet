@@ -97,3 +97,42 @@ A train that changes the version, the engine protocol or a C dependency makes
 the admitted seed's `jetpack` disagree with the batch compiler. The batch then
 tests with the `jetpack` its own census built, placed beside the batch
 compiler, never with the seed's.
+
+## Train speed
+
+A train's cost is its repeats, not its stages. One build and census take about
+20 minutes, but t22 (2026-11-11) took more than two hours across seven census
+runs and one 39-minute full test pass. These rules bind every train:
+
+1. **Gate before the build.** After composing, run a keep-going `jet check`
+   with the admitted seed on every package a submission touches. A row that is
+   new in a touched file sets that submission (and its stack) aside before the
+   build. Rows already red on the base, and rows a `seed:`-split part b
+   expects, don't count.
+2. **One build per train.** A failure after the build never restarts the
+   train. Set the failing submission aside and land the rest on the same build.
+   Rebuild only when a set-aside submission changed compiler, runtime or Core
+   build inputs, and then only once for all of them.
+3. **Affected rows only, sharded.** Each submission's own `tests` lines run
+   first. Then the rows its paths reach: a `Compiler/` submission reaches the
+   ui and golden profiles, and any other package reaches its own tests. Run
+   them in parallel shards sized to MemAvailable minus 12 GiB, with each jet
+   capped at 16 GiB. Full suites belong to milestones. The test stage aims at
+   under ten minutes.
+4. **Fail fast.** The moment one of a submission's rows is red, mark it set
+   aside and keep testing the others. Triage never waits for the whole pass.
+5. **Independent trains.** Compose the next train on `dev` plus its own
+   submissions whenever its paths are disjoint from the current train's, and
+   gate it while the current train builds and tests. Rebase only overlapping
+   submissions, after the current train lands.
+6. **Small trains.** About eight submissions, grouped so one owner's stack
+   can't hold the others.
+7. **A sealed tree.** The composed tree lives in a sealed subdirectory that is
+   read-only for the length of the run. Nobody but the lander writes, moves or
+   deletes anything under the train directory, and nobody copies from it:
+   workers compose their own trees from git objects or a published seed.
+   Area checks and tests run with an empty scratch directory as their working
+   directory, never the tree.
+8. **Timings in every report.** Each train `REPORT.md` has a stage table
+   (compose, gate, build, census, tests, regen, land) with wall minutes, and
+   every restart names its cause.
