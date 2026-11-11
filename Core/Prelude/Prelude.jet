@@ -219,15 +219,18 @@ DiagnosticFixSafety: enum {
     TargetChanging
 }
 
-// What a build's `meta.events(watch: .Functions{marked: m}, handler)` handler
-// hears: a declaration of the build's program that passed its checks.
+// What a build's `meta.events(watch: …, handler)` handler hears: a
+// declaration or a call of the build's program that passed its checks.
 CompilerEvent: enum {
     Checked(CheckedItem)
 }
 
-// The checked declaration a `CompilerEvent` names.
+// The checked part a `CompilerEvent` names: a function a
+// `.Functions{marked: m}` watch hears, or a call a `.Calls{to: f}` watch
+// hears.
 CheckedItem: enum {
     Function(FunctionInfo)
+    Call(CompilerCall)
 }
 
 // Compiler-supplied #Receipt facts are not a user-constructible handle.

@@ -424,10 +424,18 @@ for every compile and link node after it (`jet inspect explain-build
 the handler with `.Checked(.Function(f))`, a `CompilerEvent`, once for each
 function of the build's checked program that carries the marker of the
 watched value's type, in the order the program lists them; the value's fields
-filter nothing, and a value that is no marker struct's is E1134. Watching only
-reads, so it needs no Meta effect, and the build refuses a value whose build
-has returned. A handler that rewrites `f` uses `Meta.Rewrite` like any other
-caller; `f.package` is the identity of the package that declares it.
+filter nothing, and a value that is no marker struct's is E1134.
+`meta.events(watch: .Calls{to: print}, handler)` calls the handler with
+`.Checked(.Call(c))` once for each checked call written in the root package's
+own source (outside its `build: fn`) whose resolved callee is the watched one,
+in the order the checker met them; `c` is a `CompilerCall` (caller, callee,
+module, span). The watched name is a function, or an ambient call such as
+`print` that no name in scope hides; a function or method of the same name
+elsewhere is another callee, and any other name is refused (E0104). Watching
+only reads, so it needs no Meta effect, and the build refuses a value whose
+build has returned. A handler that rewrites a heard function `f` uses
+`Meta.Rewrite` like any other caller; `f.package` is the identity of the
+package that declares it.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.
@@ -446,7 +454,7 @@ limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
 facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`,
 `meta.add`, `meta.rewrite_body`, its `#{f.body}` paste, `meta.allow_rewrite`
-and `meta.events` watching marked functions are built; the other operations
-on the value are ratified contract and not yet built.
+and `meta.events` watching marked functions and resolved calls are built; the
+other operations on the value are ratified contract and not yet built.
 The source examples and the two executable registries linked above are the
 evidence; this page does not turn a schema row into an implementation claim.

@@ -97,6 +97,24 @@ jet_eval_reflection_marked_functions: fn(program: TComptimeValue, wanted: String
     Val(TComptimeValue.List{values: marked})
 }
 
+// `meta.events` with a callee: the CompilerCall rows of a checked
+// ProgramInfo's `root_calls` (the calls written in the root package's own
+// source outside its `build: fn`) whose callee is `wanted`, a definition
+// identity or an ambient call's name, in the order the checker met them. A
+// program without `root_calls` gives None.
+jet_eval_reflection_calls_to: fn(program: TComptimeValue, wanted: String) -> TComptimeValue? Never! {
+    program_fields: if program == .Struct(_, values) -> values else -> { return None }
+    listed: jet_eval_compiler_value_field(program_fields, "root_calls") ?? return None
+    calls: if listed == .List(values) -> values else -> { return None }
+    heard := [TComptimeValue]{}
+    loop call in calls {
+        call_fields: if call == .Struct(_, values) -> values else -> { next }
+        callee: jet_eval_compiler_value_field(call_fields, "callee") ?? next
+        if callee == .String(name) && name == wanted -> heard.push(call.copy()) // copy: the program keeps its call rows
+    }
+    Val(TComptimeValue.List{values: heard})
+}
+
 jet_eval_reflection_metadata_string_list_contains: fn(fields: [TComptimeField], field_name: String, wanted: String) -> Bool Never! {
     list: jet_eval_compiler_value_field(fields, field_name) ?? return false
     if list == {

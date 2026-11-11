@@ -1,0 +1,27 @@
+// A method of the same name is another callee.
+Pad: struct {
+    width: Int
+
+    print: fn(self) -> Int { self.width }
+}
+
+helper: fn() -> Int { 2 }
+
+shout: fn(n: Int) { print(n) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.events(
+        watch: .Calls{to: print},
+        (event) -> {
+            if event == .Checked(.Call(c)) -> panic("heard {c.callee} from {c.caller}")
+        },
+    )
+    b.default(app)
+}
+
+run: fn() {
+    pad: Pad{width: helper()}
+    shout(pad.print())
+}

@@ -1,0 +1,28 @@
+# #6516 c3: `meta.events(watch: .Calls{to: f}, handler)` on the root's
+# `Compiler` value hands the handler `.Checked(.Call(c))` for each checked
+# call whose resolved callee is `f`, and for no other. In `ambient` the
+# watched callee is the ambient `print`: `helper()` and the method
+# `pad.print()` are checked before `shout`'s `print(n)`, and the handler stops
+# the build at the first call it hears. In `helper` the watched callee is the
+# function `helper` by its definition identity, and the call of `other`
+# checked before it is not heard. In `refused` the name is a local Int value,
+# refused before the build runs.
+fixture: meta_events_hear_resolved_calls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build ambient/main.jet
+exit: nonzero
+stderr: ~ "heard print from" # the ambient print call is heard, its callee named `print`
+stderr: ~ "shout" # its caller is the function that wrote it
+stderr: !~ "heard helper" # a call of another function is not heard
+stderr: !~ "Pad" # a method named print is another callee
+step: jet build helper/main.jet
+exit: nonzero
+stderr: ~ "heard" # the handler's stop message
+stderr: ~ "helper from" # the callee is helper's definition identity
+stderr: !~ "other from" # a call of another function is not heard
+step: jet build refused/main.jet
+exit: nonzero
+stderr: ~ "E0104" # the call watch's shape refusal
+stderr: ~ "takes the name of a function" # it names what the watch needs
+stderr: !~ "heard" # the handler never runs

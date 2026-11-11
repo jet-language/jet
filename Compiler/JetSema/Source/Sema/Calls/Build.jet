@@ -274,14 +274,15 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
 // `compiler.rewrite_body`). `meta.allow_rewrite(package: name)` lets the
 // value rewrite that dependency's functions (JetBuildSession
 // `compiler.allow_rewrite`). `meta.events(watch: .Functions{marked: m},
-// handler)` hands the handler each checked function carrying `m`'s marker.
+// handler)` hands the handler each checked function carrying `m`'s marker,
+// and `meta.events(watch: .Calls{to: f}, handler)` each checked call of `f`.
 sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if method == "rewrite_body" -> return sema_call_compiler_rewrite_body(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "allow_rewrite" -> return sema_call_compiler_allow_rewrite(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "events" -> return sema_call_compiler_events(receiver, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if method == "events.functions" -> return sema_call_compiler_events_functions(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "events.functions" || method == "events.calls" -> return sema_call_compiler_events_read(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
         diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")` or `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)`"))
@@ -483,37 +484,55 @@ sema_call_compiler_allow_rewrite: fn(receiver: Expr, receiver_value: TExpr, args
 // `.Checked(.Function(f))` once for each function of the build's checked
 // program that carries the marker of the type of the marker value `m`, in
 // the order the program lists them; `m`'s field values filter nothing.
-// Watching only reads, so it uses no Meta effect. `m`'s type is resolved
-// here (a marker struct, else E1134), and the call is checked as the code
-//     functions: <meta's build's functions carrying that marker>
+// `meta.events(watch: .Calls{to: f}, handler)`: the handler hears
+// `.Checked(.Call(c))` once for each checked call written in the root
+// package's own source outside its `build: fn` whose resolved callee is `f`,
+// in the order the checker met them. `f` names a function, or an ambient
+// call such as `print` that no name hides; a function of the same name
+// elsewhere is another callee. Watching only reads, so it uses no Meta
+// effect. `m`'s type is resolved here (a marker struct, else E1134), as is
+// `f` (else E0104), and the call is checked as the code
+//     items: <meta's build's functions carrying that marker, or its calls of f>
 //     handler: fn(event: CompilerEvent) = <handler>
-//     loop f in functions -> handler(.Checked(.Function(f)))
+//     loop item in items -> handler(.Checked(.Function(item)))   // or .Call(item)
 // in a frame of its own, so the handler is checked as a function value of
-// that type and the loop runs in the build's own code. The functions are the
-// hidden `Compiler` method `events.functions`, which no source can spell.
+// that type and the loop runs in the build's own code. The items are the
+// hidden `Compiler` methods `events.functions` and `events.calls`, which no
+// source can spell.
 sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
-    marked: sema_compiler_events_marked(args) ?? {
-        diagnostics.push(sema_error("E0104", span, "`meta.events` takes `watch: .Functions{{marked: m}}` and a handler", "the watch names what the handler hears: each checked function that carries a marker of the type of the marker value `m`", "write `meta.events(watch: .Functions{{marked: Traced{{}}}}, (event) -> {{ … }})`"))
+    watch: sema_compiler_events_watch(args) ?? {
+        diagnostics.push(sema_error("E0104", span, "`meta.events` takes `watch: .Functions{{marked: m}}` or `watch: .Calls{{to: f}}` and a handler", "the watch names what the handler hears: each checked function that carries a marker of the type of the marker value `m`, or each checked call of the function `f`", "write `meta.events(watch: .Functions{{marked: Traced{{}}}}, (event) -> {{ … }})` or `meta.events(watch: .Calls{{to: print}}, (event) -> {{ … }})`"))
         return failed
     }
-    marker: sema_compiler_events_marker(marked, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    watched := ""
+    if watch.calls {
+        watched = sema_compiler_events_call_target(watch.value, scopes) ?? {
+            diagnostics.push(sema_error("E0104", expr_span(watch.value), "`.Calls{{to: …}}` takes the name of a function", "a call watch hears the calls whose resolved callee is that function, so it needs a name that resolves to one, or an ambient call such as `print`", "write the function's name, such as `.Calls{{to: print}}`"))
+            return failed
+        }
+    } else {
+        marker: sema_compiler_events_marker(watch.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        watched = marker.name.copy() // copy: the declaration stays with the program's markers
+    }
     at: span.start
-    functions_name: "__jet_events_functions_{at}"
+    items_name: "__jet_events_items_{at}"
     handler_name: "__jet_events_handler_{at}"
-    function_name: "__jet_events_function_{at}"
+    item_name: "__jet_events_item_{at}"
     handler_type: Type.Fn{params: [Type]{Type.Named{name: "CompilerEvent"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-    marker_name: Expr.Str{parts: [StrPart]{StrPart.Lit{text: marker.name}}, span: expr_span(marked), id: AST_NODE_GENERATED}
-    read: Expr.MethodCall{receiver: receiver.copy(), method: "events.functions", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(marker_name, expr_span(marked))}, id: AST_NODE_GENERATED}
-    function: Expr.Ident{name: function_name.copy(), span: span, id: AST_NODE_GENERATED}
-    item: Expr.EnumLit{type_name: "CheckedItem", variant: "Function", variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: function}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    watched_name: Expr.Str{parts: [StrPart]{StrPart.Lit{text: watched}}, span: expr_span(watch.value), id: AST_NODE_GENERATED}
+    read_method: if watch.calls -> "events.calls" else -> "events.functions"
+    read: Expr.MethodCall{receiver: receiver.copy(), method: read_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(watched_name, expr_span(watch.value))}, id: AST_NODE_GENERATED}
+    heard: Expr.Ident{name: item_name.copy(), span: span, id: AST_NODE_GENERATED}
+    variant: if watch.calls -> "Call" else -> "Function"
+    item: Expr.EnumLit{type_name: "CheckedItem", variant: variant, variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: heard}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
     event: Expr.EnumLit{type_name: "CompilerEvent", variant: "Checked", variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: item}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
     hear: Expr.Call{call: Call{name: handler_name.copy(), name_span: span, type_args: [Type]{}, args: [CallArg]{sema_compiler_events_arg(event, span)}}, id: AST_NODE_GENERATED}
-    functions: Expr.Ident{name: functions_name.copy(), span: span, id: AST_NODE_GENERATED}
+    items: Expr.Ident{name: items_name.copy(), span: span, id: AST_NODE_GENERATED}
     statements: [Stmt]{
-        sema_compiler_events_binding(functions_name, None, read, span),
+        sema_compiler_events_binding(items_name, None, read, span),
         sema_compiler_events_binding(handler_name, Val(handler_type), args[1].expr, span),
-        Stmt.For{var: function_name, var_span: span, var2: None, kind: ForKind.In{collection: functions, step: None}, body: [Stmt]{Stmt.Expr{expr: hear}}, span: span, arrow_body: false, label: None, auto_vectorization: None},
+        Stmt.For{var: item_name, var_span: span, var2: None, kind: ForKind.In{collection: items, step: None}, body: [Stmt]{Stmt.Expr{expr: hear}}, span: span, arrow_body: false, label: None, auto_vectorization: None},
     }
     return_type: scopes.return_type.copy()
     mark: sema_scope_mark(scopes)
@@ -529,9 +548,16 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// The marker value `m` of `meta.events(watch: .Functions{marked: m},
-// handler)`, or None when the call has another shape.
-sema_compiler_events_marked: fn(args: [CallArg]) -> Expr? Never! {
+// What a `meta.events` watch names: the marker value `m` of
+// `.Functions{marked: m}`, or the callee `f` of `.Calls{to: f}` (`calls`).
+SemaCompilerEventsWatch: struct {
+    calls: Bool
+    value: Expr
+}
+
+// The watch of `meta.events(watch: …, handler)`, or None when the call has
+// another shape.
+sema_compiler_events_watch: fn(args: [CallArg]) -> SemaCompilerEventsWatch? Never! {
     if args.len() != 2 || args[0].spread || args[1].spread -> return None
     watch: if args[0].label == .Val(label) -> label.name.copy() else -> ""
     if watch != "watch" -> return None
@@ -539,10 +565,29 @@ sema_compiler_events_marked: fn(args: [CallArg]) -> Expr? Never! {
         if label.name != "handler" -> return None
     }
     if args[0].expr == .EnumLit(_, variant, _, watched, leading_dot, _, _) {
-        if !leading_dot || variant != "Functions" || watched.len() != 1 -> return None
+        if !leading_dot || watched.len() != 1 -> return None
         if watched[0] == .Named(label, value) {
-            if label == "marked" -> return Val(value.copy())
+            if variant == "Functions" && label == "marked" -> return Val(SemaCompilerEventsWatch{calls: false, value: value.copy()})
+            if variant == "Calls" && label == "to" -> return Val(SemaCompilerEventsWatch{calls: true, value: value.copy()})
         }
+    }
+    None
+}
+
+// The ambient calls a call watch can name: each call site records the
+// call's name as its callee (Direct.jet sema_call_ambient_record_io).
+SEMA_COMPILER_EVENTS_AMBIENT_CALLS: [String]{"print"}
+
+// The resolved identity of a call watch's callee `f`, the identity a checked
+// call of it records: a function's definition identity, or the name of an
+// ambient call no name in scope hides. None when `f` names neither.
+sema_compiler_events_call_target: fn(target: Expr, scopes: SemaScopeTable) -> String? Never! {
+    if target == .Ident(name, _, _) {
+        if sema_scope_resolve(scopes, name) == .Val(symbol) {
+            if symbol.kind == SymbolKind.Function -> return Val(symbol.id.key.copy())
+            return None
+        }
+        if SEMA_COMPILER_EVENTS_AMBIENT_CALLS.contains(name) -> return Val(name.copy())
     }
     None
 }
@@ -576,21 +621,25 @@ sema_compiler_events_marker: fn(marked: Expr, environment: SemaScopeEnvironment,
     declaration
 }
 
-// The hidden `Compiler` method `events.functions` that `meta.events` reads
-// (a written method name has no dot, so no source spells it). Its argument
-// is the watched marker's declared name, which the build host matches
-// against the markers of the value's checked program (JetEval
-// jet_eval_reflection_marked_functions) once the build session accepts the
-// value as one of its own while it runs.
-sema_call_compiler_events_functions: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// The hidden `Compiler` methods `events.functions` and `events.calls` that
+// `meta.events` reads (a written method name has no dot, so no source
+// spells them). The argument of `events.functions` is the watched marker's
+// declared name, which the build host matches against the markers of the
+// value's checked program (JetEval jet_eval_reflection_marked_functions);
+// that of `events.calls` is the watched callee's identity, which it matches
+// against the callees of the root's checked calls (JetEval
+// jet_eval_reflection_calls_to). The host answers once the build session
+// accepts the value as one of its own while it runs.
+sema_call_compiler_events_read: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 -> return failed
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return failed
     name: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     // Watching only reads the checked program, so it uses no Meta effect.
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.events", span, [EffectRowEntry]{}, diagnostics) -> return failed
-    functions: Type.List{element: Type.Named{name: "FunctionInfo"}}
-    call: sema_tree_node(functions, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "events.functions", args: [TExpr]{name}}}, span)
+    element: if method == "events.calls" -> "CompilerCall" else -> "FunctionInfo"
+    items: Type.List{element: Type.Named{name: element}}
+    call: sema_tree_node(items, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{name}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
 }
 

@@ -661,6 +661,10 @@ JetCompilerServicesProgramInfo: enum {
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
 // compiler API; a missing producer fact refuses the snapshot and is named.
+// `root_calls`, which no source can spell, holds the CompilerCall of each
+// checked call written in the root package's own source outside its `build`
+// functions, an ambient call's callee being its name (`print`), in the order
+// the checker met them; `meta.events(watch: .Calls{to: f}, …)` reads it.
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
@@ -670,6 +674,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
     packages := [TComptimeValue]{}
+    build_keys := [String]{}
     loop module_row in registration.modules {
         checked := SemaGraphModuleResult?{None}
         loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
@@ -684,7 +689,10 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 .Enum(definition) -> name = Val(definition.name)
                 .Distinct(definition) -> name = Val(definition.name)
                 .Func(function) -> {
-                    if function.name == "build" -> next
+                    if function.name == "build" {
+                        if jet_eval_compiler_services_function_key(function, module_row) == .Val(key) -> build_keys.push(key)
+                        next
+                    }
                     key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
                     markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_identity}` has no marker registry")
                     value: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key), markers)
@@ -710,6 +718,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
         {name: "packages", value: TComptimeValue.List{values: packages}},
+        {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
     }
     if index.value == .Struct(_, index_fields) {
         loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
@@ -721,12 +730,35 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 
+jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, build_keys: [String]) -> [TComptimeValue] Never! {
+    calls := [TComptimeValue]{}
+    loop module_row in registration.modules {
+        if module_row.package_identity != registration.package_identity -> next
+        loop checked in graph.modules {
+            if checked.module_identity != module_row.module_identity -> next
+            loop call in checked.call_facts {
+                if build_keys.contains(call.caller_key) -> next
+                callee := call.intrinsic_api.copy() // copy: the checked graph keeps its call facts
+                if call.callee == .Val(id) -> callee = Val(id.key.copy()) // copy: the checked graph keeps its call facts
+                name: callee ?? next
+                calls.push(TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
+                    {name: "caller", value: jet_eval_compiler_services_string(call.caller_key)},
+                    {name: "callee", value: jet_eval_compiler_services_string(name)},
+                    {name: "module", value: jet_eval_compiler_services_string(checked.module_path)},
+                    {name: "span", value: jet_eval_compiler_services_span(call.span)},
+                }})
+            }
+        }
+    }
+    calls
+}
+
 // The whole-program view of a build no body can read (no source outside
-// Core spells `program`): ProgramInfo's fields, every one empty, so the
-// build skips the snapshot.
+// Core spells `program` or `compiler`): ProgramInfo's fields, every one
+// empty, so the build skips the snapshot.
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
-    loop name in ([String]{"types", "functions", "packages", "definitions", "references", "call_edges", "structural_nodes"}) {
+    loop name in ([String]{"types", "functions", "packages", "root_calls", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}
