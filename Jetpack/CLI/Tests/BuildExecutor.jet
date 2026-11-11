@@ -207,6 +207,80 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     files.remove_all(root).drop("test cleanup")
 }
 
+// The CAS file of `bytes` in the store at `store_root`.
+build_test_blob_path: fn(store_root: String, bytes: [U8]) -> String Never! {
+    files.join(files.join(store_root, "cas"), ContentDigest.from_bytes(bytes).as_str().removeprefix("sha256:"))
+}
+
+// The one action record in the store at `store_root`.
+build_test_record_path: fn(store_root: String) -[FS]> String Never! {
+    records: files.join(store_root, "ac")
+    names: loop entry in files.list_dir(records) ?? panic("list records") -> entry.name
+    assert_eq(names.len(), 1)
+    files.join(records, names[0])
+}
+
+// Half of the file at `path`, as a write cut short by a crash leaves it.
+build_test_truncate: fn(path: String) -[FS]> {
+    bytes: files.read_bytes(path) ?? panic("read entry")
+    files.write_bytes(path, bytes.slice(0, bytes.len() /% 2)) ?? panic("truncate entry")
+}
+
+// Whether `record` reads as a miss: the executor runs the action again on
+// any restore error (build_start_action's restore_failure).
+build_test_restore_misses: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> Bool {
+    if build_restore_action_outputs(store, base, action, record) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
+// Whether the record under `key` reads as a miss: absent, or refused.
+build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS, Env, Exec, Time, Rand]> Bool {
+    if build_read_action_record(store, key) == {
+        .Val(_) -> false
+        .None | .Err(_) -> true
+    }
+}
+
+#Test("lost cache entries: declared inputs are never published, and a missing or truncated blob or record reads as a miss") {
+    if !build_test_require_sandbox() -> return
+    root: build_test_root("lost-entries")
+    files.write(files.join(root, "input.txt"), "kept") ?? panic("input")
+    store_root: files.join(root, ".jet-store")
+    store: BuildArtifactStoreHandle.at(store_root) ?? panic("store")
+    grants: [BuildEffect]{BuildEffect.Exec}
+    plan: build_test_plan(grants, "read -r line < input.txt; printf %s \"$line-out\" > out.txt")
+    ran: build_execute_build_plan(plan, root, store, grants) ?? panic("run")
+    assert_eq(ran.report.metrics.cache_restored_actions, 0)
+    assert(!files.exists(build_test_blob_path(store_root, "kept".bytes())))
+    assert_eq(files.read(files.join(root, "out.txt")) ?? panic("output"), "kept-out")
+    // Each lost entry, in a store of its own, reads as a miss and never as
+    // a fault or as other bytes.
+    lost_root: files.join(root, ".lost-store")
+    lost: BuildArtifactStoreHandle.at(lost_root) ?? panic("lost store")
+    build := HermeticBuildContext.new()
+    handle: build.action("cc", ActionSpec.new([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
+    cc_plan: build.plan() ?? panic("plan")
+    action: cc_plan.actions[handle.id]
+    digest: lost.put_blob("object".bytes()) ?? panic("blob")
+    record: ActionResultRecord{key: "act-sha256:lost", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
+    build_write_action_record(lost, "act-sha256:lost", record) ?? panic("write record")
+    assert(!build_test_record_misses(lost, "act-sha256:lost"))
+    blob: build_test_blob_path(lost_root, "object".bytes())
+    build_test_truncate(blob)
+    assert(build_test_restore_misses(lost, root, action, record))
+    // The store quarantines a refused entry, so it is missing afterwards.
+    files.remove(blob).drop("a refused blob is already quarantined")
+    assert(build_test_restore_misses(lost, root, action, record))
+    record_path: build_test_record_path(lost_root)
+    build_test_truncate(record_path)
+    assert(build_test_record_misses(lost, "act-sha256:lost"))
+    files.remove(record_path).drop("a refused record may already be quarantined")
+    assert(build_test_record_misses(lost, "act-sha256:lost"))
+    files.remove_all(root).drop("test cleanup")
+}
+
 #Test("action work tree: a real sandbox root is used, a symlinked sandbox root is refused") {
     root: build_test_root("sandbox-root")
     outside: build_test_root("sandbox-root-outside")
@@ -749,7 +823,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     plan: build_test_plan([BuildEffect]{BuildEffect.Exec}, "exit 3")
     action: plan.actions[0]
-    inputs: build_snapshot_declared_inputs(store, root, action) ?? panic("snapshot")
+    inputs: build_snapshot_declared_inputs(root, action) ?? panic("snapshot")
     // The captured bytes are the hashed bytes the work tree receives.
     assert_eq(inputs.len(), 1)
     assert_eq(inputs[0].bytes, "input".bytes())

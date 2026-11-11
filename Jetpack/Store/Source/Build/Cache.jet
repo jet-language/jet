@@ -124,16 +124,16 @@ ActionResultRecord: struct {
 }
 
 // Rust `snapshot_declared_inputs`: every declared input read without
-// following links, bounded, and published to the CAS. The captured bytes are
-// the ones the work tree receives.
-build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction) -[FS, Env, Exec, Time, Rand]> [ActionInputCapture] BuildIOError! {
+// following links, bounded, and hashed. The captured bytes are the ones the
+// work tree receives, so they are never published to the CAS.
+build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[FS]> [ActionInputCapture] BuildIOError! {
     inputs := [ActionInputCapture]{}
     total := 0
     loop input in action.inputs {
         path: build_resolve_under(base, input)
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
-        digest: store.put_blob(bytes)
+        digest: ContentDigest.from_bytes(bytes)
         mode: (files.stat(path) ?? return Err(BuildIOError.from(err))).mode
         executable: (mode /% 64) % 2 == 1
         inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len(), executable}, bytes})

@@ -297,7 +297,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     action: build_found_folders(plan, declared, probe_facts) ?? return Err(err)
     handle: HermeticActionHandle{id: action.id, context: plan.context}
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
-    inputs: build_snapshot_declared_inputs(artifact_store, project_root, action) ?? return Err(build_io_action(action, err))
+    inputs: build_snapshot_declared_inputs(project_root, action) ?? return Err(build_io_action(action, err))
     snapshots := loop input in inputs -> input.snapshot
     snapshots.extend(build_snapshot_folders(stamps, project_root, action) ?? return Err(build_io_action(action, err)))
     // A tool another step makes is a declared input, run from the work

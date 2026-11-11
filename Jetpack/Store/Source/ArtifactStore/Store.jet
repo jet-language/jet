@@ -281,8 +281,13 @@ ArtifactStore: struct {
     }
 
     publish_blob: fn(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
+        self.publish_blob_entry(bytes, durable: true)
+    }
+
+    // `publish_blob`, written with its disk syncs when `durable`.
+    publish_blob_entry: fn(self, bytes: [U8], durable: Bool) -[FS, Env, Exec, Time, Rand]> ObjectHandle ArtifactStoreError! {
         object: ObjectHandle.from_bytes(bytes)
-        self.publish_object(object, bytes)
+        self.publish_data(ArtifactEntryKey.Blob(object.key()), self.object_path(object), bytes, durable)
         Ok(object)
     }
 
