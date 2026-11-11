@@ -222,6 +222,14 @@ exit: fn(code: Int) -[Exec.Exit]> Never Never! {
     loop {}
 }
 
+// Ends the program with `code` after `message` and a newline on stderr: a
+// script's `echo "$message" >&2; exit $code` in one call. Status 101 maps to
+// 1, as in `exit`.
+fail: fn(code: Int, message: String) -[Exec.Exit, IO, Time.Wait]> Never Never! {
+    core.term.eprint(message)
+    exit(code)
+}
+
 /// End the process with exactly `code`, after the same cleanup boundary as
 /// `process.exit`, without mapping 101 to the user-error status 1. Only a tool
 /// that reports a Jet defect (a compiler panic) ends with 101.

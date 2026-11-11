@@ -1,0 +1,49 @@
+// A script states its fallback in the call: `files.read_or(path, "")` is the
+// text of a file or the fallback when it can't be read (`cat f 2>/dev/null`),
+// `files.list_dir_or(dir, [])` a directory's entries or the fallback, and
+// `process.fail(code, message)` ends the run with `code` after the message on
+// stderr (`echo "$message" >&2; exit $code`). `files.best_effort()` runs file
+// operations past a failure, as the shell does, and records what failed.
+package: {
+    name: "script_fallbacks"
+    authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time] }
+}
+
+use {
+    files: core.files
+    process: core.process
+    os: core.sys
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() > 0 {
+        status: files.read_or(args[0], "").trim()
+        if status != "OK" -> process.fail(3, "batch {files.basename(args[0])} is {if status == "" -> "missing" else -> status}")
+        return print("batch is OK")
+    }
+    root: files.mktemp("script-fallbacks")
+    files.create_dir_all(root)
+    files.write(files.join(root, "b1.status"), "OK\n")
+    files.write(files.join(root, "b2.status"), "NOAPPLY\n")
+    print("b1: {files.read_or(files.join(root, "b1.status"), "none").trim()}")
+    print("b9: {files.read_or(files.join(root, "b9.status"), "none").trim()}")
+    print("statuses: {files.list_dir_or(root, [], matching: "*.status").len()}")
+    print("absent dir: {files.list_dir_or(files.join(root, "gone"), []).len()}")
+    done := files.best_effort()
+    done.remove_all(files.join(root, "old"))
+    done.remove(files.join(root, "old.lock"))
+    done.create_dir_all(files.join(root, "seed"))
+    done.copy_file(files.join(root, "b1.status"), files.join(root, "seed/b1.status"))
+    done.copy_file(files.join(root, "jet"), files.join(root, "seed/jet"))
+    done.copy_dir(files.join(root, "seed"), files.join(root, "seed.bak"))
+    done.symlink("seed", files.join(root, "current"), replace: true)
+    print("current: {files.basename(done.canonicalize(files.join(root, "current")))}")
+    print("best effort: failed {done.failed()}, {done.report().lines().len()} failure, seed has {files.list_dir_or(files.join(root, "seed"), []).len()}")
+    exe: os.executable()
+    loop name in ["b1", "b2", "b9"] {
+        receipt: Sh{"{exe} {files.join(root, "{name}.status")}"}.run()
+        print("{name}: exit {receipt.code} out [{receipt.output.trim()}] err [{receipt.errors.trim()}]")
+    }
+    files.remove_all(root)
+}

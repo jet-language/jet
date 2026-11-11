@@ -918,6 +918,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | API | Result | Description |
 | --- | --- | --- |
 | `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is `IOError.InvalidInput` with cause `stream did not contain valid UTF-8`. |
+| `read_or(path, fallback)` | `String` | The text `read` gives, or `fallback` when the file cannot be read (missing, unreadable or not UTF-8): `files.read_or(path, "")` is `cat path 2>/dev/null` with the fallback stated in the call. |
 | `read_bytes(path)` | `[U8] !IOError` | Read raw bytes. |
 | `write(path, text)` | `!IOError` | Create or replace a text file. |
 | `write_bytes(path, bytes)` | `!IOError` | Create or replace raw bytes. |
@@ -937,11 +938,13 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path, matching: String?{None})` | `[DirEntry] !IOError` | List entries in name order. `matching` keeps the names that match a shell pattern (`*` any bytes, `?` one byte), so `list_dir(dir, matching: "*.files")` is `dir/*.files`. |
+| `list_dir_or(path, fallback, matching: String?{None})` | `[DirEntry]` | The entries `list_dir` gives, or `fallback` when the directory cannot be listed: `files.list_dir_or(dir, [])`. |
 | `create_dir_all(path)` | `!IOError` | Create a directory and any missing parents; an existing directory is success. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link, replace: Bool{false})` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. `replace: true` first removes a link or file at `link`, so a link to a directory is replaced rather than followed (`ln -sfn`); a real directory there is an error. |
+| `best_effort()` | `BestEffort` | A record for file operations a script runs best effort, keeping going past one that fails as the shell does. `done.copy_file` (which runs `copy`; a method can't be named `copy`), `copy_dir`, `remove`, `remove_all`, `create_dir_all`, `symlink` and `canonicalize` take their `core.files` namesake's arguments and record a failure in `done.failures` instead of returning it; `remove` and `remove_all` count a path already gone as done (`rm -f`, `rm -rf`), and `canonicalize` gives the path unchanged when it cannot be resolved. `done.failed()` says whether any failed and `done.report()` is one line per failure, so the run reports what failed once. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path, missing_last: Bool{false})` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. `missing_last: true` lets the last part be missing, as `readlink -f` does: the parent is resolved and the last name joined to it. |
 | `walk(root, ignore, skip: [String]{[String]{}})` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. An entry whose name is in `skip` is neither yielded nor entered (`find -name NAME -prune`). `.list()` collects them all as `[WalkEntry] !IOError`. |
@@ -2434,6 +2437,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
 | `process.exit(code)` | `Never -[Exec.Exit]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
 | `#Unsafe process.exit_unmapped(code)` | `Never -[Exec.Exit]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
+| `process.fail(code, message)` | `Never -[Exec.Exit, IO, Time.Wait]>` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |

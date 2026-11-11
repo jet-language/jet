@@ -907,6 +907,13 @@ read: fn(path: String | Path) -[FS.Read]> String IOError! {
     Ok(String.from_bytes(bytes) ?? return Err(io_err("read", source, "stream did not contain valid UTF-8")))
 }
 
+/// The text of the file at `path`, or `fallback` when it cannot be read
+/// (missing, unreadable or not UTF-8): `files.read_or(path, "")` is a
+/// script's `cat path 2>/dev/null`, its fallback stated in the call.
+read_or: fn(path: String | Path, fallback: String) -[FS.Read]> String Never! {
+    read(path) ?? fallback
+}
+
 
 map: fn(path: String | Path) -[FS.Read]> MappedFile IOError! {
     text: path_text(path)
@@ -1375,6 +1382,13 @@ list_dir: fn(path: String | Path, matching: String?{None}) -[FS.Read]> [DirEntry
     Ok(kept)
 }
 
+/// The entries of directory `path` as `list_dir` gives them, or `fallback`
+/// when it cannot be listed: `files.list_dir_or(dir, [])` is a script's
+/// `ls dir 2>/dev/null`, its fallback stated in the call.
+list_dir_or: fn(path: String | Path, fallback: [DirEntry], matching: String?{None}) -[FS.Read]> [DirEntry] Never! {
+    list_dir(path, matching: matching) ?? fallback
+}
+
 
 dirname_impl: fn(path: String) -> String Never! {
     raw: path.bytes()
@@ -1510,6 +1524,67 @@ symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) 
     directory := false
     if platform == "windows" -> directory = core.files.__symlink_directory_raw(source)
     core.files.__symlink_raw(source, target, directory)
+}
+
+/// File operations run best effort, where a script keeps going past one that
+/// fails as the shell does (`rm -rf old; mkdir -p new; cp a new/`): each
+/// call runs its `core.files` namesake (`copy_file` runs `copy`, since a
+/// method can't be named `copy`) and records a failure here instead of
+/// returning it, so the failure path stays visible at the call (the receiver
+/// is the record) and the run reports what failed once, through `failed()`,
+/// `report()` or `failures`.
+BestEffort: struct {
+    failures: [IOError]
+}
+
+/// A new, empty best-effort record: `done := files.best_effort()`.
+best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
+
+impl BestEffort {
+    copy_file: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+        if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    copy_dir: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+        if core.files.copy_dir(from, to) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    /// `rm -f`: a path that is already gone is no failure.
+    remove: fn(&self, path: String | Path) Never! -[FS.Write]> {
+        if core.files.remove(path) == .Err(failure) && !(failure == .NotFound(_)) -> self.failures.push(failure)
+    }
+
+    /// `rm -rf`: a path that is already gone is no failure.
+    remove_all: fn(&self, path: String | Path) Never! -[FS]> {
+        if core.files.remove_all(path) == .Err(failure) && !(failure == .NotFound(_)) -> self.failures.push(failure)
+    }
+
+    create_dir_all: fn(&self, path: String | Path) Never! -[FS.Write]> {
+        if core.files.create_dir_all(path) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    symlink: fn(&self, original: String | Path, link: String | Path, replace: Bool{false}) Never! -[FS.Write]> {
+        if core.files.symlink(original, link, replace: replace) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    /// The resolved path, or `path` itself when it cannot be resolved (as
+    /// `readlink -f path || echo path`), the failure recorded.
+    canonicalize: fn(&self, path: String | Path, missing_last: Bool{false}) -[FS.Read]> String Never! {
+        core.files.canonicalize(path, missing_last: missing_last) ?? {
+            self.failures.push(err)
+            path_text(path)
+        }
+    }
+
+    /// Whether any operation failed.
+    failed: fn(self) -> Bool Never! { self.failures.len() > 0 }
+
+    /// One line per failure, in the order they happened; empty when none did.
+    report: fn(self) -> String Never! {
+        lines := [String]{}
+        loop failure in self.failures -> lines.push("{failure}")
+        lines.join("\n")
+    }
 }
 
 
@@ -3020,6 +3095,53 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     walked := [String]{}
     loop entry in walk_files(join(root, "keep"), skip: [String]{".jet"}) -> walked.push((entry ?? panic("walk")).relative)
     assert_eq(walked, [String]{"src.jet"})
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("best_effort runs each operation, records what failed and reports it once") {
+    root: mktemp("files-best-effort-kat")
+    create_dir_all(root) ?? panic("root")
+    write(join(root, "a"), "one") ?? panic("a")
+    done := best_effort()
+    done.remove_all(join(root, "gone"))
+    done.remove(join(root, "gone"))
+    done.create_dir_all(join(root, "out/deep"))
+    done.copy_file(join(root, "a"), join(root, "out/a"))
+    done.copy_dir(join(root, "out"), join(root, "again"))
+    assert(!done.failed())
+    assert_eq(done.report(), "")
+    done.copy_file(join(root, "missing"), join(root, "out/b"))
+    assert_eq(done.canonicalize(join(root, "missing/x")), join(root, "missing/x"))
+    assert_eq(done.canonicalize(join(root, "a")), canonicalize(join(root, "a")) ?? panic("canonical a"))
+    if core.files.__os_family() == "unix" {
+        done.symlink("a", join(root, "link"))
+        done.symlink("out", join(root, "link"))
+        done.symlink("out", join(root, "link"), replace: true)
+        assert_eq(read_link(join(root, "link")) ?? panic("link"), "out")
+    }
+    assert_eq(read(join(root, "again/a")) ?? panic("copied"), "one")
+    assert(done.failed())
+    expected: if core.files.__os_family() == "unix" -> 3 else -> 2
+    assert_eq(done.failures.len(), expected)
+    assert_eq(done.report().split("\n").len(), expected)
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("read_or and list_dir_or give the file or listing, else the stated fallback") {
+    root: mktemp("files-or-kat")
+    create_dir_all(root) ?? panic("root")
+    write(join(root, "a.files"), "one\n") ?? panic("a")
+    write(join(root, "notes.txt"), "x") ?? panic("notes")
+    write_bytes(join(root, "bad"), [U8]{255, 10}) ?? panic("bad")
+    assert_eq(read_or(join(root, "a.files"), "none"), "one\n")
+    assert_eq(read_or(join(root, "missing"), "none"), "none")
+    assert_eq(read_or(join(root, "bad"), ""), "")
+    names := [String]{}
+    loop entry in list_dir_or(root, [DirEntry]{}, matching: "*.files") -> names.push(entry.name.copy())
+    assert_eq(names, [String]{"a.files"})
+    assert_eq(list_dir_or(root, [DirEntry]{}).len(), 3)
+    assert_eq(list_dir_or(join(root, "missing"), [DirEntry]{}).len(), 0)
+    assert_eq(list_dir_or(join(root, "a.files"), [DirEntry]{}).len(), 0)
     remove_all(root) ?? panic("cleanup")
 }
 
