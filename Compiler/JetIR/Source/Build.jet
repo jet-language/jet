@@ -50,8 +50,14 @@ IRWriteBack: struct { cell: Int, slot: Int }
 // `guards` the statement guards held when it opened (leaving it drops the
 // ones taken since, ir_exit_statement_guards).
 // A valued loop (`x: loop { ... break v }`) writes its break value into
-// `value` (-1: a statement loop).
-IRLoopFrame: struct { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1} }
+// `value` (-1: a statement loop). `edge` is the word each `break` sets to
+// tell its path apart where the loop's exits meet (ir_loop_edge; -1: none).
+IRLoopFrame: struct { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1}, edge: Int{-1} }
+
+// A `break` out of the loop whose edge word is `edge`: the id it set that
+// word to and the ownership where it left of the variables bound before
+// the loop (IRLoopFrame.mark), which its drops left as they were.
+IRLoopEdge: struct { edge: Int, id: Int, states: [IROwnState] }
 
 // A guard a temporary in the statement being built took, or a temporary
 // with cleanup lent to a read parameter (IRBuilder statement_guards): its
@@ -224,6 +230,9 @@ IRBuilder: struct {
     // A task body (ir_task_spawn): a failure that leaves it stops the task,
     // which its join reports as TaskFailure.Panicked (ir_try_failure).
     task_body: Bool{false}
+    // The breaks built so far (ir_loop_jump), whose ownership meets that of
+    // their loop's other exits after it (ir_loop_join).
+    loop_edges: [IRLoopEdge]{[IRLoopEdge]{}}
 }
 
 // One failure of a body: its message and the span it names.
@@ -2133,6 +2142,72 @@ ir_join_owned: fn(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnSta
     loop (at, index) in joined -> ir_live_set(b, lives[at], else_states[index])
     ir_end(b.f, b.line)
     loop (at, index) in joined -> ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
+}
+
+// Before a loop's exit Block opens: its edge word (IRLoopFrame.edge), 0 on
+// the path that leaves at its test, when a variable bound before it has a
+// drop, so a `break` may leave it owning other than that path does;
+// else -1.
+ir_loop_edge: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
+    loop index in 0..<b.bindings.len() {
+        binding: b.bindings[index]
+        if binding.indirect < 0 && binding.slot >= 0 && ir_has_drop(m, b, binding.slot) -> return ir_word_const(m, b, 0)
+    }
+    -1
+}
+
+// After a loop's exit Block ends, where its exits meet: each `break` to it
+// (IRLoopEdge, with edge word `edge`) and, when `tested` (the loop has a
+// test), the path that left there, whose ownership the bindings hold. A
+// loop without a test takes its first break's ownership as that path's. A
+// variable the exits disagree on still owns its value through a live flag
+// each exit's edge word selects, as ir_join_owned does for an If's two.
+ir_loop_join: fn(m: &IRModule, b: &IRBuilder, edge: Int, tested: Bool) Never! {
+    if edge < 0 -> return
+    rows := [Int]{}
+    loop at in 0..<b.loop_edges.len() {
+        if b.loop_edges[at].edge == edge -> rows.push(at)
+    }
+    if rows.len() == 0 -> return
+    first := 0
+    if !tested {
+        loop index in 0..<b.loop_edges[rows[0]].states.len() {
+            if index >= b.bindings.len() -> break
+            state: b.loop_edges[rows[0]].states[index]
+            ir_set_own_state(b, index, state)
+        }
+        first = 1
+    }
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    count: b.loop_edges[rows[0]].states.len()
+    loop index in 0..<count {
+        if index >= b.bindings.len() -> break
+        base: IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live}
+        differs := false
+        held := base.owned
+        loop at in first..<rows.len() {
+            state: b.loop_edges[rows[at]].states[index]
+            if state.owned != base.owned || state.live != base.live -> differs = true
+            if state.owned -> held = true
+        }
+        if !differs -> next
+        if !held {
+            ir_set_own_state(b, index, IROwnState{owned: false})
+            next
+        }
+        live: ir_temp(m, b, bool_row)
+        ir_live_set(b, live, base)
+        loop at in first..<rows.len() {
+            state: b.loop_edges[rows[at]].states[index]
+            if state.owned == base.owned && state.live == base.live -> next
+            id: ir_word_const(m, b, b.loop_edges[rows[at]].id)
+            taken: ir_bool_op(m, b, IROp.Eq, edge, id)
+            ir_open_if(b.f, taken, b.line)
+            ir_live_set(b, live, state)
+            ir_end(b.f, b.line)
+        }
+        ir_set_own_state(b, index, IROwnState{owned: true, live: live})
+    }
 }
 
 // Sets the live flag `live` to whether a variable in `state` holds its value.
