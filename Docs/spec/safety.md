@@ -6658,14 +6658,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1388,
+      "line": 1390,
       "column": 5,
       "reason": "the caller bounded this byte position by the String storage length"
     },
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1409,
+      "line": 1411,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -9633,7 +9633,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "tests",
       "file": "tests/fixtures/explicit_cleanup_order.jet",
-      "line": 33,
+      "line": 36,
       "column": 5,
       "reason": "exercise the explicit process-stop cleanup boundary"
     },
@@ -11130,8 +11130,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Sys/Sys.jet | 1202:1 | "posix kill: the caller owns or is entitled to signal the target process" |
 | Core | Core/Sys/Sys.jet | 1209:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
 | Core | Core/Sys/Sys.jet | 1213:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
-| Core | Core/Testing/Testing.jet | 1388:5 | "the caller bounded this byte position by the String storage length" |
-| Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Testing/Testing.jet | 1390:5 | "the caller bounded this byte position by the String storage length" |
+| Core | Core/Testing/Testing.jet | 1411:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
@@ -11555,7 +11555,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/conformance/corpus/core/sys/utime.jet | 5:5 | "probe timestamp update with an empty path" |
 | tests | tests/conformance/corpus/core/sys/wait.jet | 5:5 | "wait for a child that this witness does not have" |
 | tests | tests/conformance/corpus/core/sys/waitpid.jet | 5:5 | "poll for a child that this witness does not have" |
-| tests | tests/fixtures/explicit_cleanup_order.jet | 33:5 | "exercise the explicit process-stop cleanup boundary" |
+| tests | tests/fixtures/explicit_cleanup_order.jet | 36:5 | "exercise the explicit process-stop cleanup boundary" |
 | tests | tests/fixtures/ffi_stack4_i64.jet | 2:1 | "the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return" |
 | tests | tests/fixtures/ffi_stack4_i64.jet | 49:5 | "Linux getpid syscall 39 ignores all argument registers and retains no stack pointer" |
 | tests | tests/fixtures/fmt_import_c_bindings.jet | 7:1 | "audited C boundary" |
