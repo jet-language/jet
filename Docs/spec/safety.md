@@ -6476,7 +6476,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 231,
+      "line": 248,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -11118,7 +11118,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4339:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4368:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 189:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 231:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 248:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 786:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 954:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |

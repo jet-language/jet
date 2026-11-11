@@ -2499,6 +2499,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.status_ok(receipt)` | `Bool` | Test whether a receipt represents a successful exit. |
 | `process.failed(receipt)` / `process.exited(receipt)` | `Bool` | Inspect failure or normal process exit on a receipt. |
 | `process.exit_status(receipt)` | `Int` | A finished child's status as the shell's `$?` reports it: 124 when its timeout stopped it (as `timeout(1)` does), 128 + n after signal n, else its exit code. `Sh.status()` returns the same number. |
+| `process.exec(argv, env: {"NAME": value})` | `Never -[Exec, IO, Time.Wait]>` | Run `argv` with the terminal's stdin, stdout and stderr and `env` added to the inherited environment, then end the program with the child's `exit_status` (128 + n after signal n; 101 maps to 1, as in `process.exit`): a script's last line `NAME=value cmd args`. A command that cannot start ends the program with 127 after `argv[0]: <error>` on stderr. `env` defaults to none. |
 | `process.current_pid()` | `Int -[Env]>` | Return the current process identifier. |
 | `process.cwd(spec, path)` | `ProcessSpec` | Builder form that sets the child working directory; there is no zero-argument `process.cwd()`. |
 | `process.env_get(name)` | `?String -[Env]>` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |

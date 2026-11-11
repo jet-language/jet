@@ -1,0 +1,32 @@
+// `process.exec(argv, env: …)` is a script's last line `NAME=value cmd args`:
+// the child runs with this program's stdin, stdout and stderr plus the
+// given variables, and the program ends with the child's status as the
+// shell reports it (128 + n after signal n). A command that cannot start
+// ends it with 127, as a shell's "command not found" does.
+package: {
+    name: "process_exec"
+    authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc] }
+}
+
+use {
+    process: core.process
+    os: core.sys
+}
+
+run: fn() {
+    role: process.args().get(0) ?? ""
+    if role == {
+        "status" -> process.exec(["sh", "-c", "echo \"child: $GREETING $*\"; exit 3", "sh", "a", "b"], env: ["GREETING": "hello"])
+        "signal" -> process.exec(["sh", "-c", "kill -TERM $$"])
+        "missing" -> process.exec(["jet-no-such-command"])
+        else -> {}
+    }
+    exe: os.executable()
+    loop mode in ["status", "signal", "missing"] {
+        receipt: process.run_spec(process.cmd([exe, mode])) ?? panic("relaunching {exe} failed")
+        print("{mode}: exit {receipt.code}")
+        loop line in receipt.output.lines() -> print("  stdout: {line}")
+        // The error text after the command's name is the OS's own.
+        loop line in receipt.errors.lines() -> print("  stderr: {if line.starts_with("jet-no-such-command: ") -> "jet-no-such-command: …" else -> line}")
+    }
+}

@@ -225,6 +225,23 @@ fail: fn(code: Int, message: String) -[Exec.Exit, IO, Time.Wait]> Never Never! {
     exit(code)
 }
 
+// Runs `argv` with the terminal's stdin, stdout and stderr and `env` added to
+// this program's environment, then ends the program with its status as
+// `exit_status` gives it (128 + n after signal n; 101 maps to 1, as in
+// `exit`): a script's last line `NAME=value cmd args`, or `exec cmd args`.
+// A command that cannot start ends the program with 127 after
+// `argv[0]: <error>` on stderr, as a shell's "command not found" does.
+exec: fn(argv: [String], env: [String: String]{[String: String]{}}) -[Exec, IO, Time.Wait]> Never Never! {
+    // copy: the plan owns its argv; argv[0] is still read for the error.
+    spec := cmd(argv.copy()).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    loop (name, value) in env -> spec = spec.env(name, value)
+    if spec.run() == {
+        .Ok(receipt) -> exit(exit_status(receipt))
+        .Err(error) -> fail(127, "{argv.get(0) ?? ""}: {error}")
+    }
+    loop {}
+}
+
 /// End the process with exactly `code`, after the same cleanup boundary as
 /// `process.exit`, without mapping 101 to the user-error status 1. Only a tool
 /// that reports a Jet defect (a compiler panic) ends with 101.

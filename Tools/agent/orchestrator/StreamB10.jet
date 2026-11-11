@@ -42,6 +42,5 @@ run: fn() {
         if !files.is_dir(sub) -> print("streamB: not staged, skipped: {sub}")
     }
     integrate: "{process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())}/integrate10.sh"
-    batch: Sh{"{integrate} {args[1]}"}.extend(subs.filter(sub -> files.is_dir(sub))).spec().env("CENSUS_JET_DIR", seed).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run()
-    if batch.code != 0 -> process.exit(batch.code)
+    process.exec([integrate, args[1]].concat(subs.filter(sub -> files.is_dir(sub))), env: ["CENSUS_JET_DIR": seed])
 }
