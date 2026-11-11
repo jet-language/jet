@@ -1,0 +1,13 @@
+// A callback's row holds the effect of the local lambda it calls: `IO` is
+// named, and nothing else is.
+quietly: fn(f: fn() -[]> Unit) { f() }
+
+loud: fn() -[IO]> Int {
+    say: () -> { print("escaped") }
+    quietly(() -> { say() })
+    1
+}
+
+run: fn() {
+    print(loud())
+}

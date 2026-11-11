@@ -34,6 +34,7 @@ use jet_foundation.[
     TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
     TTypedGoal,
+    TEffectFacts,
     TEffectSpan,
     TIndexProof,
     TFailureCarrier,
@@ -121,6 +122,10 @@ SemaScopeBinding: struct {
     // use refuses the name's type, it reads as the literal written there
     // (Expressions/NumberNames.jet).
     number_literal: Expr?{None}
+    // A `:` name bound to a lambda this body writes keeps that lambda's effect
+    // facts: a call through the name from inside another lambda's body adds
+    // them to that lambda's row (sema_expression_lambda_add_effect_facts).
+    lambda_effects: TEffectFacts?{None}
 }
 
 SemaOriginFact: struct {
@@ -2313,6 +2318,33 @@ sema_scope_mark_own_cell: fn(table: &SemaScopeTable, name: String) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
     table.bindings[index].own_cell = true
+}
+
+// Keeps the effect facts of the lambda that `statement`, the `:` binding
+// `name` just declared, binds (see SemaScopeBinding.lambda_effects).
+sema_scope_mark_lambda_binding: fn(table: &SemaScopeTable, name: String, statement: TStmt) Never! {
+    if statement == .Let(_, _, init, _, _, _) {
+        if init.kind == .Lambda(lambda) {
+            index: sema_scope_resolve_index(table, name) ?? return
+            sema_scope_note_binding_edit(table, index)
+            // copy: the statement keeps its lambda; the binding keeps its own facts.
+            table.bindings[index].lambda_effects = Val(lambda.effects.copy())
+        }
+    }
+}
+
+// The effect facts of the lambda that `callee`, the name a call goes
+// through, runs, when it names a `:` local bound to a lambda written in this
+// body.
+sema_scope_local_lambda_effects: fn(table: SemaScopeTable, callee: Expr) -> TEffectFacts? Never! {
+    if callee == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(table, name) ?? return None
+        binding: table.bindings[index]
+        if binding.mutable -> return None
+        // copy: the binding keeps its facts for every later call.
+        return binding.lambda_effects.copy()
+    }
+    None
 }
 
 // Keeps `literal` on the binding `name` just declared (see

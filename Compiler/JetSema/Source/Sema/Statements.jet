@@ -8420,6 +8420,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                                 diagnostics.push(sema_lint("L0521", binding.name_span, "a complete ASCII case ladder repeats a direct case conversion", "all 26 constant ASCII branches inspect the same value and only change its case", "replace the complete ladder with value.to_ascii_lower() or value.to_ascii_upper()"))
                             }
                         }
+                        if !binding.mutable && binding.pattern == None -> sema_scope_mark_lambda_binding(scopes, binding.name, value)
                         output.push(value)
                         // A bare `None` start can check as a value after its E0308.
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)

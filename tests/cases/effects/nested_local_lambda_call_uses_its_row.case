@@ -1,0 +1,37 @@
+# A call through a `:` local bound to a lambda written in the same body, from
+# inside another lambda's body, adds the called lambda's effects to that
+# lambda's own row. Before, the call was an unknown callee, so the calling
+# lambda's row was every effect: a callback that called a printing local
+# lambda was E0747 against a `-[IO]>` parameter, and a function holding
+# nested lambdas was E0740, both naming every effect. Now both run the same
+# on every tier, and a callback held to `-[]>` names only `IO`.
+fixture: nested_local_lambda_call_uses_its_row/input
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "pass\ndeep\ndeep\n3\n" # O0 runs the nested lambdas
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "pass\ndeep\ndeep\n3\n" # O1 runs the nested lambdas
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "pass\ndeep\ndeep\n3\n" # O2 runs the nested lambdas
+step: jet check narrow.jet
+exit: 1
+stderr: count "Error [" = 1 # only the callback
+stderr: ~ "This callback uses the effect `IO`, which the parameter doesn't allow" # the called lambda's own effect
+stderr: !~ "Browser" # never every effect
+step: jet run --optimize=none narrow.jet
+exit: 1
+stderr: ~ "This callback uses the effect `IO`" # O0 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=basic narrow.jet
+exit: 1
+stderr: ~ "This callback uses the effect `IO`" # O1 refuses it
+stdout: !~ "escaped" # nothing runs
+step: jet run --optimize=full narrow.jet
+exit: 1
+stderr: ~ "This callback uses the effect `IO`" # O2 refuses it
+stdout: !~ "escaped" # nothing runs

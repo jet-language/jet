@@ -158,6 +158,7 @@ sema_call_value_checked_from_type: fn(state: &SemaOwnershipState, callee: Expr, 
     // accounted where it is passed. Any other unannotated function value stays
     // an unknown callee.
     if facts.effect_bound == None && sema_call_value_is_parameter(callee, scopes) -> facts.effect_bound = Val([EffectRowEntry]{})
+    facts.local_lambda = sema_scope_local_lambda_effects(scopes, callee)
     return_view_facts: if sema_call_value_undeclared_view_provenance(callee, resolved_signature, scopes) == {
         .Val(provenance) -> sema_call_return_view_facts(Type.Fn{params: [Type]{}, ret: Val(result_type_raw), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}, None, checked_args, resolved_binding, scopes, state, span, diagnostics)
         .None -> sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, state, span, diagnostics)

@@ -14,6 +14,7 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
+    TEffectFacts,
     TFailureCarrier,
     TGenericParam,
     TMethodRef,
@@ -32,6 +33,9 @@ SemaCallFacts: struct {
     effect_bound: [EffectRowEntry]?
     type_args: [Type]
     default_refs: [FunctionDefaultRef]
+    // The call goes through a `:` local bound to a lambda written in this
+    // body, whose effect facts these are (SemaScopeBinding.lambda_effects).
+    local_lambda: TEffectFacts?{None}
 }
 
 SemaCallChecked: struct {

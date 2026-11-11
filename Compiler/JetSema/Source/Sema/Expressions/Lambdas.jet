@@ -506,6 +506,9 @@ sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_cal
                 callee: fact.callee ?? SymbolID{key: ""}
                 sema_expression_lambda_append_name(edges, callee.key)
             }
+            fact.facts.local_lambda != None -> {
+                if sema_expression_lambda_add_local_facts(fact.facts.local_lambda, fact.span, direct, edges, spans) -> maximal = true
+            }
             fact.facts.effect_bound != None -> {
                 row: fact.facts.effect_bound ?? [EffectRowEntry]{}
                 loop entry in row {
@@ -520,6 +523,19 @@ sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_cal
         }
         index += 1
     }
+}
+
+// A call through a `:` local bound to a lambda written in this body adds that
+// lambda's own facts, as its body would where it is written. The result is
+// whether that lambda's row is maximal.
+sema_expression_lambda_add_local_facts: fn(facts: TEffectFacts?, span: Span, direct: &[String], edges: &[String], spans: &[TEffectSpan]) -> Bool Never! {
+    called: facts ?? return false
+    loop name in called.direct {
+        sema_expression_lambda_append_name(direct, name)
+        spans.push(TEffectSpan{name: name, span: span})
+    }
+    loop edge in called.call_edges -> sema_expression_lambda_append_name(edges, edge)
+    called.maximal
 }
 
 sema_expression_lambda_bound_optional_expr: fn(value: Expr?, name: String) -> Bool {

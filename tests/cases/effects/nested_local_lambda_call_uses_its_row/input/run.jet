@@ -1,0 +1,24 @@
+// A callback and nested lambdas that call a local lambda that prints take
+// that lambda's `IO`, so each fits an `IO` row.
+apply: fn(f: fn() -[IO]> Unit) -[IO]> Unit { f() }
+
+pass: fn() -[IO]> Int {
+    say: () -> { print("pass") }
+    apply(() -> { say() })
+    1
+}
+
+deep: fn() -[IO]> Int {
+    say: () -> { print("deep") }
+    twice: () -> {
+        say()
+        say()
+    }
+    outer: () -> { twice() }
+    outer()
+    2
+}
+
+run: fn() {
+    print(pass() + deep())
+}
