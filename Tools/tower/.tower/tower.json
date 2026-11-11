@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99200,
+    "rev": 99201,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96598,6 +96598,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T14:13:58.001Z"
+        },
+        {
+          "n": 4,
+          "text": "I1 use-after-free in safe Jet, found by G1Lead4 on seed-t21, 2026-11-11 ($JET_SCRATCH_ROOT/lanes/G1Lead-4/out/miscompile-push-break.jet). Inside `loop item in items { path: \"dir/{item}\"; loop _ in 0..<2 { out.push(path); break } }`, `out` ends up holding freed text (it prints `got  ,got  ,got  ` instead of `dir/c,dir/b,dir/a`): the break path frees `path` after push has moved or shared it into `out`. Same class as c-branch moves, a move on one control path carried onto another. The fix is in the shared lowering of moves and drops across break and continue edges, not in this loop shape. The repro becomes a case printing the right list on O0/O1/O2, plus variants with continue, a labeled outer break, `?? return` and a `match` arm exit, all under the leak and sanitizer checks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T08:37:51.280Z"
         }
       ],
       "refs": [],
@@ -96606,9 +96615,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:13:43.430Z",
-      "updated": "2026-11-09T17:10:01.313Z",
+      "updated": "2026-11-11T08:37:51.280Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0bf5kow",
@@ -199029,6 +199038,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T08:37:51.280Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pxauid",
+      "note": "#4 I1 use-after-free in safe Jet, found by G1Lead4 on seed-t21,"
+    },
     {
       "at": "2026-11-11T08:01:57.387Z",
       "by": "Main",
