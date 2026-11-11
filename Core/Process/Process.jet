@@ -631,6 +631,20 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert(env_nonempty("JET_ENV_NONEMPTY_PROBE") == None)
 }
 
+#Test("a child's stream read wakes when the collector captures the reply") {
+    child: Sh{argv: [String]{"sh", "-c", "while read -r line; do echo \"$line\"; done"}}.spec().stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
+    start: core.time.instant()
+    loop _ in 0..<100 {
+        child.stdin.write_all("x\n".bytes()) ?? panic("write failed: {err}")
+        assert_eq(child.stdout.read(64) ?? [U8]{}, [U8]{120, 10})
+    }
+    elapsed: core.time.instant() - start
+    child.stdin.close()
+    _ := child.wait()
+    // One 10ms poll per reply would take a second; woken reads take far less.
+    assert(elapsed.ns < 600000000)
+}
+
 // Temporary native-carrier layout. This is not a second public builder API:
 // the canonical ProcessSpec stays opaque and its existing methods stay intact.
 ProcessFields: struct {

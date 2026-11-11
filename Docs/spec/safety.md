@@ -3746,21 +3746,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 335,
+      "line": 352,
       "column": 9,
       "reason": "ok is the canonical writable Bool output slot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 343,
+      "line": 360,
       "column": 5,
       "reason": "ok lends exactly the C ABI Bool byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 449,
+      "line": 469,
       "column": 13,
       "reason": "the child mutex holds the capture builder's initialized bytes"
     },
@@ -10714,9 +10714,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 514:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Parallel.jet | 51:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
 | Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 105:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 449:13 | "the child mutex holds the capture builder's initialized bytes" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 352:9 | "ok is the canonical writable Bool output slot" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 360:5 | "ok lends exactly the C ABI Bool byte" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 469:13 | "the child mutex holds the capture builder's initialized bytes" |
 | Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 125:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 19:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 27:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |

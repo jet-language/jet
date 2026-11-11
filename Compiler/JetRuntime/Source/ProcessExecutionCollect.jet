@@ -1,5 +1,5 @@
 // Plain ProcessSpec collector/lifecycle on the existing Child104 syscall seam.
-// ExecutionChild160 and launch/receipt metadata are owned by ProcessExecutionRoutes.
+// ExecutionChild168 and launch/receipt metadata are owned by ProcessExecutionRoutes.
 // stop120 bits: requested=1, closed=2, explicit wait=4, group swept=8.
 process_execution_flags_add: fn(child: I64, flag: I64) {
     loop {
@@ -46,7 +46,21 @@ process_execution_release: fn(child: I64) {
     jet_rt_string_drop(fd_word(child, I64{88}))
     pipe_drop(fd_word(child, PROCESS_EXECUTION_STDOUT))
     pipe_drop(fd_word(child, PROCESS_EXECUTION_STDERR))
+    reader: fd_word(child, PROCESS_EXECUTION_READER)
+    if (reader != I64{0}) -> sync_park_drop(reader)
     jet_rt_free(child, PROCESS_EXECUTION_BYTES, I64{8})
+}
+// Wakes the stream reader parked on the collector, handing over the slot
+// reference that reader lent.
+process_execution_wake_reader: fn(child: I64) {
+    sync_mutex_lock(child)
+    reader: fd_word(child, PROCESS_EXECUTION_READER)
+    fd_put(child, PROCESS_EXECUTION_READER, I64{0})
+    sync_mutex_unlock(child)
+    if (reader != I64{0}) {
+        sync_park_wake(reader)
+        sync_park_drop(reader)
+    }
 }
 #Export(c) jet_rt_handle_clone_process_child: fn(child: I64) -> I64 {
     _ := sync_add(wrapping(child + I64{8}), I64{1})
@@ -129,6 +143,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
             spawn_close(fd_word(native, offset))
             fd_put(native, offset, I64{-1})
             sync_mutex_unlock(native)
+            process_execution_wake_reader(child)
             return true
         }
         kept := count
@@ -145,6 +160,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
         rt_text_append(fd_word(child, if (stream == I64{1}) -> I64{80} else -> I64{88}), scratch, kept)
         fd_put(child, I64{96}, fd_word(child, I64{96}) + kept)
         sync_mutex_unlock(child)
+        process_execution_wake_reader(child)
         return false
     }
 }
@@ -249,6 +265,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
         sync_park_drop(waiter)
     }
     jet_rt_free(scratch, I64{8280}, I64{8})
+    process_execution_wake_reader(child)
     process_execution_release(child)
     I64{0}
 }
@@ -300,13 +317,13 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     sync_mutex_unlock(child)
     loop sync_load(wrapping(child + I64{40})) == (I64{0}) {
         if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
-            process_execution_park_return(child, park)
+            process_execution_park_return(child, I64{64}, park)
             process_execution_stop(child)
             process_execution_await_cleanup(child)
             return I64{0}
         }
     }
-    process_execution_park_return(child, park)
+    process_execution_park_return(child, I64{64}, park)
     // Detached spawn/drop does not sweep descendants. Explicit wait does.
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{8}) == I64{0}) -> process_execution_sweep(child)
     sync_mutex_lock(child)
@@ -320,12 +337,12 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     sync_mutex_unlock(child)
     I64{1}
 }
-// Drops the waiter's park slot, and the collector's reference with it when the
-// collector has not taken that reference to wake the slot.
-process_execution_park_return: fn(child: I64, park: I64) {
+// Drops a waiter's park slot, and the collector's reference with it when the
+// collector has not taken that reference from `slot` to wake the park.
+process_execution_park_return: fn(child: I64, slot: I64, park: I64) {
     sync_mutex_lock(child)
-    lent: fd_word(child, I64{64}) == park
-    if lent -> fd_put(child, I64{64}, I64{0})
+    lent: fd_word(child, slot) == park
+    if lent -> fd_put(child, slot, I64{0})
     sync_mutex_unlock(child)
     if lent -> sync_park_drop(park)
     sync_park_drop(park)
@@ -420,10 +437,13 @@ process_execution_pipe: fn(child: I64, stream: I64) -> I64 {
 // The next bytes of `child`'s captured stream `stream` (1 stdout, 2 stderr)
 // past what its readers consumed: through the first newline when `line`, else
 // up to `maximum` bytes. Waits on the collector until it captures them or the
-// stream ends; at the end it returns what remains, and none is EOF. Writes
-// owned data+len, or 0/0: the native U8 List buffer the route adopts, an
-// align-8 block for a line (the line ABI of HostPipe.jet) and the buffer
-// compiler_fs_bytes_take makes for a read.
+// stream ends: the first waiting reader lends the collector its park slot,
+// which the collector wakes as it captures bytes, closes a stream or finishes;
+// a reader behind it keeps the 10ms scheduler poll on its own slot. At the
+// end it returns what remains, and none is EOF. Writes owned data+len, or
+// 0/0: the native U8 List buffer the route adopts, an align-8 block for a
+// line (the line ABI of HostPipe.jet) and the buffer compiler_fs_bytes_take
+// makes for a read.
 process_execution_stream_bytes: fn(child: I64, stream: I64, maximum: I64, line: Bool, data_out: I64, len_out: I64) {
     fd_put(data_out, I64{0}, I64{0})
     fd_put(len_out, I64{0}, I64{0})
@@ -472,12 +492,18 @@ process_execution_stream_bytes: fn(child: I64, stream: I64, maximum: I64, line: 
             sync_mutex_unlock(child)
             break
         }
-        sync_mutex_unlock(child)
         if (park == I64{0}) -> park = sync_park_new()
+        // Lent under the child mutex the capture was checked under, so bytes
+        // the collector appends after that check wake this park.
+        if (fd_word(child, PROCESS_EXECUTION_READER) == I64{0}) {
+            sync_park_retain(park)
+            fd_put(child, PROCESS_EXECUTION_READER, park)
+        }
+        sync_mutex_unlock(child)
         // Cancellation propagates through the scheduler; the read ends empty.
         if (scheduler_yield(rt_static_text("process stream"), park, I64{10000000}) != I64{0}) -> break
     }
-    if (park != I64{0}) -> sync_park_drop(park)
+    if (park != I64{0}) -> process_execution_park_return(child, PROCESS_EXECUTION_READER, park)
 }
 // Writes every byte on a private dup so a concurrent close cannot recycle the
 // descriptor mid-write; Ok(0) is the closed writer, EINTR retries.
