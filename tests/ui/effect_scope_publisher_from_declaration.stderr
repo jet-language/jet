@@ -1,0 +1,10 @@
+Error [jet.EffectBoundExceeded]: `probe` uses the effect `FS.Read("secret.txt")`, which its signature doesn't allow
+  --> tests/ui/effect_scope_publisher_from_declaration.jet:6:15
+    |
+  6 | probe: fn() -[FS.Read("assets/")]> Bool {
+    |               ^^^^^^^^^^^^^^^^^^
+ Why: The signature declares `-[FS.Read("assets/")]>`, so the body may only use those; `FS.Read("secret.txt")` is outside that set
+ Fix: Add `FS.Read("secret.txt")` to the effect list, or stop using it in `probe`
+ Denial: invocation
+ Call chain: probe
+More: jet-lang.dev/e/E0740

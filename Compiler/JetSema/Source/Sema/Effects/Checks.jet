@@ -365,6 +365,8 @@ SemaEffectNode: struct {
     // argument is in `bare_scope_callees`, and reaches it bare as well.
     scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}}
     bare_scope_callees: [String]{[String]{}}
+    // Whether the first parameter is `path`, as a Core scope publisher's is.
+    path_first: Bool{false}
 }
 
 SemaEffectScopedCall: struct {
@@ -1605,6 +1607,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.type_params = node.owner_params.copy()
     loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)
     if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> node.trait_key = sema_effect_trait_cap_key(trait_symbol.key)
+    node.path_first = function.params.len() > 0 && function.params[0].name == "path"
     at: source_position ?? {
         sema_effect_check_tfunc_unsafe(function, diagnostics)
         return node
@@ -1837,6 +1840,10 @@ SemaEffectCallIndex: struct {
     // without reading that node: a collecting thread holds only its own
     // node's row (sema_effect_collect_claimed).
     node_keys: [String]{[String]{}}
+    // The effect each Core scope publisher publishes, by key
+    // (effect_scope_published_effect), read off its node before the walks:
+    // a collecting thread holds only its own node's row.
+    published_effects: [String:String]{[String:String]{}}
 }
 
 // The effect node of the declaration `callee`, -1 when it has no body here.
@@ -2504,9 +2511,12 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
 // the scope its constant first argument names: `files.read("assets/a.png")`
 // needs `FS.Read("assets/a.png")`. A run-time argument names no scope, so
 // that call needs the bare effect (EffectScope.jet).
-sema_effect_record_scope: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
+sema_effect_record_scope: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
     callee_key: fact.callee.map((callee) -> callee.key) ?? return
-    published: effect_scope_published_effect(callee_key) ?? return
+    // A publisher with no body here, such as `core.http.get`, publishes by key.
+    published: facts.published_effects.get(callee_key) ?? {
+        effect_scope_published_effect(callee_key, false, [String]{}) ?? return
+    }
     if sema_effect_call_scope(tree, node, published) == .Val(scope) {
         scoped: effect_scope_name(published, scope)
         loop call in nodes[node_index].scoped_calls {
@@ -2608,7 +2618,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
-                            sema_effect_record_scope(nodes, node_index, tree, node, value)
+                            sema_effect_record_scope(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_instantiation(nodes, node_index, tree, node, value)
                         }
@@ -3615,12 +3625,14 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         close_methods[split.after] = rows
     }
     unsafe_names := [String:String]{}
+    published_effects := [String:String]{}
     loop (key_index, key) in node_by_key.texts {
         node_index: node_by_key.rows[key_index]
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
+        if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
-    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move()}
+    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), published_effects: published_effects.move()}
     unsafe_node: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false

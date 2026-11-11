@@ -138,22 +138,21 @@ effect_scope_covers: fn(bound: String, need: String) -> Bool Never! {
     held_scope == asked_scope
 }
 
-// Core's scope publishers: the `core.files` functions whose first argument
-// is the one path they read or write, and `core.http.get`, whose URL names
-// the one host it reaches. A call with a constant argument needs the
+// Core's scope publishers, read off their declarations: a top-level
+// `core.files` function whose first parameter is `path`, the one path it
+// touches, and whose row declares one leaf of a path effect (`FS.Read`,
+// `FS.Write`) publishes that leaf; `core.http.get`, whose URL names the one
+// host it reaches, publishes `Net`. A call with a constant argument needs the
 // published effect scoped to that argument; any other call needs it bare.
-EFFECT_SCOPE_READERS: [String]{"open", "read", "read_bytes", "map", "read_at", "open_directory", "list_dir", "stat", "lstat", "is_dir", "can_read", "canonicalize", "read_link", "space"}
-EFFECT_SCOPE_WRITERS: [String]{"create", "append", "write", "write_bytes", "append_all", "write_atomic", "write_at", "create_dir_all", "remove", "remove_dir", "set_mode"}
-
-// The effect the publisher `callee_key` (a `kind:module:owner:name` symbol
-// key) declares, or None for any other callee.
-effect_scope_published_effect: fn(callee_key: String) -> String? Never! {
+// `callee_key` is a `kind:module:owner:name` symbol key, `path_first` whether
+// the callee's first parameter is `path`, and `declared` its declared row.
+effect_scope_published_effect: fn(callee_key: String, path_first: Bool, declared: [String]) -> String? Never! {
     if callee_key.ends_with(":<corelib>/core.http::get") -> return Val("Net")
-    if !callee_key.contains(":<corelib>/core.files::") -> return None
-    name: (callee_key.cut_last("::") ?? return None).after
-    if EFFECT_SCOPE_READERS.contains(name) -> return Val("FS.Read")
-    if EFFECT_SCOPE_WRITERS.contains(name) -> return Val("FS.Write")
-    None
+    if !callee_key.contains(":<corelib>/core.files::") || !path_first || declared.len() != 1 -> return None
+    leaf: declared[0]
+    if effect_scope_kind(leaf) != "path" || !leaf.contains(".") || effect_scope_is_scoped(leaf) -> return None
+    // copy: the caller keeps its declared row.
+    Val(leaf.copy())
 }
 
 // The scope a publisher's argument names for `effect`, from the argument's

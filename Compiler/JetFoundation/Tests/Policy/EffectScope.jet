@@ -55,10 +55,14 @@ use jet_foundation.[
 }
 
 #Test("a publisher's constant argument names its scope") {
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::read") ?? "", "FS.Read")
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::write_bytes") ?? "", "FS.Write")
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.http::get") ?? "", "Net")
-    assert(effect_scope_published_effect("fn:<corelib>/core.files:FileReader:read") == None, "a method publishes nothing")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::read", true, [String]{"FS.Read"}) ?? "", "FS.Read")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::write_bytes", true, [String]{"FS.Write"}) ?? "", "FS.Write")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.http::get", false, [String]{}) ?? "", "Net")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files:FileReader:read", true, [String]{"FS.Read"}) == None, "a method publishes nothing")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files::rename", false, [String]{"FS.Write"}) == None, "a first parameter that isn't the path publishes nothing")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files::remove_all", true, [String]{"FS"}) == None, "a bare root publishes nothing")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files::absolute", true, [String]{"FS", "Env"}) == None, "a row of two effects publishes nothing")
+    assert(effect_scope_published_effect("fn:app::read", true, [String]{"FS.Read"}) == None, "only core.files publishes a path")
     assert_eq(effect_scope_of_argument("FS.Read", "assets/logo.txt", true) ?? "", "assets/logo.txt")
     assert_eq(effect_scope_of_argument("FS.Read", "assets/icons/", false) ?? "", "assets/icons/")
     assert(effect_scope_of_argument("FS.Read", "logo", false) == None, "no folder before the interpolation")

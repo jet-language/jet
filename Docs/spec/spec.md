@@ -2154,7 +2154,9 @@ the bare one.
 A call names its scope through a constant argument. The `core.files`
 functions that read or write the one path their first argument names, such
 as `read`, `read_bytes`, `open`, `write` and `create`, need `FS.Read` or
-`FS.Write` scoped to that path when it is a string literal:
+`FS.Write` scoped to that path when it is a string literal. The compiler
+reads this off each declaration: a top-level `core.files` function whose
+first parameter is `path` and whose row declares one `FS` leaf publishes it.
 `files.read("assets/logo.txt")` needs `FS.Read("assets/logo.txt")`. An
 interpolated literal names the folder its constant text ends in, so
 `files.read("assets/{name}")` needs `FS.Read("assets/")`. `http.get` with a
