@@ -900,13 +900,12 @@ jet_eval_ir_primitive_shape: fn(s: &JetEvalIRState, name: String) -> Int? Never!
 // host reads and records for the path's String, a checked literal or the
 // value the comptime code computed, as the IR value of type row `dst_row`.
 // `net.fetch(url, sha256:)` takes the route as ("fetch", url, sha256): the
-// host fetches the URL and checks its content against the pin.
+// host fetches the URL and checks its content against the pin. A `build: fn`
+// runs as runtime code with the build file's input host installed, so it
+// reads through the same host. A running program has no input host: there
+// the route is E0956, as check-time refuses a runtime path to the input.
 jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int) -> Int? {
     if args.len() != 2 && args.len() != 3 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
-    if s.runtime_execution {
-        jet_eval_ir_problem(s, "a comptime input reached runtime evaluation")
-        return None
-    }
     builtin: jet_eval_ir_text(s, args[0]) ?? return None
     path: jet_eval_ir_text(s, args[1]) ?? return None
     pin := String?{None}
@@ -916,7 +915,7 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
     adapter: if s.inputs == {
         .Val(installed) -> installed.clone_input_adapter()
         .None -> {
-            if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{builtin}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs"))
+            if s.failure == None -> s.failure = Val(jet_eval_ir_comptime_input_without_host(s.runtime_execution, s.span, builtin, path))
             return None
         }
     }
@@ -928,6 +927,15 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
         }
     }
     jet_eval_ir_store_data(s, value, dst_row)
+}
+
+// The report for a comptime input read where no input host is installed:
+// E0956 in a running program (check-time refuses that path, so this is the
+// net under a program that skipped it), E3401 in a compile that has no host.
+jet_eval_ir_comptime_input_without_host: fn(runtime_execution: Bool, span: Span, builtin: String, path: String) -> JetEvalError {
+    shown: if builtin == "fetch" -> "net.fetch" else -> builtin
+    if runtime_execution -> return jet_eval_diagnostic(JetEvalErrorKind.Source, span, "a running program can't call `{shown}`", "`{shown}` reads a compile-time input, which only comptime code and `build: fn` read", "call `{shown}` in a `comptime` item and use its value in the program")
+    jet_eval_diagnostic(JetEvalErrorKind.Effect, span, "`{shown}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")
 }
 
 // The comptime input host's answer for one route: the pinned fetch of the

@@ -4,8 +4,9 @@
 # code. Content that misses the pin is E3413 and nothing runs. A running
 # program's own `net.fetch` is E0956 at check time on every tier (the call
 # reaches `Net` like any other, and a helper only comptime code calls may
-# make one), and a pin that isn't a `sha256:` String literal is E3414. The
-# fixture's data.txt is "pinned text\n".
+# make one), and a pin that isn't a `sha256:` String literal is E3414, named
+# or missing. A compile-time run stops at its first failing item, so each
+# unpinned spelling is its own file. The fixture's data.txt is "pinned text\n".
 fixture: comptime_fetch_pins_its_content_on_every_tier/input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -56,5 +57,11 @@ stderr: ~ "`run` runs in the program, so it can't call `net.fetch`" # O2 refuses
 stdout: !~ "escaped" # nothing runs
 step: jet check unpinned.jet
 exit: 1
-stderr: count "Error [" = 2 # the named pin and the missing pin
+stderr: count "Error [" = 1 # exactly this many
+stderr: ~ "`net.fetch` takes a URL and a literal `sha256:` pin" # a named pin must be a literal
+stderr: ~ "unpinned.jet:4" # at the pinned call
+step: jet check bare.jet
+exit: 1
+stderr: count "Error [" = 1 # exactly this many
 stderr: ~ "`net.fetch` takes a URL and a literal `sha256:` pin" # the pin is written in the source
+stderr: ~ "bare.jet:3" # at the call with no pin
