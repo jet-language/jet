@@ -861,6 +861,19 @@ value or another type's method neither reveals like a `#Scrub` function nor
 returns that function's tags. A foreign import keeps the C rules
 (D-SECRET-CT1).
 
+A call's result carries the tags of the arguments it was computed from, so a
+`??`, `?` or match on the result of a call that took a `.Fixed` value decides
+on that value, even when only a public length picks the outcome. Code that
+refuses on public lengths checks them before the value enters, then calls a
+function that cannot fail.
+
+Core's constant-time code is written under this check. The constant-time
+kit, the symmetric ciphers, MACs and KDFs, the bignum and elliptic-curve limb
+operations, the TLS key schedule and the CBC record MAC take their keys and
+secret operands as `#Secret` parameters. A verdict that must become public,
+such as a MAC check, a discarded random draw or an authentic record's length,
+leaves only through a `#Scrub(Secret)` function (D-SECRET-CT1).
+
 The compiler keeps this check after its own lowering too. In the IR, a
 fixed-width integer, `Bool` or `Char` whose type carries a `.Fixed` tag holds a
 fixed bit. So does every value computed from one without a call. Before code
