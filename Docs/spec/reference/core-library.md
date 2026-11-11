@@ -2556,9 +2556,11 @@ run: fn() -[Exec, Time.Wait]> {
 | `#Unsafe process.exit_unmapped(code)` | `Never -[Exec.Exit]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
 | `process.fail(code, message)` | `Never -[Exec.Exit, IO, Time.Wait]>` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is cancelled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is cancelled, so a serving `HTTPServer` returns its report and the program drains to its end. |
-| `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
+| `process.signals(kinds)` | `SignalSubscription !IOError -[Exec]>` | Take every signal of `kinds` as a value on the subscription's `receiver`, as a shell `trap` does, until `close()`; at most one is pending per kind, and every open subscription that holds a signal receives it. An empty list is `InvalidInput`; a signal the host refuses is `Unsupported` or `Other` with its OS error. |
+| `process.signal_number(signal)` | `Int` | The signal's Linux number: `Hup` 1, `Int` 2, `Quit` 3, `Usr1` 10, `Usr2` 12, `Pipe` 13, `Alrm` 14, `Term` 15, `Chld` 17, `Cont` 18, `Tstp` 20, `Ttin` 21, `Ttou` 22, `Winch` 28. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
-| `ProcessSignal` | type | Closed variants: `Term`, `Hup`, and `Int`, matching the shared signal dispatcher. |
+| `ProcessSignal` | type | The catchable POSIX signals in signal-number order: `Hup`, `Int`, `Quit`, `Usr1`, `Usr2`, `Pipe`, `Alrm`, `Term`, `Chld`, `Cont`, `Tstp`, `Ttin`, `Ttou`, `Winch`. |
+| `SignalSubscription` | type | An open `process.signals` call: `receiver: Receiver<ProcessSignal>` delivers its signals, and `close()` gives each one no other subscription holds back to its earlier effect; `receiver` then ends once its pending signals are read. |
 | `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, redaction facts, and the child's resource usage (`peak_memory_bytes`, `user_cpu_ns`, `system_cpu_ns`). |
 | `ProcessSpec` | type | The executable, arguments, stream policy, authority, terminal policy, limits, and detachment policy for a child. |
 

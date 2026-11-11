@@ -16,12 +16,53 @@ use {
     rt: jet.runtime.process
 }
 
-// Exact ProcessSignal shape. Signal arming shares the one native interrupt
-// dispatcher; source owns mask and failure policy.
+// The catchable POSIX signals, in signal-number order.
 ProcessSignal: enum {
-    Term
     Hup
     Int
+    Quit
+    Usr1
+    Usr2
+    Pipe
+    Alrm
+    Term
+    Chld
+    Cont
+    Tstp
+    Ttin
+    Ttou
+    Winch
+}
+
+// The signals a `signals` call takes. Until `close()`, each one arrives on
+// `receiver` instead of taking its earlier effect, at most one pending per
+// kind; every open subscription that holds a signal receives it.
+SignalSubscription: struct {
+    id: Int
+    receiver: Receiver<ProcessSignal>
+}
+
+impl SignalSubscription {
+    // Ends the subscription: a signal no other subscription holds takes its
+    // earlier effect again, and `receiver` ends once its pending signals are read.
+    close: fn(self) Never! -[Exec]> { rt.signal_close(self.id) }
+}
+
+// Takes the signals of `kinds` until the subscription closes, as a shell
+// `trap` does, but as values a task receives.
+signals: fn(kinds: [ProcessSignal]) -[Exec]> SignalSubscription IOError! {
+    context: IOContext{operation: .Resolve, resource: Val("process.signals"), os_code: None, cause: None}
+    if kinds.len() == 0 -> return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val("process.signals([])"), os_code: None, cause: Val("process.signals needs at least one signal")}))
+    id: rt.signal_open(false)
+    loop kind in kinds {
+        added: core.process.__signal_add(id, signal_number(kind), kind)
+        if !added.available || added.errno != 0 {
+            rt.signal_close(id)
+            if !added.available -> return Err(IOError.Unsupported(context))
+            return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val("process.signals"), os_code: Val(added.errno), cause: Val("the host refused the signal handler")}))
+        }
+    }
+    Ok(SignalSubscription{id: id, receiver: core.process.__signal_receiver(id)})
 }
 
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
@@ -254,17 +295,12 @@ exec: fn(argv: [String], env: [String: String]{[String: String]{}}) -[Exec, IO, 
 /// Cancel the process when `signal` arrives: the entry's waits end without
 /// parking (a network wait as `NetError.Cancelled`, a sleep at once) and every
 /// live task is cancelled, so a serving `HTTPServer` returns its report and
-/// the program drains to its end.
+/// the program drains to its end. `signals` takes a signal as a value instead.
 on_signal: fn(signal: ProcessSignal) Never! -[Exec]> {
-    mask: if signal == {
-        .Int -> 1
-        .Hup -> 2
-        .Term -> 4
-    }
-    if core.process.__signal_arm(mask) == {
-        .Ok(_) -> {}
-        .Err(message) -> panic("core.process.on_signal: {message}")
-    }
+    id: rt.signal_open(true)
+    added: core.process.__signal_add(id, signal_number(signal), signal)
+    if !added.available -> panic("core.process.on_signal: signals are unsupported on this host")
+    if added.errno != 0 -> panic("core.process.on_signal: the host refused the signal handler (os error {added.errno})")
 }
 
 pipeline: fn(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
@@ -445,11 +481,23 @@ list2cmdline: fn(argv: [String]) -> String Never! {
     out
 }
 
+// The signal's Linux number.
 signal_number: fn(signal: ProcessSignal) -> Int Never! {
     if signal == {
-        .Int -> 2
-        .Term -> 15
         .Hup -> 1
+        .Int -> 2
+        .Quit -> 3
+        .Usr1 -> 10
+        .Usr2 -> 12
+        .Pipe -> 13
+        .Alrm -> 14
+        .Term -> 15
+        .Chld -> 17
+        .Cont -> 18
+        .Tstp -> 20
+        .Ttin -> 21
+        .Ttou -> 22
+        .Winch -> 28
     }
 }
 
@@ -629,6 +677,17 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert_eq(env_nonempty("JET_ENV_NONEMPTY_PROBE"), Val("value"))
     assert(core.sys.unset("JET_ENV_NONEMPTY_PROBE") ?? false)
     assert(env_nonempty("JET_ENV_NONEMPTY_PROBE") == None)
+}
+
+#Test("signals takes each signal as a value until closed") {
+    taken: signals([ProcessSignal]{.Usr1, .Usr2}) ?? panic("process.signals refused Usr1 and Usr2")
+    assert(Sh{argv: [String]{"kill", "-USR2", "{current_pid()}"}}.ok())
+    got: taken.receiver.receive() ?? panic("the signal receiver closed early")
+    assert_eq(signal_number(got), 12)
+    taken.close()
+    after: taken.receiver.receive() ?? .Winch
+    assert_eq(signal_number(after), 28)
+    assert(signals([ProcessSignal]{}) == .Err(.InvalidInput(_)))
 }
 
 #Test("a child's stream read wakes when the collector captures the reply") {

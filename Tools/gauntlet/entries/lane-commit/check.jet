@@ -21,7 +21,8 @@ run: fn() {
     print("status:")
     print(Sh{"git -C repo/work status --porcelain"}.text().trim_end())
     queue: "{process.env_get("JET_RUN_ROOT") ?? "run"}/commit-queue"
-    loop job in names_in(queue) {
+    // An interrupted original leaves its precommit log, a dot file, in the queue.
+    loop job in names_in(queue).filter(name -> !name.starts_with(".")) {
         path: "{queue}/{job}"
         // This call's own job is named by the time and the caller's pid.
         print("job {if job.starts_with("0") -> job else -> "(this call's)"}: {names_in(path).join(" ")}".trim_end())

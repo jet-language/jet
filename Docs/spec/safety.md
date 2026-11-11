@@ -3774,63 +3774,63 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 19,
+      "line": 17,
       "column": 5,
       "reason": "the kernel enters this restorer only from a returning handler, on its signal frame"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 27,
+      "line": 25,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 51,
+      "line": 48,
       "column": 9,
       "reason": "written under the scheduler root mutex"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 269,
+      "line": 211,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 342,
+      "line": 266,
       "column": 9,
       "reason": "written under the scheduler root mutex, after every word the handler and dispatcher read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 392,
+      "line": 316,
       "column": 5,
       "reason": "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 396,
+      "line": 320,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 405,
+      "line": 329,
       "column": 5,
       "reason": "rt_sigaction reads the saved four-word action from the hub's table and writes no old action"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessSignal.jet",
-      "line": 636,
+      "line": 560,
       "column": 9,
       "reason": "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action"
     },
@@ -6469,14 +6469,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 190,
+      "line": 231,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 249,
+      "line": 290,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -7106,7 +7106,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/orchestrator/LaneCommit.jet",
-      "line": 182,
+      "line": 214,
       "column": 5,
       "reason": "signal 0 delivers nothing: it only asks whether a queued job's caller still runs"
     },
@@ -10711,15 +10711,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 360:5 | "ok lends exactly the C ABI Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 469:13 | "the child mutex holds the capture builder's initialized bytes" |
 | Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 125:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 19:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 27:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 51:9 | "written under the scheduler root mutex" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 269:5 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 342:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 392:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 396:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 405:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 636:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 17:5 | "the kernel enters this restorer only from a returning handler, on its signal frame" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 25:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 48:9 | "written under the scheduler root mutex" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 211:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 266:9 | "written under the scheduler root mutex, after every word the handler and dispatcher read" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 316:5 | "rt_sigaction writes the signal's four-word action into the hub's preallocated table and sets none" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 320:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 329:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 560:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 97:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 165:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
 | Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 181:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
@@ -11096,8 +11096,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4334:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4339:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4368:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 190:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 249:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 231:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 290:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 786:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 954:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
@@ -11187,7 +11187,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent/cache/Lanes.jet | 311:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
-| Tools | Tools/agent/orchestrator/LaneCommit.jet | 182:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
+| Tools | Tools/agent/orchestrator/LaneCommit.jet | 214:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |

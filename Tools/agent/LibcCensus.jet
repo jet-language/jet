@@ -273,8 +273,9 @@ FAMILIES: [Family]{
     // ---- Signals ----
     {area: "Signals", header: "signal.h", standard: POSIX, names: "kill killpg", variants: "", jet: "core.sys.kill", coverage: .Covered, note: ""},
     {area: "Signals", header: "signal.h", standard: C23, names: "raise signal", variants: "", jet: "core.sys.kill core.sys.reset_signal core.process.on_signal core.sys.on_interrupt", coverage: .Covered, note: ""},
-    {area: "Signals", header: "signal.h", standard: POSIX, names: "sigaction", variants: "", jet: "core.process.on_signal", coverage: .Partial, note: "a handler per signal; no flags or alternate stack"},
-    {area: "Signals", header: "signal.h", standard: POSIX, names: "sigaddset sigdelset sigemptyset sigfillset sigismember sigprocmask pthread_sigmask sigpending sigsuspend sigwait sigwaitinfo sigtimedwait sigqueue sigaltstack", variants: "", jet: "", coverage: .Gap, note: "no signal masks, queued signals or synchronous signal waits"},
+    {area: "Signals", header: "signal.h", standard: POSIX, names: "sigaction", variants: "", jet: "core.process.signals core.process.on_signal", coverage: .Partial, note: "a subscription takes a set of signals as values, or a signal cancels the root task; no flags or alternate stack"},
+    {area: "Signals", header: "signal.h", standard: POSIX, names: "sigwait sigwaitinfo sigtimedwait", variants: "", jet: "core.process.signals", coverage: .Partial, note: "a subscription's receiver waits for its signals; no siginfo"},
+    {area: "Signals", header: "signal.h", standard: POSIX, names: "sigaddset sigdelset sigemptyset sigfillset sigismember sigprocmask pthread_sigmask sigpending sigsuspend sigqueue sigaltstack", variants: "", jet: "", coverage: .Gap, note: "no signal masks or queued signals"},
     {area: "Signals", header: "signal.h", standard: POSIX, names: "psignal psiginfo sig2str str2sig", variants: "", jet: "core.process.ProcessSignal core.process.signal_number", coverage: .Partial, note: "signal names and numbers; no siginfo"},
     {area: "Signals", header: "string.h", standard: POSIX, names: "strsignal", variants: "", jet: "core.process.ProcessSignal", coverage: .Covered, note: ""},
     {area: "Signals", header: "signal.h", standard: POSIX, names: "pthread_kill", variants: "", jet: "", coverage: .Gap, note: "no signal to one task"},

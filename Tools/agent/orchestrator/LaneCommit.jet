@@ -19,9 +19,10 @@
 // $JET_DEV_WORKTREE; the queue, lock, hold switch and path freeze are in
 // $JET_RUN_ROOT; the precommit is Main's precommit.sh, in
 // $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them. A relative
-// root names a path in the caller's directory. The original reverts a drain on
-// SIGTERM, SIGINT and SIGHUP; Core handles only SIGINT (sys.on_interrupt), so
-// this twin reverts on SIGINT alone.
+// root names a path in the caller's directory. A drain holds SIGTERM, SIGINT
+// and SIGHUP (process.signals, the original's `trap on_signal TERM INT HUP`):
+// one stops the precommit's process group, and the drain's next step reverts
+// every applied job and ends the lander with 143.
 use {
     files: core.files
     process: core.process
@@ -97,21 +98,50 @@ interrupted: fn(l: Lander) {
     if !files.is_dir(l.worktree) -> return
     queued := jobs_in(l.queue)
     queued.reverse()
-    loop job in queued {
-        if !files.exists("{job}/applied") -> next
+    loop job in queued.filter(job -> files.exists("{job}/applied")) {
         paths: files.read("{job}/files").lines()
         _ := quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
         if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" -> revert_job(l, job)
         finish(job, 7, "lane-commit: lander interrupted; reverted, resubmit")
     }
-    // The lander exits 143 after it.
 }
 
-// Precommit's run over `paths`, stdout and stderr together. It dies with this
-// process when the lander is interrupted.
-run_pre: fn(l: Lander, paths: [String]) -> ProcessReceipt IOError! {
-    ran: process.run_all([command(l, Sh{"bash {l.precommit}"}.extend(paths)).stderr(.Stdout)], 1)
-    ran[0]
+// What a drain's signal watcher and its steps share: whether TERM, INT or HUP
+// arrived, and the running precommit.
+Interrupt: struct {
+    signalled: Bool
+    pre: ProcessChild?
+}
+
+// A drain step boundary: after a held signal, revert and end with 143.
+checkpoint: fn(l: Lander, stop: Shared<Interrupt>) {
+    if !stop.guard_read().value.signalled -> return
+    interrupted(l)
+    process.exit(143)
+}
+
+// Once a signal has arrived, stops the running precommit with every process
+// it started (a child leads its own process group).
+halt: fn(state: &Interrupt) {
+    if state.signalled && state.pre == .Val(pre) -> pre.terminate() ?? ()
+}
+
+// Records the running precommit (None: none), and stops it when a signal came first.
+pre_running: fn(stop: Shared<Interrupt>, pre: ProcessChild?) {
+    edit: stop.guard_edit()
+    edit.value.pre = pre
+    halt(edit.value)
+}
+
+// Precommit's run over `paths`, stdout and stderr together. A held signal
+// stops it, and the step after it reverts.
+run_pre: fn(l: Lander, stop: Shared<Interrupt>, paths: [String]) -> ProcessReceipt {
+    pre: command(l, Sh{"bash {l.precommit}"}.extend(paths)).stdout(.Capture).stderr(.Stdout).spawn()
+    pre_running(stop.copy(), Val(pre.copy()))
+    receipt: pre.wait()
+    pre_running(stop.copy(), None)
+    checkpoint(l, stop)
+    receipt
 }
 
 // The precommit's last 20 lines, then the failure line.
@@ -119,7 +149,8 @@ pre_failed: fn(pre: ProcessReceipt) -> String {
     "{pre.output.trim_end().last_lines(20).join("\n")}\nlane-commit: precommit failed; reverted"
 }
 
-commit_job: fn(l: Lander, job: String) {
+commit_job: fn(l: Lander, stop: Shared<Interrupt>, job: String) {
+    checkpoint(l, stop)
     paths: files.read("{job}/files").lines()
     _ := command(l, Sh{"git add -A -f --"}.extend(paths.copy())).run()
     if command(l, Sh{"git commit -q -F {"{job}/msg"} --"}.extend(paths.copy())).run().code == 0 {
@@ -133,7 +164,8 @@ commit_job: fn(l: Lander, job: String) {
 
 // Applies one job onto the current tree (with earlier batch jobs applied); its
 // paths when it applied.
-apply_job: fn(l: Lander, job: String) -> [String]? Err! {
+apply_job: fn(l: Lander, stop: Shared<Interrupt>, job: String) -> [String]? Err! {
+    checkpoint(l, stop)
     paths: files_of(l, "{job}/patch")
     files.write("{job}/files", listed(paths.copy()))
     if paths.len() == 0 {
@@ -163,7 +195,7 @@ apply_job: fn(l: Lander, job: String) -> [String]? Err! {
 // the end time, a job from another lane that touches a frozen prefix waits in
 // the queue (it neither fails nor lands).
 frozen: fn(l: Lander, lane: String, paths: [String]) -> Bool {
-    lines: (files.read(l.freeze) ?? return false).lines()
+    lines: files.read_or(l.freeze, "").lines()
     end: (lines.get(0) ?? "").to_int() ?? return false
     if time.unix_ns() /% 1000000000 >= end || lane == (lines.get(1) ?? "") -> return false
     lines.slice(2, lines.len()).any(prefix -> prefix != "" && paths.any(path -> path.starts_with(prefix)))
@@ -185,7 +217,7 @@ alive: fn(pid: String) -> Bool {
     true
 }
 
-drain: fn(l: Lander) {
+drain: fn(l: Lander, stop: Shared<Interrupt>) {
     if !files.is_dir(l.worktree) -> return
     batch := [String]{}
     union := [String]{}
@@ -202,15 +234,15 @@ drain: fn(l: Lander) {
         files.write("{job}/files.peek", listed(peek.copy()))
         // A job that touches a path already in the batch waits for the next round.
         if frozen(l, lane, peek.copy()) || union.any(path -> peek.contains(path)) -> next
-        if apply_job(l, job.copy()) == .Val(paths) {
+        if apply_job(l, stop.copy(), job.copy()) == .Val(paths) {
             union.extend(paths)
             batch.push(job)
         }
     }
     if batch.len() == 0 -> return
-    whole: run_pre(l, union)
+    whole: run_pre(l, stop.copy(), union)
     if whole.code == 0 {
-        loop job in batch -> commit_job(l, job)
+        loop job in batch -> commit_job(l, stop.copy(), job)
         return
     }
     // Batch failed: revert all (newest first), then land each job alone so only the bad one fails.
@@ -220,10 +252,10 @@ drain: fn(l: Lander) {
         return
     }
     loop job in batch {
-        paths: apply_job(l, job.copy()) ?? next
-        alone: run_pre(l, paths)
+        paths: apply_job(l, stop.copy(), job.copy()) ?? next
+        alone: run_pre(l, stop.copy(), paths)
         if alone.code == 0 {
-            commit_job(l, job)
+            commit_job(l, stop.copy(), job)
             next
         }
         revert_job(l, job.copy())
@@ -231,10 +263,25 @@ drain: fn(l: Lander) {
     }
 }
 
-// Whether a lander is draining, read by the interrupt handler: only a drain
-// has patches of its own to revert.
-Draining: struct {
-    on: Bool
+// One drain with TERM, INT and HUP held, as the original's trap around it: a
+// watcher marks the arrival and stops the precommit, and the drain's next
+// step reverts. Closing gives the signals their default action back.
+drain_trapped: fn(l: Lander) {
+    stop: Shared{Interrupt{signalled: false, pre: None}}
+    trap: process.signals([process.ProcessSignal]{.Term, .Int, .Hup}) ?? process.fail(1, "lane-commit: cannot take SIGTERM, SIGINT and SIGHUP")
+    arrivals: trap.receiver.copy()
+    // Copies of a shared value share its cell.
+    seen: stop.copy()
+    watcher: task {
+        _ := arrivals.receive() ?? return
+        edit: seen.guard_edit()
+        edit.value.signalled = true
+        halt(edit.value)
+    }
+    drain(l, stop.copy())
+    trap.close()
+    watcher.join() ?? ()
+    checkpoint(l, stop)
 }
 
 run: fn() {
@@ -265,25 +312,13 @@ run: fn() {
     files.write("{job}/pid", "{sys.pid()}\n")
     files.touch("{job}/ready")
 
-    draining: Shared{Draining{on: false}}
-    // Copies of a shared value share its cell.
-    handler_draining: draining.copy()
-    handler_lander: l.copy()
-    sys.on_interrupt(() -> {
-        permit: handler_draining.guard_read()
-        if !permit.value.on -> process.exit(130)
-        interrupted(handler_lander) ?? ()
-        process.exit(143)
-    })
     loop !files.exists("{job}/result") {
         // The lock is held until this round ends.
         _held: files.try_lock(lock) ?? {
             time.sleep(5s)
             next
         }
-        draining.guard_edit().value.on = true
-        drain(l)
-        draining.guard_edit().value.on = false
+        drain_trapped(l)
     }
     print(files.read("{job}/out").removesuffix("\n"))
     code: files.read("{job}/rc").trim().to_int() ?? 1

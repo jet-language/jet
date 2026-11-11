@@ -1,0 +1,33 @@
+// process.signals takes a signal as a value: a subscribed signal arrives on
+// the receiver instead of ending the process, every open subscription that
+// holds it receives it, close() ends the receiver, and an empty list is
+// InvalidInput.
+package: {
+    name: "process_signals"
+    authority: { allow: [Env, Exec, IO, Mem.Alloc, Time.Wait] }
+}
+
+use process: core.process
+
+send: fn(name: String) -[Env, Exec, Time.Wait]> {
+    receipt: process.run_spec(process.cmd(["kill", "-{name}", "{process.current_pid()}"])) ?? panic("kill did not start")
+    if !receipt.success -> panic("kill -{name} failed")
+}
+
+run: fn() -[Env, Exec, IO, Time.Wait]> {
+    first: process.signals([ProcessSignal]{.Usr1, .Hup}) ?? panic("process.signals refused Usr1 and Hup")
+    second: process.signals([ProcessSignal]{.Usr1}) ?? panic("process.signals refused Usr1")
+    send("USR1")
+    a: first.receiver.receive() ?? panic("the first receiver closed early")
+    b: second.receiver.receive() ?? panic("the second receiver closed early")
+    print("usr1: first={process.signal_number(a)} second={process.signal_number(b)}")
+    second.close()
+    ended: second.receiver.receive() ?? .Winch
+    print("second after close: {process.signal_number(ended)}")
+    send("HUP")
+    c: first.receiver.receive() ?? panic("the first receiver closed early")
+    print("hup: {process.signal_number(c)}")
+    first.close()
+    refused: process.signals([ProcessSignal]{}) == .Err(.InvalidInput(_))
+    print("empty list refused: {refused}")
+}
