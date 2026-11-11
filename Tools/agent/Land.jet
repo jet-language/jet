@@ -107,17 +107,29 @@
 //
 // `batch` lands the jobs of LIST (`LANE<TAB>MSG<TAB>PATCH[<TAB>NAME]` lines,
 // absolute paths) on $JET_DEV_WORKTREE under $JET_RUN_ROOT/commit.lock with
-// one verification: every patch that applies (a patch already on dev is
-// skipped; a lane's later patches are left once one does not apply), the
-// regenerated views and runtime generator outputs, then one seed `precommit`
-// of every path. Patches that share a file land as one commit. The commits
-// are built in a private index and published with one compare-and-swap of
-// HEAD; a failed precommit or commit leaves HEAD and the worktree as they
-// were. A landed batch is then published (`publish latest`, then `publish
-// base` of HEAD) and handed to the release train. The report is
-// $JET_RUN_ROOT/batch-land.log. Exit: 0 landed or nothing applied; 2 setup
-// failure; 3 the worktree has tracked changes; 5 precommit failed; 6 the
-// commits could not be made.
+// one verification, by the train speed rules
+// (.agents/skills/orchestration/references/intake.md, "Train speed"):
+// every patch that applies (a patch already on dev is skipped; a lane's later
+// patches are left once one does not apply), the regenerated views and
+// runtime generator outputs; the gate, the seed's keep-going check of every
+// touched package from an empty directory; one build, the seed `precommit`
+// of every path; then the affected test rows (each job's `tests` lines, its
+// own first, plus the whole ui and golden profiles once for a compiler
+// change) in memory-sized parallel waves on a sealed export
+// ($JET_RUN_ROOT/train/sealed, read-only during the run), a red line rerun on
+// HEAD with the seed at once. A job with a gate, build or test row of its own
+// is set aside with its stack (`SET ASIDE`) and the rest lands on the same
+// build, rebuilt only when a job set aside after it changed a compiler input.
+// A job's side files: BASE.tests and BASE.meta beside BASE.patch, else
+// `tests` and `meta` beside the patch (a `seed:` split in meta keeps gate
+// rows from setting the job aside). Patches that share a file land as one
+// commit. The commits are built in a private index and published with one
+// compare-and-swap of HEAD; a failed precommit or commit leaves HEAD and the
+// worktree as they were. A landed batch is then published (`publish latest`,
+// then `publish base` of HEAD) and handed to the release train. The report is
+// $JET_RUN_ROOT/batch-land.log; it ends in the stage table. Exit: 0 landed or
+// nothing applied; 2 setup failure; 3 the worktree has tracked changes; 5
+// precommit failed, or red rows no job owns; 6 the commits could not be made.
 //
 // `publish latest` makes the batch-verified census compiler (with a runtime
 // pack) $JET_SCRATCH_ROOT/discovery/b2/install-latest. `publish base COMMIT`
@@ -1605,10 +1617,18 @@ batch_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never!
     batch(tools_checkout(), worktree, read_jobs(text))
 }
 
-// Land `jobs` on the worktree `dir` with one verification; the report is
-// $JET_RUN_ROOT/batch-land.log. Exit: 0 landed (or nothing applied); 2 setup
-// failure; 3 the worktree has tracked changes; 5 the precommit failed; 6 the
-// commits could not be made. 5 and 6 leave HEAD and the worktree as they were.
+// Land `jobs` on the worktree `dir` with one verification, by the train speed
+// rules (.agents/skills/orchestration/references/intake.md, "Train speed"):
+// compose, the seed gate of every touched package (rule 1), one build, the
+// `precommit` of every changed path (rule 2), then the jobs' affected test
+// rows on a sealed export (rules 3, 4 and 7), then the commits. A job red at
+// the gate, the build or its rows is set aside with its stack (`SET ASIDE` in
+// the report) and the rest lands on the same build; the build reruns only when
+// a job set aside after it changed a compiler input. The report is
+// $JET_RUN_ROOT/batch-land.log; it ends in the stage table (rule 8). Exit: 0
+// landed (or nothing applied); 2 setup failure; 3 the worktree has tracked
+// changes; 5 the precommit failed, or red rows no job owns; 6 the commits
+// could not be made. 5 and 6 leave HEAD and the worktree as they were.
 batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     run: run_root()
     files.create_dir_all(run) ?? ()
@@ -1630,80 +1650,112 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         return 2
     }
     pre: parsed.output.trim()
-    applied := [Applied]{}
-    all := [String]{}
-    broken := [String:String]{}
-    regenerate := false
-    loop job in jobs {
-        name: files.basename(job.patch)
-        if broken.get(job.lane) == .Val(base) {
-            say(log, "DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply ({base}); left for its lane")
-            next
+    // The train's own directory: the sealed export the tests run on, their
+    // logs, and the empty working directory of the gate's checks.
+    work: "{run}/train"
+    files.set_mode("{work}/sealed", 0o755) ?? ()
+    files.remove_all(work) ?? ()
+    files.create_dir_all(work) ?? {
+        say(log, "{work} cannot be created: {err}")
+        return 2
+    }
+    stages := [Stage]{}
+    started := epoch()
+    aside := [String]{}
+    composed := compose(dir, jobs, aside, log)
+    stages.push(Stage{name: "compose", seconds: epoch() - started})
+    if !composed.ok -> return finish(log, stages, 5)
+    if composed.applied.len() == 0 {
+        say(log, "nothing applied")
+        return finish(log, stages, 0)
+    }
+
+    // Rule 1: a job with a seed check row in a file it touches is set aside,
+    // with its stack, before anything is built.
+    started = epoch()
+    gated: prebuild_gate(dir, composed.applied, work, log)
+    if gated.len() > 0 {
+        aside = with_stack(aside, composed.applied, gated, "a seed check row in a file it touches (the gate)", log)
+        revert_batch(dir, composed.applied, composed.all, log)
+        composed = compose(dir, jobs, aside, log)
+    }
+    stages.push(Stage{name: "gate", seconds: epoch() - started})
+    if !composed.ok -> return finish(log, stages, 5)
+    if composed.applied.len() == 0 {
+        say(log, "every job was set aside at the gate; nothing to land")
+        return finish(log, stages, 5)
+    }
+
+    // Rule 2: one build. Rows it attributes set their jobs aside and the
+    // build runs once more; anything else fails the batch.
+    rebuilt := false
+    built := false
+    loop {
+        started = epoch()
+        checked: precommit_batch(dir, composed, log)
+        stages.push(Stage{name: if rebuilt -> "rebuild" else -> "build", seconds: epoch() - started})
+        built = checked.census
+        if checked.code == 0 -> break
+        red: if checked.census && !rebuilt -> census_red(composed.applied, log) else -> [String]{}
+        if red.len() == 0 {
+            say(log, "PRECOMMIT FAILED for the batch; reverting")
+            revert_batch(dir, composed.applied, composed.all, log)
+            return finish(log, stages, 5)
         }
-        if git(dir, [String]{"apply", "-R", "--check", job.patch}).code == 0 {
-            say(log, "SKIP (already on dev) {job.lane} {name}")
-            next
+        aside = with_stack(aside, composed.applied, red, "a build row in a file it touches", log)
+        revert_batch(dir, composed.applied, composed.all, log)
+        composed = compose(dir, jobs, aside, log)
+        if !composed.ok -> return finish(log, stages, 5)
+        if composed.applied.len() == 0 {
+            say(log, "every job was set aside at the build; nothing to land")
+            return finish(log, stages, 5)
         }
-        whole: git(dir, [String]{"apply", "--check", job.patch}).code == 0 && git(dir, [String]{"apply", job.patch}).code == 0
-        // A patch whose only conflict is in the generated CoreSourceRows views
-        // applies around them; the views are regenerated from the batch's sources.
-        around := false
-        if !whole {
-            around = git(dir, around_views([String]{"--check"}, job.patch)).code == 0 && git(dir, around_views([String]{}, job.patch)).code == 0
-            if around {
-                regenerate = true
-                say(log, "applied around the CoreSourceRows views: {name}")
+        rebuilt = true
+    }
+
+    // Rules 3, 4 and 7: the affected rows on a sealed export, each job's own
+    // first; a red row sets its jobs aside and the rest land on this build.
+    started = epoch()
+    from: if built -> "{scratch_root()}/discovery/r14/snap/Compiler/JetCli/.jet/build" else -> seed_dir()
+    tested: train_tests(dir, pre, composed, work, log, from)
+    stages.push(Stage{name: "tests", seconds: epoch() - started})
+    if tested.unowned > 0 {
+        say(log, "TESTS FAILED: {tested.unowned} red row(s) no job owns; reverting")
+        revert_batch(dir, composed.applied, composed.all, log)
+        return finish(log, stages, 5)
+    }
+    if tested.red.len() > 0 {
+        started = epoch()
+        before: aside.copy()
+        aside = with_stack(aside, composed.applied, tested.red, "a red test row", log)
+        compiler := false
+        loop item in composed.applied {
+            if before.contains(job_key(item.job)) || !aside.contains(job_key(item.job)) -> next
+            loop path in item.paths {
+                if compiler_input(path) -> compiler = true
             }
         }
-        if !whole && !around {
-            say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
-            broken[job.lane] = name
-            next
+        revert_batch(dir, composed.applied, composed.all, log)
+        composed = compose(dir, jobs, aside, log)
+        if !composed.ok -> return finish(log, stages, 5)
+        if composed.applied.len() == 0 {
+            say(log, "every job was set aside at the tests; nothing to land")
+            return finish(log, stages, 5)
         }
-        paths: touched_paths(dir, job.patch)
-        loop path in paths {
-            if !all.contains(path) -> all.push(path.copy())
-        }
-        say(log, "APPLIED {job.lane} {name} ({paths.len()} files)")
-        applied.push(Applied{job: job.copy(), paths: paths})
-    }
-    if applied.len() == 0 {
-        say(log, "nothing applied")
-        return 0
-    }
-    if regenerate {
-        rows: seed_run(dir, [String]{"Tools/agent/CoreSourceRows.jet"}, 900)
-        say(log, "CoreSourceRows regeneration rc={rows.code} {both(rows).trim_end().last_lines(1).join(" ")}")
-        if rows.code != 0 {
-            say(log, "CoreSourceRows regeneration FAILED; reverting")
-            revert_batch(dir, applied, all, log)
-            return 5
+        // The build stands unless a set-aside job changed a compiler input;
+        // the ratchets always rerun on what is left.
+        rechecked: if compiler -> precommit_batch(dir, composed, log).code else -> ratchets(dir)
+        stages.push(Stage{name: if compiler -> "rebuild" else -> "ratchets", seconds: epoch() - started})
+        if rechecked != 0 {
+            say(log, "PRECOMMIT FAILED after the set-aside; reverting")
+            revert_batch(dir, composed.applied, composed.all, log)
+            return finish(log, stages, 5)
         }
     }
-    // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
-    generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
-    say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")
-    regenerated := [String]{}
-    loop path in dirty_paths(dir) {
-        if !all.contains(path) -> regenerated.push(path)
-    }
-    shown_regenerated: if regenerated.len() > 0 -> regenerated.join(" ") else -> "none"
-    say(log, "regenerated: {shown_regenerated}")
-    precommit_args := [String]{"Tools/agent/Land.jet", "precommit"}
-    precommit_args.extend(all.copy())
-    precommit_args.extend(regenerated.copy())
-    checked: seed_run(dir, precommit_args, 0)
-    rows := [String]{}
-    loop line in both(checked).lines() {
-        if line.starts_with("nm: ") || line.starts_with("skip ") -> next
-        rows.push(line.copy())
-    }
-    loop line in last_of(rows, 25) -> say(log, line)
-    if checked.code != 0 {
-        say(log, "PRECOMMIT FAILED for the batch; reverting")
-        revert_batch(dir, applied, all, log)
-        return 5
-    }
+    started = epoch()
+    applied: composed.applied.copy()
+    all: composed.all.copy()
+    regenerated: composed.regenerated.copy()
 
     // Every commit is built in a private index, chained on the pre-batch HEAD;
     // nothing visible changes until the one compare-and-swap of HEAD.
@@ -1797,7 +1849,7 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
         say(log, "!!!!!!!! nothing landed: this batch moved no ref (HEAD {git(dir, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}, pre-batch {short_sha(pre)}); reverting the batch's worktree changes")
         loop item in applied -> say(log, "COMMIT FAILED {item.job.lane} {item.job.patch}")
         revert_batch(dir, applied, all, log)
-        return 6
+        return finish(log, stages, 6)
     }
     // The worktree already is the new HEAD; bring the index along.
     synced: git(dir, [String]{"read-tree", "--reset", "HEAD"}).code == 0 && git(dir, [String]{"update-index", "-q", "--refresh"}).code == 0
@@ -1816,7 +1868,8 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     if latest.ok -> say(log, publish_base(tools, dir, head).line)
     say(log, "DONE HEAD {git(dir, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
     say(log, release_train(tools, head))
-    0
+    stages.push(Stage{name: "land", seconds: epoch() - started})
+    finish(log, stages, 0)
 }
 
 // `git apply` arguments that apply `patch` around the generated views, after
@@ -1827,6 +1880,681 @@ around_views: fn(options: [String], patch: String) -> [String] Never! {
     loop view in GENERATED_VIEWS -> argv.push("--exclude={view}")
     argv.push(patch.copy())
     argv
+}
+
+// --- the train rules (`batch`) ----------------------------------------------
+//
+// .agents/skills/orchestration/references/intake.md, "Train speed". A job's
+// side files sit beside its patch: BASE.tests and BASE.meta for BASE.patch,
+// else `tests` and `meta` in the patch's directory (an intake submission).
+
+// What MemAvailable keeps free; the cap of the gate's checks, of a job's test
+// line and of the train's whole-profile lines (GiB); how many gate checks run
+// at once, and at most how many test lines.
+TRAIN_FLOOR_GIB: 12
+GATE_GIB: 12
+GATE_JOBS: 2
+TEST_GIB: 10
+PROFILE_GIB: 16
+TEST_JOBS_MAX: 4
+TEST_SECONDS: 1500
+// The whole profiles every ui and golden row of a compiler change is in: the
+// train runs each once when a job changes a compiler input.
+TRAIN_PROFILES: [String]{"ui", "golden"}
+// The keep-going reports of the census passes (`census`), for the rows a
+// failed build attributes.
+CENSUS_PASSES: [String]{"check", "build", "selfcheck", "selfcheck-core"}
+// The units of a test row's timings, and the marks around a path in a row.
+TIME_UNITS: [String]{"ms", "µs", "us", "ns", "s"}
+PATH_MARKS: [String]{"`", "'", "\"", "(", ")", "[", "]", ","}
+
+Stage: struct {
+    name: String
+    seconds: Int
+}
+
+// The applied jobs of a composition, every path they change, and the paths
+// the regeneration changed besides; `ok` is false when the regeneration
+// failed (the worktree is then reverted).
+Composed: struct {
+    ok: Bool
+    applied: [Applied]
+    all: [String]
+    regenerated: [String]
+}
+
+// A precommit's exit code, and whether it ran the census with its row reports
+// and no ratchet failed (so its rows can be attributed).
+Checked: struct {
+    code: Int
+    census: Bool
+}
+
+// A distinct test line: the keys of the jobs listing it (none for the train's
+// whole-profile lines), and its exit code once run.
+TestLine: struct {
+    line: String
+    owners: [String]
+    train: Bool
+    code: Int
+}
+
+// The jobs red at the tests, and the red rows no job owns.
+Tested: struct {
+    red: [String]
+    unowned: Int
+}
+
+job_key: fn(job: Job) -> String Never! { "{job.lane} {files.basename(job.patch)}" }
+
+// The side file `name` of `job` (see the section head).
+job_side: fn(job: Job, name: String) -> String Never! {
+    if job.patch.ends_with(".patch") -> return "{job.patch.removesuffix(".patch")}.{name}"
+    "{job.patch.rpartition("/").head}/{name}"
+}
+
+// Does the job's meta split it from a part its rows need (`seed: needed`,
+// `seed: after X`, `seed: a jet built with X`)? Its gate rows then do not set
+// it aside: the train's own build carries what the seed lacks.
+seed_split: fn(job: Job) -[FS]> Bool Never! {
+    text: files.read(job_side(job, "meta")) ?? return false
+    loop line in text.lines() {
+        if !line.starts_with("seed:") -> next
+        value: line.removeprefix("seed:").trim()
+        if value.starts_with("needed") || value.starts_with("after") || value.starts_with("a jet built") -> return true
+    }
+    false
+}
+
+// The stage table, then `code`.
+finish: fn(log: String, stages: [Stage], code: Int) -[FS, IO]> Int Never! {
+    say(log, "stages (wall minutes):")
+    say(log, "| stage | min |")
+    say(log, "|---|---|")
+    total := 0
+    loop stage in stages {
+        say(log, "| {stage.name} | {minutes(stage.seconds)} |")
+        total += stage.seconds
+    }
+    say(log, "| total | {minutes(total)} |")
+    code
+}
+
+minutes: fn(seconds: Int) -> String Never! {
+    whole: seconds /% 60
+    "{whole}.{(seconds - whole * 60) * 10 /% 60}"
+}
+
+// Apply `jobs` but the `aside` ones on the worktree `dir` (a lane's later
+// patches are left once one does not apply), then regenerate the views and the
+// runtime generators' outputs.
+compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> Composed Never! {
+    applied := [Applied]{}
+    all := [String]{}
+    broken := [String:String]{}
+    regenerate := false
+    loop job in jobs {
+        if aside.contains(job_key(job)) -> next
+        name: files.basename(job.patch)
+        if broken.get(job.lane) == .Val(base) {
+            say(log, "DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply ({base}); left for its lane")
+            next
+        }
+        if git(dir, [String]{"apply", "-R", "--check", job.patch}).code == 0 {
+            say(log, "SKIP (already on dev) {job.lane} {name}")
+            next
+        }
+        whole: git(dir, [String]{"apply", "--check", job.patch}).code == 0 && git(dir, [String]{"apply", job.patch}).code == 0
+        // A patch whose only conflict is in the generated CoreSourceRows views
+        // applies around them; the views are regenerated from the batch's sources.
+        around := false
+        if !whole {
+            around = git(dir, around_views([String]{"--check"}, job.patch)).code == 0 && git(dir, around_views([String]{}, job.patch)).code == 0
+            if around {
+                regenerate = true
+                say(log, "applied around the CoreSourceRows views: {name}")
+            }
+        }
+        if !whole && !around {
+            say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
+            broken[job.lane] = name
+            next
+        }
+        paths: touched_paths(dir, job.patch)
+        loop path in paths {
+            if !all.contains(path) -> all.push(path.copy())
+        }
+        say(log, "APPLIED {job.lane} {name} ({paths.len()} files)")
+        applied.push(Applied{job: job.copy(), paths: paths})
+    }
+    if applied.len() == 0 -> return Composed{ok: true, applied: applied, all: all, regenerated: [String]{}}
+    if regenerate {
+        rows: seed_run(dir, [String]{"Tools/agent/CoreSourceRows.jet"}, 900)
+        say(log, "CoreSourceRows regeneration rc={rows.code} {both(rows).trim_end().last_lines(1).join(" ")}")
+        if rows.code != 0 {
+            say(log, "CoreSourceRows regeneration FAILED; reverting")
+            revert_batch(dir, applied, all, log)
+            return Composed{ok: false, applied: [Applied]{}, all: [String]{}, regenerated: [String]{}}
+        }
+    }
+    // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
+    generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
+    say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")
+    regenerated := [String]{}
+    loop path in dirty_paths(dir) {
+        if !all.contains(path) -> regenerated.push(path)
+    }
+    shown_regenerated: if regenerated.len() > 0 -> regenerated.join(" ") else -> "none"
+    say(log, "regenerated: {shown_regenerated}")
+    Composed{ok: true, applied: applied, all: all, regenerated: regenerated}
+}
+
+// `aside` plus the `red` jobs of `applied` and their stacks: every later job
+// of a set-aside job's lane, or sharing a file with one. Each new one is
+// reported as `SET ASIDE LANE NAME - why`.
+with_stack: fn(aside: [String], applied: [Applied], red: [String], why: String, log: String) -[FS, IO]> [String] Never! {
+    out := aside.copy()
+    lanes := [String]{}
+    paths := [String]{}
+    loop item in applied {
+        key: job_key(item.job)
+        hit := red.contains(key) || lanes.contains(item.job.lane)
+        loop path in item.paths {
+            if paths.contains(path) -> hit = true
+        }
+        if !hit -> next
+        lanes.push(item.job.lane.copy())
+        paths.extend(item.paths.copy())
+        if out.contains(key) -> next
+        out.push(key.copy())
+        reason: if red.contains(key) -> why.copy() else -> "in the stack of a job set aside for {why}"
+        say(log, "SET ASIDE {key} - {reason}")
+    }
+    out
+}
+
+// The package a changed `path` is checked through: Compiler/JetCli for the
+// compiler and Core (the census's check), else the nearest directory of `tree`
+// with a package.jet; "" for a path in no package (left to the tests).
+package_of: fn(tree: String, path: String) -[FS]> String Never! {
+    if path.starts_with("Compiler/") || path.starts_with("Core/") -> return "Compiler/JetCli"
+    dir := path.rpartition("/").head
+    loop dir != "" {
+        if files.is_file("{tree}/{dir}/package.jet") -> return dir
+        dir = dir.rpartition("/").head
+    }
+    ""
+}
+
+// Rule 1, the gate: the seed's keep-going `jet check` of every package the
+// applied jobs touch, GATE_JOBS at once, each capped at GATE_GIB and run from
+// an empty directory with the package's absolute path. A row in a file a job
+// touches makes the job red (unless its meta is seed-split); other rows and
+// a failed check with no rows are reported. The red jobs' keys.
+prebuild_gate: fn(dir: String, applied: [Applied], work: String, log: String) -[Exec, Env, FS, IO, Time.Wait]> [String] Never! {
+    red := [String]{}
+    packages := [String]{}
+    loop item in applied {
+        loop path in item.paths {
+            package: package_of(dir, path)
+            if package != "" && !packages.contains(package) -> packages.push(package)
+        }
+    }
+    if packages.len() == 0 {
+        say(log, "gate: no package touched")
+        return red
+    }
+    cwd: "{work}/cwd"
+    files.create_dir_all(cwd) ?? ()
+    seed: seed_dir()
+    identity: read_identity(seed)
+    specs := [ProcessSpec]{}
+    loop at in 0..<packages.len() {
+        report: "{work}/gate-{at}.tsv"
+        argv: capped(GATE_GIB, [String]{"{seed}/jet", "check", "--threads", "8", "{dir}/{packages[at]}"})
+        spec := process.cmd(argv).cwd(cwd).timeout(time.duration_seconds(1200)).output_limit(268435456)
+        loop setting in compile_env(identity, dir, report) -> spec = spec.env(setting.name, setting.value)
+        specs.push(spec)
+    }
+    say(log, "gate: the seed's check of {packages.join(" ")}")
+    results: process.run_all(specs, GATE_JOBS) ?? {
+        say(log, "gate: the checks cannot start: {err}")
+        return red
+    }
+    package_dirs := compiler_package_dirs(dir) ?? [String]{}
+    loop at in 0..<packages.len() {
+        receipt: results[at] ?? {
+            say(log, "gate {packages[at]}: cannot start: {err}")
+            next
+        }
+        bases := package_dirs.copy()
+        bases.push(packages[at].copy())
+        rows: census_rows("{work}/gate-{at}.tsv", dir, bases)
+        say(log, "gate {packages[at]} rc={exit_code(receipt)} {rows[0]}")
+        if exit_code(receipt) != 0 && report_rows("{work}/gate-{at}.tsv") == 0 {
+            say(log, "gate {packages[at]}: the check failed with no rows: {process.combined_output(receipt).trim_end().last_lines(3).join(" | ")}")
+        }
+        loop k in 1..<rows.len() {
+            row: rows[k]
+            owners: row_owners(applied, row_file(row))
+            if owners.len() == 0 {
+                say(log, "gate row no job touches: {row}")
+                next
+            }
+            loop item in applied {
+                key: job_key(item.job)
+                if !owners.contains(key) -> next
+                if seed_split(item.job) {
+                    say(log, "gate row of {key} (seed-split, not red): {row}")
+                    next
+                }
+                say(log, "gate RED {key}: {row}")
+                if !red.contains(key) -> red.push(key.copy())
+            }
+        }
+    }
+    red
+}
+
+// `argv` in its own systemd scope capped at `gib` GiB (no swap), at low
+// priority, with the compiler's 1 GiB stack.
+capped: fn(gib: Int, argv: [String]) -> [String] Never! {
+    out := [String]{"systemd-run", "--user", "--scope", "-q", "--expand-environment=no", "-p", "MemoryMax={gib}G", "-p", "MemorySwapMax=0", "nice", "-n", "19", "ionice", "-c3", "prlimit", HEAVY_STACK, "--"}
+    out.extend(argv.copy())
+    out
+}
+
+// A receipt's exit code: 124 on a timeout, 128 + the signal on a signal.
+exit_code: fn(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+// The file of a `code<TAB>file:line<TAB>detail` row.
+row_file: fn(row: String) -> String Never! {
+    fields: row.split("\t").to_list()
+    if fields.len() < 2 -> return ""
+    at: fields[1].rpartition(":")
+    if at.sep != "" && is_digits(at.tail) -> return at.head.copy()
+    fields[1].copy()
+}
+
+// The keys of the applied jobs that change `file`.
+row_owners: fn(applied: [Applied], file: String) -> [String] Never! {
+    owners := [String]{}
+    if file == "" -> return owners
+    loop item in applied {
+        if item.paths.contains(file) -> owners.push(job_key(item.job))
+    }
+    owners
+}
+
+// Rule 2's build: the `precommit` of every path the composition changed.
+precommit_batch: fn(dir: String, composed: Composed, log: String) -[Exec, Env, FS, IO, Time.Wait]> Checked Never! {
+    args := [String]{"Tools/agent/Land.jet", "precommit"}
+    args.extend(composed.all.copy())
+    args.extend(composed.regenerated.copy())
+    checked: seed_run(dir, args, 0)
+    rows := [String]{}
+    census := false
+    ratchet_failed := false
+    loop line in both(checked).lines() {
+        if line.starts_with("nm: ") || line.starts_with("skip ") -> next
+        if line.starts_with("check rc=") -> census = true
+        if line.starts_with("PRECOMMIT: ") && line.contains(" failed") -> ratchet_failed = true
+        rows.push(line.copy())
+    }
+    loop line in last_of(rows, 25) -> say(log, line)
+    Checked{code: checked.code, census: census && !ratchet_failed}
+}
+
+// The jobs a failed census's rows name, every row in a file one of them
+// changes; none when a row names no job's file or the census left no rows.
+census_red: fn(applied: [Applied], log: String) -[Exec, Env, FS, IO, Time.Wait]> [String] Never! {
+    r14: "{scratch_root()}/discovery/r14"
+    snap: "{r14}/snap"
+    package_dirs: compiler_package_dirs(snap) ?? [String]{}
+    red := [String]{}
+    rows := 0
+    loop pass in CENSUS_PASSES {
+        report: "{r14}/census/{pass}-keep-going.tsv"
+        if !files.is_file(report) -> next
+        found: census_rows(report, snap, package_dirs)
+        loop k in 1..<found.len() {
+            row: found[k]
+            rows += 1
+            owners: row_owners(applied, row_file(row))
+            if owners.len() == 0 {
+                say(log, "build row no job changes: {row}")
+                return [String]{}
+            }
+            say(log, "build RED {owners.join(", ")}: {row}")
+            loop key in owners {
+                if !red.contains(key) -> red.push(key)
+            }
+        }
+    }
+    if rows == 0 {
+        say(log, "the build failed with no rows to attribute")
+        return [String]{}
+    }
+    red
+}
+
+// Rule 7: the composed tree (HEAD `pre` plus every path the composition
+// changed) and HEAD itself exported under `work`/sealed, with the batch's
+// compiler beside them, then sealed/ made read-only so nothing can remove or
+// rename the trees during the run. "" or what failed.
+seal: fn(dir: String, pre: String, composed: Composed, work: String, from: String) -[Exec, Env, FS, Time.Wait]> String Never! {
+    sealed: "{work}/sealed"
+    tree: "{sealed}/tree"
+    export_tree(dir, pre, tree, [String]{}) ?? return err.message
+    changed := composed.all.copy()
+    changed.extend(composed.regenerated.copy())
+    loop path in changed {
+        target: files.join(tree, path)
+        if !on_disk(dir, path) {
+            files.remove(target) ?? ()
+            next
+        }
+        files.create_dir_all(files.dirname(target)) ?? ()
+        files.copy(files.join(dir, path), target) ?? return "{path}: {err}"
+    }
+    export_tree(dir, pre, "{sealed}/base", [String]{}) ?? return err.message
+    // The batch's compiler (the directory `from`: the census s1 and its
+    // runtime pack when this batch built one, as `publish latest` takes them,
+    // else the seed), with the seed's C/C++ toolchain pack beside it.
+    seed: seed_dir()
+    jet: "{sealed}/jet"
+    files.create_dir_all(jet) ?? return "{jet}: {err}"
+    files.copy("{from}/jet", "{jet}/jet") ?? return "{from}/jet: {err}"
+    files.set_mode("{jet}/jet", 0o755) ?? return "{jet}/jet: {err}"
+    if files.is_dir("{from}/jet-runtime") -> files.copy_dir("{from}/jet-runtime", "{jet}/jet-runtime") ?? return "{from}/jet-runtime: {err}"
+    pack: "{seed}/jet-cc-pack-x86_64-linux.tar.zst"
+    if files.is_file(pack) -> files.copy(pack, "{jet}/jet-cc-pack-x86_64-linux.tar.zst") ?? return "{pack}: {err}"
+    files.set_mode(sealed, 0o555) ?? return "{sealed} cannot be sealed: {err}"
+    ""
+}
+
+// Rules 3 and 4: the affected rows. Every distinct line of the jobs' tests
+// files runs once (a LaneCheck line is the lane's own receipt; the build and
+// the ratchets cover it), and a batch that changes a compiler input adds each
+// whole TRAIN_PROFILES run once. Three waves: lines one job owns, then the
+// shared ones (a line whose jobs are all red already is skipped), then the
+// whole profiles; each wave runs as many lines at once as MemAvailable above
+// TRAIN_FLOOR_GIB holds at its cap. A red line reruns at once on HEAD with
+// the seed: FAIL rows HEAD has too (or the same failure) are pre-existing,
+// otherwise its jobs are red. A whole-profile row goes to the jobs that change
+// a file of its path stem; a row no job owns is counted.
+train_tests: fn(dir: String, pre: String, composed: Composed, work: String, log: String, from: String) -[Exec, Env, FS, IO, Time.Wait]> Tested Never! {
+    lines := [TestLine]{}
+    compiler := false
+    loop item in composed.applied {
+        key: job_key(item.job)
+        text: files.read(job_side(item.job, "tests")) ?? ""
+        loop raw in text.lines() {
+            line: raw.trim()
+            if line == "" || line.starts_with("#") || line.contains("LaneCheck") -> next
+            at := -1
+            loop k in 0..<lines.len() {
+                if lines[k].line == line -> at = k
+            }
+            if at < 0 {
+                lines.push(TestLine{line: line.copy(), owners: [String]{key.copy()}, train: false, code: -1})
+                next
+            }
+            entry := lines[at].copy()
+            if !entry.owners.contains(key) -> entry.owners.push(key.copy())
+            lines[at] = entry
+        }
+        loop path in item.paths {
+            if compiler_input(path) -> compiler = true
+        }
+    }
+    if compiler {
+        loop profile in TRAIN_PROFILES {
+            whole: "jet test Compiler --profile {profile}"
+            listed := false
+            loop entry in lines {
+                if entry.line == whole -> listed = true
+            }
+            if !listed -> lines.push(TestLine{line: "{whole} --jobs=8", owners: [String]{}, train: true, code: -1})
+        }
+    }
+    red := [String]{}
+    unowned := 0
+    if lines.len() == 0 {
+        say(log, "tests: no test lines")
+        return Tested{red: red, unowned: unowned}
+    }
+    sealing: seal(dir, pre, composed, work, from)
+    if sealing != "" {
+        say(log, "tests: the sealed tree cannot be made: {sealing}")
+        return Tested{red: red, unowned: 1}
+    }
+    tree: "{work}/sealed/tree"
+    base: "{work}/sealed/base"
+    out: "{work}/tests"
+    files.create_dir_all(out) ?? ()
+    seed: seed_dir()
+    say(log, "tests: {lines.len()} distinct line(s) on {tree}")
+    loop wave in 0..<3 {
+        picked := [Int]{}
+        loop at in 0..<lines.len() {
+            entry: lines[at]
+            in_wave: if {
+                entry.train -> wave == 2
+                entry.owners.len() == 1 && !whole_profile(entry.line) -> wave == 0
+                else -> wave == 1
+            }
+            if !in_wave -> next
+            all_red := !entry.train
+            loop key in entry.owners {
+                if !red.contains(key) -> all_red = false
+            }
+            if all_red {
+                say(log, "tests SKIP (every job listing it is red): {entry.line}")
+                next
+            }
+            picked.push(at)
+        }
+        if picked.len() == 0 -> next
+        gib: if wave == 2 -> PROFILE_GIB else -> TEST_GIB
+        codes: run_lines(lines, picked, tree, "{work}/sealed/jet", gib, out, "")
+        reds := [Int]{}
+        loop k in 0..<picked.len() {
+            entry := lines[picked[k]].copy()
+            entry.code = codes[k]
+            lines[picked[k]] = entry
+            if codes[k] == 0 {
+                say(log, "tests PASS {entry.line}")
+                next
+            }
+            reds.push(picked[k])
+        }
+        if reds.len() == 0 -> next
+        base_codes: run_lines(lines, reds, base, seed, gib, out, ".base")
+        loop k in 0..<reds.len() {
+            at: reds[k]
+            entry: lines[at]
+            got: fail_rows(files.read("{out}/{at}.out") ?? "")
+            was: fail_rows(files.read("{out}/{at}.base.out") ?? "")
+            new := [String]{}
+            loop row in got {
+                if !was.contains(row) -> new.push(row.copy())
+            }
+            if base_codes[k] != 0 && new.len() == 0 && (got.len() > 0 || base_codes[k] == entry.code) {
+                say(log, "tests PRE-EXISTING rc={entry.code} (HEAD with the seed: rc={base_codes[k]}): {entry.line}")
+                next
+            }
+            if !entry.train {
+                loop key in entry.owners {
+                    say(log, "tests RED {key} rc={entry.code}: {entry.line} ({out}/{at}.out)")
+                    if !red.contains(key) -> red.push(key.copy())
+                }
+                next
+            }
+            rows: if new.len() > 0 -> new else -> error_lines(files.read("{out}/{at}.out") ?? "", 20)
+            if rows.len() == 0 {
+                say(log, "tests row no job owns ({entry.line}, rc={entry.code}, no FAIL rows): {out}/{at}.out")
+                unowned += 1
+            }
+            loop row in rows {
+                owners: stem_owners(composed.applied, row)
+                if owners.len() == 0 {
+                    say(log, "tests row no job owns ({entry.line}): {clip(row, 300)}")
+                    unowned += 1
+                    next
+                }
+                loop key in owners {
+                    say(log, "tests RED {key} (a {entry.line} row in a file it changes): {clip(row, 300)}")
+                    if !red.contains(key) -> red.push(key.copy())
+                }
+            }
+        }
+    }
+    Tested{red: red, unowned: unowned}
+}
+
+whole_profile: fn(line: String) -> Bool Never! {
+    loop profile in TRAIN_PROFILES {
+        if line.ends_with("--profile {profile}") -> return true
+    }
+    false
+}
+
+// GiB of MemAvailable, 0 when /proc/meminfo cannot be read.
+available_gib: fn() -[FS]> Int Never! {
+    text: files.read("/proc/meminfo") ?? return 0
+    loop line in text.lines() {
+        if !line.starts_with("MemAvailable:") -> next
+        kib: Int.parse(line.removeprefix("MemAvailable:").trim().removesuffix("kB").trim()) ?? return 0
+        return kib /% 1048576
+    }
+    0
+}
+
+// Run the `picked` lines in `tree` with the compiler of `jet_dir` first on
+// PATH, each capped at `gib`, as many at once as memory allows; each line's
+// output goes to `out`/<index><suffix>.out. Their exit codes.
+run_lines: fn(lines: [TestLine], picked: [Int], tree: String, jet_dir: String, gib: Int, out: String, suffix: String) -[Exec, Env, FS, Time.Wait]> [Int] Never! {
+    width := (available_gib() - TRAIN_FLOOR_GIB) /% gib
+    if width < 1 -> width = 1
+    if width > TEST_JOBS_MAX -> width = TEST_JOBS_MAX
+    identity: read_identity(seed_dir())
+    path: env_or("PATH", "")
+    specs := [ProcessSpec]{}
+    loop at in picked {
+        spec := process.cmd(capped(gib, [String]{"bash", "-c", lines[at].line})).cwd(tree).timeout(time.duration_seconds(TEST_SECONDS)).output_limit(268435456)
+        spec = spec.env("PATH", "{jet_dir}:{path}").env("JET", "{jet_dir}/jet").env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree)
+        specs.push(spec)
+    }
+    codes := [Int]{}
+    results: process.run_all(specs, width) ?? {
+        loop at in picked {
+            files.write("{out}/{at}{suffix}.out", "the test lines cannot start: {err}\n") ?? ()
+            codes.push(127)
+        }
+        return codes
+    }
+    loop k in 0..<picked.len() {
+        receipt: results[k] ?? {
+            files.write("{out}/{picked[k]}{suffix}.out", "cannot start: {err}\n") ?? ()
+            codes.push(127)
+            next
+        }
+        files.write("{out}/{picked[k]}{suffix}.out", process.combined_output(receipt)) ?? ()
+        codes.push(exit_code(receipt))
+    }
+    codes
+}
+
+// The FAIL rows of a test output without their timings, sorted, once each.
+fail_rows: fn(text: String) -> [String] Never! {
+    rows := [String]{}
+    loop line in text.lines() {
+        if !line.contains("FAIL") -> next
+        words := [String]{}
+        loop word in line.split(" ") {
+            if !is_timing(word) -> words.push(word.copy())
+        }
+        row: words.join(" ")
+        if !rows.contains(row) -> rows.push(row)
+    }
+    rows.sort()
+    rows
+}
+
+// Is `word` a duration such as `12ms`, `(1.5s)` or `30µs`?
+is_timing: fn(word: String) -> Bool Never! {
+    bare: word.removeprefix("(").removesuffix(",").removesuffix(")")
+    loop unit in TIME_UNITS {
+        if !bare.ends_with(unit) -> next
+        number: bare.removesuffix(unit)
+        whole: number.partition(".")
+        if is_digits(whole.head) && (whole.sep == "" || is_digits(whole.tail)) -> return true
+    }
+    false
+}
+
+// At most `limit` lines of `text` that read as an error.
+error_lines: fn(text: String, limit: Int) -> [String] Never! {
+    out := [String]{}
+    loop line in text.lines() {
+        if out.len() >= limit -> break
+        if line.contains("error") || line.contains("Error") || line.contains("panic") || line.contains("failed") -> out.push(line.copy())
+    }
+    out
+}
+
+// The keys of the applied jobs that change a file with the path stem of a
+// path in `row` (a test case and its expected output share one).
+stem_owners: fn(applied: [Applied], row: String) -> [String] Never! {
+    owners := [String]{}
+    loop word in row.split(" ") {
+        token: path_token(word)
+        if !token.contains("/") || !token.contains(".") -> next
+        cited: path_stem(token)
+        loop item in applied {
+            key: job_key(item.job)
+            if owners.contains(key) -> next
+            loop path in item.paths {
+                changed: path_stem(path)
+                if changed == cited || changed.ends_with("/{cited}") || cited.ends_with("/{changed}") {
+                    owners.push(key.copy())
+                    break
+                }
+            }
+        }
+    }
+    owners
+}
+
+// A word of a row as a path: quotes and brackets dropped, and a `:line` after it.
+path_token: fn(word: String) -> String Never! {
+    token := word.copy()
+    loop mark in PATH_MARKS {
+        token = token.removeprefix(mark).removesuffix(mark)
+    }
+    token.partition(":").head.copy()
+}
+
+// `path` without its extension.
+path_stem: fn(path: String) -> String Never! {
+    at: path.rpartition(".")
+    if at.sep == "" || at.tail.contains("/") -> return path.copy()
+    at.head.copy()
+}
+
+// The report lines about `job` (its set-aside, gate, build and test rows).
+rows_of: fn(report: String, job: Job, name: String) -> [String] Never! {
+    key: "{job.lane} {name}"
+    out := [String]{}
+    loop line in report.lines() {
+        if line.contains(key) -> out.push(clip(line, 400))
+    }
+    last_of(out, 25)
 }
 
 // Stage `paths` in the private index and commit it on `tip` with `message`:
@@ -2057,6 +2785,7 @@ job_result: fn(job: Job, report: String, why: String) -> String Never! {
     stale_stack := false
     stale := false
     skipped := false
+    aside := ""
     loop line in report.lines() {
         if line.starts_with("COMMITTED ") && line.ends_with(" {job.lane} {name}") {
             landed = line.remove_prefix("COMMITTED ").partition(" ").head.copy()
@@ -2065,11 +2794,13 @@ job_result: fn(job: Job, report: String, why: String) -> String Never! {
         if line.starts_with("DOES NOT APPLY {job.lane} {name} - an earlier patch of its stack did not apply") -> stale_stack = true
         if line.starts_with("DOES NOT APPLY {job.lane} {name} ") -> stale = true
         if line == "SKIP (already on dev) {job.lane} {name}" -> skipped = true
+        if line.starts_with("SET ASIDE {job.lane} {name} - ") -> aside = line.remove_prefix("SET ASIDE {job.lane} {name} - ").copy()
     }
     if landed != "" -> return "LANDED {landed}\n"
     if stale_stack -> return "STALE an earlier patch of its stack did not apply; rebase the stack onto HEAD\n"
     if stale -> return "STALE does not apply to HEAD; rebase\n"
     if skipped -> return "LANDED already-on-dev\n"
+    if aside != "" -> return "REJECTED set aside by the train: {aside}\n{rows_of(report, job, name).join("\n")}\n"
     tail := [String]{}
     loop line in report.lines() {
         if !line.starts_with("nm: ") -> tail.push(line.copy())
