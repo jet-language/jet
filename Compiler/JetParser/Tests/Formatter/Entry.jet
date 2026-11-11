@@ -1,6 +1,6 @@
 // Composed formatter proofs require the complete formatter SCC, not mocks.
 use {
-    jet_parser.[jet_format_redundant_grouping, jet_format_source, jfmt_format_program_with_tokens, parse_source]
+    jet_parser.[jet_format_library_source, jet_format_redundant_grouping, jet_format_source, jfmt_format_program_with_tokens, parse_source]
     jet_lexer.[Token, lex]
     jet_foundation.[AST_NODE_GENERATED, Expr, Item, Stmt, TryConvert, expr_span]
 }
@@ -198,4 +198,20 @@ run: fn() {
     looped: fmt_core_stable("run: fn() {{\n    loop directory in ([String]{{\"{{package}}/src\", \"{{root}}/.jet\", \"{{package}}/.jet\", \"{{package}}/.jet/generated\"}}) {{\n        print(directory)\n    }}\n}}\n")
     assert(!looped.contains("), {{"), "a wrapped loop head ends without a comma")
     assert(looped.contains("loop directory in"), "the loop head is kept")
+}
+
+// Core library and compiler prelude sources spell reserved `__` names; they
+// format in the reserved lane, and a user source with the same text is E0067.
+#Test("library_sources_format_in_the_reserved_lane") {
+    source: "// A Core library source may spell reserved names.\n__probe_value: 1\n\nprobe: fn() -> Int {{ __probe_value }}\n"
+    library: jet_format_library_source(source, false)
+    assert(library.ok, "a library source formats: {library.diagnostics:Debug}")
+    assert_eq(library.text, source)
+    user: jet_format_source(source, false)
+    assert(!user.ok, "a user source may not spell a reserved name")
+    reserved := false
+    loop diagnostic in user.diagnostics {
+        if diagnostic.code == "E0067" -> reserved = true
+    }
+    assert(reserved, "the user source reports E0067")
 }

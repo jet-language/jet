@@ -54,6 +54,7 @@ use {
         TOKEN_UNIFIED_ARROW,
         Token,
         lex,
+        lex_generated,
     ]
 }
 
@@ -1917,11 +1918,23 @@ jfmt_trailing_marker_followed: fn(f: JetFmt, prog: Program, ordered_file_rules: 
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
 jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
+    jfmt_format_source_in(src, simplify_requested, false)
+}
+
+// jet_format_source for a Core library or compiler prelude source. Those
+// spell the reserved `__name` namespace, so they lex and parse as the loader
+// reads embedded Core (parse_generated_source); a user file never formats
+// this way.
+jet_format_library_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
+    jfmt_format_source_in(src, simplify_requested, true)
+}
+
+jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) -> JetFormatResult {
     source: src.bytes()
-    lexed: lex(source)
+    lexed: if library -> lex_generated(source) else -> lex(source)
     if lexed.diagnostics.len() > 0 -> return JetFormatResult{ok: false, text: "", diagnostics: lexed.diagnostics}
     simplify := simplify_requested
-    parsed: parse_source(source)
+    parsed: if library -> parse_generated_source(source) else -> parse_source(source)
     if jfmt_check_parse_accepts(parsed.diagnostics) {
         // A recovered control-body diagnostic leaves only a recovery
         // scaffold; simplify must remain a no-op there.

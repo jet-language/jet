@@ -157,6 +157,7 @@ use {
     ]
     jet_parser.[
         JetFormatResult,
+        jet_format_library_source,
         jet_format_source,
     ]
     jet_plugin.[jet_plugin_link]
@@ -2869,7 +2870,7 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
     if jet_cli_fmt_is_typed_package_source(materialized, origin) {
         if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
     }
-    result: jet_cli_fmt_ordinary(materialized, simplify)
+    result: jet_cli_fmt_ordinary(materialized, simplify, jet_cli_fmt_is_library_source(origin))
     if result.ok -> return jet_cli_fmt_formatted(result.text)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
@@ -2880,23 +2881,48 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
 // The ordinary formatter with one leading inline `package: { … }` carrier kept
 // exactly as written: the carrier and the trivia before it are masked from the
 // parser formatter and restored in front of its output, so Package fields stay
-// owned by the Package model.
-jet_cli_fmt_ordinary: fn(source: String, simplify: Bool) -> JetFormatResult {
+// owned by the Package model. A `library` source formats in the reserved lane.
+jet_cli_fmt_ordinary: fn(source: String, simplify: Bool, library: Bool) -> JetFormatResult {
     carrier: jet_driver_inline_package(source)
     if carrier.error == .Val(error) -> return JetFormatResult{ok: false, text: "", diagnostics: [Diagnostic]{error}}
-    if !carrier.found -> return jet_format_source(source, simplify)
+    if !carrier.found -> return jet_cli_fmt_parsed(source, simplify, library)
     masked := jet_driver_mask_inline_package(source, carrier).bytes()
     loop offset in 0..<carrier.start {
         if masked[offset] != (U8{10}) && masked[offset] != (U8{13}) -> masked[offset] = U8{32}
     }
     ordinary: String.from_bytes(masked) ?? panic("masking keeps the source UTF-8")
-    formatted: jet_format_source(ordinary, simplify)
+    formatted: jet_cli_fmt_parsed(ordinary, simplify, library)
     if !formatted.ok -> return formatted
     kept: String.from_bytes(source.bytes()[0..<carrier.end]) ?? panic("the carrier ends on a character boundary")
     if formatted.text == "" -> return JetFormatResult{ok: true, text: kept, diagnostics: [Diagnostic]{}}
     separator: if kept.ends_with("\n") || kept.ends_with("\r") -> "" else -> "\n"
     JetFormatResult{ok: true, text: "{kept}{separator}{formatted.text}", diagnostics: [Diagnostic]{}}
 }
+
+jet_cli_fmt_parsed: fn(source: String, simplify: Bool, library: Bool) -> JetFormatResult {
+    if library -> return jet_format_library_source(source, simplify)
+    jet_format_source(source, simplify)
+}
+
+// A source of the Core library or the compiler prelude of the toolchain a
+// compile here reads (jet_cli_toolchain_root). Those may spell reserved `__`
+// names, as the loader reads them.
+jet_cli_fmt_is_library_source: fn(origin: String) -> Bool {
+    if !cli_files.is_file(origin) -> return false
+    root: if jet_cli_toolchain_root(origin) == {
+        .Found(found) -> found
+        .Missing(_, _) -> return false
+    }
+    file: cli_files.realpath(origin) ?? return false
+    loop library in JET_CLI_FMT_LIBRARY_DIRECTORIES {
+        if cli_files.realpath(jet_cli_authority_path(root, library)) == .Ok(directory) {
+            if file.starts_with("{directory}/") -> return true
+        }
+    }
+    false
+}
+
+JET_CLI_FMT_LIBRARY_DIRECTORIES: [String]{"Core", "Compiler/Prelude"}
 
 // Format one source (`run_fmt` preflight).
 jet_cli_fmt_one: fn(path: String, source: String, request: JetCLIFmtRequest) -> JetCLIFmtFile {
