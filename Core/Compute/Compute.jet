@@ -223,6 +223,21 @@ sum_axis: fn(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     Ok(out)
 }
 
+// The sum of every element, added in storage order. The input is finite, so a
+// total that is not stays so: one test after the loop finds it and returns
+// ComputeError.Arithmetic.
+sum: fn(tensor: Tensor) -> Float ComputeError! {
+    _ := checked(tensor)
+    f32: tensor.numeric_profile == PROFILE_F32
+    total := Float{0.0}
+    loop value in tensor.data {
+        added: total + value
+        total = if f32 -> narrow(added, true) else -> added
+    }
+    if !math.is_finite(total) -> return Err(ComputeError.Arithmetic)
+    Ok(total)
+}
+
 add: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! { ad_binary("add", 0, a, b) }
 
 sub: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! { ad_binary("sub", 1, a, b) }

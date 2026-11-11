@@ -1,0 +1,12 @@
+// core-conformance: core.regex.Match.group_int
+use re: core.regex
+
+digits: fn(found: re.Match) -> Int { found.group_int(1) ?? -1 }
+
+run: fn() {
+    pattern: Regex{"IMG_(\d+)\.jpeg"}
+    if pattern.match_full("IMG_0042.jpeg") == {
+        .Val(found) -> print(digits(found))
+        .None -> print("none")
+    }
+}

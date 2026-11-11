@@ -82,4 +82,10 @@ regex_core_calls_lesson: fn() {
     print(matches.len())
     parts: re.split_limit(Regex{","}, "a,b,c", 2)
     print(parts)
+    // match_full is the match record that spans the whole text, and
+    // group_int reads a group as an Int.
+    photo_pattern: Regex{"IMG_(\d+)\.jpeg"}
+    if photo_pattern.match_full("IMG_0042.jpeg") == .Val(photo) -> print(photo.group_int(1) ?? -1)
+    if re.match_full(Regex{"a|ab"}, "ab") == .Val(both) -> print(both.text)
+    if photo_pattern.match_full("IMG_7.jpeg.bak") == .Val(_) -> print("unexpected") else -> print("no full match")
 }

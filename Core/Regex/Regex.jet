@@ -111,6 +111,7 @@ Regex: struct {
 
     is_match: fn(self, text: String) -> Bool Never! { is_match(self, text) }
     full_match: fn(self, text: String) -> Bool Never! { full_match(self, text) }
+    match_full: fn(self, text: String) -> Match? Never! { match_full(self, text) }
     match: fn(self, text: String) -> Match? Never! { match(self, text) }
     find: fn(self, text: String) -> String? Never! { find(self, text) }
     find_all: fn(self, text: String) -> [String] Never! { find_all(self, text) }
@@ -183,6 +184,13 @@ Match: struct {
         if n == 0 -> return Val(self.end)
         if n < 0 || n > self.groups.len() || self.spans[2 * n - 2] < 0 -> return None
         Val(self.spans[2 * n - 1])
+    }
+
+    /// Group `n` read as an Int, as `Int.parse` reads it; None when `group`
+    /// reports none or the text is not an Int.
+    group_int: fn(self, n: Int) -> Int? Never! {
+        text: self.group(n) ?? return None
+        Val(Int.parse(text) ?? return None)
     }
 }
 
@@ -298,6 +306,17 @@ is_match: fn(pattern: Regex, text: String) -> Bool Never! {
 full_match: fn(pattern: Regex, text: String) -> Bool Never! {
     if needle_absent(pattern, text) -> return false
     exists(pattern, text.bytes(), true, true)
+}
+
+/// The match that spans all of `text`, with its groups: the match-record form
+/// of `full_match`, so `Regex{"a|ab"}.match_full("ab")` matches "ab".
+match_full: fn(pattern: Regex, text: String) -> Match? Never! {
+    if needle_absent(pattern, text) -> return None
+    raw: text.bytes()
+    runs: scan(pattern, raw, true, true, pattern.groups > 0, false, 1)
+    if runs.len() == 0 -> return None
+    chars := CharCursor{byte: 0, count: 0}
+    Val(make_match(pattern, raw, runs[0], chars))
 }
 
 // The needle prefilter behind every String entry point, not part of the

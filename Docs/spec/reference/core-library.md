@@ -4430,7 +4430,7 @@ match), `${name}` inserts a named group, `$$` is a literal `$`, and any other
 used repeatedly, and call `escape` for literal user input.
 
 Methods on `Regex` take the receiver as the pattern of the free function of
-the same name: `is_match`, `full_match`, `match`, `find`, `find_all`,
+the same name: `is_match`, `full_match`, `match_full`, `match`, `find`, `find_all`,
 `matches`, `split`, `split_limit`, `replace`, `replace_first`, plus
 `replace_all_with(text, replacer: fn(Match) -> String)`, which replaces every
 match with what `replacer` returns for it. Methods on `Match`:
@@ -4441,6 +4441,7 @@ match with what `replacer` returns for it. Methods on `Match`:
 | `name(name: String) -> ?String` | text | The named group, as `group` reports it. |
 | `group_start(n: Int) -> ?Int` | position | Character position where group `n` starts. |
 | `group_end(n: Int) -> ?Int` | position | Character position where group `n` ends. |
+| `group_int(n: Int) -> ?Int` | number | Group `n` read as an Int, as `Int.parse` reads it; none when `group` is none or the text is not an Int. |
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4450,6 +4451,7 @@ match with what `replacer` returns for it. Methods on `Match`:
 | `escape(text: String) -> String` | text | Escape regex metacharacters. |
 | `is_match(pattern: Regex, text: String) -> Bool` | Boolean | Test whether any match exists. |
 | `full_match(pattern: Regex, text: String) -> Bool` | Boolean | Require the entire text to match. |
+| `match_full(pattern: Regex, text: String) -> ?Match` | match | The match record that spans the entire text, with its groups; none when no match does. |
 | `match(pattern: Regex, text: String) -> ?Match` | match | Return the first positional match record. |
 | `find(pattern: Regex, text: String) -> ?String` | text | Return the first matched text. |
 | `find_all(pattern: Regex, text: String) -> [String]` | text list | Return all matched text values. |
@@ -5652,6 +5654,7 @@ those bounds and the enclosing source location, rather than a copied slice.
 | `abs`, `negate`, `exp`, `log`, `sqrt` | tensor | Apply checked elementwise math. |
 | `matmul(a, b) -> Tensor !ComputeError` / `matmul_f32_tile(a, b) -> Tensor !ComputeError` | tensor | Multiply compatible matrices under a profile. |
 | `sum_axis(tensor, axis: Int) -> Tensor !ComputeError` | tensor | Reduce one axis. |
+| `sum(tensor) -> Float !ComputeError` | scalar | Sum every element in storage order. |
 | `value_and_gradient(pred, target) -> VJPRun !ComputeError`, `vjp(pred, target) -> VJPRun !ComputeError` | result | Evaluate the fixed MSE value and gradient. |
 | `gradient(pred, target) -> Tensor !ComputeError`, `jvp(pred, target, tangent) -> Tensor !ComputeError` | tensor | Return gradient or tangent result for that contract. |
 | `det(tensor) -> Float !ComputeError`, `inv(tensor) -> Tensor !ComputeError`, `solve(a, b) -> Tensor !ComputeError` | linear algebra | Perform checked square-matrix operations. |
