@@ -1,10 +1,14 @@
-// `jet.runtime.net` (#6615): the runtime's public DNS text lookups, in Jet
-// types with their declared effect rows. Each member is a runtime binding
-// (Guest.jet sema_guest_runtime_binding) of the runtime export that is its
-// one body (RouteDns.jet). Each answers `[String] Err!`: the records' texts,
-// or an Err whose message is the lookup's failure reason (the export writes
-// that text). `ms` is the lookup's timeout in milliseconds; a negative one
-// fails.
+// `jet.runtime.net` (#6615): the runtime's public DNS text lookups, and the
+// sockets, addresses and lookups behind core.net, core.net.ws and
+// core.net.tls, in Jet types with their declared effect rows. Each member is
+// a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (RouteDns.jet, NetRoutes.jet,
+// NetHandleRoutes.jet, NetDatagramRoutes.jet, RouteNet.jet, NetUnix.jet,
+// NetUnixConnect.jet, HostNetAddress.jet, WsRoutes.jet, and for core.net.tls
+// CryptoEntropy.jet, CompilerFS.jet, HostHeldDirectory.jet, ProveJournal.jet).
+// A lookup answers `[T] Err!`: the records, or an Err whose message is the
+// lookup's failure reason (the export writes that text). `ms` is a timeout in
+// milliseconds; a negative lookup timeout fails. A member with no row is pure.
 net: module {
     // The TXT records of `name` over the host's resolvers: the first that
     // answers wins, else the last one's failure.
@@ -16,4 +20,107 @@ net: module {
 
     // The PTR names of the reverse name `name` over the host's resolvers.
     #Import(c) dns_ptr_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [String] Err! = "jet_net_dns_ptr_lookup"
+
+    // ---- core.net's socket leaves (#6615 c5) ----------------------------
+    // Each is `priv`: only Core calls them.
+
+    // TCP: listens on `address`, accepts, and connects (by host text, by
+    // socket address, within `ms`, or racing the host's addresses for
+    // `port`).
+    #Import(c) priv tcp_listen: fn(address: String) -[Net]> TCPListener NetError! = "jet_net_tcp_listen"
+    #Import(c) priv tcp_listen_addr: fn(address: SocketAddr) -[Net]> TCPListener NetError! = "jet_net_tcp_listen_addr"
+    #Import(c) priv tcp_accept: fn(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_accept"
+    #Import(c) priv tcp_connect: fn(address: String) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_connect"
+    #Import(c) priv tcp_connect_addr: fn(address: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_connect_addr"
+    #Import(c) priv tcp_connect_timeout: fn(address: SocketAddr, ms: Int) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_connect_timeout"
+    #Import(c) priv tcp_connect_happy: fn(host: String, port: Int, ms: Int) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_connect_happy"
+
+    // A TCP stream's descriptor, and its and a listener's addresses.
+    #Import(c) priv tcp_fd: fn(stream: TCPStream) -[Net]> Int = "jet_net_tcp_fd"
+    #Import(c) priv tcp_local_socket_addr: fn(stream: TCPStream) -[Net]> SocketAddr NetError! = "jet_net_tcp_local_socket_addr"
+    #Import(c) priv tcp_peer_socket_addr: fn(stream: TCPStream) -[Net]> SocketAddr NetError! = "jet_net_tcp_peer_socket_addr"
+    #Import(c) priv listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetError! = "jet_net_listener_local_socket_addr"
+
+    // A TCP stream's timeouts, Nagle switch and hop limit.
+    #Import(c) priv set_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_timeout"
+    #Import(c) priv set_read_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_read_timeout"
+    #Import(c) priv set_write_timeout: fn(stream: &TCPStream, ms: Int) -[Net]> NetError! = "jet_net_set_write_timeout"
+    #Import(c) priv nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! = "jet_net_nodelay"
+    #Import(c) priv set_nodelay: fn(stream: &TCPStream, enabled: Bool) -[Net]> NetError! = "jet_net_set_nodelay"
+    #Import(c) priv ttl: fn(stream: TCPStream) -[Net]> Int NetError! = "jet_net_ttl"
+    #Import(c) priv set_ttl: fn(stream: &TCPStream, ttl: Int) -[Net]> NetError! = "jet_net_set_ttl"
+
+    // UDP: binds, its address and timeout, sends a text or bytes to
+    // `address` (the count sent), and receives up to `limit` bytes.
+    #Import(c) priv udp_bind: fn(address: String) -[Net]> UDPSocket NetError! = "jet_net_udp_bind"
+    #Import(c) priv udp_bind_addr: fn(address: SocketAddr) -[Net]> UDPSocket NetError! = "jet_net_udp_bind_addr"
+    #Import(c) priv udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! = "jet_net_udp_local_addr"
+    #Import(c) priv udp_set_timeout: fn(socket: UDPSocket, ms: Int) -[Net]> NetError! = "jet_net_udp_set_timeout"
+    #Import(c) priv udp_send_to: fn(socket: UDPSocket, text: String, address: SocketAddr) -[Net, Time.Wait]> Int NetError! = "jet_net_udp_send_to"
+    #Import(c) priv udp_recv_from: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! = "jet_net_udp_recv_from"
+    #Import(c) priv udp_send_bytes_to: fn(socket: UDPSocket, data: [U8], address: SocketAddr) -[Net, Time.Wait]> Int NetError! = "jet_net_udp_send_bytes_to"
+    #Import(c) priv udp_receive: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! = "jet_net_udp_receive"
+
+    // Unix sockets: listens, accepts, connects (by a deadline), reads and
+    // writes, passes descriptors (`tokens`), waits up to `ns`, shuts down
+    // and closes.
+    #Import(c) priv unix_listen: fn(path: String) -[Net]> UnixListener NetError! = "jet_net_unix_listen"
+    #Import(c) priv unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_accept"
+    #Import(c) priv unix_connect_host: fn(path: String) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_connect"
+    #Import(c) priv unix_connect_deadline_host: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_connect_deadline"
+    #Import(c) priv unix_read: fn(stream: &UnixStream) -[Net, Time.Wait]> String NetError! = "jet_net_unix_read"
+    #Import(c) priv unix_write: fn(stream: &UnixStream, text: String) -[Net, Time.Wait]> NetError! = "jet_net_unix_write"
+    #Import(c) priv unix_read_bytes: fn(stream: &UnixStream, limit: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_read_bytes"
+    #Import(c) priv unix_write_all_bytes: fn(stream: &UnixStream, data: [U8]) -[Net, Time.Wait]> NetError! = "jet_net_unix_write_all_bytes"
+    #Import(c) priv unix_send_fds_raw: fn(stream: &UnixStream, data: [U8], tokens: [Int]) -[Net, Time.Wait]> NetError! = "jet_net_unix_send_fds_raw"
+    #Import(c) priv unix_receive_fds_raw: fn(stream: &UnixStream, max: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_receive_fds_raw"
+    #Import(c) priv unix_wait_raw: fn(stream: &UnixStream, ns: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_raw"
+    #Import(c) priv unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) -[Net]> NetError! = "jet_net_unix_shutdown"
+    #Import(c) priv unix_close: fn(stream: &UnixStream) -[Net]> NetError! = "jet_net_unix_close"
+
+    // A and AAAA addresses and SRV records of `name`, over the host's
+    // resolvers or from the DNS server at `server`.
+    #Import(c) priv dns_a_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] Err! = "jet_net_dns_a_lookup"
+    #Import(c) priv dns_a_at_lookup: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] Err! = "jet_net_dns_a_at_lookup"
+    #Import(c) priv dns_aaaa_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] Err! = "jet_net_dns_aaaa_lookup"
+    #Import(c) priv dns_aaaa_at_lookup: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] Err! = "jet_net_dns_aaaa_at_lookup"
+    #Import(c) priv dns_srv_lookup: fn(name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] Err! = "jet_net_dns_srv_lookup"
+    #Import(c) priv dns_srv_at_lookup: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] Err! = "jet_net_dns_srv_at_lookup"
+
+    // An SRV record's fields.
+    #Import(c) priv dns_srv_target: fn(record: DNSSRV) -> String = "jet_net_dns_srv_target"
+    #Import(c) priv dns_srv_port: fn(record: DNSSRV) -> Int = "jet_net_dns_srv_port"
+    #Import(c) priv dns_srv_priority: fn(record: DNSSRV) -> Int = "jet_net_dns_srv_priority"
+    #Import(c) priv dns_srv_weight: fn(record: DNSSRV) -> Int = "jet_net_dns_srv_weight"
+
+    // Address facts: an IP's bytes and family, a socket address's IP, port
+    // and scope (None when it has none), and a UDP packet's sender.
+    #Import(c) priv ip_bytes: fn(address: IPAddr) -> [U8] = "jet_net_raw_ip_bytes"
+    #Import(c) priv ip_is_v4: fn(address: IPAddr) -> Bool = "jet_net_raw_ip_is_v4"
+    #Import(c) priv socket_ip: fn(address: SocketAddr) -> IPAddr = "jet_net_raw_socket_ip"
+    #Import(c) priv socket_port: fn(address: SocketAddr) -> Int = "jet_net_raw_socket_port"
+    #Import(c) priv socket_scope: fn(address: SocketAddr) -> Int? = "jet_net_raw_socket_scope"
+    #Import(c) priv udp_packet_addr: fn(packet: UDPPacket) -> SocketAddr = "jet_net_raw_udp_packet_addr"
+
+    // A WebSocket client connection to `url`, a server upgrade of the
+    // descriptor `fd` with the client's `key`, and a connection's read and
+    // write timeout in milliseconds.
+    #Import(c) priv ws_connect: fn(url: String) -[Net, Time.Wait]> WsConn WsError! = "jet_ws_connect"
+    #Import(c) priv ws_upgrade: fn(fd: Int, key: String) -[Net, Time.Wait]> WsConn WsError! = "jet_ws_upgrade"
+    #Import(c) priv ws_set_timeout: fn(conn: WsConn, milliseconds: Int) -[Net]> WsError! = "jet_ws_conn_set_timeout"
+
+    // core.net.tls's host reads, under its Net root (Core/Net/SSL/Defs.jet
+    // ssl_time): `count` bytes of OS entropy (None when the source fails), a
+    // file's bytes, a held directory's key and its close, the wall clock, an
+    // environment variable's bytes (None when unset), and the prove journal's
+    // mode, record and replay.
+    #Import(c) priv tls_entropy: fn(count: Int) -[Net]> [U8]? = "jet_random_os_entropy"
+    #Import(c) priv tls_read_bytes: fn(path: String) -[Net]> [U8] IOError! = "jet_files_read_bytes_os"
+    #Import(c) priv tls_open_directory: fn(handle: Int, name: String) -[Net]> Int IOError! = "jet_fs_directory_open"
+    #Import(c) priv tls_close_directory: fn(handle: Int) -[Net]> = "jet_fs_directory_close"
+    #Import(c) priv tls_wall_sample: fn() -[Net]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+    #Import(c) priv tls_env_value: fn(name: String) -[Net]> [U8]? = "jet_sys_env_value_raw"
+    #Import(c) priv tls_prove_mode: fn() -[Net]> Int = "jet_prove_net_mode"
+    #Import(c) priv tls_prove_record: fn(tape: [U8]) -[Net]> = "jet_prove_net_record"
+    #Import(c) priv tls_prove_take: fn(request: [U8]) -[Net]> [U8]? = "jet_prove_net_take"
 }

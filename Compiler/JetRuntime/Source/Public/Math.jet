@@ -1,0 +1,25 @@
+// `jet.runtime.math` (#6615): the Float operations core.math reaches that
+// are one hardware instruction or the runtime's exactly rounded kernel, in Jet
+// types. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (CompilerNeededMath.jet, Libm.jet). Each is `priv`: only core.math calls
+// them. Lowering keys on the export, as it did for the Core leaves: sqrt and
+// fabs build as their one operation (JetIR BuildRoutes.jet ir_leaf_route),
+// and fma as one vfmadd213sd behind an FMA3 probe (X64Select.jet ir_x64_fma).
+math: module {
+    // The rounding functions: toward -inf, toward +inf and toward zero.
+    #Import(c) priv floor: fn(x: Float) -> Float = "jet_std_math_floor"
+    #Import(c) priv ceil: fn(x: Float) -> Float = "jet_std_math_ceil"
+    #Import(c) priv trunc: fn(x: Float) -> Float = "jet_std_math_trunc"
+
+    // The correctly rounded square root, |x| (the sign bit cleared), x mod y
+    // with the sign of x, and a * b + c rounded once.
+    #Import(c) priv sqrt: fn(x: Float) -> Float = "jet_std_math_sqrt"
+    #Import(c) priv fabs: fn(x: Float) -> Float = "jet_std_math_abs_f64"
+    #Import(c) priv fmod: fn(x: Float, y: Float) -> Float = "jet_std_math_fmod"
+    #Import(c) priv fma: fn(a: Float, b: Float, c: Float) -> Float = "jet_std_math_fma"
+
+    // The binary64 bits of x as an Int, and the Float of `bits`.
+    #Import(c) priv to_bits: fn(x: Float) -> Int = "jet_std_math_to_bits"
+    #Import(c) priv from_bits: fn(bits: Int) -> Float = "jet_std_math_from_bits"
+}

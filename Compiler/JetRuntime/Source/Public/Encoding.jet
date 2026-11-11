@@ -21,6 +21,20 @@ encoding: module {
     #Import(c) priv string_byte: fn(text: String, index: U64) -> U8 = "jet_raw_string_byte"
     #Import(c) priv bytes_into_text: fn(bytes: [U8]) -> String = "jet_raw_bytes_into_text"
 
+    // Ok when `bytes` is strict UTF-8, else the Utf8Error text. `priv`: the
+    // codecs validate before they take bytes as text.
+    #Import(c) priv utf8_validate: fn(bytes: [U8]) Err! = "jet_string_validate_utf8"
+
+    // The codec streams' file I/O: the next byte (None at EOF), up to
+    // `limit` bytes into `buffer` (its new length; 0 at EOF), and a write or
+    // flush. Each fails with the codec's cause. `priv`: only the streaming
+    // codecs call them, on the reader or writer they own.
+    #Import(c) priv read_byte: fn(reader: &FileReader) -[IO]> U8? EncodingCause! = "jet_raw_encoding_read_byte"
+    #Import(c) priv read_into: fn(reader: &FileReader, buffer: &[U8], limit: Int) -[IO]> Int EncodingCause! = "jet_raw_encoding_read_into"
+    #Import(c) priv write_bytes: fn(writer: &FileWriter, bytes: View<U8>) -[IO]> EncodingCause! = "jet_raw_encoding_write_bytes"
+    #Import(c) priv write_text: fn(writer: &FileWriter, text: String) -[IO]> EncodingCause! = "jet_raw_encoding_write_text"
+    #Import(c) priv flush: fn(writer: &FileWriter) -[IO]> EncodingCause! = "jet_raw_encoding_flush"
+
     // The untyped JSON decoder's coercion audit: the wall clock in ms since
     // the epoch, and one line on stderr. `priv`: only core.encoding.json calls
     // them, inside its audited `#Unsafe` regions, which keep this hidden

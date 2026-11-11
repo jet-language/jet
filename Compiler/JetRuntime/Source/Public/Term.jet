@@ -17,6 +17,11 @@ term: module {
     // Flushes stdout, or stderr; the flush's failure, if any.
     #Import(c) stdio_flush: fn(stderr: Bool) -[IO]> String? = "jet_term_stdio_flush_raw"
 
+    // The next stdin line without its trailing LF and CR bytes, None at EOF.
+    // `priv`: Core's StdinHandle.read_line calls it after its fault
+    // checkpoint.
+    #Import(c) priv stdin_line: fn() -[IO]> String? IOError! = "jet_stdin_line_raw"
+
     // Whether the fault schedule fails the stdio operation `operation`.
     #Import(c) stdio_fault: fn(operation: String) -> Bool = "jet_fault_should_fail"
 
