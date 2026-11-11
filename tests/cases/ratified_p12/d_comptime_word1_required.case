@@ -1,0 +1,62 @@
+# `comptime` demands a value now (#4276 c49). A file constant needs no word
+# and is computed while building; `comptime` on a binding or block fails the
+# build when its value can't be computed then: it reads a run-time value, it
+# runs out of the evaluator's steps (the same budget a plain file constant
+# has), or a static assertion in it fails. A value computed while building
+# sizes `[T#N]` lists and `mem.Fixed.new(size:)` storage; a run-time local
+# or parameter can't, and is refused at each site. The program the passing
+# file builds carries the computed values: both tiers and two launches of
+# the built program print the same lines.
+fixture: d_comptime_word1_required.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_comptime_word1_required.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_comptime_word1_required.stdout.expected
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step first_launch: {work}/.jet/build/main
+exit: 0
+stdout: = d_comptime_word1_required.stdout.expected
+stderr: empty
+step second_launch: {work}/.jet/build/main
+exit: 0
+stdout: = d_comptime_word1_required.stdout.expected
+stderr: empty
+step fmt: jet fmt --check main.jet runtime/main.jet fuel/main.jet plain/main.jet assert/main.jet length/main.jet
+exit: 0 # every fixture file is in `jet fmt` form
+step runtime: jet check runtime/main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/E0640" # `comptime` code can't read a parameter
+stderr: ~ "--> main.jet:2:23" # the parameter read inside the block
+stderr: ~ "1 problem found"
+step fuel: jet check fuel/main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/E0952" # the marked value ran out of steps
+stderr: ~ "--> main.jet:7:20"
+stderr: ~ "1 problem found"
+step plain: jet check plain/main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/E0643" # a file constant must be computable early
+stderr: ~ "exhausted its fuel" # under the same step budget as `comptime`
+stderr: ~ "--> main.jet:7:8"
+stderr: ~ "1 problem found"
+step assert: jet check assert/main.jet
+exit: 1
+stderr: ~ "jet-lang.dev/e/E3010" # a failed static assertion stops the build
+stderr: ~ "SLOTS must exceed 8"
+stderr: ~ "--> main.jet:4:5"
+stderr: ~ "1 problem found"
+step length: jet check length/main.jet
+exit: 1
+stderr: ~ "reads `count`, a run-time value of the function around it" # `[T#N]` needs a length computed while building
+stderr: ~ "jet-lang.dev/e/E0963"
+stderr: ~ "--> main.jet:4:13"
+stderr: ~ "jet-lang.dev/e/E0103" # so does `mem.Fixed.new(size:)`
+stderr: ~ "--> main.jet:8:47"
+stderr: ~ "2 problems found"

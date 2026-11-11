@@ -9,6 +9,7 @@ use jet_foundation.[
     ExprMember,
     ExprPair,
     IndexKind,
+    Measure,
     NodeKind,
     OrFallback,
     QuantityKind,
@@ -506,6 +507,10 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
                         return None
                     }
                 }
+                if sema_expression_runtime_measure_name(len, scopes) == .Val(local) {
+                    diagnostics.push(sema_error("E0963", span, "`[T#{measure_expression(len)}]` reads `{local}`, a run-time value of the function around it", "a fixed-size list `[T#N]` takes a length computed while compiling: a literal, an integer constant, a number parameter or a `comptime` value", "make the length a constant, or bind it with `{local}: comptime {{ … }}`"))
+                    return None
+                }
                 if has_spread {
                     diagnostics.push(sema_error("E1311", span, "list spread can't build a fixed-size `[T#N]` list", "spread expands a growable list — a `[T#N]` has a fixed compile-time length", "use a growable `[T]` binding (`:`/`:=`) instead of `[T#N]`"))
                     return None
@@ -569,6 +574,28 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     }
     trait_coercion: sema_expression_list_trait_coercion(ty)
     sema_expr_expected_owned(sema_tree_node(ty, TExprKind.List{values: values, trait_coercion: trait_coercion}, span), expected, environment, program, diagnostics)
+}
+
+// The first name in fixed length `measure` that is a run-time local or
+// parameter of the function being checked. A `name: comptime { … }` local
+// holds a value computed while compiling, and a name with no binding is a
+// constant, number parameter or module value the length checks resolve.
+sema_expression_runtime_measure_name: fn(measure: Measure, scopes: SemaScopeTable) -> String? Never! {
+    if measure == {
+        .Symbol(_, name) -> {
+            index: sema_scope_resolve_index(scopes, name) ?? return None
+            kind: scopes.bindings[index].symbol.kind
+            if kind != SymbolKind.Local && kind != SymbolKind.Parameter -> return None
+            if scopes.bindings[index].prepared != None -> return None
+            Val(name.copy())
+        }
+        .Combined(_, _, left, right) -> {
+            found: sema_expression_runtime_measure_name(left, scopes)
+            if found != None -> return found
+            sema_expression_runtime_measure_name(right, scopes)
+        }
+        .Literal(_, _) | .SignedLiteral(_, _) -> None
+    }
 }
 
 sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
