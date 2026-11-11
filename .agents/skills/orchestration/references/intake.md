@@ -42,6 +42,14 @@ One folder per submission in the orchestrator's inbox
 - `meta`: `base: <sha>`, `stack: <earlier submissions it needs, or none>`,
   `seed: none` or `seed: <what the seed must carry>`.
 
+A patch that touches Compiler/JetIR, Compiler/JetBackend or
+Compiler/JetRuntime lists `jet Tools/perf/CodegenCeiling.jet --check` in its
+`tests`, the codegen gate over the golden machine-code catalog. The gate needs
+a compiler built from the patch, so it runs on the next batch compiler. A
+count above golden fails the submission. A patch that lowers a count carries
+the gate's `--update` of `Tools/perf/codegen-ceiling/golden.tsv`, and its
+`msg` gives the before and after counts.
+
 A patch that adds Prelude or registry rows (a dispatcher row, a fixed
 signature, a new reserved member, a runtime export) and also uses them from
 Core cannot pass the census, because the census checks Core with the admitted
@@ -77,9 +85,10 @@ train to the Lander it names (AGENTS.md, Delegation):
    Any other conflict, or a failed stack dependency, sets the submission aside.
 2. Rerun every generator the batch touched, on the composed tree.
 3. One collect-all census: check, build, guards, runtime pack, self-check,
-   Core self-check. Then the repository ratchets, every submission's `tests`
-   with the built compiler, and every golden that cites a touched Core or
-   Prelude line.
+   Core self-check, and the codegen gate with the built compiler
+   (`jet Tools/perf/CodegenCeiling.jet --check --jet <built jet>`, about two
+   seconds). Then the repository ratchets, every submission's `tests` with the
+   built compiler, and every golden that cites a touched Core or Prelude line.
 4. If the census fails, set aside every submission its rows name, with that
    worker's later submissions, and rerun the rest in the same cycle.
 5. Send each author every failure attributed to it, in one message. Announce

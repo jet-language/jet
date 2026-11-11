@@ -211,7 +211,7 @@ AREA_MARGIN: 268435456
 // checks with) or the area assembler, so it reaches every Jetpack area.
 CHECKER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/Bootstrap/"}
 // The census passes in the order their lines print.
-PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "selfcheck", "selfcheck-core", "core-tests", "areas"}
+PASS_ORDER: [String]{"check", "build", "guards", "runtime-pack", "codegen", "selfcheck", "selfcheck-core", "core-tests", "areas"}
 // The failing Core #Tests the core-tests pass tolerates: one "FILE: test
 // title" per line (# comments), each file run by the pass.
 CORE_KNOWN: "Tools/agent/core-known.txt"
@@ -953,8 +953,9 @@ census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never
 
 // The collect-all census: every pass runs and reports, whatever an earlier
 // one found, except those that need what a failed pass did not make (the
-// self-checks and the areas need the build's compiler). Phase A runs the
-// seed's check, its build and the guard shards at once; phase B the
+// codegen gate, the self-checks and the areas need the build's compiler).
+// Phase A runs the seed's check, its build and the guard shards at once; then
+// the codegen gate runs alone (about two seconds); phase B runs the
 // self-check, the Core self-check and the Jetpack area lanes. Each pass's
 // seconds (and each area's peak) go to OUT/phases.tsv.
 census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
@@ -1045,6 +1046,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         return census_finish(runs, out)
     }
     runs.push(PassRun{name: "runtime-pack", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{"runtime rc=0 native.key {native_key}"}})
+    runs.push(codegen_pass(snap, out, self_jet, identity))
     if !passes.selfcheck -> return census_finish(runs, out)
 
     task.group phase_b(limit: 3) {
@@ -1071,6 +1073,18 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
 // A pass whose task ended without a result.
 lost_pass: fn(name: String) -> PassRun Never! {
     PassRun{name: name.copy(), rc: 1, seconds: 0, peak: 0, note: "lost", lines: [String]{"{name} rc=1 (its task ended without a result)"}}
+}
+
+// The codegen gate (Tools/perf/CodegenCeiling.jet --check) with the built
+// compiler: a function of the golden machine-code catalog whose count grew
+// fails it, and its REGRESSION lines are the pass's lines.
+codegen_pass: fn(snap: String, out: String, self_jet: String, identity: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    watch: time.start()
+    env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
+    code: run_logged(snap, [String]{self_jet, "Tools/perf/CodegenCeiling.jet", "--check", "--jet", self_jet}, env, "{out}/codegen")
+    lines := [String]{"codegen rc={code}"}
+    if code != 0 -> lines.push(clip(files.read("{out}/codegen.err") ?? "", 600))
+    PassRun{name: "codegen", rc: code, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "", lines}
 }
 
 // The first `limit` of `lines`.

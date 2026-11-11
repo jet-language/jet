@@ -21,8 +21,13 @@
 // and only when nothing regressed. loop_insns against the ceiling (the
 // instructions of one hand-written loop, 0 for none) is the codegen gap,
 // which the gate reports per row.
+// A submission that touches Compiler/JetIR, Compiler/JetBackend or
+// Compiler/JetRuntime lists `jet Tools/perf/CodegenCeiling.jet --check` in
+// its tests, and a gain lands with its `--update` (the orchestration skill's
+// intake reference).
 // Usage (from the repository root; needs objdump and nm):
-//   jet Tools/perf/CodegenCeiling.jet [--jet PATH] [--update]
+//   jet Tools/perf/CodegenCeiling.jet --check [--jet PATH]
+//   jet Tools/perf/CodegenCeiling.jet --update [--jet PATH]
 // The default compiler is Tools/agent/JetEnv.jet's `jet`.
 use {
     files: core.files
@@ -33,6 +38,7 @@ use {
 DIR: "Tools/perf/codegen-ceiling"
 GOLDEN: "Tools/perf/codegen-ceiling/golden.tsv"
 JET_ENV: "Tools/agent/JetEnv.jet"
+USAGE: "usage: jet Tools/perf/CodegenCeiling.jet --check|--update [--jet PATH]"
 HEADER: "symbol\tinsns\tpushes\tpops\tframe_slots\tloops\tloop_insns\tceiling_loop_insns"
 FIELDS: 8
 // The catalog's argument: big enough to run every loop, small enough to
@@ -262,11 +268,11 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
 codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     args: process.args()
     jet := [String]{}
-    update := false
+    mode := ""
     index := 0
     loop index < args.len() {
-        if args[index] == "--update" {
-            update = true
+        if (args[index] == "--check" || args[index] == "--update") && mode == "" {
+            mode = args[index].copy()
             index += 1
             next
         }
@@ -275,8 +281,10 @@ codegen_gate: fn() -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             index += 2
             next
         }
-        return fail("usage: jet Tools/perf/CodegenCeiling.jet [--jet PATH] [--update]")
+        return fail(USAGE)
     }
+    if mode == "" -> return fail(USAGE)
+    update: mode == "--update"
     root: files.cwd() ?? return fail("cannot read the working directory: {err}")
     if jet.len() == 0 -> jet = [String]{"{root}/{JET_ENV}", "jet"}
     home: process.env_get_or("HOME", "")
