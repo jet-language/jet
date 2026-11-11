@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99092,
+    "rev": 99093,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74907,7 +74907,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T02:35:37.827Z",
+      "updated": "2026-11-11T02:43:33.207Z",
       "updatedBy": "Main",
       "criteriaLastN": 172
     },
@@ -190304,7 +190304,7 @@
       "explainer": "Words used here. A result is a value or an error. An arm table is if subject == { … } with one arm per case. A single-arm if tests one case, as in if r == .Ok(n) -> …. The ?? fallback gives a value when the result is an error.",
       "story": "Kai's lookup returns an error for -1, none for 0 and a value for 7. Every option must print -1, 0 and 7, in that order, without running lookup twice.",
       "inWild": "Rust's match uses one pattern mechanism for arbitrary enums and can fit on a line. Zig's payload captures are short for success/error and optional branches. Jet can combine compact layout with its already approved flat three-state patterns.",
-      "detail": "Recommendation changes from A to added F. F writes subject ? { pattern -> value, pattern -> value }. It is a shorter spelling of the existing exhaustive pattern table for any subject, not a new result carrier or evaluator. For T? E!, use the ratified flat .Val(value), .None and .Err(error) states. No nested .Ok(.Val(...)) representation is introduced.\n\nF has one subject evaluation, lazy selected arms and branch-local payload names. It lowers immediately to the canonical table representation. In a value position all reachable arms produce a compatible value or diverge; a statement position can use unit arms. Ordinary return, break and next retain their surrounding target, unlike returns inside callback-based folds. Patterns keep existing move/borrow, tag and duty rules. No allocation or closure is required by the handler itself.\n\nExact grammar: ? followed by { opens the compact table; comma or newline separates arms, with an optional trailing comma. An arm can hold a braced body. It has the existing table's precedence and requires parentheses when used as a larger subject. Nested handlers stay inside their own braces. ?. and ?? remain distinct tokens. Formatter keeps a fitting table on one line and expands long or commented arms. Duplicate or missing cases use the same exhaustive checker as ordinary tables; open sets require else.\n\nPareto cases: ordinary calls keep automatic error propagation. Pure optional and pure Result defaults retain ??. To give value and error different transforms, write r ? { .Ok(n) -> n * 2, .Err(e) -> -1 }. For three states, use the demonstrated flat table. To treat every non-value state alike, r ? { .Val(n) -> n, else -> 0 } is explicit. A handler listing .Err owns failure rather than propagating it. Do not silently make an optional fallback swallow errors.\n\nObserved with t17a a0.0.43 and jet run -: both B's two-branch handler with an optional fallback and A's multiline flat table print -1, 0, 7. C's comma-separated table gets E0003 at the comma. F is new syntax and has not run. Compiler/JetParser/Source/Parser/ExpressionForms/ResultHandlers.jet:1-3 and 99-105 already lower the current operator to ordinary pattern branches. Calling it a second runtime mechanism was false.\n\nA is the smallest grammar but lengthens common handlers. B is very compact and already ratified under D-RESULT-DECON2=B; its two roles require a nested optional fallback for this job. C is the strongest minimal extension: commas in ordinary tables, no new handler head. F removes the if/== framing for the common expression use and covers arbitrary enums. Neither C's layout flexibility nor F's spelling violates I8 when both use one semantic mechanism.\n\nAdversarial verdict: F holds as a readable compact proposal, not a measured typing-speed win. First reduce ceremony using general comma layout. Second shorten only the head, reusing patterns instead of inventing separate value/none/error punctuation. The remaining cost is learning ? { and general separator rules; show equivalent expanded tables in teaching and hover. Do not retain the old result-only operator as a second permanent short form. Its ratification must be amended and all callers migrated through D-LANG-MIGRATE1=A, preserving evaluation, control flow, bindings and cleanup.",
+      "detail": "Recommendation changes from A to added F. F writes subject ? { pattern -> value, pattern -> value }. This is a short spelling of the existing table, not a new carrier or evaluator. T? E! keeps its ratified flat .Val(value), .None and .Err(error) states. No nested .Ok(.Val(...)) representation returns.\n\nOne subject evaluation, lazy selected arms and branch-local names lower immediately to canonical pattern checking. Value arms produce compatible values or diverge; statement arms may yield unit. Return, break and next keep their enclosing targets, unlike callback returns. Existing move/borrow, tags and finishing duties apply. The handler itself needs no allocation or closure.\n\nExact grammar: ? followed by { opens the table; commas or newlines separate arms, with optional trailing comma. Braced bodies and nested handlers stay within their own braces. Use the existing table's precedence, with parentheses around larger nested subjects. ?. and ?? remain distinct tokens. The formatter keeps fitting tables on one line and expands long or commented arms.\n\nPreserve the ratified closed-set rule: every case of a closed enum is explicit; else and catch-all patterns are refused even if reachable. Thus a three-state outcome spells .Val, .None and .Err, not a catch-all non-value shortcut. Open sets still require else. Duplicate or missing cases use the same exhaustive checker. This corrects an invalid else shortcut in the initial draft.\n\nPareto paths: ordinary calls retain automatic error propagation. Pure optional and pure Result defaults retain ??. Transform both Result sides with r ? { .Ok(n) -> n * 2, .Err(e) -> -1 }. For optional success, distinguish all three states as shown. To share none/error behavior, write those two explicit arms; the closed-set rule is not relaxed for brevity. Listing .Err handles the failure rather than silently propagating it.\n\nObserved on t17a a0.0.43, jet run -: B's two-branch handler with optional fallback and A's multiline flat table both print -1, 0, 7. C's comma table gets E0003. F is new and has not run. Compiler/JetParser/Source/Parser/ExpressionForms/ResultHandlers.jet:1-3 and 99-105 already lower the current handler to ordinary pattern branches. Calling it a second runtime mechanism was false.\n\nA has the smallest grammar but lengthens common handlers. B is compact and ratified under D-RESULT-DECON2=B, but nests optional handling for this job. C is the strongest small extension: commas without another head. F shortens expression framing and works for arbitrary enums. I8 permits useful spelling and layout flexibility when semantic checking stays canonical.\n\nAdversarial verdict: F holds as a compact proposal, not a measured typing-speed win. First use general comma layout; then shorten the head while retaining ordinary patterns. New spelling and separator rules remain a learning cost; teach the expanded table beside them. Remove the old result-only operator rather than retain another permanent short form. Amend its ratification and migrate through D-LANG-MIGRATE1=A, preserving evaluation, bindings, control flow and cleanup.",
       "options": [
         {
           "key": "A",
@@ -197960,6 +197960,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:43:33.207Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-RESULT-BRANCH1",
+      "note": ""
+    },
     {
       "at": "2026-11-11T02:35:37.827Z",
       "by": "Main",
