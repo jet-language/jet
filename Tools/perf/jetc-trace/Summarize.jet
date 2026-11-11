@@ -15,7 +15,6 @@ use {
     files: core.files
     math: core.math
     process: core.process
-    sys: core.sys
     time: core.time
 }
 
@@ -134,18 +133,6 @@ render: fn(file: String) -> String IOError! {
     lines.join("\n")
 }
 
-two: fn(value: Int) -> String { if value < 10 -> "0{value}" else -> "{value}" }
-
-// Date.prototype.toLocaleTimeString() in en-US for the host's zone: TZ, else
-// the zone /etc/localtime links to, else UTC.
-local_clock: fn() -[Env, FS.Read, Time]> String {
-    name := (sys.get("TZ") ?? "").remove_prefix(":")
-    if name == "" -> name = (files.read_link("/etc/localtime") ?? "").split_once("zoneinfo/")?.after ?? "UTC"
-    local: time.now().in_zone(time.zone(name) ?? time.utc()).time()
-    hour: local.hour()
-    "{if hour % 12 == 0 -> 12 else -> hour % 12}:{two(local.minute())}:{two(local.second())} {if hour < 12 -> "AM" else -> "PM"}"
-}
-
 run: fn() {
     args: process.args()
     path: args.find(a -> !a.starts_with("--")) ?? process.fail(64, "usage: Summarize.jet <trace.json> [--watch[=seconds]]")
@@ -158,7 +145,7 @@ run: fn() {
                 .Err(e) -> "cannot read {path}: {e}"
             }
             esc: String.from_bytes_lossy([U8]{27})
-            print("{esc}[2J{esc}[H{local_clock()}  {path}\n\n{text}")
+            print("{esc}[2J{esc}[H{time.now().in_host_zone().format("%-I:%M:%S %p")}  {path}\n\n{text}")
             time.sleep(time.duration_ns(math.round(every * 1e9)))
         }
     }

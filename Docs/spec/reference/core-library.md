@@ -3450,6 +3450,16 @@ numeric offset must be valid for that local date and time in the zone.
 Missing brackets, an unknown zone, malformed offsets, and an offset that does
 not match the zone return `TimeError`.
 
+`host_zone()` is the host's zone, by the rule glibc, Go and JavaScript follow:
+`TZ` without a leading `:` (a zone name or the path of a TZif file), else the
+zone file /etc/localtime (named `Local`), else UTC. An empty `TZ`, or one that
+does not load, is UTC.
+`DateTime.in_host_zone()` is `in_zone(host_zone())`: the clock on the host's
+wall. The format patterns' no-pad flag (`%-H`, `%-I`, `%-M`, `%-S`, `%-d`,
+`%-m`, `%-j`) writes the field without its leading zeros, so
+`format("%-I:%M %p")` is `6:05 AM`; `format_checked` rejects the flag on any
+other field.
+
 `zoned_local(date, local_time, zone, disambiguation)` resolves a local
 date-time against zone transitions. `compatible` is the default; for an
 ambiguous fall-back time, `compatible` and `earlier` choose the earlier

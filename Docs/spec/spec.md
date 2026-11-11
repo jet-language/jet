@@ -165,7 +165,10 @@ vocabulary](vocabulary.md).
   checked formatting. `DateTime` provides Unix second/microsecond/nanosecond
   views, sub-second fields, `Duration` and `Period` arithmetic, rounding,
   replacement, checked formatting, and `until`/`since`; `in_zone` changes its
-  view without changing the instant. `ZonedDateTime` adds explicit DST
+  view without changing the instant, and `in_host_zone` views it in
+  `time.host_zone()`: the zone `TZ` names, else /etc/localtime, else UTC
+  (D-SCRIPT-LOCAL-CLOCK1). The format patterns' no-pad flag `%-H %-I %-M %-S
+  %-d %-m %-j` drops the leading zero. `ZonedDateTime` adds explicit DST
   disambiguation, RFC 9557 round trips, transition queries, `start_of_day`,
   `hours_in_day`, `with_time`, and `with_zone`. `Period` exposes its parts,
   sign, absolute/negated/add/sub operations, and anchor-dependent totals.

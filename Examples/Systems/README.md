@@ -107,6 +107,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [DurationFacts](Time/DurationFacts.jet) — Fixed values use exact duration literals.
 - [DurationNs](Time/DurationNs.jet)
 - [Expiring](Time/Expiring.jet) — core.time.expiring expired and remaining_ms are Core source: a deadline is still valid at its own tick, expires on the next one, and the remaining time…
+- [HostClock](Time/HostClock.jet) — `in_host_zone()` reads the host's wall clock (TZ, else /etc/localtime, else UTC); `%-I` drops the hour's leading zero.
 - [InstantPoint](Time/InstantPoint.jet) — `time.instant()` is the compiler-owned monotonic Time point on every tier.
 - [TimeCalendar](Time/TimeCalendar.jet)
 - [TimeOrder](Time/TimeOrder.jet)
