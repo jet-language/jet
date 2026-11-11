@@ -895,7 +895,7 @@ rsaes_oaep_unpadding: fn(buf: &[U8], md: hashes.Md, lhash: [U8], output_max_len:
     // 0x00 || seed || lHash' || PS || 0x01 || M with lHash' = lHash and PS
     // all zeros.
     bad := ctime.cond_of(U64.from_u8(buf[0]))
-    bad = ctime.bool_or(bad, ctime.cond_of_int(ctime.memcmp(lhash, 0, buf, 1 + hlen, hlen)))
+    bad = ctime.bool_or(bad, ctime.mem_ne(lhash, 0, buf, 1 + hlen, hlen))
     // Read the whole of PS || 0x01 || M: pad_count counts the zeros before
     // the first nonzero byte, which must be 0x01.
     start: 1 + 2 * hlen
@@ -931,8 +931,8 @@ rsaes_oaep_unpadding: fn(buf: &[U8], md: hashes.Md, lhash: [U8], output_max_len:
 /// padding whose message the output cannot hold. Only the verdict and the
 /// length of a message handed out show, as mbedtls returns them.
 unpadded_message: fn(decoded: &V15Unpadded) -> [U8] RSAError! {
-    bad: unpadding_bad(decoded.bad)
-    too_large: unpadding_bad(decoded.too_large)
+    bad: unpadding_bad(decoded.bad.mask)
+    too_large: unpadding_bad(decoded.too_large.mask)
     if bad || too_large {
         core.crypto.wipe(decoded.out)
         if bad -> return Err(.InvalidPadding)
@@ -945,7 +945,8 @@ unpadded_message: fn(decoded: &V15Unpadded) -> [U8] RSAError! {
 
 /// An unpadding's verdict, revealed once the whole block is decoded, as
 /// mbedtls returns it.
-unpadding_bad: fn(bad: ctime.CtCond) -> Bool Never! { ctime.cond_is_true(bad) }
+#Scrub(Secret)
+unpadding_bad: fn(mask: #Secret U64) -> Bool Never! { ctime.cond_is_true(mask) }
 
 /// The length of a message an unpadding hands out, revealed once its
 /// verdict is good: the caller is handed that many bytes. It is below the
@@ -1077,11 +1078,11 @@ rsa_decrypt_decompose_ret: fn(invalid_padding_in: Int, invalid_padding_out: Int,
     problem := 0
     ret := combined_ret
     invalid_padding: ctime.uint_eq(U64{0 - ret}, U64{0 - invalid_padding_in})
-    problem = ctime.error_if(invalid_padding, invalid_padding_out, problem)
-    ret = ctime.error_if(invalid_padding, 0, ret)
+    problem = ctime.error_if(invalid_padding.mask, invalid_padding_out, problem)
+    ret = ctime.error_if(invalid_padding.mask, 0, ret)
     output_too_large: ctime.uint_eq(U64{0 - ret}, U64{0 - output_too_large_in})
-    problem = ctime.error_if(output_too_large, output_too_large_out, problem)
-    ret = ctime.error_if(output_too_large, 0, ret)
+    problem = ctime.error_if(output_too_large.mask, output_too_large_out, problem)
+    ret = ctime.error_if(output_too_large.mask, 0, ret)
     DecomposedRet{ret: ret, problem: problem}
 }
 
@@ -1434,13 +1435,13 @@ self_test_key: fn() -> RSAContext {
     pms: cipher.bytes_of(message, 0, 48)
     sealed48: rsa_pkcs1_encrypt(ctx, rng, pms) ?? panic("encrypt 48")
     good: rsa_rsaes_pkcs1_v15_decrypt_fixed(ctx, rng, sealed48, 48) ?? panic("decrypt 48")
-    assert(!ctime.cond_is_true(good.bad))
+    assert(!ctime.cond_is_true(good.bad.mask))
     assert(good.out == pms)
     lengths: [Int]{47, 49, 1}
     loop len in lengths {
         sealed: rsa_pkcs1_encrypt(ctx, rng, cipher.bytes_of(message, 0, len)) ?? panic("encrypt {len}")
         other: rsa_rsaes_pkcs1_v15_decrypt_fixed(ctx, rng, sealed, 48) ?? panic("decrypt {len}")
-        assert(ctime.cond_is_true(other.bad))
+        assert(ctime.cond_is_true(other.bad.mask))
         assert(other.out == zeros)
     }
     // Values whose private operation gives a block that is no EME-PKCS1-v1_5
@@ -1457,7 +1458,7 @@ self_test_key: fn() -> RSAContext {
     loop block in blocks {
         sealed: rsa_public(ctx, block) ?? panic("raw public operation")
         bad: rsa_rsaes_pkcs1_v15_decrypt_fixed(ctx, rng, sealed, 48) ?? panic("decrypt a bad padding")
-        assert(ctime.cond_is_true(bad.bad))
+        assert(ctime.cond_is_true(bad.bad.mask))
         assert(bad.out == zeros)
         assert(rsa_pkcs1_decrypt(ctx, rng, sealed, 48) == .Err(.InvalidPadding))
     }
@@ -1499,12 +1500,12 @@ self_test_key: fn() -> RSAContext {
     loop _ in 0..<62 -> zeros.push(U8{0})
     lhash: hashes.hash(.SHA256, label)
     decoded := rsaes_oaep_unpadding(spoiled, .SHA256, lhash, 62)
-    assert(ctime.cond_is_true(decoded.bad))
+    assert(ctime.cond_is_true(decoded.bad.mask))
     assert(decoded.out == zeros)
     good := block.copy()
     kept := rsaes_oaep_unpadding(good, .SHA256, lhash, 62)
-    assert(!ctime.cond_is_true(kept.bad))
-    assert(!ctime.cond_is_true(kept.too_large))
+    assert(!ctime.cond_is_true(kept.bad.mask))
+    assert(!ctime.cond_is_true(kept.too_large.mask))
     assert_eq(unpadded_len(kept.olen), 16)
     assert(cipher.bytes_of(kept.out, 0, 16) == cipher.bytes_of(message, 0, 16))
 }

@@ -438,7 +438,7 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
         ssldefs.ssl_wipe(mac_peer)
         ssldefs.ssl_wipe(mac_expect)
     }
-    if !ssl_record_authentic(correct) -> return Err(.InvalidMac)
+    if !ssl_record_authentic(correct.mask) -> return Err(.InvalidMac)
     if auth_done != 1 -> return Err(.InternalError)
     if cbc -> rec.data_len = ssl_authentic_len(content_len)
     if t.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
@@ -452,7 +452,8 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
 
 /// The verdict of a CBC record's padding and MAC checks, revealed once both
 /// are done: a record that fails is refused whatever went wrong in it.
-ssl_record_authentic: fn(correct: ctime.CtCond) -> Bool Never! { ctime.cond_is_true(correct) }
+#Scrub(Secret)
+ssl_record_authentic: fn(mask: #Secret U64) -> Bool Never! { ctime.cond_is_true(mask) }
 
 /// A CBC record's content length, revealed once its MAC verdict is true:
 /// an authentic record's length is the one its sender chose, which the
