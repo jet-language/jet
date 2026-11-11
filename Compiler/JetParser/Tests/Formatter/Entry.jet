@@ -249,3 +249,19 @@ g: fn() -> String {
     inline: "g: fn() -> String {{ \"{{if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}}}\" }}\n"
     assert(fmt_core_stable(inline).contains("if h(P{{n: 1}}) == {{ .Ok(ok) -> \"yes\", .Err(error) -> \"no\" }}"), "a table in an interpolation hole stays a table")
 }
+#Test("a deep one-line else-if chain formats in linear time") {
+    // Each level once rendered its whole tail twice, compact then expanded:
+    // at 48 levels the format never finished.
+    depth: 48
+    line := ""
+    loop _ in 0..<depth {
+        line = "{line}if {{ flag -> print(\"stop\") else -> "
+    }
+    line = "{line}if {{ flag -> print(\"stop\") else -> print(\"deep-tail\") }}"
+    loop _ in 0..<depth {
+        line = "{line} }}"
+    }
+    formatted: fmt_core_stable("deep: fn(flag: Bool) -[IO]> {{\n    {line}\n}}\n")
+    assert(formatted.contains("print(\"deep-tail\")"))
+    assert(!formatted.contains(line), "a chain past the line width expands")
+}

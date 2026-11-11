@@ -1156,11 +1156,16 @@ jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_b
 // A table written on one line stays on one line when it fits, as
 // `jfmt_fmt_guard_expr` keeps a value table.
 jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, span: Span) {
+    if jfmt_one_line_trial_lost(f) -> return
     if jfmt_switch_written_on_one_line(f, span.start, arms) {
-        mark: jfmt_mark(f)
+        // Inside a one-line trial the expanded form would fail it as well.
+        if f.one_line_trials > 0 {
+            jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, true)
+            return
+        }
+        mark: jfmt_one_line_trial_begin(f)
         jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, true)
-        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
-        jfmt_rollback(f, mark)
+        if jfmt_one_line_trial_end(f, mark) -> return
     }
     jfmt_fmt_dispatch_table(f, subject, arms, else_body, force_arm_blocks, false)
 }
@@ -1170,21 +1175,15 @@ jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [
 jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) -> Bool Never! {
     body_start: if arms.len() > 0 -> arms[0].span.start else -> jfmt_dispatch_else_start(f, start) ?? return false
     open := -1
-    loop (index, token) in f.source_toks {
-        if token.span.start >= body_start -> break
-        if token.span.start >= start && token.kind == TOKEN_LBRACE -> open = index
-    }
-    if open < 0 -> return false
-    depth := 0
-    loop index in open..<f.source_toks.len() {
+    loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
         token: f.source_toks[index]
-        if token.kind == TOKEN_LBRACE -> depth += 1
-        if token.kind == TOKEN_RBRACE {
-            depth -= 1
-            if depth == 0 -> return jfmt_written_on_one_line(f, Span{start: start, end: token.span.end})
-        }
+        if token.span.start >= body_start -> break
+        if token.kind == TOKEN_LBRACE -> open = index
     }
-    false
+    if open < 0 || open >= f.brace_closes.len() -> return false
+    close: f.brace_closes[open]
+    if close < 0 -> return false
+    jfmt_written_on_one_line(f, Span{start: start, end: f.source_toks[close].span.end})
 }
 
 jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, compact: Bool) {
@@ -1239,11 +1238,16 @@ jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
 }
 
 jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
+    if jfmt_one_line_trial_lost(f) -> return
     if jfmt_switch_written_on_one_line(f, span.start, arms) {
-        mark: jfmt_mark(f)
+        // Inside a one-line trial the expanded form would fail it as well.
+        if f.one_line_trials > 0 {
+            jfmt_fmt_guard_dispatch_table(f, arms, else_body, true)
+            return
+        }
+        mark: jfmt_one_line_trial_begin(f)
         jfmt_fmt_guard_dispatch_table(f, arms, else_body, true)
-        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
-        jfmt_rollback(f, mark)
+        if jfmt_one_line_trial_end(f, mark) -> return
     }
     jfmt_fmt_guard_dispatch_table(f, arms, else_body, false)
 }
@@ -1390,8 +1394,9 @@ jfmt_fmt_switch_arm: fn(f: &JetFmt, subject: Expr, table_op: BinOp, arm: SwitchA
 }
 
 jfmt_dispatch_else_start: fn(f: JetFmt, after: Int) -> Int? Never! {
-    loop token in f.source_toks {
-        if token.span.start >= after && token.kind == TOKEN_KW_ELSE -> return Val(token.span.start)
+    loop index in jfmt_first_token_at(f, after)..<f.source_toks.len() {
+        token: f.source_toks[index]
+        if token.kind == TOKEN_KW_ELSE -> return Val(token.span.start)
     }
     None
 }

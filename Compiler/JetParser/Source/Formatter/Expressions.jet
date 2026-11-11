@@ -404,23 +404,28 @@ jfmt_table_continues: fn(else_body: [Stmt], else_value: Expr, arm_span: Span, ta
 // Any other table expands to one arm per line, without commas.
 jfmt_fmt_guard_expr: fn(f: &JetFmt, expr: Expr) {
     table_span: jfmt_if_span(expr) ?? return
+    if jfmt_one_line_trial_lost(f) -> return
     // A line break in an interpolation hole would split the string.
     if f.interp_depth > 0 {
         jfmt_fmt_guard_table(f, expr, table_span, true)
         return
     }
     if jfmt_written_on_one_line(f, table_span) {
-        mark: jfmt_mark(f)
+        // Inside a one-line trial the expanded form would fail it as well.
+        if f.one_line_trials > 0 {
+            jfmt_fmt_guard_table(f, expr, table_span, true)
+            return
+        }
+        mark: jfmt_one_line_trial_begin(f)
         jfmt_fmt_guard_table(f, expr, table_span, true)
-        if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
-        jfmt_rollback(f, mark)
+        if jfmt_one_line_trial_end(f, mark) -> return
     }
     jfmt_fmt_guard_table(f, expr, table_span, false)
 }
 
 // The source of `span` holds no line break and no comment.
 jfmt_written_on_one_line: fn(f: JetFmt, span: Span) -> Bool Never! {
-    jfmt_src_valid(f, span.start, span.end) && !jfmt_bytes_have_newline(f.src_bytes, span.start, span.end) && !jfmt_span_has_comment(f, span.start, span.end)
+    jfmt_src_valid(f, span.start, span.end) && jfmt_line_of(f, span.start) == jfmt_line_of(f, span.end) && !jfmt_span_has_comment(f, span.start, span.end)
 }
 
 // Open, separate and close the arms of a table on one line or one per line.

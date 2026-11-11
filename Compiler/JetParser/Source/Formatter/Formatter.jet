@@ -131,6 +131,13 @@ JetFmt: struct {
     // the printed precedence does not need are left out, their spans kept.
     drop_grouping: Bool{false}
     dropped_grouping: [Span]{[Span]{}}
+    // The index of the `}` token that closes each `{` token of
+    // `source_toks`, -1 for any other token (jfmt_brace_closes).
+    brace_closes: [Int]{[Int]{}}
+    // How many one-line trials are in progress, and where the outermost
+    // began in `out` (jfmt_one_line_trial_begin).
+    one_line_trials: Int{0}
+    one_line_trial_start: Int{0}
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
@@ -1025,12 +1032,19 @@ jfmt_emit_comment_inline: fn(f: &JetFmt, text: String) Never! {
     f.pending_blank = false
 }
 
-// True if any tracked comment falls inside `open..close` (gate c).
+// True if any tracked comment falls inside `open..close` (gate c). The
+// comments are in source order, so the first at or after `open` decides.
 jfmt_span_has_comment: fn(f: JetFmt, open: Int, close: Int) -> Bool Never! {
-    loop comment in f.comments {
-        if comment.span.start >= open && comment.span.start < close -> return true
+    low := 0
+    high := f.comments.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if {
+            f.comments[middle].span.start < open -> low = middle + 1
+            else -> high = middle
+        }
     }
-    false
+    low < f.comments.len() && f.comments[low].span.start < close
 }
 
 // ---- source scans ----
@@ -1362,14 +1376,13 @@ jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
         comment_free := true
         if jfmt_single_stmt_braces(f, statement) == .Val(braces) -> comment_free = !jfmt_span_has_comment(f, braces.open, braces.close)
         if jfmt_is_simple_stmt(statement) && comment_free && !jfmt_is_table_value_stmt(f, statement) {
-            mark: jfmt_mark(f)
+            mark: jfmt_one_line_trial_begin(f)
             jfmt_write(f, " ")
             jfmt_fmt_stmt_inline(f, statement)
             jfmt_write(f, " }}")
             // A statement can render multi-line even on the inline path; never
             // keep a collapsed body whose content spans lines.
-            if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
-            jfmt_rollback(f, mark)
+            if jfmt_one_line_trial_end(f, mark) -> return
         }
     }
     jfmt_fmt_body_expanded(f, body)
@@ -1619,6 +1632,7 @@ jfmt_new: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -
     loop token in source_toks {
         if jfmt_is_comment_kind(token.kind) -> comments.push(JetFmtComment{text: jfmt_bytes_text(bytes, token.span.start, token.span.end), span: token.span})
     }
+    closes: jfmt_brace_closes(source_toks)
     JetFmt{
         src: src,
         src_bytes: bytes,
@@ -1639,7 +1653,54 @@ jfmt_new: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -
         expected_return_type: None,
         force_control_braces: false,
         inline_rules: jfmt_inline_rules(prog.applied_rules),
+        brace_closes: closes,
     }
+}
+
+// The index of the `}` token that closes each `{` token, -1 for any other
+// token, so a table finds its end without scanning its body.
+jfmt_brace_closes: fn(tokens: [Token]) -> [Int] Never! {
+    closes := [Int]{}
+    opens := [Int]{}
+    loop (index, token) in tokens {
+        closes.push(-1)
+        if token.kind == TOKEN_LBRACE -> opens.push(index)
+        if token.kind == TOKEN_RBRACE && opens.len() > 0 {
+            open: opens.pop() ?? -1
+            closes[open] = index
+        }
+    }
+    closes
+}
+
+// A one-line trial: a table or body the author wrote on one line is
+// rendered on one line and kept only if it fits with no line break, else
+// rolled back for the expanded form. Inside a trial, a line break or a
+// column past JFMT_MAX_WIDTH means the outermost trial fails, since only a
+// rollback to before it removes either; a nested table then renders nothing
+// (jfmt_one_line_trial_lost). Without that, each level of a deep
+// `else -> if { … }` chain rendered its whole tail twice, once per form:
+// exponential in the chain's depth.
+jfmt_one_line_trial_begin: fn(f: &JetFmt) -> JetFmtMark Never! {
+    mark: jfmt_mark(f)
+    if f.one_line_trials == 0 -> f.one_line_trial_start = mark.out_len
+    f.one_line_trials += 1
+    mark
+}
+
+// Ends the trial begun at `mark`: true when its one-line form stays, false
+// when it was rolled back.
+jfmt_one_line_trial_end: fn(f: &JetFmt, mark: JetFmtMark) -> Bool Never! {
+    f.one_line_trials -= 1
+    if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return true
+    jfmt_rollback(f, mark)
+    false
+}
+
+// The outermost one-line trial in progress already failed: what a nested
+// table would render is rolled back unread.
+jfmt_one_line_trial_lost: fn(f: JetFmt) -> Bool Never! {
+    f.one_line_trials > 0 && (f.col > JFMT_MAX_WIDTH || jfmt_out_since_has_newline(f, f.one_line_trial_start))
 }
 
 jfmt_inline_rules: fn(applications: [AppliedRuleApplication]) -> [AppliedRuleApplication] Never! {

@@ -1,0 +1,24 @@
+# `jet fmt` on a 48-deep one-line `else -> if { … }` chain finishes in linear
+# time: each one-line table is tried compact once, and a nested table inside a
+# trial that already failed renders nothing, so no level renders its tail twice.
+# The fixture files are byte copies of
+# control_and_data/deep_discarded_else_if_chain_stays_iterative.fixture/main.jet
+# and its aot/main.jet, which hung `jet fmt` before.
+fixture: deep_else_if_chain_formats_in_linear_time.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt main.jet
+limit: time=8
+exit: 0
+file: main.jet ~ "deep-tail"
+step: jet fmt --check main.jet
+limit: time=8
+exit: 0
+step: jet fmt aot/main.jet
+limit: time=8
+exit: 0
+file: aot/main.jet ~ "deep-tail"
+step: jet fmt --check aot/main.jet
+limit: time=8
+exit: 0
