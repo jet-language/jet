@@ -372,7 +372,12 @@ reassigning it.
 
 The orchestrator does every build and test. It keeps every worker's next task
 queued, integrates submissions in batches with one collect-all pass, and lands
-each passing submission on `dev` as its own commit. A failing submission is
+each passing submission on `dev` as its own commit. At intake it runs a quick,
+narrow, targeted check of each submission with the current train's compiler
+and returns every finding to the worker as one list. Trains run continuously:
+when a train's preflight or census finds failures, it collects them all, their
+owners fix them all, and the train retests only the affected rows and
+continues. A failing submission is
 set aside without holding back the rest, and every failure goes back at once
 to the worker that owns it, as one list and that worker's top priority. The
 orchestration skill's intake reference defines the submission format, batch

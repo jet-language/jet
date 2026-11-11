@@ -11,21 +11,21 @@ of a test it wrote, one at a time, under `nice`, with the admitted seed or the
 batch compiler the orchestrator last announced. Anything that needs a freshly
 built compiler goes in the submission's `tests`.
 
-Before it submits, the worker collects every problem at once and fixes the
-whole list in one pass (AGENTS.md, Find every issue at once):
+The worker never builds the compiler and never runs the submission gate,
+suites, censuses or chains. It submits and moves straight on to its next task.
+At intake the orchestrator runs a quick, narrow, targeted check on each
+submission: the lander's submission gate on the patch applied to the current
+train's composed tree, with that train's already-built compiler. The gate runs
+the guards, the Core coverage ratchet, the formatter pins, every generator's
+`--check` and every `Jetpack/Bootstrap/Check.jet --area` in keep-going
+mode. Every finding goes back to the worker as one list, and the worker fixes
+the whole list in one pass alongside its new work. Only a submission with a
+clean gate enters a train.
 
-- It runs the lander's submission gate on the patch applied to the current
-  train's composed tree. The gate runs the guards, the Core coverage ratchet,
-  the formatter pins, every generator's `--check` and every
-  `Jetpack/Bootstrap/Check.jet --area` in keep-going mode, and the
-  submission's `msg` carries its clean summary. The lander refuses a
-  submission without one.
-- A change that makes sema, a guard or a gate stricter is swept against every
-  Jet source it can reach (Core, Compiler, Jetpack, Tools, Examples, every
-  `tests/` tree, case fixture and template). Every hit is fixed in the same
-  submission, and the `msg` names the sweep command and its zero result.
-- A failure is never the stopping point: the worker collects the whole list,
-  fixes every item, and reruns once.
+A change that makes sema, a guard or a gate stricter names the rule's reach in
+its `msg`. The gate sweeps it against every Jet source it can reach (Core,
+Compiler, Jetpack, Tools, Examples, every `tests/` tree, case fixture and
+template), and every hit is fixed in one pass.
 
 ## The submission
 
@@ -58,7 +58,11 @@ that moves a line of a Core file regenerates every golden citing
 
 Batches run as a rolling train, and trains overlap: the next train's census
 starts on the current train's composed tree while the current train tests, so
-it launches already clean when the current train lands. A train leaves about every 45 minutes, or
+it launches already clean when the current train lands. Trains run
+continuously. When a train's preflight or census finds failures, every
+failure is collected in one pass and goes to its owner as one list. After the
+fixes, the train retests only the affected rows and continues. It never
+restarts to find the next failure. A train leaves about every 45 minutes, or
 sooner when a heavy slot is free, with every ready submission that is not
 waiting on a seed, in stack order. It lands whatever passed. One failing
 submission is set aside and the rest land in the same cycle; a train is never
