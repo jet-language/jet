@@ -42,8 +42,9 @@
 //             and s2 fails twice is lost; a lost row needs a
 //             disposition line `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in
 //             --dispositions. No failing row may be untracked: each one needs a known-failing
-//             line, a host skip or an opt-in, or (for a lost row) a disposition; a REFUSED row
-//             no ledger line owns counts as untracked.
+//             line, a host skip, an opt-in, or a disposition (a lost row, or a row that fails
+//             with the same status on both columns); a REFUSED row no ledger line owns counts
+//             as untracked. A disposition that tracks no row is a WARN row.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
 // The candidate's suite rows need the jetpack engine that serves them, so they start once
@@ -315,6 +316,9 @@ Compared: struct {
     added: [SuiteRow]
     flaky: [SuiteRow]
     untracked: [SuiteRow]
+    // Failing rows a disposition tracks: each fails with the same status on
+    // both columns (`was` the release's, `now` the candidate's).
+    carded: [LostRow]
     release_untracked: Int
 }
 
@@ -328,10 +332,18 @@ is_untracked: fn(status: String) -> Bool Never! { !passes(status) && !TRACKED_FA
 // release, however many the current release had (shown for comparison).
 untracked_row: fn(suite: String, compared: Compared) -> GateRow Never! {
     count: compared.untracked.len()
-    GateRow{check: "untracked:{suite}", status: if count > 0 -> "FAIL" else -> "PASS", detail: "{count} failing row(s) with no known-failing line (release {compared.release_untracked}); full list in REPORT.md"}
+    GateRow{check: "untracked:{suite}", status: if count > 0 -> "FAIL" else -> "PASS", detail: "{count} failing row(s) with no known-failing line or disposition (release {compared.release_untracked}; {compared.carded.len()} failing alike on both columns, tracked by a disposition); full list in REPORT.md"}
 }
 
 row_key: fn(suite: String, id: String, tier: String) -> String Never! { "{suite}\t{id}\t{tier}" }
+
+// The first disposition naming row (suite, id, tier): its tier or `*`.
+disposition_for: fn(dispositions: [Disposition], suite: String, id: String, tier: String) -> Disposition? Never! {
+    loop entry in dispositions {
+        if entry.suite == suite && entry.id == id && (entry.tier == "*" || entry.tier == tier) -> return Val(entry.copy())
+    }
+    None
+}
 
 // Each key's last row, and the keys in first-seen order.
 Indexed: struct {
@@ -351,9 +363,11 @@ index_rows: fn(rows: [SuiteRow]) -> Indexed Never! {
 
 // Per-row comparison of two testkit result lists over the same fixtures.
 // `retry` holds the candidate's second run of the rows it lost the first
-// time. Lost rows carry their disposition.
+// time. Lost rows carry their disposition. A failing row the release fails
+// with the same status is not lost; a disposition naming it tracks it
+// (`carded`), else it is untracked.
 compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [SuiteRow], dispositions: [Disposition]) -> Compared Never! {
-    out := Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [SuiteRow]{}, untracked: [SuiteRow]{}, release_untracked: 0}
+    out := Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [SuiteRow]{}, untracked: [SuiteRow]{}, carded: [LostRow]{}, release_untracked: 0}
     loop item in before_rows {
         if is_untracked(item.status) -> out.release_untracked += 1
     }
@@ -374,12 +388,9 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
             next
         }
         lost := LostRow{suite: was.suite.copy(), id: was.id.copy(), tier: was.tier.copy(), was: was.status.copy(), now: now_status.copy(), detail: if found == .Val(at) -> after_rows[at].detail.copy() else -> "", disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
-        loop entry in dispositions {
-            if entry.suite == was.suite && entry.id == was.id && (entry.tier == "*" || entry.tier == was.tier) {
-                lost.disposed = true
-                lost.disposition = entry.copy()
-                break
-            }
+        if disposition_for(dispositions, was.suite, was.id, was.tier) == .Val(entry) {
+            lost.disposed = true
+            lost.disposition = entry
         }
         out.lost.push(lost)
     }
@@ -407,6 +418,13 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
             out.flaky.push(item.copy())
             tracked[key.copy()] = true
             next
+        }
+        if before.at.get(key) == .Val(at) && before_rows[at].status == item.status {
+            if disposition_for(dispositions, item.suite, item.id, item.tier) == .Val(entry) {
+                out.carded.push(LostRow{suite: item.suite.copy(), id: item.id.copy(), tier: item.tier.copy(), was: before_rows[at].status.copy(), now: item.status.copy(), detail: item.detail.copy(), disposed: true, disposition: entry})
+                tracked[key.copy()] = true
+                next
+            }
         }
         out.untracked.push(item.copy())
     }
@@ -1683,19 +1701,29 @@ judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -
     }
 }
 
-// The dispositions no lost row used.
-disposition_note: fn(ctx: &Ctx) Never! -[FS, IO, Time]> {
+// The dispositions that track no row, lost or carded: a typo in a case ID
+// or tier must not pass unseen.
+unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
     unused := [String]{}
-    loop entry in ctx.dispositions {
+    loop entry in dispositions {
         used := false
-        loop result in ctx.suites {
+        loop result in suites {
             loop lost in result.compared.lost {
                 if lost.disposed && same_disposition(lost.disposition, entry) -> used = true
+            }
+            loop carded in result.compared.carded {
+                if same_disposition(carded.disposition, entry) -> used = true
             }
         }
         if !used -> unused.push("{entry.suite} {entry.id} {entry.tier} {entry.card}")
     }
-    if unused.len() > 0 -> row(ctx, "dispositions", "NOTE", "{unused.len()} disposition(s) match no lost row: {unused[0..<if unused.len() > 4 -> 4 else -> unused.len()].join(" | ")}")
+    unused
+}
+
+// A WARN row naming every disposition that tracks no row.
+disposition_note: fn(ctx: &Ctx) Never! -[FS, IO, Time]> {
+    unused: unused_dispositions(ctx.dispositions, ctx.suites)
+    if unused.len() > 0 -> row(ctx, "dispositions", "WARN", "{unused.len()} disposition(s) match no lost row and no row failing alike on both columns: {unused.join(" | ")}")
 }
 
 Resolution: struct {
@@ -1794,6 +1822,10 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
         if compared.untracked.len() > 0 {
             lines.extend([String]{"", "## {result.suite}: untracked failures"})
             loop found in compared.untracked -> lines.push("- {found.id} {found.tier}: {found.status} {short(found.detail.partition("\n").head, 160)}")
+        }
+        if compared.carded.len() > 0 {
+            lines.extend([String]{"", "## {result.suite}: failing on both columns, tracked by a disposition"})
+            loop found in compared.carded -> lines.push("- {found.id} {found.tier}: {found.now} on both ({found.disposition.card}: {found.disposition.reason}) {short(found.detail.partition("\n").head, 160)}")
         }
     }
     if ctx.jetpack_fixed.len() > 0 {
