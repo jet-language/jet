@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99512,
+    "rev": 99516,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75008,11 +75008,11 @@
         {
           "n": 176,
           "text": "A function whose error union is inferred includes the errors of its unit-returning fallible statements (files.write, stdout.write). On seed-t21, `jet check` passes such a function, then `jet run` reaches an internal error in ir.build (\"method call outside the checked program\"), which breaks I2 and I3 (found by G1Lead4 on the scaling-report twin, 2026-11-11). Sema adds those errors to the inferred union, a case runs on O0, O1 and O2, and no checked program reaches the ir.build panic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T10:38:15.927Z"
+          "evidence": "G8Scope-9 landed as 7e51f9debb (t25a landed on dev 2026-11-11 at 12:21 (regen d8a82024a7)). An inferred failure union keeps the failures of statements that read a typed-guarded value. Train lines PASS: cases --filter failure_foundation/inferred_union_keeps_unit_statement_failures_on_every_tier, cases --filter failure_foundation, ui --filter failure and ui --filter propagat.",
+          "at": "2026-11-11T17:22:32.793Z"
         },
         {
           "n": 177,
@@ -75086,7 +75086,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T16:22:59.623Z",
+      "updated": "2026-11-11T17:22:32.793Z",
       "updatedBy": "Main",
       "criteriaLastN": 183
     },
@@ -85796,29 +85796,29 @@
         {
           "n": 7,
           "text": "Release a0.0.44 blocker (admit l2-release044d on 9755703c76, 2026-11-11): a cases row that passed on a0.0.43 is lost. cases reader_region_tiers/reader_whole_byte_take_patterns_match_inline_and_report_misses fails with jet.UnknownFunction \"`Reader` has no method `take_pattern`\" (it reproduces with seed-t23 on the fixture). sema_expr_check_take_pattern_method needs the receiver type to be Named \"Reader\"; suspects are 8c02016476 (#6206 c21, Core impls on runtime handles register) and 6dcd4e37c6 (#6206 c37, Body.reader runtime). Met when the row passes at O0, O1 and O2 on the train compiler, with the root commit named.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T15:30:13.559Z"
+          "evidence": "G8Scope-18 landed as 11042e61ef (t25a landed on dev 2026-11-11 at 12:21 (regen d8a82024a7)). Root: a latent take_pattern gate compared the spelling Reader instead of the handle, exposed by cf7dbdb374. Train PASS on the train compiler: cases reader_region_tiers/reader_whole_byte_take_patterns_match_inline_and_report_misses and annotated_reader_and_cursor_take_patterns_match.",
+          "at": "2026-11-11T17:22:34.953Z"
         },
         {
           "n": 8,
           "text": "Release a0.0.44 blocker (admit l2-release044d on 9755703c76, 2026-11-11): a cases row that passed on a0.0.43 is lost. cases ui_backend/headless_window_frames_follow_their_script fails with E0307 (an if-dispatch is missing the `Compose` variant). Suspects are 81f9b22dd4 (#6281 c50-53 closed sets) or a newly added event variant. Met when the row passes, with the root named, and the fix is in the right place: the fixture handles the new variant if the variant is intended, and the compiler is fixed if E0307 is wrong.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T15:30:16.864Z"
+          "evidence": "G8Scope-18 landed as 11042e61ef (t25a landed on dev 2026-11-11 at 12:21 (regen d8a82024a7)). Train PASS: cases ui_backend/headless_window_frames_follow_their_script on the train compiler; the root and fix side are in the commit msg.",
+          "at": "2026-11-11T17:22:37.162Z"
         },
         {
           "n": 9,
           "text": "Release a0.0.44 blocker (admit l2-release044d on 9755703c76, 2026-11-11): a cases row that passed on a0.0.43 is lost. cases truthfulness/audit_reports_list_findings_without_a_disposition: snapshot mismatch (audit counts 120 reports, 138 drifted). Met when the .out is regenerated from the train compiler and the new counts are explained in the commit msg (which findings were added), not blindly accepted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T15:30:19.868Z"
+          "evidence": "G8Scope-18 landed as 11042e61ef (t25a landed on dev 2026-11-11 at 12:21 (regen d8a82024a7)). Train PASS: cases truthfulness/audit_reports_list_findings_without_a_disposition on the train compiler, with the count change explained in the commit msg.",
+          "at": "2026-11-11T17:22:39.240Z"
         }
       ],
       "refs": [],
@@ -85829,7 +85829,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T04:00:20.629Z",
-      "updated": "2026-11-11T15:30:19.868Z",
+      "updated": "2026-11-11T17:22:39.240Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -197586,6 +197586,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:22:39.240Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h114mv",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-11T17:22:37.163Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h114mv",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-11T17:22:34.953Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h114mv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-11T17:22:32.793Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#176"
+    },
     {
       "at": "2026-11-11T16:47:03.171Z",
       "by": "Main",
