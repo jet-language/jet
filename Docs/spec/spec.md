@@ -803,6 +803,17 @@ comparisons and width changes, but no branch, select, call target or
 address. A finding is an ICE that names the function, the instruction and
 its line (D-SECRET-CT1).
 
+A host runs that code in fixed time only if its processor's vendor says so.
+Intel's guidance does for a processor without `IA32_ARCH_CAPABILITIES`; one
+with it holds only while the operating system sets DOITM, which a program
+cannot read. AMD and other vendors publish no such statement, and a
+WebAssembly engine picks its own instructions. So a program with fixed values
+runs on any host by default, and `jet inspect decisions` prints its
+`timing host:` row. A package that sets `policy.harden` admits only a
+confirmed host: its native entry checks the host before `run` and refuses to
+start anywhere else, giving the reason. A build of such a package for web or
+another wasm32 target is E0744 (D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`

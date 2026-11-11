@@ -554,6 +554,9 @@ JetDriverPackageInfo: struct {
     policy_expert: Bool?{None}
     // `policy.lints.deny`: lint names that fail this package's build (E1293).
     policy_lints_deny: [String]{[String]{}}
+    // `policy.harden`: the package's fixed-timing code starts only on a
+    // confirmed host (jet_driver_entry_harden).
+    policy_harden: Bool{false}
     // The Package comes from a leading inline `package: { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
@@ -753,6 +756,8 @@ JetDriverCompileResult: struct {
     allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
     // The entry package's `log:` level filter (jet_driver_entry_log).
     log_filter: String{""}
+    // The entry package's `policy.harden` (jet_driver_entry_harden).
+    harden: Bool{false}
     // A compile through assembly: the encoded JetCommandSchema record its
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
     command_record: [U8]{[U8]{}}
@@ -779,6 +784,14 @@ jet_driver_entry_log: fn(load: JetDriverLoadResult) -> String Never! {
         if package.identity == load.package_identity -> return package.log_filter.copy()
     }
     ""
+}
+
+// The `policy.harden` of the entry package of `load`.
+jet_driver_entry_harden: fn(load: JetDriverLoadResult) -> Bool Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.policy_harden
+    }
+    false
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

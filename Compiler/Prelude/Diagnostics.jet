@@ -5731,6 +5731,20 @@ FixedTimingCheckedArithmetic: struct {
     }
 }
 
+FixedTimingUnconfirmedTarget: struct {
+    target: String
+
+    impl Diagnostic {
+        code: "E0744"
+        meaning: "A `policy.harden` package with `timing: .Fixed` values is built for a target where no host is confirmed to run them in fixed time"
+        detail: true
+        fix_next: "Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package's `policy:`."
+        what: fn(self) -> String { "This package sets `policy.harden`, and its `timing: .Fixed` values would run on `{self.target}`, where no host is confirmed to run them in fixed time." }
+        why: fn(self) -> String { "WebAssembly leaves the machine instructions to the engine that compiles the module, and no engine states that its code takes the same time for every value; a hardened package refuses to start on an unconfirmed host, and on this target that is known when it is built." }
+        fix: fn(self) -> String { "Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package's `policy:`." }
+    }
+}
+
 RetiredPureWithEffects: struct {
     impl Diagnostic {
         code: "E0745"

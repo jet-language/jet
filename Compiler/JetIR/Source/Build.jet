@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 
 use {
-    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -290,6 +290,10 @@ IRChecks: struct {
     // filters the entry passes to the runtime (ir_log_configure).
     log_package: String{""}
     log_flag: String{""}
+    // The entry package's `policy.harden`: when a function holds a
+    // `timing: .Fixed` value, the entry first calls jet_rt_timing_admit,
+    // which ends the program on an unconfirmed host (ir_timing_admitted).
+    harden: Bool{false}
     // A release build (the `release` or `hardened` profile): an
     // `#Off(.Release)` body emits no code (ir_stmt).
     release: Bool{false}
@@ -1291,7 +1295,7 @@ IR_STARTUP_FUNCTION_PREFIX: "__startup_"
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "") -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p)) -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}#entry"
     id: m.functions.len()
@@ -1301,6 +1305,9 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
     ir_checked_alloc_link(m, p, b)
+    if ir_timing_admitted(p) {
+        _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)
+    }
     ir_observe_link(m, p, b)
     ir_log_configure(m, p, b)
     if p.checks.backtrace != .Full {
@@ -1341,6 +1348,14 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     ir_resolve_deferred(m, p, b)
     m.functions[id] = b.f.move()
     id
+}
+
+// Whether the entry admits the host first: the entry package sets
+// `policy.harden` and a function holds a `timing: .Fixed` value. The
+// runtime (JetRuntime HostTiming.jet jet_rt_timing_admit) ends the program
+// with the reason on a host its vendor does not confirm.
+ir_timing_admitted: fn(p: IRProgram) -> Bool Never! {
+    p.checks.harden && body_fixed_timing(p.functions)
 }
 
 // A `--checked-alloc` build's entry (or test harness main) first calls

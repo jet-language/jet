@@ -1,0 +1,15 @@
+// A `policy.harden` package that holds `timing: .Fixed` values starts only on
+// a confirmed host: on any other host its entry refuses to start before `run`
+// prints anything.
+Key: tag { deny: [Exec], timing: .Fixed }
+
+#Scrub(Key)
+reveal: fn(value: #Key U64) -> U64 { value }
+
+pick: fn(k: #Key U64, a: U64, b: U64) -> U64 {
+    if k == (U64{1}) -> a else -> b
+}
+
+run: fn() {
+    print("started: pick {reveal(pick(#Key U64{1}, U64{7}, U64{9}))}")
+}

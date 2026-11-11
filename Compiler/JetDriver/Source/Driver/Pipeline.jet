@@ -101,6 +101,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        body_fixed_timing,
         BuildSettingOverride,
         PolicyKey,
         policy_gate_allows,
@@ -364,6 +365,7 @@ jet_driver_compile_result: fn(
         typed_goals: load.typed_goals,
         allocator: jet_driver_entry_allocator(load),
         log_filter: jet_driver_entry_log(load),
+        harden: jet_driver_entry_harden(load),
     }
 }
 
@@ -375,6 +377,25 @@ jet_driver_has_typed_goals: fn(modules: [SemaGraphModuleResult]) -> Bool Never! 
         }
     }
     false
+}
+
+// E0744: a WebAssembly target leaves the machine instructions to the engine
+// that compiles the module, and no engine states that its code takes the same
+// time for every value, so the start-up refusal a `policy.harden` entry makes
+// on an unconfirmed host (JetIR Build.jet ir_timing_admitted) is known when
+// such a program is built for it.
+jet_driver_timing_target_refusal: fn(load: JetDriverLoadResult, modules: [SemaGraphModuleResult], machine: TargetMachine) -> Diagnostic? Never! {
+    if !machine.triple.starts_with("wasm") || !jet_driver_entry_harden(load) -> return None
+    fixed := false
+    loop graph_module in modules {
+        if body_fixed_timing(graph_module.functions) {
+            fixed = true
+            break
+        }
+    }
+    if !fixed -> return None
+    target: if machine.name == "wasm.browser" -> "web" else -> machine.triple
+    Val(jet_driver_diagnostic_without_span("E0744", "This package sets `policy.harden`, and its `timing: .Fixed` values would run on `{target}`, where no host is confirmed to run them in fixed time.", "WebAssembly leaves the machine instructions to the engine that compiles the module, and no engine states that its code takes the same time for every value; a hardened package refuses to start on an unconfirmed host, and on this target that is known when it is built.", "Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package's `policy:`."))
 }
 
 // Ordinary Doc preserves its user-only projection. The explicit retained
@@ -4039,6 +4060,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // A check whose bodies hold `#Todo` goals says so, so `jet check` can
     // print each goal card from a Doc projection (Rust `render_goal_report`).
     if request.mode == JetDriverCompileMode.Check -> load.typed_goals = jet_driver_has_typed_goals(checked_graph.modules)
+    if jet_driver_timing_target_refusal(load, checked_graph.modules, registration_graph.target_machine) == .Val(refusal) -> load.diagnostics.push(refusal)
     if checked_projection {
         capture.job_rows = jet_driver_job_rows(registration_graph, load.entry_module_identity)
         resolved_registration := sema_comptime_graph_with_values(registration_graph, comptime_values)

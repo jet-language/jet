@@ -796,6 +796,16 @@ FnBody: struct {
     tree: BodyTree
 }
 
+// Whether a body of `functions` holds a `timing: .Fixed` value
+// (FnBody.fixed_tags): a package that sets `policy.harden` admits such a
+// program only on a host its vendor confirms (core.sys.timing_host).
+body_fixed_timing: fn(functions: [FnBody]) -> Bool Never! {
+    loop function in functions {
+        if function.fixed_tags.len() > 0 -> return true
+    }
+    false
+}
+
 BodyParameter: struct {
     local: TLocal
     name: String
