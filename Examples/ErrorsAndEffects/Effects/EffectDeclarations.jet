@@ -1,6 +1,13 @@
-Log.Audit: effect
+// An effect is a type with an `impl Effect` block. `Audit` is a package
+// effect, a kind of the Prelude's `Log`, so `audit` names `Audit` in its row
+// and a caller that denies `Log` cannot call it.
+Audit: struct {
+    impl Effect {
+        parent: Log
+    }
+}
 
-audit: fn() -[Log.Audit]> {}
+audit: fn() -[Audit]> {}
 
 run: fn() {
     audit()

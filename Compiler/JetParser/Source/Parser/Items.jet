@@ -334,8 +334,8 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_EFFECT -> {
-            value: parser_parse_effect_word(state) ?? return ParsedItemOrImport{item: None, handled: true}
-            return ParsedItemOrImport{item: Val(Item.EffectDecl{value: value}), handled: true}
+            parser_refuse_effect_word(state)
+            return ParsedItemOrImport{item: None, handled: true}
         }
         token.kind == TOKEN_KW_TAG -> {
             value: parser_parse_tag_decl(state, modifiers)

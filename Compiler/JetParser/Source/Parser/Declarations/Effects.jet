@@ -1,5 +1,4 @@
-// Effect types (a struct's or enum's `impl Effect { … }` block) and the
-// `Root.Leaf: effect` package leaf declaration.
+// Effect types: a struct's or enum's `impl Effect { … }` block.
 use {
     jet_foundation.[
         AccessConvention,
@@ -224,35 +223,26 @@ parser_effect_fact_holds: fn(expr: Expr, member: String?) -> Bool Never! {
     false
 }
 
-// `Root.Leaf: effect` declares a package leaf. A root effect is a type with an
-// `impl Effect { … }` block, and a Prelude effect is already declared.
-parser_parse_effect_word: fn(state: &JetParserState) -> EffectDecl? {
+// A `Root.Leaf: effect` line declares nothing: a package effect is a type
+// with an `impl Effect` block, and a kind of another effect names it with
+// `parent:`. The line is reported with that declaration as its fix and
+// skipped.
+parser_refuse_effect_word: fn(state: &JetParserState) {
     start: parser_bump(state)
-    name: parser_effect_path_name(state)
-    parser_finish_statement(state)
-    head: parser_cover(start.span, name.span)
-    if !name.name.contains(".") {
-        parser_add_error_code(state, "E0003", head, "`{name.name}: effect` names no effect leaf", "an `effect` line declares a package leaf, `Root.Leaf: effect`; a root effect is a struct or enum with an `impl Effect {{ … }}` block", "write `{name.name}.Leaf: effect`, or declare `{name.name}: struct {{ impl Effect {{}} }}`")
-        return None
-    }
-    loop row in EFFECT_VOCABULARY_ROWS {
-        if row.name == name.name {
-            parser_add_error_code(state, "E0003", head, "`{name.name}` is already a Prelude effect", "the Prelude declares `{name.name}`, so every program already names it", "delete this line")
-            return None
-        }
-    }
-    Val(EffectDecl{name: name.name, name_span: name.span, irreversible: false, span: head})
-}
-
-parser_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "after the `effect` declaration keyword")
     name := parser_value(state, first)
     end := first.span
+    root := ""
+    leaf := name
     loop parser_current_kind(state) == TOKEN_DOT {
         parser_bump(state)
         segment: parser_expect_name(state, "for an effect path segment after `.`")
-        name = "{name}.{parser_value(state, segment)}"
+        root = if root == "" -> leaf else -> "{root}.{leaf}"
+        leaf = parser_value(state, segment)
+        name = "{name}.{leaf}"
         end = segment.span
     }
-    NamedSpan{name: name, span: parser_cover(first.span, end)}
+    parser_finish_statement(state)
+    fix: if root == "" -> "declare `{name}: struct {{ impl Effect {{}} }}`" else -> "declare `{leaf}: struct {{ impl Effect {{ parent: {root} }} }}` and write `{leaf}` in effect rows"
+    parser_add_error_code(state, "E0003", parser_cover(start.span, end), "`{name}: effect` declares no effect", "a package effect is a struct or enum with an `impl Effect` block; a kind of another effect names that effect with `parent:`", fix)
 }

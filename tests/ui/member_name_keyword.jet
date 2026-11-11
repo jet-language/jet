@@ -1,18 +1,12 @@
 // A member name after `.` may be a word that is a keyword elsewhere:
 // `p.effect` is a field access, so
-// the error is sema's missing field, not a parse error. At the start of an
-// item, `effect` still declares an effect.
-Log.Audit: effect
-
+// the error is sema's missing field, not a parse error.
 Point: struct {
     x: Int
     y: Int
 }
 
-audit: fn() -[Log.Audit]> {}
-
 run: fn() {
-    audit()
     p: Point{x: 1, y: 2}
     print(p.effect)
 }

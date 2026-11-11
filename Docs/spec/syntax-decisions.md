@@ -3442,8 +3442,9 @@ binders), so `-[!FFI]>` prohibits every foreign language at once. `Panic` and
 `Mem` remain deny-only rows and are not grantable roots. Amended by
 D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 (`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
-are retired. D-EFFECT-DECL1=A made `Root.Leaf: effect` leaf declarations live; a
-new user root stays unminted (E0119).
+are retired. D-EFFECT-DECL1=A made `Root.Leaf: effect` leaf declarations live,
+and D-EFFECT-PKGLEAF1=A replaced them with package effect types that name a
+`parent:`; a new user root stays unminted (E0119).
 
 **D-AUTH-AMBIENT2=A — Waiting is deny-only**: the exact `Time.Wait` leaf
 remains an inferred reachability fact and can be prohibited with
@@ -3520,7 +3521,10 @@ Prelude leaves. Once a root has one declared leaf, every dotted use under that
 root in effect rows, `#FX`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
-erase before the IR is built.
+erase before the IR is built. Superseded by D-EFFECT-PKGLEAF1=A: a package's
+kind of a Prelude effect is a struct or enum whose `impl Effect` block names
+its `parent:`, and a `Root.Leaf: effect` line is E0003. Prelude leaves and
+effect family cases still close their root (E0750).
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function

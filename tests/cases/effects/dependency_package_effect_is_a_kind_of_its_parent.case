@@ -1,4 +1,5 @@
-# Port of effects.rs:917-969. Sources and argv preserved verbatim.
+# A dependency's package effect is a kind of its parent: the app may call
+# `audit.record`, and a function that denies `Log` may not.
 fixture: fixtures/dependency-effect
 env: NO_COLOR=1
 step: jet check main.jet
@@ -8,5 +9,5 @@ copy: invalid-main.jet app/main.jet
 step: jet check main.jet
 cwd: app
 exit: nonzero
-stderr: ~ E0750 # original diagnostic code membership
-stderr: ~ Log.Audit # original contains predicate
+stderr: ~ E0749
+stderr: ~ Log

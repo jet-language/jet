@@ -268,24 +268,6 @@ jfmt_src_text: fn(f: JetFmt, start: Int, end: Int) -> String Never! {
     jfmt_bytes_text(f.src_bytes, start, end)
 }
 
-// A leaf `Root.Leaf: effect` parses with its `effect` keyword moved in front
-// of the name, so the parsed span stops at the name; the `: effect` after it
-// still belongs to the declaration.
-jfmt_effect_decl_end: fn(f: JetFmt, span: Span) -> Int Never! {
-    bytes: f.src_bytes
-    index := span.end
-    loop index < bytes.len() && (bytes[index] == 32 || bytes[index] == 9) -> index += 1
-    if index >= bytes.len() || bytes[index] != 58 -> return span.end
-    index += 1
-    loop index < bytes.len() && (bytes[index] == 32 || bytes[index] == 9) -> index += 1
-    word: "effect".bytes()
-    if index + word.len() > bytes.len() -> return span.end
-    loop offset in 0..<word.len() {
-        if bytes[index + offset] != word[offset] -> return span.end
-    }
-    index + word.len()
-}
-
 // Rust `src.get(start..end).is_some()`.
 jfmt_src_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     start >= 0 && start <= end && end <= f.src_bytes.len()

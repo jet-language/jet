@@ -1,9 +1,10 @@
 // This rule declared effect leaves (E0750).
 //
-// A root that has declared leaves (`Log.Audit: effect`, or a Prelude leaf such
-// as `FS.Read`) is closed below it: every leaf written in an effect row, a
-// callback type, a trait method row or a module's or type's `#FX(…)` cap must
-// resolve to one declared name. A root with no declared leaves stays open.
+// A root that has declared leaves (a Prelude leaf such as `FS.Read`, or a
+// case of an effect family enum) is closed below it: every leaf written in an
+// effect row, a callback type, a trait method row or a module's or type's
+// `#FX(…)` cap must resolve to one declared name. A root with no declared
+// leaves stays open.
 // Every module except the canonical Prelude effect module is validated, and
 // every module contributes leaves.
 use jet_foundation.[
@@ -111,7 +112,7 @@ sema_effect_leaf_unknown_diagnostic: fn(name: String, root: String, member: Stri
         suggestion = Val("{root}.{closest}")
         closest_member = Val(closest)
     }
-    fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "declare it with `{name}: effect`, or use a declared leaf"
+    fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "use one of the declared leaves of `{root}`"
     diagnostic := sema_error("E0750", span, "`{name}` isn't a declared effect", "the `{root}` root has declared leaves, so every leaf under it must resolve to one declared name", fix)
     if suggestion == .Val(candidate) {
         // A span over the leaf alone takes the leaf; a span over the written
@@ -231,11 +232,8 @@ sema_effect_leaf_check_cap_entries: fn(leaves: [SemaEffectLeaf], written: Module
 sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
-            .EffectDecl(declaration) -> {
-                // A library effect's own name and its cases (Library.jet).
-                if sema_library_effect_declared(items, sema_effect_root(declaration.name)) -> next
-                if sema_effect_parse_name(declaration.name) == None -> diagnostics.push(sema_effect_unknown(declaration.name, declaration.name_span))
-            }
+            // A library effect's own name and its cases (Library.jet).
+            .EffectDecl(_) -> {}
             .Func(function) -> sema_effect_leaf_check_function(leaves, function, diagnostics)
             .Struct(definition) -> {
                 sema_effect_leaf_check_cap(leaves, definition.cap, diagnostics)

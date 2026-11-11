@@ -5895,14 +5895,14 @@ UnknownEffectLeaf: struct {
 
     impl Diagnostic {
         code: "E0750"
-        meaning: "An effect declaration lacks a leaf, or a dotted effect under a checked root is not a declared package-view leaf"
+        meaning: "A dotted effect under a closed root is not one of the root's declared leaves"
         detail: true
         edit: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.effect_name}` is not a declared effect leaf." }
-        why: fn(self) -> String { "This package view has declared leaves under the same root, so dotted effect names must match one of those declarations exactly." }
-        fix: fn(self) -> String { "Use the suggested declared leaf, add an `{self.effect_name}: effect` declaration, or use the bare root." }
+        why: fn(self) -> String { "The root has declared leaves (a Prelude effect's leaves, or an effect family's cases), so dotted effect names must match one of those declarations exactly." }
+        fix: fn(self) -> String { "Use the suggested declared leaf, or use the bare root." }
     }
 }
 

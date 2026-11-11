@@ -692,13 +692,9 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
         .Trait(value) -> jfmt_fmt_trait(f, value)
         // Tag declarations are emitted verbatim (non-destructive).
         .Tag(t) -> jfmt_write_verbatim(f, t.span.start, t.span.end, true)
-        .EffectDecl(declaration) -> {
-            end: jfmt_effect_decl_end(f, declaration.span)
-            jfmt_write_verbatim(f, declaration.span.start, end, true)
-        }
-        // A marker prints inside the struct that declares it
-        // (jfmt_fmt_marker_impl).
-        .MarkerDecl(_) -> {}
+        // A marker or an effect name prints inside the struct or enum that
+        // declares it (jfmt_fmt_marker_impl, jfmt_fmt_effect_impl).
+        .EffectDecl(_) | .MarkerDecl(_) -> {}
         // Fact declarations share marker parameter syntax, so
         // use the same source-aware comma-list formatter.
         .FactDecl(declaration) -> jfmt_fmt_fact_decl(f, declaration)
@@ -2201,23 +2197,9 @@ jfmt_fmt_effect_impl: fn(f: &JetFmt, declared: EffectImpl) {
 }
 
 // A marker, or an effect name a struct or enum declares, prints inside that
-// type; a written `Root.Leaf: effect` line prints itself. A type's companions
-// follow it and lie inside its span.
+// type.
 jfmt_item_prints_inside_type: fn(items: [Item], index: Int) -> Bool Never! {
-    if items[index] == .MarkerDecl(_) -> return true
-    span := Span?{None}
-    if items[index] == .EffectDecl(declaration) -> span = Val(declaration.span)
-    inner: span ?? return false
-    owner := index - 1
-    loop owner >= 0 {
-        if items[owner] == .Struct(definition) -> return definition.span.start <= inner.start && inner.end <= definition.span.end
-        if items[owner] == .Enum(definition) -> return definition.span.start <= inner.start && inner.end <= definition.span.end
-        companion := false
-        if items[owner] == .EffectDecl(_) -> companion = true
-        if items[owner] == .MarkerDecl(_) -> companion = true
-        if !companion -> return false
-        owner -= 1
-    }
+    if items[index] == .MarkerDecl(_) || items[index] == .EffectDecl(_) -> return true
     false
 }
 

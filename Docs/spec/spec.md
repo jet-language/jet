@@ -2182,19 +2182,17 @@ FS: enum {
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
 An effect is a type with an `impl Effect` block; `effect` is not a declaration
-word. A package may still
-declare a leaf beneath a Prelude root at compile time:
+word. A `Log.Audit: effect` line is E0003, and its fix declares
+`Audit: struct { impl Effect { parent: Log } }`, a package effect that is a
+kind of `Log` (see the package-effect paragraph after the E0757 entries).
 
-```jet
-Log.Audit: effect
-```
-
-Declarations from the package, its dependencies, and the Prelude form one
-package view. If a root has declared leaves, a dotted use under that root must
-name one of the view's declared leaves. A bare root remains valid. A root with
-no declared leaves remains open. The same rule applies to function effect
-rows, `#FX`, and package effect budgets. Declarations have no runtime
-representation. An unknown root is a language error, not a new effect.
+A root that has declared leaves is closed: the Prelude's own leaves
+(`FS.Read`) and an effect family's cases (`Query.Read`) are the only dotted
+names under it. A dotted use under a closed root must name one of them
+(E0750); a bare root remains valid, and a root with no declared leaves
+remains open. The same rule applies to function effect rows, `#FX`, and
+package effect budgets. Declarations have no runtime representation. An
+unknown root is a language error, not a new effect.
 
 A package writes its own effect the same way, as a *library effect*: a
 struct or enum that implements `Effect`, with `#FX(…)` above it naming the

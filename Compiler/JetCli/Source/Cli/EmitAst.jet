@@ -211,7 +211,8 @@ jet_cli_emit_ast_item: fn(item: Item) -> JetCLIEmitNode Never! {
             jet_cli_emit_node("trait", "{value.name}: trait{supertraits}", children)
         }
         .Tag(value) -> jet_cli_emit_leaf("tag", "{value.name}: tag")
-        .EffectDecl(value) -> jet_cli_emit_leaf("effect", "{value.name}: effect")
+        // An effect name a struct or enum declares in its `impl Effect` block.
+        .EffectDecl(value) -> jet_cli_emit_leaf("effect", value.name)
         .Impl(value) -> {
             children := [JetCLIEmitNode]{}
             jet_cli_emit_ast_methods(value.methods, children)
