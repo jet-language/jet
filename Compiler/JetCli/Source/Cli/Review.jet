@@ -280,6 +280,7 @@ jet_cli_review_load: fn(path: String) -> JetCLIReviewLoaded {
         .Prepared(request, snapshot) -> {
             gated := request.move()
             gated.external_gate_entries = jet_cli_external_gate_rows(gated.external_gate_entries.move(), snapshot, [String]{})
+            gated.capture_gate_ledger = true
             if jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: gated.move(), snapshot: snapshot.move()}, None, None) == {
                 .Refused(output) -> return JetCLIReviewLoaded.Refused{output: output.move()}
                 .Compiled(result, _) -> return jet_cli_review_side(path, result)

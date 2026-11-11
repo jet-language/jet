@@ -144,31 +144,39 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     generated := [BuildSessionGeneratedModule]{}
     // The modules every target compile loads beside the package's sources.
     target_generated := [JetDriverGeneratedModule]{}
+    // The plan query is the trace's `build.plan` span: the check of the
+    // build entry and its `build: fn` run.
+    if trace_sink == .Val(sink) -> sink.begin("build.plan", "", -1, -1)
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    refused := JetDriverVerbOutput?{None}
     if prepared.move() == {
-        .Refused(output) -> return output
+        .Refused(output) -> refused = Val(output)
         .Prepared(request, snapshot) -> {
             scope := JetDriverBuildQueryScope{next_session_id: 1}
             query_request := request.move()
             query_request.build_args = build_args.copy()
             response := jet_driver_query_build_plan(query_request, scope)
             query := response.query.move()
-            if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(response.request, query, file, false, color, false)
-            plan: query.plan ?? return jet_cli_ice("the completed build query has no plan")
-            if jet_cli_settings_package(snapshot) == .Val(package) {
-                recorded: jet_cli_record_build_contributions(plan, package, color)
-                // copy: `refusal` is a payload view of `recorded`.
-                if recorded == .Val(refusal) -> return refusal.copy()
+            if !query.complete || query.internal_problem != None {
+                refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
+            } else if query.plan == .Val(plan) {
+                if jet_cli_settings_package(snapshot) == .Val(package) {
+                    recorded: jet_cli_record_build_contributions(plan, package, color)
+                    // copy: `refusal` is a payload view of `recorded`.
+                    if recorded == .Val(refusal) -> refused = Val(refusal.copy())
+                }
+                selection = Val(build_plan_selection(plan))
+                execution = Val(build_plan_execution(plan))
+                receipt = query.graph.copy()
+                policy = query.authority_policy
+                generated = build_plan_generated(plan)
+                // copy: `query` is returned whole to report a failure above.
+                target_generated = query.generated.copy()
             }
-            selection = Val(build_plan_selection(plan))
-            execution = Val(build_plan_execution(plan))
-            receipt = query.graph.copy()
-            policy = query.authority_policy
-            generated = build_plan_generated(plan)
-            // copy: `query` is returned whole to report a failure above.
-            target_generated = query.generated.copy()
         }
     }
+    if trace_sink == .Val(sink) -> sink.end("build.plan", if refused == None -> 1 else -> 0)
+    if refused.move() == .Val(output) -> return output
     selected: selection ?? return jet_cli_ice("the completed build query has no plan")
     if selected.unsupported.len() > 0 {
         return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)

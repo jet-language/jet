@@ -1,0 +1,16 @@
+# `jet build` of a package traces its plan as one `build.plan` span (the
+# check of the build entry and the plan's query) and each batch of its steps
+# as one `build.step` span named by the batch's steps (#6527 c5).
+fixture: fixtures/build_traces_its_plan_and_steps
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build --trace=trace.json main.jet --allow=Exec,FS
+exit: 0
+file: mirror.txt = "one"
+file: trace.json ~ "{\"name\":\"build.plan\",\"cat\":\"build.plan\",\"ph\":\"B\"" # the plan opens one span
+file: trace.json ~ "{\"name\":\"build.plan\",\"cat\":\"build.plan\",\"ph\":\"E\"" # and closes it
+file: trace.json ~ "{\"name\":\"mirror\",\"cat\":\"build.step\",\"ph\":\"B\"" # the step batch is one span named by its step
+file: trace.json ~ "{\"name\":\"mirror\",\"cat\":\"build.step\",\"ph\":\"E\"" # which closes

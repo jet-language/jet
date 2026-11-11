@@ -121,7 +121,15 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
 // A checked result ends the process behind `notice` (jet_cli_finish).
 jet_cli_structure_host: fn(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Doc)
+    prepared := jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    compiled: if prepared.move() == {
+        .Refused(refusal) -> JetCLICompiled.Refused{output: refusal}
+        .Prepared(request, snapshot) -> {
+            gated := request.move()
+            gated.capture_gate_ledger = true
+            jet_cli_compile_prepared(JetCLIPrepared.Prepared{request: gated.move(), snapshot: snapshot.move()}, None, None)
+        }
+    }
     if compiled == {
         .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))

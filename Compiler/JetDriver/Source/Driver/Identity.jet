@@ -313,6 +313,11 @@ JetDriverCompileRequest: struct {
     capture_build_nodes: Bool{false}
     build_output_names: [String]{[String]{}}
     capture_cost_report: Bool{false}
+    // A Doc compile builds its shared GateLedger (GateProjection.jet
+    // jet_driver_doc_gate_projection) only for the verbs that read it: `jet
+    // inspect structure` and `jet review`. Every other Doc compile (the build
+    // plan, the runtime library, `jet doc` itself) skips the projection.
+    capture_gate_ledger: Bool{false}
     generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
     // The package-relative sources the build targets being compiled list
     // (`b.add_executable("app", ["main.jet", "helper.jet"])`): in a package

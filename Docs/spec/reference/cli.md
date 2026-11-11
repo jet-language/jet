@@ -774,9 +774,13 @@ bytes, which its own thread realizes and reads while the object builds; for
 a closure only checked foreign declarations name, also the link's live
 symbol collection and the realization of the providers it reaches),
 `native.link`; one `native.build` around
-them for a test harness). The readable stream is written through
-`/dev/stderr`, so redirect stderr to a file with `2>>`, or use
-`--trace=FILE`. A trace that cannot be written stops; the compile does not.
+them for a test harness). A package build (`jet build` of a `build: fn`)
+also traces `build.plan`, the check of its build entry and the plan's query,
+and one `build.step` per batch of its steps, named by the steps; a step's own
+process is not traced, so the span's `proc_cpu_ns` is jet's alone. The
+readable stream is written through `/dev/stderr`, so redirect stderr to a
+file with `2>>`, or use `--trace=FILE`. A trace that cannot be written
+stops; the compile does not.
 
 Before `jet build` or `jet run` writes anything, the Jet host checks the
 application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)).

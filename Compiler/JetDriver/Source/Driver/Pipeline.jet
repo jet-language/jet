@@ -4128,7 +4128,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if request.mode == JetDriverCompileMode.Doc {
         resolved_registration := sema_comptime_graph_with_values(registration_graph, comptime_values)
         load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity, false, capture)
-        jet_driver_doc_gate_projection(load.doc_modules, checked_graph, resolved_registration, request, load.packages)
+        if request.capture_gate_ledger -> jet_driver_doc_gate_projection(load.doc_modules, checked_graph, resolved_registration, request, load.packages)
         registration_graph = resolved_registration.move()
     }
     if request.capture_build_program {

@@ -227,8 +227,12 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
             executor: plan ?? panic("a build with steps lowered them to the executor")
             artifacts: store ?? panic("a build with steps opened the build store")
             loop batch in build_execution_batches(executor, ready_steps) {
+                // Each batch is one `build.step` span, named by its steps.
+                names: loop id in batch -> graph.actions[id].name.copy()
+                if trace_sink == .Val(sink) -> sink.begin("build.step", names.join(" "), -1, -1)
                 watch: cli_time.start()
                 results: build_execute_actions(executor, batch, root, artifacts, grants, probes, jobs)
+                if trace_sink == .Val(sink) -> sink.end("build.step", batch.len())
                 wall: watch.elapsed_millis()
                 loop index in 0..<batch.len() {
                     node: jet_cli_build_step_node(nodes, batch[index])
