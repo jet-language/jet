@@ -17,6 +17,7 @@ use {
     service: core.service
     core.service.[ServiceError, ServiceEndpoint]
     files: core.files
+    rt: jet.runtime.time
 }
 
 // One durable queue. Source owns the storage/lease/receipt transactions;
@@ -327,9 +328,9 @@ queue_mkdir_error: fn(error: IOError) -> ServiceError Never! {
 // Rust service_authority_now: duration_since(UNIX_EPOCH).ok(), bounded
 // signed-i64 milliseconds, otherwise MAX. Controlled time is not consulted.
 queue_now: fn() -[Time]> Int Never! {
-    sample: core.time.__wall_sample()
-    if sample.before_epoch -> return 9223372036854775807
-    millis: sample.seconds * 1000 + sample.nanoseconds /% 1000000
+    sample: rt.wall_sample()
+    if sample.pre_epoch -> return 9223372036854775807
+    millis: sample.epoch_seconds * 1000 + sample.fraction_ns /% 1000000
     if millis > 9223372036854775807 -> return 9223372036854775807
     millis
 }

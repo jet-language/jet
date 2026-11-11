@@ -8,7 +8,10 @@ package: {
         time: .Library{ entry: time }
     }
 }
-use core: core
+use {
+    core: core
+    rt: jet.runtime.time
+}
 
 
 // Civil calendars, validation, codecs, wall-clock policy, and monotonic points
@@ -42,15 +45,21 @@ asctime: fn(dt: DateTime) -> String Never! {
 }
 
 start: fn() -[Time]> Stopwatch Never! {
-    core.time.__reject_uncontrolled("clock")
-    Stopwatch{start_ns: core.time.__host_monotonic_ns()}
+    rt.reject_uncontrolled("clock")
+    Stopwatch{start_ns: rt.host_monotonic_ns()}
 }
 
 // Waiting is the `Time.Wait` leaf, so sleeping needs no clock grant.
 sleep: fn(duration: Duration) Never! -[Time.Wait]> {
     // Even a zero or negative delay is a deadline/cancellation wait boundary.
     // The shared scheduler clamps the delay and owns pre/post wait checks.
-    core.time.__sleep_ns(duration.ns)
+    rt.sleep_ns(duration.ns)
+}
+
+// `task.timeout(duration)` (Sema TaskGroups.jet): moves the task deadline to
+// the earlier of the installed one and now plus `duration`.
+__task_timeout: fn(duration: Duration) Never! -[Time]> {
+    rt.task_timeout(duration.ns)
 }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
@@ -71,11 +80,12 @@ __ClockState: enum {
 Clock: struct {
     state: Shared<__ClockState>
 
+
     new: fn(seed: Int) -> Clock Never! {
         Clock{state: Shared{__ClockState.Manual(seed)}}
     }
     system: fn() -[Time]> Clock Never! {
-        Clock{state: Shared{__ClockState.System{started_ns: core.time.__clock_mono_ns(), offset_ms: 0}}}
+        Clock{state: Shared{__ClockState.System{started_ns: rt.clock_mono_ns(), offset_ms: 0}}}
     }
     now: fn(self) -> Int Never! {
         guard: self.state.guard_read()
@@ -87,7 +97,7 @@ Clock: struct {
             .Manual(_) -> guard.value = __ClockState.Manual(value)
             .System(_, _) -> {
                 current: clock_state_now(guard.value)
-                started: core.time.__clock_mono_ns()
+                started: rt.clock_mono_ns()
                 offset: if value > current -> value else -> current
                 guard.value = __ClockState.System{started_ns: started, offset_ms: offset}
             }
@@ -117,7 +127,7 @@ Clock: struct {
         if guard.value == {
             .Manual(now) -> Clock.new(now)
             .System(_, _) -> {
-                started: core.time.__clock_mono_ns()
+                started: rt.clock_mono_ns()
                 offset: clock_state_now(guard.value)
                 Clock{state: Shared{__ClockState.System{started_ns: started, offset_ms: offset}}}
             }
@@ -161,7 +171,7 @@ clock_state_now: fn(state: __ClockState) -> Int Never! {
     if state == {
         .Manual(value) -> value
         .System(started_ns, offset_ms) -> {
-            elapsed_ns: core.time.__clock_mono_ns() - started_ns
+            elapsed_ns: rt.clock_mono_ns() - started_ns
             elapsed_ms: civil_clamp(elapsed_ns /% 1000000, 0, time_int_max())
             saturating_add_ns(offset_ms, elapsed_ms)
         }
@@ -440,7 +450,7 @@ duration_ns: fn(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic(
 duration_as_seconds: fn(d: Duration) -> Int Never! { d.ns /% 1000000000 }
 
 elapsed: fn(watch: Stopwatch) -[Time]> Duration Never! {
-    duration_ns(saturating_sub_ns(core.time.__host_monotonic_ns(), watch.start_ns))
+    duration_ns(saturating_sub_ns(rt.host_monotonic_ns(), watch.start_ns))
 }
 
 compare_date: fn(a: LocalDate, b: LocalDate) -> Int Never! {
@@ -1443,17 +1453,17 @@ zone: fn(name: String) -[Env, FS.Read]> Zone TimeError! {
     rel := name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     loop rel.starts_with("right/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
-    if core.time.__embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
+    if rt.embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
     roots := [String]{}
-    if core.time.__zone_env("JET_TZDB_DIR") == .Val(dir) -> roots.push(dir)
-    if core.time.__zone_env("TZDIR") == .Val(dir) -> roots.push(dir)
-    if core.time.__zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/tzdb")
+    if rt.zone_env("JET_TZDB_DIR") == .Val(dir) -> roots.push(dir)
+    if rt.zone_env("TZDIR") == .Val(dir) -> roots.push(dir)
+    if rt.zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/tzdb")
     roots.push("Core/Time/tzdb")
     roots.push("/usr/share/zoneinfo")
     roots.push("/usr/share/lib/zoneinfo")
     roots.push("/etc/zoneinfo")
     loop root in roots {
-        if core.time.__zone_file_bytes("{root}/{rel}") == .Val(bytes) -> return civil_tzif(name, bytes)
+        if rt.zone_file_bytes("{root}/{rel}") == .Val(bytes) -> return civil_tzif(name, bytes)
     }
     Err(TimeError{reason: "unknown IANA time zone: {name}; set JET_TZDB_DIR or TZDIR to an IANA TZif database"})
 }
@@ -1950,18 +1960,18 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (
 
 // Clock selection belongs beside the civil values; providers expose samples.
 now_utc: fn() -[Time]> DateTime Never! {
-    if core.time.__world_wall_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
-    if core.time.__wall_override_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
-    sample: core.time.__wall_sample()
-    if sample.before_epoch -> return from_timestamp(0)
-    civil_timestamp(sample.seconds, sample.nanoseconds, false)
+    if rt.world_wall_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
+    if rt.wall_override_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
+    sample: rt.wall_sample()
+    if sample.pre_epoch -> return from_timestamp(0)
+    civil_timestamp(sample.epoch_seconds, sample.fraction_ns, false)
 }
 now: fn() -[Time]> DateTime Never! { now_utc() }
 today: fn() -[Time]> LocalDate Never! { now_utc().date() }
 civil_monotonic_ns: fn() -[Time]> Int Never! {
-    if core.time.__controlled_monotonic_ns() == .Val(value) -> return value
-    if core.time.__world_monotonic_ns() == .Val(value) -> return value
-    civil_i64(core.time.__host_monotonic_ns())
+    if rt.controlled_monotonic_ns() == .Val(value) -> return value
+    if rt.world_monotonic_ns() == .Val(value) -> return value
+    civil_i64(rt.host_monotonic_ns())
 }
 instant: fn() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
 sleep_until: fn(deadline: Instant) Never! -[Time]> {
@@ -2353,7 +2363,7 @@ __civil_footer_test_stamp: fn(text: String) -> Int Never! {
 
 #Test("Stopwatch start and elapsed share the host monotonic epoch") {
     watch: start()
-    later: core.time.__host_monotonic_ns()
+    later: rt.host_monotonic_ns()
     assert(watch.start_ns <= later)
     assert(elapsed(watch).ns >= 0)
     assert(watch.elapsed_millis() >= 0)

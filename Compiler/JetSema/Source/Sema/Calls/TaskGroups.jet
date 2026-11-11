@@ -837,14 +837,14 @@ sema_taskgroup_check_surface_method: fn(receiver: Expr, method: String, args: [C
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(context, span)
-        // The Duration installs the task deadline through
-        // the registered `core.time.__task_timeout` row (Rust
-        // jet_task_timeout_duration_ns); the next wait point past it stops.
-        record: core_call("core.time", "__task_timeout") ?? {
-            diagnostics.push(sema_error("E0906", span, "the canonical `core.time.__task_timeout` route for `task.timeout` is unavailable", "a task timeout installs its deadline through the registered Core row", "restore the registered `core.time.__task_timeout` route"))
+        // The Duration installs the task deadline through the Core source
+        // function `core.time.__task_timeout` (jet.runtime.time
+        // task_timeout); the next wait point past it stops.
+        unit: Type.Named{name: "Unit"}
+        value: sema_call_core_source("core.time", "__task_timeout", [TExpr]{duration}, unit, true, span, environment, program, diagnostics) ?? {
+            diagnostics.push(sema_error("E0906", span, "the source `core.time.__task_timeout` declaration for `task.timeout` is unavailable", "a task timeout installs its deadline through the Core time source", "restore the `core.time` source module"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        value := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.CoreCall{record: record, args: [TExpr]{duration}, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, fallibility: TFailureCarrier.Infallible}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {

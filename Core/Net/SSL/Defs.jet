@@ -22,6 +22,7 @@
 // the context and the network (mbedtls_ssl_set_bio's role).
 use {
     core
+    rt: jet.runtime.time
     bn: __core_crypto_bignum
     layer: __core_crypto_cipher_layer
     hashes: __core_crypto_md
@@ -1505,7 +1506,7 @@ ssl_time: fn() -> Int Never! {
 
 /// Milliseconds of the monotonic clock (mbedtls_ms_time, which reads
 /// CLOCK_BOOTTIME or CLOCK_MONOTONIC).
-ssl_ms_time: fn() -> Int Never! { core.time.__clock_mono_ns() /% 1000000 }
+ssl_ms_time: fn() -> Int Never! { rt.clock_mono_ns() /% 1000000 }
 
 // ---------------------------------------------------------------------------
 // Pools: C's session and transform pointers.

@@ -302,9 +302,8 @@ sema_taint_core_effect: fn(module_name: String, method: String) -> String? Never
     if module_name == "core.service" && method == "state_store" -> return Val("FS")
     if module_name == "core.net" && method == "gethostname" -> return Val("Env")
     if (module_name == "core.sys" && method == "success") || (module_name == "core.process" && method == "status_ok") -> return None
-    if module_name == "core.time" && method == "__zone_env" -> return Val("Env")
-    if module_name == "core.time" && (method == "zone" || method == "parse_zoned" || method == "__zone_file_bytes") -> return Val("FS")
-    if module_name == "core.time" && ["clock", "time", "parse_time", "period", "period_days", "period_months", "period_years", "utc", "zoned", "zoned_local", "__embedded_zone_bytes", "__clock_mono_ns"].contains(method) -> return None
+    if module_name == "core.time" && (method == "zone" || method == "parse_zoned") -> return Val("FS")
+    if module_name == "core.time" && ["clock", "time", "parse_time", "period", "period_days", "period_months", "period_years", "utc", "zoned", "zoned_local"].contains(method) -> return None
     if module_name == "core.math.random" && method == "rng" -> return None
     if module_name == "core.math" && method == "random" -> return Val("Rand")
     if module_name == "core.term" && method == "style_force" -> return None

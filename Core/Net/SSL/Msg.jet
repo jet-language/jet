@@ -20,6 +20,7 @@ use {
     ctime: __core_crypto_ctime
     ssldefs: __core_net_ssl_defs
     ssltls: __core_net_ssl_tls
+    rt: jet.runtime.time
 }
 
 /// How a transform protects records (mbedtls_ssl_mode_t).
@@ -109,14 +110,14 @@ ssl_set_timer: fn(ssl: &ssldefs.SSLContext, millisecs: Int) Never! {
     if !ssl.timer.enabled -> return
     ssl.timer.int_ms = millisecs /% 4
     ssl.timer.fin_ms = millisecs
-    if millisecs != 0 -> ssl.timer.start_ns = core.time.__clock_mono_ns()
+    if millisecs != 0 -> ssl.timer.start_ns = rt.clock_mono_ns()
 }
 
 /// mbedtls_timing_get_delay: -1 canceled, 0 running, 1 past the
 /// intermediate delay, 2 past the final one.
 ssl_timer_state: fn(ssl: ssldefs.SSLContext) -> Int Never! {
     if ssl.timer.fin_ms == 0 -> return -1
-    elapsed_ms: (core.time.__clock_mono_ns() - ssl.timer.start_ns) /% 1000000
+    elapsed_ms: (rt.clock_mono_ns() - ssl.timer.start_ns) /% 1000000
     if elapsed_ms >= ssl.timer.fin_ms -> return 2
     if elapsed_ms >= ssl.timer.int_ms -> return 1
     0

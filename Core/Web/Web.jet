@@ -21,6 +21,7 @@ use {
     // `web.form(Model, action: handler)` elaborates (in sema) into
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
+    rt: jet.runtime.time
 }
 
 // core.web — server-rendered apps on `core.http`.
@@ -1378,7 +1379,7 @@ auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 // result yet, was invalidated, or its poll interval has passed; the stored
 // result changes only when the re-run's encoding differs.
 state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     if live_current(binding.id, now) == .Val(text) {
         if live_value_state<T, E>(text) == .Val(current) -> return current
     }

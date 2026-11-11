@@ -9,6 +9,7 @@ use {
     dbus: __core_ui_dbus
     frame: __core_ui_frame
     xkb: core.ui.xkb
+    rt: jet.runtime.time
 }
 // __core_ui_wayland — the Wayland wire adapter behind `ui.open`, a private
 // part of core.ui.
@@ -555,7 +556,7 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
         // Uncapped, a frame is for now: `time` and `delta` follow the
         // program's own rate, never the display's.
         c.frame_due = false
-        c.target_ns = core.time.__clock_mono_ns()
+        c.target_ns = rt.clock_mono_ns()
         c.follows = false
     } else if c.frame_due && c.failure == None && !has_close(c.events) {
         c.frame_due = false
@@ -569,14 +570,14 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
         // Draw late: wait for the frame's start, reading input meanwhile.
         start: c.target_ns - draw_budget(c) - safety(c)
         loop c.failure == None && !has_close(c.events) && !urgent(c) {
-            now: core.time.__clock_mono_ns()
+            now: rt.clock_mono_ns()
             if now >= start -> break
             receive(c, start - now)
         }
     } else {
         // Idle, or urgent input between callbacks: the frame is for now,
         // and never earlier than the frame before it.
-        c.target_ns = max_int(core.time.__clock_mono_ns(), c.target_ns)
+        c.target_ns = max_int(rt.clock_mono_ns(), c.target_ns)
         c.follows = false
     }
     if c.first_target < 0 -> c.first_target = c.target_ns
@@ -597,7 +598,7 @@ next_frame: fn(&c: Connection) -[Env, Net, Time]> [UIEvent] {
         if c.width != width || c.height != height -> c.events.push(UIEvent.Resize{width: c.width, height: c.height})
         if c.failure != None -> c.events.push(UIEvent.Close)
     }
-    c.frame_start = core.time.__clock_mono_ns()
+    c.frame_start = rt.clock_mono_ns()
     events: c.events.copy()
     c.events.clear()
     events
@@ -629,7 +630,7 @@ refresh_interval: fn(c: Connection) -> Int { if c.refresh_ns > 0 -> c.refresh_ns
 // least the draw budget and safety margin away, on the grid of the
 // latest presented vblank (else of the frame callback's arrival).
 predict: fn(c: Connection) -[Time]> Int {
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     refresh: refresh_interval(c)
     if refresh <= 0 -> return now
     base: if c.vblank_known -> c.vblank_ns else -> c.callback_at
@@ -729,9 +730,9 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     }
     free := free_buffer(c)
     if free < 0 {
-        started: core.time.__clock_mono_ns()
-        loop free < 0 && c.failure == None && core.time.__clock_mono_ns() - started < 1000000000 {
-            receive(c, 1000000000 - (core.time.__clock_mono_ns() - started))
+        started: rt.clock_mono_ns()
+        loop free < 0 && c.failure == None && rt.clock_mono_ns() - started < 1000000000 {
+            receive(c, 1000000000 - (rt.clock_mono_ns() - started))
             free = free_buffer(c)
         }
         if c.failure == .Val(failure) -> return Err(failure)
@@ -797,7 +798,7 @@ present: fn(&c: Connection, pixels: [U8], damage: [UIRect]) UIError! -[Env, Net,
     c.mapped = true
     flush(c)
     if c.failure == .Val(failure) -> return Err(failure)
-    cost: core.time.__clock_mono_ns() - c.frame_start
+    cost: rt.clock_mono_ns() - c.frame_start
     if c.costs.len() < COSTS_KEPT -> c.costs.push(cost) else -> c.costs[c.cost_at] = cost
     c.cost_at = (c.cost_at + 1) %% COSTS_KEPT
     Ok()
@@ -1121,7 +1122,7 @@ event: fn(&c: Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
     if object == c.frame_callback {
         c.frame_callback = 0
         c.frame_due = true
-        c.callback_at = core.time.__clock_mono_ns()
+        c.callback_at = rt.clock_mono_ns()
         return
     }
     if object == c.keyboard {
@@ -1284,7 +1285,7 @@ presented: fn(&c: Connection, object: Int, body: [U8]) -[Time]> {
     stamp: ((u32_at(body, 0) << 32) + u32_at(body, 4)) * 1000000000 + u32_at(body, 8)
     refresh: u32_at(body, 12)
     if refresh > 0 -> c.refresh_ns = refresh
-    gap: core.time.__clock_mono_ns() - stamp
+    gap: rt.clock_mono_ns() - stamp
     if !c.offset_known || gap < c.clock_offset {
         c.clock_offset = gap
         c.offset_known = true
@@ -1465,7 +1466,7 @@ hold: fn(&c: Connection, code: Int, key: Key, text: String) -[Time]> {
     c.held = code
     c.held_key = key
     c.held_text = text.copy()
-    c.held_at = core.time.__clock_mono_ns()
+    c.held_at = rt.clock_mono_ns()
     c.held_repeats = 0
 }
 
@@ -1481,7 +1482,7 @@ repeat_wait: fn(c: Connection, timeout_ns: Int) -[Time]> Int {
     n: c.held_repeats
     due_ms: c.repeat.delay + (n * 1000 + c.repeat.rate - 1) /% c.repeat.rate
     // Whole milliseconds, rounded up, so a wait never wakes just before.
-    left: (max_int(c.held_at + due_ms * 1000000 - core.time.__clock_mono_ns(), 0) + 999999) /% 1000000 * 1000000
+    left: (max_int(c.held_at + due_ms * 1000000 - rt.clock_mono_ns(), 0) + 999999) /% 1000000 * 1000000
     if timeout_ns >= 0 && timeout_ns < left -> return timeout_ns
     left
 }
@@ -1540,7 +1541,7 @@ take_appearance: fn(&c: Connection, look: dbus.PortalAppearance) {
 // delivered in a burst.
 repeat_key: fn(&c: Connection) -[Time]> {
     if c.held < 0 || c.failure != None -> return
-    held_ms: (core.time.__clock_mono_ns() - c.held_at) /% 1000000
+    held_ms: (rt.clock_mono_ns() - c.held_at) /% 1000000
     due: c.repeat.due(held_ms)
     if due <= c.held_repeats -> return
     c.held_repeats = due
@@ -1690,10 +1691,10 @@ source_event: fn(&c: Connection, object: Int, opcode: Int) -[Env, Time]> {
 // clipboard's wait: a paster that stops reading or goes away gets what
 // was written by then. Dropping `fd` closes the pipe.
 send_text: fn(fd: sys.Fd, bytes: [U8]) -[Env, Time]> {
-    deadline: core.time.__clock_mono_ns() + CLIPBOARD_WAIT_NS
+    deadline: rt.clock_mono_ns() + CLIPBOARD_WAIT_NS
     at := 0
     loop at < bytes.len() {
-        left: deadline - core.time.__clock_mono_ns()
+        left: deadline - rt.clock_mono_ns()
         if left <= 0 -> return
         end: min_int(at + 4096, bytes.len())
         wrote: fd.write(bytes[at..<end].copy(), left) ?? return
@@ -1728,10 +1729,10 @@ clipboard_text: fn(&c: Connection) -[Env, Net, Time]> String UIError! {
 
 // Reads a pipe to its end within the clipboard's wait, as UTF-8 text.
 read_text: fn(reader: sys.Fd) -[Env, Time]> String UIError! {
-    deadline: core.time.__clock_mono_ns() + CLIPBOARD_WAIT_NS
+    deadline: rt.clock_mono_ns() + CLIPBOARD_WAIT_NS
     bytes := [U8]{}
     loop {
-        left: deadline - core.time.__clock_mono_ns()
+        left: deadline - rt.clock_mono_ns()
         if left <= 0 -> return Err(UIError.Protocol("the clipboard's holder did not send its text within {CLIPBOARD_WAIT_NS /% 1000000} ms"))
         chunk: reader.read(65536, left) ?? return Err(UIError.Protocol("reading the clipboard failed: {err}"))
         if chunk.len() == 0 -> break

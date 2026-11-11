@@ -11,6 +11,7 @@ package: {
 use {
     core: core
     time: core.time
+    rt: jet.runtime.time
 }
 
 // Timer creation and scheduler identity are host cells. Scheduler channels
@@ -86,7 +87,7 @@ current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()
 /// time. Only the difference of two reads by the same task means anything.
 /// A deterministic world has no CPU clock to control, so it rejects the read.
 cpu_ns: fn() -[Time]> Int Never! {
-    core.time.__reject_uncontrolled("task CPU clock")
+    rt.reject_uncontrolled("task CPU clock")
     core.tasks.__task_cpu_ns()
 }
 

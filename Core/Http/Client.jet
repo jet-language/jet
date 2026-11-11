@@ -13,6 +13,7 @@ use {
     build_net: core.net
     build_tls: core.net.tls
     client_gzip: core.archive.gzip
+    rt: jet.runtime.time
 }
 C_MAX_BODY_BYTES: 1048576
 C_MAX_URL_BYTES: 8192
@@ -592,13 +593,13 @@ __BuildNumber: struct { state: Int, value: Int, big: Bool }
 
 jet_http_build_get: fn(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
     if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 -> return Err(__build_fail("out of range integral type conversion attempted"))
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     end_ns: if timeout_ms > (C_BUILD_INT_MAX - now) /% 1000000 -> C_BUILD_INT_MAX else -> now + timeout_ms * 1000000
     portable := ""
     tcp := __build_connect(addresses, port, end_ns, portable) ?? return Err(err)
     wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0, prove: 0, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_EXCHANGE, addresses: [[U8]]{}}
     if secure {
-        remaining: end_ns - core.time.__clock_mono_ns()
+        remaining: end_ns - rt.clock_mono_ns()
         if remaining <= 0 -> return Err(__build_fail("timed out"))
         stream := build_tls.__client_deadline_entry(tcp, host, Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
         wire.tls = Val(stream)
@@ -636,7 +637,7 @@ __build_connect: fn(addresses: [[U8]], port: Int, end_ns: Int, &portable: String
         if address.len() != 4 && address.len() != 16 -> return Err(__build_fail("invalid resolved address carrier"))
     }
     loop address in addresses {
-        remaining: end_ns - core.time.__clock_mono_ns()
+        remaining: end_ns - rt.clock_mono_ns()
         if remaining <= 0 {
             portable = "timed_out"
             return Err(__build_fail("timed out"))
@@ -706,7 +707,7 @@ __build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __Build
         }
         if failed != "" -> return Err(__build_tape_fail(wire, failed, message))
     }
-    if wire.end_ns - core.time.__clock_mono_ns() <= 0 -> return Err(__build_tape_fail(wire, "timed_out", "timed out"))
+    if wire.end_ns - rt.clock_mono_ns() <= 0 -> return Err(__build_tape_fail(wire, "timed_out", "timed out"))
     if wire.prove == C_CLIENT_PROVE_CAPTURE -> wire.sends += 1
     Ok(at)
 }
@@ -714,7 +715,7 @@ __build_send: fn(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __Build
 // Time left for one wire operation: the exchange deadline, narrowed to the
 // current phase's per-operation bound when one is set.
 __build_remaining: fn(wire: __BuildWire) -[Time.Wait]> Int Never! {
-    left: wire.end_ns - core.time.__clock_mono_ns()
+    left: wire.end_ns - rt.clock_mono_ns()
     if wire.idle_ns > 0 && wire.idle_ns < left -> return wire.idle_ns
     left
 }
@@ -776,7 +777,7 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
 // (__client_timed_out, __client_body_error).
 __build_tape_fail: fn(&wire: __BuildWire, name: String, message: String) -[Time.Wait]> __BuildHTTPFailure Never! {
     if wire.prove != C_CLIENT_PROVE_CAPTURE -> return __build_fail(message)
-    wire.ending = if core.time.__clock_mono_ns() >= wire.end_ns -> "timed_out" else -> name.copy()
+    wire.ending = if rt.clock_mono_ns() >= wire.end_ns -> "timed_out" else -> name.copy()
     __build_fail(__build_ending_message(wire.ending))
 }
 
@@ -1118,7 +1119,7 @@ __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
 __client_phases: fn(req: HTTPRequest) -[Time.Wait]> __ClientPhases HTTPError! {
     blanket: req.__timeout_ms ?? C_CLIENT_TIMEOUT_MS
     if blanket < 0 -> return Err(.Timeout{phase: "transport"})
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     end_ns := C_BUILD_INT_MAX
     if req.__total_timeout_ms == .Val(total) {
         if total < 0 -> return Err(.Timeout{phase: "transport"})
@@ -1146,7 +1147,7 @@ __client_deadline: fn(now: Int, ms: Int) -> Int Never! {
 
 // The earlier of now + `span_ns` and the send's deadline.
 __client_until: fn(span_ns: Int, end_ns: Int) -[Time.Wait]> Int Never! {
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     at: if span_ns > C_BUILD_INT_MAX - now -> C_BUILD_INT_MAX else -> now + span_ns
     if at < end_ns -> at else -> end_ns
 }
@@ -1489,7 +1490,7 @@ __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body:
 __client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?) -[Net, Time.Wait]> __ClientReply HTTPError! {
     destination: proxy ?? url
     connect_end: __client_until(phases.connect_ns, phases.end_ns)
-    if connect_end <= core.time.__clock_mono_ns() {
+    if connect_end <= rt.clock_mono_ns() {
         wire.ending = "timed_out"
         return Err(.Timeout{phase: "transport"})
     }
@@ -1507,7 +1508,7 @@ __client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL,
     wire.stage = C_CLIENT_STAGE_CONNECT
     portable := "unmapped"
     tcp := __build_connect(addresses, destination.port, connect_end, portable) ?? {
-        if core.time.__clock_mono_ns() >= connect_end {
+        if rt.clock_mono_ns() >= connect_end {
             wire.ending = "timed_out"
             return Err(.Timeout{phase: "transport"})
         }
@@ -1529,13 +1530,13 @@ __client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL,
             __client_carry(wire, tunnel)
             tcp = tunnel.tcp.move() ?? return Err(.Proxy{stage: "transport"})
         }
-        remaining: tls_end - core.time.__clock_mono_ns()
+        remaining: tls_end - rt.clock_mono_ns()
         if remaining <= 0 {
             wire.ending = "timed_out"
             return Err(.Timeout{phase: "transport"})
         }
         stream := build_tls.__client_deadline_entry(tcp, url.host, Duration{ns: remaining}) ?? {
-            if core.time.__clock_mono_ns() >= tls_end {
+            if rt.clock_mono_ns() >= tls_end {
                 wire.ending = "timed_out"
                 return Err(.Timeout{phase: "transport"})
             }
@@ -1817,7 +1818,7 @@ __client_timed_out: fn(wire: __BuildWire, message: String) -[Time.Wait]> Bool Ne
     // Under `jet prove` the recorded ending decides (__build_tape_fail), so a
     // replay classifies the failure as its capture did.
     if wire.prove != 0 -> return message.contains("timed out")
-    message.contains("timed out") || message.contains("timeout") || core.time.__clock_mono_ns() >= wire.end_ns
+    message.contains("timed out") || message.contains("timeout") || rt.clock_mono_ns() >= wire.end_ns
 }
 
 __client_wire_error: fn(wire: __BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {

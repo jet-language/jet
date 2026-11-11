@@ -14,6 +14,7 @@ use {
     hashes: __core_crypto_md
     suites: __core_net_ssl_ciphersuites
     cipher: __core_crypto_cipher
+    rt: jet.runtime.time
 }
 
 // core.net.tls — TLS 1.2/1.3 byte streams over the Jet port of Mbed TLS
@@ -140,7 +141,7 @@ TLSStream: struct {
     ready: fn(self, interest: NetReadyInterest, /, *, deadline: Duration) -[Net, Time.Wait]> NetReady IOError! {
         operation: if __wants_write_only(interest) -> IOOperation.Write else -> IOOperation.Read
         end_ns: __deadline_end(deadline, "tls ready") ?? return Err(__net_to_io(err))
-        if end_ns <= core.time.__clock_mono_ns() -> return Err(__net_to_io(__deadline_error("tls ready")))
+        if end_ns <= rt.clock_mono_ns() -> return Err(__net_to_io(__deadline_error("tls ready")))
         state: __state(self) ?? return Err(__io_error(operation, "TLS stream is closed"))
         guard := state.guard_edit()
         if guard.value.closed -> return Err(__io_error(operation, "TLS stream is closed"))
@@ -344,6 +345,7 @@ __server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFai
     if identity != 0 -> return Err(__fail("TLS certificate and private key do not match: {__mbedtls_text(identity)}"))
     Ok(context)
 }
+
 
 read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
@@ -1084,7 +1086,7 @@ __send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.
     total: tls.ssl.bio.tx.len()
     at := 0
     loop at < total {
-        remaining: end_ns - core.time.__clock_mono_ns()
+        remaining: end_ns - rt.clock_mono_ns()
         if remaining <= 0 -> return Err(__deadline_error(operation))
         slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
         sent := 0
@@ -1108,7 +1110,7 @@ __send_queued: fn(&tls: __TLSState, end_ns: Int, operation: String) -[Net, Time.
 // Queues what a readable socket holds for the engine: 0, or the socket
 // status that failed the read. An empty read is the end of the stream.
 __take: fn(&tls: __TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
-    remaining: end_ns - core.time.__clock_mono_ns()
+    remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
     if tls.tcp.read_into(tls.ssl.bio.rx, C_RECORD_BYTES, deadline: slice) == {
@@ -1515,7 +1517,7 @@ __test_released: fn(tls: __TLSState) -> Bool Never! {
     // the server refuses it, and its alert reaches the client over the socket.
     assert_eq(__test_step(client), C_WANT_READ)
     __test_pump(client, server)
-    end_ns: core.time.__clock_mono_ns() + 10000000000
+    end_ns: rt.clock_mono_ns() + 10000000000
     server_refused := false
     if __handshake(server, "", end_ns) == .Err(_) -> server_refused = true
     assert(server_refused)
@@ -1625,7 +1627,7 @@ __not_connected: fn(err: NetError) -> Bool Never! {
 // sliced so the runtime never sees an unbounded duration; a timeout that comes
 // before the slice ends (an ambient deadline) is the caller's error as is.
 __wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: String) -[Net, Time.Wait]> NetReady NetError! {
-    started: core.time.__clock_mono_ns()
+    started: rt.clock_mono_ns()
     remaining: end_ns - started
     if remaining <= 0 -> return Err(__deadline_error(operation))
     slice: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining
@@ -1633,7 +1635,7 @@ __wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: S
         .Ok(ready) -> Ok(ready)
         .Err(err) -> {
             if __timed_out(err) {
-                now: core.time.__clock_mono_ns()
+                now: rt.clock_mono_ns()
                 if now >= end_ns -> return Err(__deadline_error(operation))
                 if slice < remaining && now - started >= slice -> return Ok(NetReady{readable: false, writable: false})
             }
@@ -1653,7 +1655,7 @@ __forever: fn() -> Duration Never! { Duration{ns: C_NO_DEADLINE} }
 
 __deadline_end: fn(deadline: Duration, operation: String) -> Int NetError! {
     if deadline.ns < 0 -> return Err(NetError.InvalidInput(__detail(operation, "network timeout must be non-negative")))
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     if deadline.ns > C_NO_DEADLINE - now -> return Ok(C_NO_DEADLINE)
     Ok(now + deadline.ns)
 }

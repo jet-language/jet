@@ -19,6 +19,7 @@ use {
     base: __core_db_base
     math: core.math
     time: core.time
+    rt: jet.runtime.time
     encoding: core.encoding
     core.encoding.[Dyn]
     stream: __core_encoding_stream
@@ -1228,11 +1229,11 @@ DBLease: struct {
     impl Display { display: fn(self) -> String { "db.lease" } }
 }
 __pool_deadline: fn(deadline: Duration) -> Int Never! {
-    now: core.time.__clock_mono_ns()
+    now: rt.clock_mono_ns()
     if deadline.ns > 9223372036854775807 - now -> return 9223372036854775807
     now + deadline.ns
 }
-__pool_expired: fn(deadline_ns: Int) -> Bool Never! { core.time.__clock_mono_ns() >= deadline_ns }
+__pool_expired: fn(deadline_ns: Int) -> Bool Never! { rt.clock_mono_ns() >= deadline_ns }
 __pool_state_error: fn(lifecycle: __PoolLifecycle) -> DBError Never! {
     if lifecycle == {
         .Open -> __db_error("database pool is unavailable")

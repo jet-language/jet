@@ -643,7 +643,6 @@ TIME_PURE: [String]{
     "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
     "parse_iso_week_date", "from_iso_week", "datetime", "utc",
     "zoned", "zoned_local", "days_in_month", "is_leap_year",
-    "__embedded_zone_bytes", "__clock_mono_ns",
 }
 TERM_PURE: [String]{"style_force"}
 NET_PURE: [String]{
@@ -774,8 +773,7 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
             else -> Val("Exec")
         }
         "core.time" -> if member == {
-            "__zone_env" -> Val("Env")
-            "zone" | "parse_zoned" | "__zone_file_bytes" -> Val("FS")
+            "zone" | "parse_zoned" -> Val("FS")
             else -> unless_listed(member, TIME_PURE, "Time")
         }
         "core.rt" -> if member == "callback" -> Val("Time") else -> None
@@ -847,8 +845,8 @@ call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
             else -> if SERVICE_SLEEPS.contains(member) -> Val("Time.Wait") else -> when_listed(member, SERVICE_WAITS, "Time.Wait")
         }
         "core.time" -> if member == {
-            "zone" | "parse_zoned" | "__zone_file_bytes" -> Val("FS.Read")
-            "sleep" | "sleep_until" | "__sleep_ns" -> Val("Time.Wait")
+            "zone" | "parse_zoned" -> Val("FS.Read")
+            "sleep" | "sleep_until" -> Val("Time.Wait")
             else -> None
         }
         "core.tasks" -> if member == "yield_now" || member == "__yield_now" -> Val("Time.Wait") else -> None

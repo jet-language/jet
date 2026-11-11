@@ -7,6 +7,7 @@ use {
     server_tls: core.net.tls
     core.encoding.[Dyn]
     core.prelude.[SourceLocation]
+    rt: jet.runtime.time
 }
 
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
@@ -684,7 +685,7 @@ __with_request_id: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Never! 
     }
     seq: __mux_next_seq(mux)
     out := request.copy()
-    out.headers = http.headers_set(out.headers, "x-request-id", "req-{__hex(core.time.__clock_mono_ns())}-{__hex(seq)}")
+    out.headers = http.headers_set(out.headers, "x-request-id", "req-{__hex(rt.clock_mono_ns())}-{__hex(seq)}")
     out
 }
 
@@ -1187,7 +1188,7 @@ __accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?)
 // left to the upgraded connection rather than closed here.
 __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
-    wire := __HTTPWire{buffer: [U8]{}, end_ns: core.time.__clock_mono_ns() + budget}
+    wire := __HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
     upgraded := false
     if __read_request(stream, wire) == {
@@ -1202,12 +1203,12 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[
                 answered = true
             } else {
                 bytes: __response_wire(request.method, reply) ?? __error_wire(500)
-                answered = __send(stream, bytes, core.time.__clock_mono_ns() + budget)
+                answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
             }
         }
         .Err(fault) -> {
             if fault == .Reply(status) {
-                _: __send(stream, __error_wire(status), core.time.__clock_mono_ns() + budget)
+                _: __send(stream, __error_wire(status), rt.clock_mono_ns() + budget)
             }
         }
     }
@@ -1223,7 +1224,7 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[
 }
 
 __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
-    remaining: end_ns - core.time.__clock_mono_ns()
+    remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return false
     if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
     if stream.tcp == .Val(plain) {
@@ -1238,7 +1239,7 @@ __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool
 // Append what the peer sends next; false at end of stream. Both streams
 // append with read_into, so a connection's reads reuse their buffers.
 __wire_fill: fn(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __HTTPFault! {
-    remaining: wire.end_ns - core.time.__clock_mono_ns()
+    remaining: wire.end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     if stream.tls == .Val(secure) {
         count: secure.read_into(C_READ_BYTES, Duration{ns: remaining}) ?? {
