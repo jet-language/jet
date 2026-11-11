@@ -167,7 +167,10 @@ jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&
 }
 jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     request := owned_request.move()
-    sources: jet_driver_source_query(request)
+    // The plan reads the entry package's modules (its `build: fn`) and
+    // manifest facts, so Core loads as the program reaches it, with no name
+    // ledger (jet_driver_source_query loads every Core declaration for one).
+    sources: jet_driver_source_query_loaded(jet_driver_load(request), request)
     if !sources.complete -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
     package: sources.modules[sources.entry_module_index].package_identity
@@ -198,7 +201,12 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     path: selected ?? {
         // No build entry still has an ordinary checked source projection.
         // Loader-only success must not hide type errors in the package.
+        // The plan reads only the user modules' diagnostics and build nodes
+        // (no Core module is a node), so Core bodies are checked on demand.
+        demand_core := request.doc_core_on_demand
+        request.doc_core_on_demand = true
         checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
+        request.doc_core_on_demand = demand_core
         complete: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
         result := jet_driver_build_query_empty(request, checked.diagnostics.move(), complete, checked.internal_problem.move())
         if complete {
@@ -312,7 +320,12 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     loop target in targets.libraries {
         if target.sources.contains(entry) { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
     }
+    // As above: the plan reads the user modules' diagnostics and build nodes
+    // alone, so Core bodies are checked on demand.
+    demand_core := request.doc_core_on_demand
+    request.doc_core_on_demand = true
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
+    request.doc_core_on_demand = demand_core
     loop request.generated_modules.len() > original_generated_count -> _: request.generated_modules.pop()
     request.target_sources = [String]{}
     if selected_outputs -> request.build_output_names = [String]{}
