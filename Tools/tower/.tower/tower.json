@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99196,
+    "rev": 99197,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76054,6 +76054,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "c8 migration form, decided by Main on 2026-11-11 within D-ALLOC-FAIL1=C (no new ballot). G3Ctx measured the reach on t4: 27,821 growth call sites (Compiler 15,345, Jetpack 5,095, Core 4,147, Tools 3,234) and 22,279 Never! lines. The ratified text fixes the form: \"first reduce plumbing through ordinary inference and propagation, then choose stopping once at a boundary\"; Never! must prove or handle failure, and no flag silently changes a contract. The cutover is a program SUB (a codemod run on the composed train tree, with a --check mode), not a static patch. Its order: (1) an unannotated function infers AllocError, and nothing is written; (2) a typed-contract function whose domain admits it gains mem.AllocError in its contract, written in the source; (3) a Never! function that allocates loses Never! and propagates, unless it is a real no-failure boundary, which handles it once with `?? panic(\"no memory\")` at its outermost call, never at each growth site; (4) entry points (the jet driver main, tool main and run functions) are the stopping boundaries. A per-call `?? panic` is used only where the codemod cannot find a boundary, and the SUB lists those sites. A paired perf cell (propagating growth against the pre-cutover build on a growth-heavy workload) proves the cost before ratification closes, and the census of the whole repository runs collect-all before the train."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "D-SOA-SITE1 A retired the #Layout(columnar) marker in favour of Columns<T>; the criterion named the retired spelling."
@@ -76132,7 +76137,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T07:34:54.601Z",
+      "updated": "2026-11-11T07:41:29.175Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -199063,6 +199068,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T07:41:29.175Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ct4a0i",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-11T07:36:58.079Z",
       "by": "Main",
