@@ -12,7 +12,7 @@
 // the one body of each.
 use {
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
-    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, Type, type_marked_name, type_name]
+    jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, Type, access_sigil, type_marked_name, type_name]
 }
 
 JET_DRIVER_RUNTIME_INTERFACE_ROOT: "jet.runtime"
@@ -39,9 +39,9 @@ jet_driver_unknown_runtime_interface_module: fn(module_name: String, span: Span)
 // is `symbol`: a lifted inline-module member (`time.sleep_ns` binding
 // `jet_std_time_sleep_duration_ns`). None for a top-level declaration.
 // `declaration` is "" when the Jet signature uses a form the interface
-// doesn't render (type parameters, or a parameter convention, default, or
-// variadic), or the member is `priv(package)`; the runtime pack build refuses
-// that row.
+// doesn't render (type parameters, or a moved, defaulted or variadic
+// parameter), or the member is `priv(package)`; the runtime pack build
+// refuses that row.
 jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> RuntimeInterfaceRow? Never! {
     module_path: sema_inline_member_module(declaration.name)
     if module_path == "" -> return None
@@ -62,11 +62,12 @@ jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) 
     "priv {signature}"
 }
 
+// A written (`&`) parameter keeps its mark.
 jet_driver_runtime_interface_signature: fn(declaration: Func, member: String) -> String Never! {
     params := [String]{}
     loop param in declaration.params {
-        if param.convention != AccessConvention.Read || param.default != None || param.variadic -> return ""
-        params.push("{param.name}: {type_name(param.ty)}")
+        if param.convention == AccessConvention.Move || param.default != None || param.variadic -> return ""
+        params.push("{param.name}: {access_sigil(param.convention)}{type_name(param.ty)}")
     }
     result: if declaration.return_type == .Val(ty) -> jet_driver_runtime_interface_result(ty) else -> ""
     if declaration.declared_effects == .Val(entries) {

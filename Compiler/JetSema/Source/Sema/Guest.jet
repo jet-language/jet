@@ -323,9 +323,10 @@ sema_guest_runtime_tuple: fn(fields: [TypeTupleField]) -> Bool Never! {
 
 // A runtime route result: a carried value, an Option of one or of a tuple, a
 // tuple of carried values and Options of them (its items cross in the checked
-// tuple's member order), or a fallible `T Err!` whose success is a carried
-// value or Unit. Its error is the default `Err`, the one Error type a binding
-// can name, and crosses as its message text.
+// tuple's member order), or a fallible `T E!` whose success is a carried
+// value, an Option of one or Unit. Its error is the default `Err`, which
+// crosses as its message text, or a Core type the runtime holds as a handle
+// (`EncodingCause`, `IOError`), which crosses as that handle.
 sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Option(inner) -> {
@@ -333,19 +334,37 @@ sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
             sema_guest_runtime_value(inner)
         }
         .Tuple(fields) -> sema_guest_runtime_tuple(fields)
-        .Result(ok, err) -> (ok == Type.Named{name: "Unit"} || sema_guest_runtime_value(ok)) && err == Type.Named{name: "Err"}
+        .Result(ok, err) -> (ok == Type.Named{name: "Unit"} || sema_guest_runtime_item(ok)) && (err == Type.Named{name: "Err"} || sema_guest_runtime_handle(err))
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_guest_runtime_value(ty)
     }
 }
 
+// A parameter a runtime route carries: a read carried value, a read View of
+// a scalar (its window crosses as a List), or a written (`&`) runtime handle
+// or List of scalars, which the runtime changes in place. Nothing crosses
+// moved.
+sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Never! {
+    if convention == {
+        .Read -> {
+            if ty == .Apply(name, args) -> return name == "View" && args.len() == 1 && sema_guest_runtime_scalar(args[0])
+            sema_guest_runtime_value(ty)
+        }
+        .Write -> {
+            if ty == .List(item) -> return sema_guest_runtime_scalar(item)
+            sema_guest_runtime_handle(ty)
+        }
+        .Move -> false
+    }
+}
+
 // E3203 for a runtime binding's parameter or result no runtime route carries;
-// true when every one is carried. A parameter is read (no `&` or move).
+// true when every one is carried.
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: &[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T Err!` with a carried or Unit success"
+    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, or a written (`&`) handle or List of scalars; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
-        if param.convention != AccessConvention.Read || !sema_guest_runtime_value(param.ty) {
+        if !sema_guest_runtime_param(param.convention, param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))
             valid = false
         }

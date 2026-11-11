@@ -142,11 +142,12 @@ ir_foreign_comptime_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign:
 // (BuildRoutes.jet ir_route_of_signature), lowered as a Core call's route
 // is; in a build invocation's `#Impure` block between the host marks
 // Impure.enter and Impure.leave. A Word argument crosses as its native I64,
-// any other one borrowed.
+// any other one borrowed; a written (`&`) one the export changes in place.
 ir_runtime_binding_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() -> return ir_fail_slot(b, span, "jet.runtime call {foreign.name} with {args.len()} arguments")
     params: loop param in foreign.params -> param.ty.copy()
-    route: ir_route_of_signature(foreign.symbol, params, foreign.return_type) ?? return ir_fail_slot(b, span, "jet.runtime function {foreign.name} has a type no runtime route carries")
+    writes: loop param in foreign.params -> param.convention == AccessConvention.Write
+    route: ir_route_of_signature(foreign.symbol, params, writes, foreign.return_type) ?? return ir_fail_slot(b, span, "jet.runtime function {foreign.name} has a type no runtime route carries")
     borrow_mask: loop carrier in route.params -> carrier != IRRouteCarrier.Word
     values: loop arg in args -> arg.value
     ty: foreign.return_type.copy() ?? Type.Named{name: "Unit"}

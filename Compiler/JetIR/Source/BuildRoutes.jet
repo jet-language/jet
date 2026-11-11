@@ -5483,17 +5483,27 @@ ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String
 // The route a jet.runtime binding's Jet signature projects onto its runtime
 // export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
 // Float, String as Text, a Core type with a runtime handle row as that
-// Handle, a List of those, and as a result also an Option of one or of a
-// tuple, a tuple whose items are those or an Option of one (in the checked
-// tuple's member order), or a fallible `T Err!` as a Result route (a Unit
-// success writes no out word, the Err its message text), as sema admits them
-// (Guest.jet sema_guest_check_runtime_binding). None for a type no carrier
-// holds.
-ir_route_of_signature: fn(symbol: String, params: [Type], returned: Type?) -> IRRoute? Never! {
+// Handle, a List of those, a View of a scalar as its List window, a written
+// (`writes`) handle or List as HandleMut or ListMut, and as a result also an
+// Option of one or of a tuple, a tuple whose items are those or an Option of
+// one (in the checked tuple's member order), or a fallible `T E!` as a Result
+// route (a Unit success writes no out word, the default Err its message text,
+// a handle error its handle), as sema admits them (Guest.jet
+// sema_guest_check_runtime_binding). None for a type no carrier holds.
+ir_route_of_signature: fn(symbol: String, params: [Type], writes: [Bool], returned: Type?) -> IRRoute? Never! {
     carriers := [IRRouteCarrier]{}
-    loop ty in params {
+    loop (index, ty) in params {
         carrier: ir_route_carrier_of(ty) ?? return None
-        carriers.push(carrier)
+        written: index < writes.len() && writes[index]
+        if !written {
+            carriers.push(carrier)
+            next
+        }
+        if carrier == {
+            .Handle(name) -> carriers.push(IRRouteCarrier.HandleMut{name: name})
+            .List(elem) -> carriers.push(IRRouteCarrier.ListMut{elem: elem})
+            .Word | .Flag | .Float | .Text | .Unit | .HandleMut(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> return None
+        }
     }
     result: ir_route_result_of(returned) ?? return None
     Val(IRRoute{symbol: symbol.copy(), export: symbol.copy(), native_lists: true, params: carriers, result: result})
@@ -5504,12 +5514,17 @@ ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
     if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
     if ir_untag(ty) == .Result(ok, err) {
         if err == (Type.Named{name: "Never"}) -> return ir_route_result_of(Val(ok))
-        // The default Err, the one error a binding names, crosses as its
-        // message text (ir_route_result builds the Err).
-        if err != (Type.Named{name: "Err"}) -> return None
-        if ir_unit_type(ok) -> return Val(IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Text})
+        // The default Err crosses as its message text (ir_route_result
+        // builds the Err); an error the runtime holds as a handle crosses as
+        // that handle.
+        failure: if err == (Type.Named{name: "Err"}) -> IRRouteCarrier.Text else -> ir_route_carrier_of(err) ?? return None
+        if failure == {
+            .Text | .Handle(_) -> {}
+            .Word | .Flag | .Float | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> return None
+        }
+        if ir_unit_type(ok) -> return Val(IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: failure})
         success: ir_route_carrier_of(ok) ?? return None
-        return Val(IRRouteResult.Result{ok: success, err: IRRouteCarrier.Text})
+        return Val(IRRouteResult.Result{ok: success, err: failure})
     }
     if ir_untag(ty) == .Option(inner) {
         some: ir_route_carrier_of(inner) ?? return None
@@ -5529,8 +5544,9 @@ ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
 
 // The carrier of one value: the scalars, Text, a runtime handle (a record the
 // program lays out itself crosses as a runtime record made for the call,
-// ir_route_declared), a List, and inside a result an Option or a tuple (sema
-// admits those only there).
+// ir_route_declared), a List, a View of a scalar as its List window (sema
+// admits it only as a parameter), and inside a result an Option or a tuple
+// (sema admits those only there).
 ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
     if ir_untag(ty) == {
         .Int | .IntN(_, _) -> Val(IRRouteCarrier.Word)
@@ -5557,7 +5573,12 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
             handle: ir_runtime_handle(name) ?? return None
             Val(IRRouteCarrier.Handle{name: handle.runtime})
         }
-        .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Apply(name, args) -> {
+            if name != "View" || args.len() != 1 -> return None
+            elem: ir_route_carrier_of(args[0]) ?? return None
+            Val(IRRouteCarrier.List{elem: elem})
+        }
+        .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
