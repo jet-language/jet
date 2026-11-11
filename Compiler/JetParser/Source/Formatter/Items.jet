@@ -1826,6 +1826,7 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
         return
     }
     jfmt_write(f, " {{")
+    saved_tail: jfmt_value_tail_begin(f, if parser_return_type_has_value(func.return_type) -> func.body else -> [Stmt]{})
     inside: jfmt_inside_markers(func.markers)
     if inside.len() > 0 {
         // Marker lines keep the body expanded, each where it was written.
@@ -1834,11 +1835,13 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
         jfmt_fmt_block_lines(f, func.body, inside)
         f.indent -= 1
         jfmt_end_block(f)
+        f.value_tail_at = saved_tail
         f.expected_return_type = saved_return_type
         return
     }
     if func.body.len() == 0 && jfmt_empty_body_inline(f, func.span) {
         jfmt_write(f, "}}")
+        f.value_tail_at = saved_tail
         f.expected_return_type = saved_return_type
         return
     }
@@ -1846,6 +1849,7 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     // recovered `-> expr` body (E0080) takes the same braced path, so the
     // fixed output is canonical and idempotent.
     jfmt_fmt_body(f, func.body)
+    f.value_tail_at = saved_tail
     f.expected_return_type = saved_return_type
 }
 

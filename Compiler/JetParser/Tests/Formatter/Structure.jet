@@ -85,6 +85,17 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(formatted.text.contains("}} else if x > 1 {{ next }} else if x > 0 {{ print(0) }}\n"))
 }
 
+#Test("a braced if that ends a callable body with a value stays a statement") {
+    source: "pick: fn(c: Bool) -> Int {{\n    if c {{\n        make(1)\n    }} else {{\n        make(2)\n    }}\n}}\n\nrun: fn(c: Bool) {{\n    each: (c: Bool) -> {{\n        if c {{\n            print(\"a\")\n        }} else {{\n            print(\"b\")\n        }}\n    }}\n    each(c)\n    if c {{\n        print(\"x\")\n    }} else {{\n        print(\"y\")\n    }}\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("if c -> make(1)"))
+    assert(!formatted.text.contains("if c -> print(\"a\")"))
+    // The last line of a body without a value is no value: arrows as before.
+    assert(formatted.text.contains("    if c -> print(\"x\") else -> print(\"y\")\n"))
+}
+
 #Test("grouping parentheses are not structure, quoted text is") {
     written: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    (a) * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
     bare: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program

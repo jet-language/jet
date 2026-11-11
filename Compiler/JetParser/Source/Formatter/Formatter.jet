@@ -138,6 +138,9 @@ JetFmt: struct {
     // began in `out` (jfmt_one_line_trial_begin).
     one_line_trials: Int{0}
     one_line_trial_start: Int{0}
+    // Where the last line of a callable body with a value starts, else -1
+    // (jfmt_value_tail_begin).
+    value_tail_at: Int{-1}
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
@@ -1301,6 +1304,18 @@ jfmt_list_item_spans: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never!
 
 jfmt_fmt_body: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_control_body(f, body)
+}
+
+// The parser reads the last line of a callable body with a value as the
+// body's value when it is an `if` in a value form
+// (parser_parse_callable_body), so a braced `if` statement there keeps its
+// braces (jfmt_fmt_classic_switch). `body` is that body, or no lines for a
+// body without a value. Returns the enclosing body's mark, which the caller
+// restores once the body is written.
+jfmt_value_tail_begin: fn(f: &JetFmt, body: [Stmt]) -> Int {
+    saved: f.value_tail_at
+    f.value_tail_at = if body.len() > 0 -> jfmt_stmt_start(body[body.len() - 1]) else -> -1
+    saved
 }
 
 // The expanded brace-body shape; the caller has already emitted ` {`.

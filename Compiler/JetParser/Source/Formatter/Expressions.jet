@@ -2018,18 +2018,23 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
     if lambda.body == {
         .Expr(value) -> jfmt_fmt_expr(f, value, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
         .Block(statements) -> {
+            saved_tail: jfmt_value_tail_begin(f, statements)
             // A lone statement written after `->` keeps its line, as an arm's
             // does: `(n: &Int) -> n += 1`.
             if jfmt_arm_body_was_braceless(f, statements) {
                 mark: jfmt_mark(f)
                 jfmt_fmt_stmt_inline(f, statements[0])
-                if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+                if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) {
+                    f.value_tail_at = saved_tail
+                    return
+                }
                 jfmt_rollback(f, mark)
             }
             jfmt_write(f, "{{")
             jfmt_newline(f)
             jfmt_fmt_limited_block(f, statements, lambda.span.end)
             jfmt_end_block(f)
+            f.value_tail_at = saved_tail
         }
     }
 }
@@ -2075,7 +2080,9 @@ jfmt_fmt_fn_lambda: fn(f: &JetFmt, lambda: Lambda) {
     }
     jfmt_write(f, " {{")
     jfmt_newline(f)
+    saved_tail: jfmt_value_tail_begin(f, statements)
     jfmt_fmt_limited_block(f, statements, lambda.span.end)
+    f.value_tail_at = saved_tail
     jfmt_end_block(f)
 }
 
