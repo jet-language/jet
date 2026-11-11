@@ -56,11 +56,9 @@ impl Sh {
     // environment, stdio or limit first.
     spec: fn(self) -[Exec]> ProcessSpec Never! { cmd(self.argv.copy()) }
     // Runs with the terminal's stdin, stdout and stderr, as a shell runs a
-    // plain command line; its exit status (128 + n after signal n).
+    // plain command line; its exit status as `exit_status` gives it.
     status: fn(self) -[Exec, Time.Wait]> Int IOError! {
-        receipt: self.spec().stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run()
-        if receipt.signal == .Val(number) -> return 128 + number
-        receipt.code
+        exit_status(self.spec().stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run())
     }
     // Whether the command runs and exits 0; its stdout is discarded and its
     // stderr passed through (`cmd >/dev/null`).
@@ -440,6 +438,15 @@ stdout_lines: fn(receipt: ProcessReceipt) -> [String] Never! {
 exited: fn(receipt: ProcessReceipt) -> Bool Never! {
     receipt.signal == None && !receipt.timed_out
 }
+
+/// A finished child's exit status as the shell reports it in `$?`: 124 when
+/// its timeout stopped it (as `timeout(1)` reports one), 128 + n after
+/// signal n, else its exit code.
+exit_status: fn(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
 contains_path_separator: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte == (U8{47}) || byte == (U8{92}) -> return true
@@ -582,6 +589,11 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert_eq(Sh{argv: [String]{"sh", "-c", "kill -9 $$"}}.status() ?? -1, 137)
     receipt: Sh{argv: [String]{"sh", "-c", "echo out; exit 4"}}.run() ?? panic("sh did not start")
     assert(receipt.code == 4 && receipt.output == "out\n")
+    assert_eq(exit_status(receipt), 4)
+    killed: Sh{argv: [String]{"sh", "-c", "kill -9 $$"}}.run() ?? panic("sh did not start")
+    assert_eq(exit_status(killed), 137)
+    stopped: Sh{argv: [String]{"sleep", "10"}}.spec().timeout(1s).run() ?? panic("sleep did not start")
+    assert_eq(exit_status(stopped), 124)
 }
 
 // Temporary native-carrier layout. This is not a second public builder API:

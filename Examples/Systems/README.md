@@ -56,6 +56,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Process
 
 - [EnvOverlay](Process/EnvOverlay.jet)
+- [GitLand](Process/GitLand.jet) — `core.git` runs a script's git blocks as one call each: `w.land(patch, message)` stages a patch and commits exactly its paths, `w.patch_paths(patch)` lists what a patch touches, `w.export(commit, dir)` and `w.drift(dir)` export a commit and compare the tracked files with a tested tree.
 - [OSCPUTime](Process/OSCPUTime.jet) — `core.sys.cpu_time` reads the CPU time of any process; `set_wall_clock` sets the machine's wall clock under `#Unsafe`, which needs privilege.
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
 - [OSIDs](Process/OSIDs.jet) — `core.sys.user_ids` reads the real, effective and saved IDs and `set_user_ids` changes them under `#Unsafe`; `users` and `groups` read /etc/passwd and /etc/group as musl does.

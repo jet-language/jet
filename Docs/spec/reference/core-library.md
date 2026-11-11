@@ -2427,6 +2427,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.check(receipt)` | `Unit !IOError` | Convert a failed receipt to `IOError`, preserving timeout, resource-limit, exit-code, or signal information. |
 | `process.status_ok(receipt)` | `Bool` | Test whether a receipt represents a successful exit. |
 | `process.failed(receipt)` / `process.exited(receipt)` | `Bool` | Inspect failure or normal process exit on a receipt. |
+| `process.exit_status(receipt)` | `Int` | A finished child's status as the shell's `$?` reports it: 124 when its timeout stopped it (as `timeout(1)` does), 128 + n after signal n, else its exit code. `Sh.status()` returns the same number. |
 | `process.current_pid()` | `Int -[Env]>` | Return the current process identifier. |
 | `process.cwd(spec, path)` | `ProcessSpec` | Builder form that sets the child working directory; there is no zero-argument `process.cwd()`. |
 | `process.env_get(name)` | `?String -[Env]>` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |
@@ -2650,6 +2651,33 @@ A terminal session is an opt-in process mode. It supplies terminal-sized input
 and output through the terminal policy and fails with a typed error when the
 selected backend cannot provide one; it is not an implicit replacement for
 captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
+
+### `core.git` — the git steps scripts repeat
+
+`core.git` turns the git blocks that recur in scripts into one call each, on a
+`Repo` that names a work tree: `w: git.repo(dir)`. Every git command it runs
+uses `dir` as its working directory with the caller's `GIT_DIR`,
+`GIT_INDEX_FILE` and `GIT_WORK_TREE` unset, so a script started from a hook,
+a lander or another repository's environment acts on this tree alone. git's
+own errors go to stderr. The implementation is
+[`Core/Git/Git.jet`](../../../Core/Git/Git.jet), and
+`Examples/Systems/Process/GitLand.jet` is the golden.
+
+| Call | Result |
+|---|---|
+| `w.spec(Sh{"git …"})` | the command as a `ProcessSpec` in the work tree, the git environment unset and stderr shown, for a run that sets more first |
+| `w.head()` | HEAD's short sha, `""` when there is none |
+| `w.clean()` | whether no tracked file has changes (`git status --porcelain -uno` prints nothing) |
+| `w.patch_paths(patch)` | every path the patch file touches without repeats: each file under its new path in patch order, then the old path of each rename; empty when the patch does not parse |
+| `w.land(patch, message) -> Landed GitError!` | `git apply --index`, then a commit of exactly the staged paths, rename sources included; `Landed{sha, paths}` |
+| `w.commit(paths, message) -> String GitError!` | `git add -A -f` of `paths` (deletions included), then a commit of exactly those paths; the new short sha |
+| `w.export(commit, dir) IOError!` | `git archive COMMIT \| tar -x -C DIR`, `dir` created first |
+| `w.drift(dir, skip:) -> [Drift] IOError!` | how the tracked files differ from the tree at `dir`: each tracked file that differs or is missing there, in git's order, then each file only `dir` has; symlinks are not compared and `skip` names directories never entered |
+
+`GitError` is `.NoApply` (the patch does not apply) or `.NoCommit` (git
+refused the commit or did not run). A `Drift` is `{path, tracked, tested}`:
+`tracked` when the work tree tracks and has the file, `tested` when the
+tested tree has it; with both, their bytes differ.
 
 ### `core.math` — numeric functions
 
@@ -5803,6 +5831,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files.path`
 - `core.font`
 - `core.game`
+- `core.git`
 - `core.http`
 - `core.http.client`
 - `core.http.server`

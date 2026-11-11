@@ -7,6 +7,8 @@
 // `lines()` for its stdout lines, `run()` for the whole receipt, and
 // `spec()` for a run that sets a directory, environment or limit first.
 // `extend(list)` appends a list's items as argv items (`"$@"`).
+// `process.exit_status(receipt)` is a receipt's status as `$?` gives it:
+// 124 when its timeout stopped the child, as `timeout(1)` reports one.
 package: {
     name: "sh_command"
     authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] }
@@ -15,15 +17,18 @@ package: {
 use {
     process: core.process
     os: core.sys
+    time: core.time
 }
 
 // The child: `argv` prints each argument in brackets, `lines` prints two
-// lines and two blank ones, `env` prints $GREETING, and `fail` exits 3.
+// lines and two blank ones, `env` prints $GREETING, `sleep` sleeps ten
+// seconds, and `fail` exits 3.
 child: fn(args: [String]) {
     if args[0] == {
         "argv" -> loop arg in args.slice(1, args.len()) -> print("<{arg}>")
         "lines" -> print("one\ntwo\n\n")
         "env" -> print(os.get("GREETING") ?? "unset")
+        "sleep" -> time.sleep(10s)
         else -> process.exit(3)
     }
 }
@@ -42,4 +47,6 @@ run: fn() {
     failed: Sh{"{exe} fail"}.run()
     print("receipt: {failed.code} {failed.success}")
     print(Sh{"{exe} env"}.spec().env("GREETING", "hello").run().output.trim())
+    stopped: Sh{"{exe} sleep"}.spec().timeout(1s).run()
+    print("exit_status: {process.exit_status(failed)} {process.exit_status(stopped)}")
 }
