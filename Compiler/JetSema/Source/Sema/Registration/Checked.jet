@@ -1807,6 +1807,8 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
     if written == .Val(.Result(ok, err)) && err == (Type.Named{name: "Never"}) -> written = Val(ok)
     return_type: sema_checked_foreign_return_type(graph, module_identity, written)
     bridge_eligible: sema_guest_import_bridge_compatible(registered.declaration)
+    // A runtime binding crosses the runtime's route carriers (#6615).
+    runtime_binding: sema_guest_runtime_binding(module_row.package_identity, registered.declaration)
     // A plain written return is the default failure carrier at every call
     // site; the C value is that carrier's success (Rust `wraps_default_failure`).
     wraps_default_failure: if registered.declaration.return_type == {
@@ -1828,10 +1830,10 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
         symbol: symbol,
         path: symbol,
         params: params,
-        raw_scalar_abi: true,
+        raw_scalar_abi: !runtime_binding,
         bridge_eligible: bridge_eligible,
         return_type: return_type,
-        abi: "C",
+        abi: if runtime_binding -> SEMA_GUEST_RUNTIME_ABI else -> "C",
         language: "c",
         effect_root: None,
         callback_transport: if wraps_default_failure -> Val("guest-import-result") else -> None,

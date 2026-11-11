@@ -1615,13 +1615,24 @@ An `#Import(c)` that names one of the Jet runtime's own C exports (the generated
 RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
 declaration, or it is E3101. Ordinary C symbols stay ungated. An `#Import(c)`
 has no Jet body, so the effect row it declares is the effect each call
-performs: a caller whose row lacks it is E0740. The `jet.runtime` interface
-modules are `#Import(c)` declarations of this kind (core-library.md). A member
-X of `jet.runtime.M` replaces the Core leaf `core.M.__X`, and
+performs: a caller whose row lacks it is E0740.
+
+The `jet.runtime` interface modules (core-library.md) are the one exemption
+from that gate, keyed on where the declaration comes from, not on its module
+name: a runtime binding is an `#Import(c)` of a generated interface unit, or
+an inline-module member of the runtime package itself that names one of its
+exports, from which the interface is rendered. A binding gets no E3101, no C
+signature check and no shared-symbol E1341; its parameters and result must be
+runtime route carriers (E3203 otherwise), and its call lowers through the
+route the IR projects from its Jet signature, as a Core call's does, not
+through the C marshalling of foreign rows. The raw export is the one body of
+each binding; the binding declares it and nothing else does. A member X of
+`jet.runtime.M` replaces the Core leaf `core.M.__X`, and
 `Tools/agent/RuntimeEffectRows.jet --check` (a verify-full gate) fails when the
 member's declared row differs from that leaf's CoreCallRecord effect
 (`effect_leaf`, else `effect_kind`) or only one of the leaf's record and
-`dispatcher_row` remains.
+`dispatcher_row` remains; `--before REV` reads the leaves at the revision
+before a cutover deleted them.
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

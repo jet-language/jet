@@ -12,7 +12,12 @@
 // (or never existed) and has nothing to compare. The report names each member
 // with its export symbol and the record's runtime symbol.
 //
-// Usage (from the repository root): jet Tools/agent/RuntimeEffectRows.jet --check
+// With `--before REV` the Core leaves are read at the git revision REV, so a
+// cutover that deleted them still compares each member with the leaf it
+// replaced.
+//
+// Usage (from the repository root):
+//   jet Tools/agent/RuntimeEffectRows.jet --check [--before REV]
 use {
     files: core.files
     process: core.process
@@ -22,7 +27,8 @@ use {
 INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
 CORE_CALL_ROWS: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
 DISPATCHER: "Compiler/Prelude/Core.jet"
-USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check"
+USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check [--before REV]"
+OUTPUT_LIMIT: 268435456
 
 #Error
 RowsError: struct {
@@ -167,14 +173,28 @@ read_text: fn(path: String) -[FS]> String RowsError! {
     Ok(text)
 }
 
-runtime_effect_rows_main: fn(args: [String]) -[FS, IO]> Int RowsError! {
-    if args.len() != 1 || args[0] != "--check" {
+// The text of `path`: the working tree's, else its text at the git revision
+// `before` (`git show`).
+source_text: fn(path: String, before: String) -[Exec, FS, Time, Time.Wait]> String RowsError! {
+    if before == "" -> return read_text(path)
+    argv: [String]{"git", "show", "{before}:{path}"}
+    spec: process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
+    ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
+    receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(RowsError{message: "command failed: {argv.join(" ")}"})
+    Ok(receipt.output)
+}
+
+runtime_effect_rows_main: fn(args: [String]) -[Exec, FS, IO, Time, Time.Wait]> Int RowsError! {
+    before := ""
+    if args.len() == 3 && args[1] == "--before" -> before = args[2].copy()
+    if args.len() == 0 || args[0] != "--check" || (args.len() != 1 && before == "") {
         term.eprint(USAGE)
         return Ok(2)
     }
     members: interface_members(read_text(INTERFACE) ?? return Err(err))
-    leaves: core_leaves(read_text(CORE_CALL_ROWS) ?? return Err(err))
-    dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
+    leaves: core_leaves(source_text(CORE_CALL_ROWS, before) ?? return Err(err))
+    dispatched: dispatcher_keys(source_text(DISPATCHER, before) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
     report: differences(members, leaves, dispatched)
     found: report.differences
@@ -207,10 +227,10 @@ run: fn() {
 
 #Test("a member joins core.M.__X; its row must be the record's leaf, else its kind") {
     members: [InterfaceMember]{
-        InterfaceMember{module_name: "jet.runtime.time", member: "sleep_ns", effects: [String]{"Time.Wait"}, symbol: "__jet_time_dsleep_uns"},
-        InterfaceMember{module_name: "jet.runtime.time", member: "task_timeout", effects: [String]{"Time.Wait"}, symbol: "__jet_time_dtask_utimeout"},
-        InterfaceMember{module_name: "jet.runtime.time", member: "cut", effects: [String]{}, symbol: "__jet_time_dcut"},
-        InterfaceMember{module_name: "jet.runtime.time", member: "half", effects: [String]{}, symbol: "__jet_time_dhalf"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "sleep_ns", effects: [String]{"Time.Wait"}, symbol: "jet_std_time_sleep_duration_ns"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "task_timeout", effects: [String]{"Time.Wait"}, symbol: "jet_task_timeout_duration_ns"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "cut", effects: [String]{}, symbol: "jet_time_cut"},
+        InterfaceMember{module_name: "jet.runtime.time", member: "half", effects: [String]{}, symbol: "jet_time_half"},
     }
     leaves: [CoreLeaf]{
         CoreLeaf{module_name: "core.time", member: "__sleep_ns", effect_kind: Val("Time"), effect_leaf: Val("Time.Wait"), symbol: "jet_std_time_sleep_duration_ns"},
@@ -218,11 +238,11 @@ run: fn() {
     }
     report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half"})
     assert_eq(report.joined, 2)
-    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (__jet_time_dtask_utimeout): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (__jet_time_dtask_utimeout): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (__jet_time_dhalf): core.time.__half has a dispatcher_row but no CoreCallRecord")
+    assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord")
 }
 
 #Test("the table rows parse from their generated lines") {
-    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.time\", member: \"sleep_ns\", declaration: \"sleep_ns: fn(nanos: Int) -[Time.Wait]>\", symbol: \"__jet_time_dsleep_uns\"}},"
+    interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.time\", member: \"sleep_ns\", declaration: \"sleep_ns: fn(nanos: Int) -[Time.Wait]>\", symbol: \"jet_std_time_sleep_duration_ns\"}},"
     parsed: interface_members(interface)
     assert_eq(parsed.len(), 1)
     assert_eq(parsed[0].effects.join("|"), "Time.Wait")

@@ -93,6 +93,7 @@ use {
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         sema_cli_command_record,
         sema_marker_is_guest_export,
+        sema_guest_runtime_binding,
         sema_source_location_at,
         sema_effect_chain_name,
         sema_module_is_core_source,
@@ -174,6 +175,7 @@ use {
     ]
     jet_parser.[
         parse_source,
+        parser_guest_import_symbol,
     ]
 
     jet_eval.[JetEvalComptimeInputAdapter]
@@ -2801,18 +2803,21 @@ jet_driver_test_plan: fn(test_modules: [String:Bool], graph: SemaGraphResult, fu
     }
 }
 
-// One `#Export(c)` function of the entry module: its symbol key and name,
-// and its jet.runtime interface row when it is an inline-module member
-// (jet_driver_runtime_interface_row).
+// One `#Export(c)` function of the entry module (`exported`), its symbol key
+// and name; or one runtime binding of a runtime inline module
+// (Guest.jet sema_guest_runtime_binding), which exports nothing and carries
+// its jet.runtime interface row (jet_driver_runtime_interface_row).
 JetDriverCExportRow: struct {
     key: String
     name: String
+    exported: Bool
     runtime_interface: RuntimeInterfaceRow?
 }
 
-// The entry module's `#Export(c)` functions in declaration order, read from
-// the registration graph before IR lowering so the graph need not stay
-// alive through lowering and assembly (jet_driver_c_exports).
+// The entry module's `#Export(c)` functions and runtime bindings in
+// declaration order, read from the registration graph before IR lowering so
+// the graph need not stay alive through lowering and assembly
+// (jet_driver_c_exports).
 jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverCExportRow] Never! {
     rows := [JetDriverCExportRow]{}
     loop registration_module in graph.modules {
@@ -2822,7 +2827,12 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
             loop marker in row.declaration.markers {
                 if sema_marker_is_guest_export(marker) -> exported = true
             }
-            if exported -> rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, runtime_interface: jet_driver_runtime_interface_row(row.declaration, jet_driver_c_symbol(row.declaration.name))})
+            if exported {
+                rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, exported: true, runtime_interface: None})
+            } else if sema_guest_runtime_binding(registration_module.package_identity, row.declaration) {
+                symbol: parser_guest_import_symbol(row.declaration) ?? next
+                rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, exported: false, runtime_interface: jet_driver_runtime_interface_row(row.declaration, symbol)})
+            }
         }
     }
     rows

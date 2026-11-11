@@ -4356,12 +4356,21 @@ ir_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: 
 // ir_route whose tuple result's kernel items carry the declared `labels`
 // (core_call_native_return_labels).
 ir_route_labeled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
+    ir_route_declared(m, p, b, symbol, None, inputs, borrowed, result, labels, span)
+}
+
+// ir_route_labeled through `declared` when it is given: the route a
+// jet.runtime binding's Jet signature projects (ir_route_of_signature), which
+// no route table row repeats.
+ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name: ir_route_symbol(symbol)
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
         if ir_route_inline(m, p, b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
     if ir_environment_route(name) == .Val(environment) -> return ir_environment_call(m, p, b, environment, inputs, result, span)
-    route: ir_runtime_route(name) ?? return ir_fail_slot(b, span, "runtime route {name}")
+    found := declared.copy()
+    if found == None -> found = ir_runtime_route(name)
+    route: found ?? return ir_fail_slot(b, span, "runtime route {name}")
     if !route.native_lists && ir_route_nested(route) -> return ir_fail_slot(b, span, "runtime route {name} crosses a nested List, which only a Jet runtime provider reads")
     if route.params.len() != inputs.len() -> return ir_fail_slot(b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
     args := [Int]{}
@@ -5376,24 +5385,7 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         .Prelude(name) -> name
         .SourceOwned -> { return ir_fail_slot(b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
-    // A compile-time value that reaches a route reading ambient state is
-    // refused as the call's effect when evaluation gets there
-    // (ir_comptime_ambient_refusal): the ambient random stream as
-    // non-deterministic, anything else as a Tier-2 effect.
-    if p.comptime_values && b.impure == 0 {
-        if ir_comptime_ambient_refusal(symbol) == .Val(what) {
-            refusal: if what == IR_COMPTIME_AMBIENT_RANDOM -> "Comptime.nondeterministic" else -> "Comptime.refuse"
-            _: ir_host_method_words(m, p, b, Type.Bool, "{refusal}:{what}", [Int]{}, span)
-        }
-    }
-    // Inside a build invocation's `#Impure` block, a route that reads or
-    // writes ambient process state with no system call the runtime child's
-    // filter could refuse is refused by the compiler as it is reached.
-    if p.invocation && b.impure > 0 {
-        if ir_invocation_ambient_refusal(symbol) == .Val(what) {
-            _: ir_host_method_words(m, p, b, Type.Bool, "Impure.refuse:{what}", [Int]{}, span)
-        }
-    }
+    ir_route_ambient_refusals(m, p, b, symbol, span)
     if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(m, p, b, ty, args, span)
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(m, p, b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(m, p, b, args, span)
@@ -5401,8 +5393,40 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
+    // Bounded Core slots take I64, but `keep<T>` returns its argument at
+    // the checked type: it does not narrow exact Int.
+    typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
+    labels: core_call_native_return_labels(canonical.module_name, canonical.member)
+    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, typed_carrier_value, span)
+}
+
+// The refusals a route call reading ambient state meets before it runs. A
+// compile-time value that reaches one is refused as the call's effect when
+// evaluation gets there (ir_comptime_ambient_refusal): the ambient random
+// stream as non-deterministic, anything else as a Tier-2 effect. Inside a
+// build invocation's `#Impure` block, a route that reads or writes ambient
+// process state with no system call the runtime child's filter could refuse
+// is refused by the compiler as it is reached.
+ir_route_ambient_refusals: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, span: Span) Never! {
+    if p.comptime_values && b.impure == 0 {
+        if ir_comptime_ambient_refusal(symbol) == .Val(what) {
+            refusal: if what == IR_COMPTIME_AMBIENT_RANDOM -> "Comptime.nondeterministic" else -> "Comptime.refuse"
+            _: ir_host_method_words(m, p, b, Type.Bool, "{refusal}:{what}", [Int]{}, span)
+        }
+    }
+    if p.invocation && b.impure > 0 {
+        if ir_invocation_ambient_refusal(symbol) == .Val(what) {
+            _: ir_host_method_words(m, p, b, Type.Bool, "Impure.refuse:{what}", [Int]{}, span)
+        }
+    }
+}
+
+// The route `symbol` (`declared`, else its table row) on the checked
+// argument expressions `args`, typed `ty`: an exact Int argument the route
+// consumes (borrow_mask false) crosses as its native I64 unless
+// `typed_carrier_value`.
+ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], typed_carrier_value: Bool, span: Span) -> Int Never! {
     slots := [Int]{}
-    borrow_mask: canonical.signature.borrow_mask
     loop (index, arg) in args {
         slot: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
@@ -5411,9 +5435,6 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
             if access == .Write -> ir_make_unique(m, p, b, slot)
         }
-        // Bounded Core slots take I64, but `keep<T>` returns its argument at
-        // the checked type: it does not narrow exact Int.
-        typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
         if !typed_carrier_value && index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(p, b, arg)) == Type.Int {
             slots.push(ir_core_native_int(m, b, slot, span))
             if ir_failed(b) -> return -1
@@ -5422,8 +5443,56 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         }
     }
     result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
-    labels: core_call_native_return_labels(canonical.module_name, canonical.member)
-    ir_route_labeled(m, p, b, symbol, slots, borrow_mask, result, labels, span)
+    ir_route_declared(m, p, b, symbol, declared, slots, borrow_mask, result, labels, span)
+}
+
+// The route a jet.runtime binding's Jet signature projects onto its runtime
+// export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
+// Float, String as Text, a List of those, and as a result also an Option of
+// one or a tuple of scalars (in the checked tuple's member order), as sema
+// admits them (Guest.jet sema_guest_check_runtime_binding). None for a type
+// no carrier holds.
+ir_route_of_signature: fn(symbol: String, params: [Type], returned: Type?) -> IRRoute? Never! {
+    carriers := [IRRouteCarrier]{}
+    loop ty in params {
+        carrier: ir_route_carrier_of(ty) ?? return None
+        carriers.push(carrier)
+    }
+    result: ir_route_result_of(returned) ?? return None
+    Val(IRRoute{symbol: symbol.copy(), export: symbol.copy(), native_lists: true, params: carriers, result: result})
+}
+
+ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
+    ty: returned ?? return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_untag(ty) == .Option(inner) {
+        some: ir_route_carrier_of(inner) ?? return None
+        return Val(IRRouteResult.Option{some: some})
+    }
+    if ir_untag(ty) == .Tuple(fields) {
+        items := [IRRouteCarrier]{}
+        loop field in fields {
+            item: ir_route_carrier_of(field.ty) ?? return None
+            items.push(item)
+        }
+        return Val(IRRouteResult.Tuple{items: items})
+    }
+    carrier: ir_route_carrier_of(ty) ?? return None
+    Val(IRRouteResult.Plain{carrier: carrier})
+}
+
+ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
+    if ir_untag(ty) == {
+        .Int | .IntN(_, _) -> Val(IRRouteCarrier.Word)
+        .Bool -> Val(IRRouteCarrier.Flag)
+        .Float -> Val(IRRouteCarrier.Float)
+        .String -> Val(IRRouteCarrier.Text)
+        .List(item) -> {
+            elem: ir_route_carrier_of(item) ?? return None
+            Val(IRRouteCarrier.List{elem: elem})
+        }
+        else -> None
+    }
 }
 
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written
@@ -5579,7 +5648,7 @@ IR_COMPTIME_AMBIENT_RANDOM: "the ambient random stream"
 // (JetEval Native.jet jet_eval_native_refused) refuses the clock, OS
 // randomness, files and the terminal, but these routes answer from memory,
 // so a compile-time value would bake one build's answer into every run; the
-// builder puts a refusal before each such call (ir_core_call_routed).
+// builder puts a refusal before each such call (ir_route_ambient_refusals).
 // None for every other route. The wall-clock override stays: `time.now`
 // reads it before its clock read, which the filter refuses as the clock.
 ir_comptime_ambient_refusal: fn(symbol: String) -> String? Never! {

@@ -4,6 +4,7 @@
 // checked, and every native symbol of the guest surface is unique.
 use {
     jet_foundation.[
+        AccessConvention,
         Diagnostic,
         Func,
         Marker,
@@ -247,6 +248,86 @@ sema_guest_runtime_import_error: fn(function: Func, symbol: String) -> Diagnosti
     sema_error("E3101", function.name_span, "`#Import(c)` of the Jet runtime symbol `{symbol}` can only sit inside `#Unsafe`.", "The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.", "Gate the declaration with `#[Import(c), Unsafe(\"why this is safe\")]`, or call the Core function that wraps it.")
 }
 
+// The package identity of the generated jet.runtime interface units
+// (Driver RuntimeInterface.jet jet_driver_runtime_interface_sources): the
+// compiler-generated Core root, which no user package can carry.
+SEMA_GUEST_RUNTIME_INTERFACE_PACKAGE: "<corelib>/jet/runtime/"
+
+// The package identity prefixes (Driver Loader.jet jet_driver_package_identity)
+// of the runtime (Compiler/JetRuntime/package.jet) and of its test units
+// (Toolchain/RuntimePack.jet test_package).
+SEMA_GUEST_RUNTIME_PACKAGES: [String]{"package:11:jet_runtime:", "package:17:jet_runtime_tests:"}
+
+// The ABI of a runtime binding's foreign row: the runtime's route carriers
+// (IR ir_runtime_binding_call), not the C law.
+SEMA_GUEST_RUNTIME_ABI: "jet-runtime"
+
+// A runtime binding (#6615): a body-less `#Import(c)` member of a jet.runtime
+// interface module, the checked API over one runtime export. It is one either
+// in a generated interface unit, or as the runtime's own declaration of it:
+// an inline-module member of the runtime package naming a runtime export
+// (Compiler/JetRuntime/Source/Public), from which the interface is rendered.
+// A user module of any name, `jet.runtime.*` included, is neither.
+sema_guest_runtime_binding: fn(package_identity: String, function: Func) -> Bool Never! {
+    symbol: parser_guest_import_symbol(function) ?? return false
+    if package_identity.starts_with(SEMA_GUEST_RUNTIME_INTERFACE_PACKAGE) -> return true
+    if !runtime_c_export(symbol) || sema_inline_member_module(function.name) == "" -> return false
+    loop prefix in SEMA_GUEST_RUNTIME_PACKAGES {
+        if package_identity.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// A value a runtime route carries: Int and the machine integers as a Word,
+// Float, Bool as a Flag, String as Text, and a List of those scalars.
+sema_guest_runtime_scalar: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .IntN(_, _) -> true
+        else -> false
+    }
+}
+
+sema_guest_runtime_value: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .String -> true
+        .List(item) -> sema_guest_runtime_scalar(item)
+        else -> sema_guest_runtime_scalar(ty)
+    }
+}
+
+// A runtime route result: a carried value, an Option of one, or a tuple of
+// scalars (its items cross in the checked tuple's member order).
+sema_guest_runtime_result: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Option(inner) -> sema_guest_runtime_value(inner)
+        .Tuple(fields) -> loop field in fields {
+            if !sema_guest_runtime_scalar(field.ty) -> break false
+        } ?? true
+        else -> sema_guest_runtime_value(ty)
+    }
+}
+
+// E3203 for a runtime binding's parameter or result no runtime route carries;
+// true when every one is carried. A parameter is read (no `&` or move).
+sema_guest_check_runtime_binding: fn(function: Func, diagnostics: &[Diagnostic]) -> Bool Never! {
+    valid := true
+    why: "a jet.runtime function crosses the runtime's route carriers"
+    fix: "use Int, a machine integer, Float, Bool, String or a List of scalars; a result may also be an Option of one or a tuple of scalars"
+    loop param in function.params {
+        if param.convention != AccessConvention.Read || !sema_guest_runtime_value(param.ty) {
+            diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))
+            valid = false
+        }
+    }
+    if sema_guest_c_return_type(function.return_type) == .Val(returned) {
+        if !sema_guest_runtime_result(returned) {
+            diagnostics.push(sema_error("E3203", function.return_type_span ?? function.name_span, "`{type_name(returned)}` is not a runtime carrier for the result of `{function.name}`", why, fix))
+            valid = false
+        }
+    }
+    valid
+}
+
 // Rust CheckInner `check_guest_import_surface` (every module),
 // `check_guest_export_surface` (the entry module) and
 // `check_guest_symbol_collisions` (the bundle), after registration and
@@ -258,6 +339,10 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         diagnostics := [Diagnostic]{}
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {
+                if sema_guest_runtime_binding(graph.modules[module_index].package_identity, function) {
+                    if !sema_guest_check_runtime_binding(function, diagnostics) -> failed = true
+                    next
+                }
                 if parser_guest_import_symbol(function) == .Val(symbol) {
                     if runtime_c_export(symbol) && !function.is_unsafe {
                         diagnostics.push(sema_guest_runtime_import_error(function, symbol))
@@ -290,7 +375,9 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         loop item in graph.modules[module_index].program.items {
             if item == {
                 .Func(function) -> {
-                    if parser_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
+                    // A runtime binding names the runtime's own export, not a
+                    // second owner of its symbol.
+                    if parser_guest_import_symbol(function) == .Val(symbol) && !sema_guest_runtime_binding(graph.modules[module_index].package_identity, function) -> sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
                     if module_index == entry_index && sema_function_is_guest_export(function) {
                         if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) -> has_text_export = true
                         sema_guest_record_symbol(symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), diagnostics)

@@ -1,11 +1,15 @@
 // The jet.runtime interface (#6615): the runtime's public functions as Jet
-// declarations. The runtime pack build reads them from the checked runtime
-// (each `#Export(c)` member of an inline module of Compiler/JetRuntime/Source)
-// and renders RuntimeInterface.jet (jet_driver_runtime_interface_file), which
+// declarations. The runtime declares each one as a runtime binding, an
+// `#Import(c)` member of an inline module of Compiler/JetRuntime/Source that
+// names one of its own exports (Guest.jet sema_guest_runtime_binding). The
+// runtime pack build reads them from the checked runtime and renders
+// RuntimeInterface.jet (jet_driver_runtime_interface_file), which
 // Toolchain/RuntimePack.jet compares with the copy in the tree. jet embeds that
 // copy (RUNTIME_INTERFACE_ROWS) and loads each module as `jet.runtime.<m>`:
-// its members are `#Import(c)` declarations of their runtime symbols, checked
-// against their Jet signature and effect row only.
+// its members are the same `#Import(c)` declarations, checked against their
+// Jet signature and effect row only, whose calls cross the runtime's route
+// carriers (BuildRoutes.jet ir_route_of_signature). The runtime export stays
+// the one body of each.
 use {
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_foundation.[AccessConvention, Diagnostic, Func, RUNTIME_INTERFACE_ROWS, RuntimeInterfaceRow, Span, type_name]
@@ -31,12 +35,12 @@ jet_driver_unknown_runtime_interface_module: fn(module_name: String, span: Span)
     jet_driver_diagnostic("E1001", span, "there is no runtime module `{module_name}`", "`jet.runtime` holds only the modules of the runtime's public interface", "use one of: {names.join(", ")}")
 }
 
-// The interface row of the runtime export `declaration`, whose C symbol is
-// `symbol`: a lifted inline-module member (`time.sleep_ns` ->
-// `__jet_time_dsleep_ns`). None for a top-level export, which stays
-// runtime-internal. `declaration` is "" when the Jet signature uses a form
-// the interface doesn't render (type parameters, or a parameter convention,
-// default, or variadic); the runtime pack build refuses that row.
+// The interface row of the runtime binding `declaration`, whose runtime export
+// is `symbol`: a lifted inline-module member (`time.sleep_ns` binding
+// `jet_std_time_sleep_duration_ns`). None for a top-level declaration.
+// `declaration` is "" when the Jet signature uses a form the interface
+// doesn't render (type parameters, or a parameter convention, default, or
+// variadic); the runtime pack build refuses that row.
 jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> RuntimeInterfaceRow? Never! {
     module_path: sema_inline_member_module(declaration.name)
     if module_path == "" -> return None
@@ -44,9 +48,8 @@ jet_driver_runtime_interface_row: fn(declaration: Func, symbol: String) -> Runti
     Val(RuntimeInterfaceRow{module_name: "{JET_DRIVER_RUNTIME_INTERFACE_ROOT}.{module_path}", member: member.copy(), declaration: jet_driver_runtime_interface_declaration(declaration, member), symbol: symbol})
 }
 
-// The member's Jet declaration. Its row is the runtime row without `FFI`
-// leaves: the runtime's host calls are its own machine code, not foreign code
-// the program reaches.
+// The member's Jet declaration, as the runtime declares it: its parameters,
+// effect row and result. A member without a row is pure.
 jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) -> String Never! {
     if declaration.type_params.len() > 0 -> return ""
     params := [String]{}
@@ -54,14 +57,14 @@ jet_driver_runtime_interface_declaration: fn(declaration: Func, member: String) 
         if param.convention != AccessConvention.Read || param.default != None || param.variadic -> return ""
         params.push("{param.name}: {type_name(param.ty)}")
     }
-    row := ""
+    result: if declaration.return_type == .Val(ty) -> type_name(ty) else -> ""
     if declaration.declared_effects == .Val(entries) {
-        names: loop entry in entries if entry.name != "FFI" && !entry.name.starts_with("FFI.") -> entry.name
-        row = " -[{names.join(", ")}]>"
+        names: loop entry in entries -> entry.name
+        row: "{member}: fn({params.join(", ")}) -[{names.join(", ")}]>"
+        return if result == "" -> row else -> "{row} {result}"
     }
-    result := ""
-    if declaration.return_type == .Val(ty) -> result = " {type_name(ty)}"
-    "{member}: fn({params.join(", ")}){row}{result}"
+    if result == "" -> return "{member}: fn({params.join(", ")})"
+    "{member}: fn({params.join(", ")}) -> {result}"
 }
 
 // A Jet string literal of `value`.
@@ -78,7 +81,7 @@ jet_driver_runtime_interface_literal: fn(value: String) -> String Never! {
 // runtime object and checks against the tree.
 jet_driver_runtime_interface_file: fn(rows: [RuntimeInterfaceRow]) -> String Never! {
     lines := [String]{
-        "// Sources: the `#Export(c)` members of the inline modules of Compiler/JetRuntime/Source",
+        "// Sources: the runtime bindings of the inline modules of Compiler/JetRuntime/Source",
         "// This file is generated by the runtime pack build (Compiler/Toolchain/RuntimePack.jet); do not edit.",
         "// One member of the jet.runtime interface (#6615): `declaration` is its Jet",
         "// signature and effect row, `symbol` the runtime export it binds.",

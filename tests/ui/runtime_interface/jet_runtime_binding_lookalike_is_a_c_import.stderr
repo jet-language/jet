@@ -1,0 +1,80 @@
+Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_time_raw_zone_env` can only sit inside `#Unsafe`.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:8:16
+    |
+  8 |     #Import(c) zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+    |                ^^^^^^^^
+ Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
+ Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
+More: jet-lang.dev/e/E3101
+
+Error [jet.NonCAbiType]: `String?` is not a C-compatible type for a foreign function parameter or return.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:8:51
+    |
+  8 |     #Import(c) zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+    |                                                   ^^^^^^^
+ Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203
+
+Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_time_raw_wall_sample` can only sit inside `#Unsafe`.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:9:16
+    |
+  9 |     #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+    |                ^^^^^^^^^^^
+ Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
+ Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
+More: jet-lang.dev/e/E3101
+
+Error [jet.NonCAbiType]: `(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)` is not a C-compatible type for a foreign function parameter or return.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:9:43
+    |
+  9 |     #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203
+
+Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_time_raw_zone_file_bytes` can only sit inside `#Unsafe`.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:10:16
+    |
+ 10 |     #Import(c) zone_file_bytes: fn(path: String) -[FS.Read]> [U8]? = "jet_time_raw_zone_file_bytes"
+    |                ^^^^^^^^^^^^^^^
+ Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
+ Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
+More: jet-lang.dev/e/E3101
+
+Error [jet.NonCAbiType]: `[U8]?` is not a C-compatible type for a foreign function parameter or return.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:10:62
+    |
+ 10 |     #Import(c) zone_file_bytes: fn(path: String) -[FS.Read]> [U8]? = "jet_time_raw_zone_file_bytes"
+    |                                                              ^^^^^
+ Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203
+
+Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_time_raw_zone_env` can only sit inside `#Unsafe`.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:13:12
+    |
+ 13 | #Import(c) top_zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+    |            ^^^^^^^^^^^^
+ Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
+ Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
+More: jet-lang.dev/e/E3101
+
+Error [jet.NonCAbiType]: `String?` is not a C-compatible type for a foreign function parameter or return.
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:13:51
+    |
+ 13 | #Import(c) top_zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+    |                                                   ^^^^^^^
+ Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203
+
+Error [jet.InvalidLibraryOutput]: Guest imports `__jet_time_dzone_uenv` in module `jet_runtime_binding_lookalike_is_a_c_import` and guest imports `top_zone_env` in module `jet_runtime_binding_lookalike_is_a_c_import` use the same C symbol `jet_time_raw_zone_env`
+  --> jet_runtime_binding_lookalike_is_a_c_import.jet:13:12
+    |
+ 13 | #Import(c) top_zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+    |            ^^^^^^^^^^^^
+ Why: The native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen
+ Fix: Rename one declaration or its native symbol string
+More: jet-lang.dev/e/E1341

@@ -261,26 +261,43 @@ The first form is an ordinary import error under D-S14-PAUSE; the second uses
 the file-import grammar.
 
 The `jet.runtime` root holds the runtime's public interface: one module per
-inline module of the runtime source, each member that module's `#Export(c)`
-function with its Jet signature and declared effect row, less the `FFI` leaves
-of the runtime's own host calls. The runtime pack build renders the interface
-from the runtime source and fails when the copy jet embeds disagrees, so no
-hand-written copy exists. A call to a member is checked against that
-signature, and the member's row is the effect the call performs:
+inline module of the runtime source. The runtime declares each member as a
+runtime binding, a body-less `#Import(c)` of one of its own exports with the
+member's Jet signature and effect row; the export stays the one body. The
+runtime pack build renders the interface from those declarations and fails
+when the copy jet embeds disagrees, so no hand-written copy exists. A call to
+a member is checked against that signature, and the member's row is the
+effect the call performs; a member without a row is pure:
 
 ```jet
 use rt: jet.runtime.time
 
-nap: fn(nanos: Int) -[Time]> {
+nap: fn(nanos: Int) -[Time.Wait]> {
     rt.sleep_ns(nanos)
 }
 ```
 
-`jet.runtime.time` holds `host_monotonic_ns: fn() -[Time]> Int`,
-`sleep_ns: fn(nanos: Int) -[Time.Wait]>` and
-`task_timeout: fn(nanos: Int) -[Time]>`. A runtime member keeps the name of
-the Core leaf it replaces without the `__` (`core.time.__sleep_ns` becomes
-`rt.sleep_ns`). A `jet.runtime` path that names no interface module is E1001.
+A call crosses the runtime's route carriers, not the C law: an `Int` or a
+machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
+and a `List` of scalars; a result may also be an `Option` of one of those or
+a tuple of scalars, whose items the export writes in the tuple's
+label-sorted order. A binding parameter or result outside those carriers is
+E3203. Only the generated interface units and the runtime's own inline
+modules declare bindings; an `#Import(c)` in a user module of any name,
+`jet.runtime.*` included, is an ordinary C import (E3101 outside `#Unsafe`,
+E3203 for a non-C type, E1341 for a shared symbol).
+
+`jet.runtime.time` holds the clock, wait and zone reads of the `core.time`
+leaves: `host_monotonic_ns` and the pure `clock_mono_ns` (`Int`), `sleep_ns`
+(`-[Time.Wait]>`), `task_timeout` (the `task.timeout` deadline),
+`reject_uncontrolled`, `wall_sample`
+(`(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)`), the controlled
+and world clocks `world_wall_ms`, `wall_override_ms`, `controlled_monotonic_ns`
+and `world_monotonic_ns` (`Int?`), `zone_env` (`-[Env]> String?`),
+`zone_file_bytes` (`-[FS.Read]> [U8]?`) and the pure `embedded_zone_bytes`. A
+runtime member keeps the name of the Core leaf it replaces without the `__`
+(`core.time.__sleep_ns` becomes `rt.sleep_ns`). A `jet.runtime` path that names
+no interface module is E1001.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in

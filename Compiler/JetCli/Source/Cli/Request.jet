@@ -157,7 +157,7 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // after the build and after the optimizer, and written as `{prefix}.o` with
 // its export list, ABI receipt and thread receipt (ir_thread_exports: the
 // exports that can start a second thread), and `{prefix}.interface.jet`: the
-// jet.runtime interface its inline-module exports render
+// jet.runtime interface its runtime bindings render
 // (jet_driver_runtime_interface_file), which Toolchain/RuntimePack.jet checks
 // against the embedded copy. The rows alone root the library:
 // an entry module's `run: fn` is no startup here, only an export when it is
@@ -170,7 +170,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     checked := owned.inputs.move() ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
     lifecycle_path: lifecycle ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
-    rows: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+    rows: loop row in checked.c_exports if row.exported -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
     interface_rows := [RuntimeInterfaceRow]{}
     loop row in checked.c_exports {
         found: row.runtime_interface ?? next
