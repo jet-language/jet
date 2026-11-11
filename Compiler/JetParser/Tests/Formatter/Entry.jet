@@ -187,3 +187,15 @@ run: fn() {
     source: "run: fn() {{\n    store.transaction(\"x\", (n: &Int) -> n += 1)\n    store.each((n) -> total += n)\n}}\n"
     assert_eq(fmt_core_stable(source), source)
 }
+
+// fmt keeps the order the author wrote: a named tuple type's fields stay in
+// source order, and a wrapped `loop … in` head gains no comma.
+#Test("fmt_keeps_tuple_field_order_and_adds_no_comma_to_a_wrapped_loop_head") {
+    tuple: "run: fn() {{\n    cases: [(path: String, replacement: String, original: String)]{{}}\n    print(cases.len())\n}}\n"
+    assert_eq(fmt_core_stable(tuple), tuple)
+    nested: "f: fn(x: (p: [Int], b: (z: Int, a: Int))) {{\n    print(x)\n    print(x)\n}}\n"
+    assert_eq(fmt_core_stable(nested), nested)
+    looped: fmt_core_stable("run: fn() {{\n    loop directory in ([String]{{\"{{package}}/src\", \"{{root}}/.jet\", \"{{package}}/.jet\", \"{{package}}/.jet/generated\"}}) {{\n        print(directory)\n    }}\n}}\n")
+    assert(!looped.contains("), {{"), "a wrapped loop head ends without a comma")
+    assert(looped.contains("loop directory in"), "the loop head is kept")
+}

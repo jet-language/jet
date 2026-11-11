@@ -39,11 +39,19 @@ use {
         type_name,
     ]
     jet_lexer.[
+        TOKEN_COLON,
+        TOKEN_GT,
+        TOKEN_IDENT,
         TOKEN_KW_FN,
         TOKEN_LBRACE,
+        TOKEN_LBRACKET,
         TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
         TOKEN_RPAREN,
         TOKEN_SEMI,
+        TOKEN_SHR,
     ]
 }
 
@@ -622,9 +630,11 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
         .Bool -> jfmt_write(f, "Bool")
         .String -> jfmt_write(f, "String")
         .Char -> jfmt_write(f, "Char")
+        // A nested type passes the source span on, so a tuple inside can
+        // find its written field order; the tuple checks the names it finds.
         .List(inner) -> {
             jfmt_write(f, "[")
-            jfmt_fmt_type(f, inner)
+            jfmt_fmt_type_at(f, inner, source)
             jfmt_write(f, "]")
         }
         .Map(key, _, value) -> {
@@ -766,12 +776,26 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
             list_source: jfmt_source_list_at(f, source, JFMT_DELIM_PAREN)
             item_spans: jfmt_list_item_spans(f, list_source)
             multiline: jfmt_comma_begin(f, fields.len(), list_source)
-            loop (index, field) in fields {
+            written: jfmt_tuple_written_names(f, fields, list_source)
+            loop index in 0..<fields.len() {
                 span: jfmt_item_span_or(item_spans, index, fallback_span)
                 jfmt_comma_before(f, index, multiline, span.start)
-                jfmt_write(f, field.name)
+                // The field this position writes, and where its type starts.
+                slot := index
+                at := Span?{None}
+                if index < written.len() {
+                    name: jfmt_src_text(f, written[index].start, written[index].end)
+                    loop (candidate, field) in fields {
+                        if field.name == name {
+                            slot = candidate
+                            break
+                        }
+                    }
+                    at = Val(Span{start: written[index].end, end: written[index].end})
+                }
+                jfmt_write(f, fields[slot].name)
                 jfmt_write(f, ": ")
-                jfmt_fmt_type(f, field.ty)
+                jfmt_fmt_type_at(f, fields[slot].ty, at)
                 jfmt_comma_after(f, multiline, span.end)
             }
             jfmt_comma_end(f, multiline, list_source)
@@ -799,6 +823,47 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
             }
         }
     }
+}
+
+// The name spans of a tuple type's fields in the order the source writes
+// them: the `name :` token pairs at the list's top level. The parser keeps the
+// fields sorted, because tuple identity ignores order; printing that order
+// would move the author's fields. Empty, so the parsed order stays, without a
+// source list whose names match the parsed fields one for one.
+jfmt_tuple_written_names: fn(f: JetFmt, fields: [TypeTupleField], source: JetFmtSourceList?) -> [Span] Never! {
+    list: source ?? return [Span]{}
+    names := [Span]{}
+    depth := 0
+    loop index in (jfmt_first_token_at(f, list.span.start) + 1)..<f.source_toks.len() {
+        token: f.source_toks[index]
+        if token.span.start >= list.close_start -> break
+        kind: token.kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_LT {
+            depth += 1
+            next
+        }
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_GT {
+            depth = jfmt_saturating_sub(depth, 1)
+            next
+        }
+        if kind == TOKEN_SHR {
+            depth = jfmt_saturating_sub(depth, 2)
+            next
+        }
+        if depth != 0 || kind != TOKEN_IDENT || index + 1 >= f.source_toks.len() || f.source_toks[index + 1].kind != TOKEN_COLON -> next
+        name: jfmt_src_text(f, token.span.start, token.span.end)
+        found := false
+        loop field in fields {
+            if field.name == name {
+                found = true
+                break
+            }
+        }
+        if !found -> return [Span]{}
+        names.push(token.span)
+    }
+    if names.len() != fields.len() -> return [Span]{}
+    names
 }
 
 jfmt_is_unit_fallible_type: fn(ty: Type) -> Bool Never! {
@@ -968,7 +1033,7 @@ jfmt_fmt_err_constructor: fn(f: &JetFmt, fields: [ExprField], span: Span) {
 
 jfmt_fmt_typed_lit: fn(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) {
     // Print the head (when present) and the body shape.
-    if head == .Val(head_type) -> jfmt_fmt_type(f, head_type)
+    if head == .Val(head_type) -> jfmt_fmt_type_at(f, head_type, Val(span))
     jfmt_write(f, "{{")
     multiline: jfmt_source_span_multiline(f, span)
     if multiline {

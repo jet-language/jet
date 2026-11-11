@@ -1075,7 +1075,6 @@ jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
                 jfmt_loop_clause_separator(f, expr_span(value).start, wrap)
                 jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
             }
-            if wrap && step == None -> jfmt_write(f, ",")
             header_end = if step == .Val(value) -> expr_span(value).end else -> expr_span(end).end
         }
         .In(collection, step) -> {
@@ -1084,7 +1083,6 @@ jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
                 jfmt_loop_clause_separator(f, expr_span(value).start, wrap)
                 jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
             }
-            if wrap && step == None -> jfmt_write(f, ",")
             header_end = if step == .Val(value) -> expr_span(value).end else -> expr_span(collection).end
         }
     }
