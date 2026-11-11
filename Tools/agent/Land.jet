@@ -329,28 +329,15 @@ jet_binary: fn() -[Env, FS]> String Never! {
 
 // --- roots (Tools/agent/roots.sh) -------------------------------------------
 
-// The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`, the
-// file the shell tools source first.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
-    home: env_or("HOME", "")
-    path: "{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env"
-    text: files.read(path) ?? return None
-    found := ""
-    seen := false
-    loop raw in text.lines() {
-        line: raw.trim().removeprefix("export ").trim()
-        parts: line.partition("=")
-        if parts.sep == "" || parts.head != name -> next
-        value := parts.tail
-        quoted: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
-        if value.len() >= 2 && quoted -> value = value.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        found = value.replace("$HOME", home)
-        seen = true
-    }
-    if seen -> Val(found) else -> None
+// `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
+// over the environment (the shell tools source the file first), else
+// `fallback`; an empty value is unset. A file sys.env_file refuses leaves the
+// environment's.
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    vars: sys.env_file("{sys.config_dir() ?? ""}/jet/env") ?? sys.environment()
+    value: vars.get(name) ?? ""
+    if value != "" -> value.copy() else -> fallback.copy()
 }
-
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! { env_or(name, env_file_value(name) ?? fallback) }
 
 state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
 
