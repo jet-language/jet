@@ -13,7 +13,6 @@ use {
     hex: core.encoding.hex
     files: core.files
     process: core.process
-    term: core.term
 }
 
 ASSET_PATH: "Core/Text/Runtime/Assets/UnicodeNameIndex.jet"
@@ -83,15 +82,10 @@ asset_failures: fn(source: String) -> [String] Never! {
 }
 
 run: fn() {
-    source: files.read(ASSET_PATH) ?? {
-        term.eprint("unicode-name-asset: cannot read {ASSET_PATH}: {err}")
-        process.exit(1)
-        return
-    }
+    source: files.read(ASSET_PATH) ?? process.fail(1, "unicode-name-asset: cannot read {ASSET_PATH}: {err}")
     failures: asset_failures(source)
     if failures.len() > 0 {
-        loop failure in failures -> term.eprint("unicode-name-asset: {failure}")
-        process.exit(1)
+        process.fail(1, failures.map(failure -> "unicode-name-asset: {failure}").join("\n"))
     }
     print("unicode-name-asset: ok ({TREE_ROWS} rows)")
 }

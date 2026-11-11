@@ -319,15 +319,8 @@ agent_doc_flags_main: fn(args: [String]) -[FS, IO]> Int DocFlagsError! {
 }
 
 run: fn() {
-    if agent_doc_flags_main(process.args()) == {
-        .Ok(code) -> {
-            if code != 0 -> process.exit(code)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
+    code: agent_doc_flags_main(process.args()) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
 }
 
 error_lines: fn(errors: [String]) -> String Never! {

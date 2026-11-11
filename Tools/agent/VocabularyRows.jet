@@ -16,7 +16,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 PACKAGE_ROOTS: [String]{"Compiler", "Jetpack"}
@@ -146,15 +145,7 @@ vocabulary_rows_main: fn(args: [String]) -[FS]> String VocabularyRowsError! {
     Ok("vocabulary rows check passed ({count} vocabularies)")
 }
 
-run: fn() {
-    if vocabulary_rows_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(vocabulary_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 // The error text vocabulary_types reports for `text`, or "" when it accepts it.
 vocabulary_rows_error: fn(text: String) -> String Never! {

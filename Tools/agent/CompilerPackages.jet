@@ -108,20 +108,11 @@ run: fn() {
     }
     if at >= args.len() -> usage()
     rest: args[(at + 1)..<args.len()]
-    if command(root, args[at], rest) == .Err(error) {
-        term.eprint("CompilerPackages: {error.message}")
-        process.exit(1)
-    }
+    command(root, args[at], rest) ?? process.fail(1, "CompilerPackages: {err.message}")
 }
 
 usage: fn() -[Exec, IO]> Never {
-    term.eprint("usage: jet Tools/agent/CompilerPackages.jet [--root DIR] packages|sources [ENTRY]")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] roots|inputs")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
-    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
-    process.exit(2)
+    process.fail(2, "usage: jet Tools/agent/CompilerPackages.jet [--root DIR] packages|sources [ENTRY]\n       jet Tools/agent/CompilerPackages.jet [--root DIR] roots|inputs\n       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...\n       jet Tools/agent/CompilerPackages.jet [--root DIR] identity\n       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-\n       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
 }
 
 command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Exec, FS, IO, Time.Wait]> {

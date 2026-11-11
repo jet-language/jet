@@ -127,15 +127,8 @@ rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
 }
 
 run: fn() {
-    if rust_era_main() == {
-        .Ok(code) -> {
-            if code != 0 -> process.exit(code)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
+    code: rust_era_main() ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
 }
 
 #Test("harness tables are top-level tests/ tables and Tools/ci tables") {

@@ -208,15 +208,8 @@ runtime_effect_rows_main: fn(args: [String]) -[Exec, FS, IO, Time, Time.Wait]> I
 }
 
 run: fn() {
-    if runtime_effect_rows_main(process.args()) == {
-        .Ok(code) -> {
-            if code != 0 -> process.exit(code)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
+    code: runtime_effect_rows_main(process.args()) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
 }
 
 #Test("a declaration's row entries, sorted; no row is no effect") {

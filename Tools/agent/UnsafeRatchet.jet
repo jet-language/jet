@@ -1405,13 +1405,8 @@ unsafe_ratchet_main: fn(args: [String]) -[FS, Env, IO]> Bool RatchetError! {
 }
 
 run: fn() {
-    if unsafe_ratchet_main(process.args()) == {
-        .Ok(passed) -> if !passed -> process.exit(1)
-        .Err(error) -> {
-            term.eprint("unsafe ratchet: {error.message}")
-            process.exit(1)
-        }
-    }
+    passed: unsafe_ratchet_main(process.args()) ?? process.fail(1, "unsafe ratchet: {err.message}")
+    if !passed -> process.exit(1)
 }
 
 // ---------------------------------------------------------------------------

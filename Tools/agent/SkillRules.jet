@@ -238,15 +238,8 @@ skill_rules_main: fn() -[FS, IO]> Int SkillRulesError! {
 }
 
 run: fn() {
-    if skill_rules_main() == {
-        .Ok(code) -> {
-            if code != 0 -> process.exit(code)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
+    code: skill_rules_main() ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
 }
 
 #Test("an unmapped skill, a missing file, a repeat and a bad status are each reported") {

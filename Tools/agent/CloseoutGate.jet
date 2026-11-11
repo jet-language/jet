@@ -17,7 +17,6 @@ use {
     json: core.encoding.json
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 TOWER_STATE_PREFIX: "Tools/tower/.tower/"
@@ -32,10 +31,7 @@ run: fn() {
     refuse("usage: jet Tools/agent/CloseoutGate.jet check [MILESTONE]")
 }
 
-refuse: fn(reason: String) -[Exec, IO]> Never {
-    term.eprint("closeout gate: {reason}")
-    process.exit(2)
-}
+refuse: fn(reason: String) -[Exec, IO]> Never { process.fail(2, "closeout gate: {reason}") }
 
 // The checkout holding this script.
 repo_root: fn() -[Env, Exec, FS, IO]> String Never! {

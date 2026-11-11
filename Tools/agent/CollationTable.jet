@@ -12,7 +12,6 @@ use {
     crypto: core.crypto
     files: core.files
     process: core.process
-    term: core.term
 }
 
 ALLKEYS_PATH: "tests/data/unicode/uca/allkeys_CLDR.txt"
@@ -305,15 +304,7 @@ table_main: fn(args: [String]) -[FS]> String TableError! {
     Ok("collation-table: wrote {TARGET_PATH}")
 }
 
-run: fn() {
-    if table_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("allkeys rows parse into scalars and weight triples") {
     rows: parse_allkeys("@version 17.0.0\n0061 ; [.2075.0020.0002] # a\n006C 00B7 ; [.2528.0020.0002][.0000.011F.0002]\n") ?? panic(err.message)

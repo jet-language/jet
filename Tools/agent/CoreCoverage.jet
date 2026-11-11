@@ -196,11 +196,7 @@ Decision: struct {
 
 run: fn() {
     root: repo_root()
-    if root == "" {
-        term.eprint("Core coverage census: run from inside the Jet checkout")
-        process.exit(1)
-        return
-    }
+    if root == "" -> process.fail(1, "Core coverage census: run from inside the Jet checkout")
     process.exit(coverage_exit(process.args(), root))
 }
 

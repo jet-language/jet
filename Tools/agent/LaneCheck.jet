@@ -177,10 +177,7 @@ check_refused: fn(output: String, reason: String) -[Exec, IO]> () {
     process.exit(1)
 }
 
-usage: fn(text: String) -[Exec, IO]> Never {
-    term.eprint("usage: {text}")
-    process.exit(64)
-}
+usage: fn(text: String) -[Exec, IO]> Never { process.fail(64, "usage: {text}") }
 
 // The checkout holding this tool, else the nearest directory at or above the
 // working directory that holds it.
@@ -192,8 +189,7 @@ repo_root: fn() -[Env, Exec, FS, IO]> String Never! {
     dir := start.copy()
     loop !files.exists("{dir}{tool}") {
         if dir == "/" || dir == "" {
-            term.eprint("lane-check: run from inside the Jet checkout (no Tools/agent/LaneCheck.jet above {start})")
-            process.exit(1)
+            process.fail(1, "lane-check: run from inside the Jet checkout (no Tools/agent/LaneCheck.jet above {start})")
         }
         dir = files.dirname(dir)
     }

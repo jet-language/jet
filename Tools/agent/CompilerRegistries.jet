@@ -27,7 +27,6 @@ use {
     process: core.process
     regex: core.regex
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -210,10 +209,7 @@ run: fn() {
     fail(USAGE)
 }
 
-fail: fn(message: String) -[Exec, IO]> Never {
-    term.eprint("compiler registries: {message}")
-    process.exit(1)
-}
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "compiler registries: {message}") }
 
 jet_cli: fn() -[Env]> String Never! { process.env_nonempty("JET") ?? "jet" }
 

@@ -19,7 +19,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 SOURCE_PATH: "Compiler/Prelude/Diagnostics.jet"
@@ -922,15 +921,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     Ok("diagnostic rows check passed: {generated.len()} copies match; {sites.files} source files read, none builds a report by hand, and {sites.copies} runtime report copies match their rows")
 }
 
-run: fn() {
-    if diagnostic_rows_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(diagnostic_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 // The error text render_rows reports for `source`, or "" when it accepts it.
 diagnostic_rows_error: fn(source: String) -> String Never! {

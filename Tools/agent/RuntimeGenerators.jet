@@ -184,15 +184,8 @@ runtime_export_files: fn() -[FS]> String GeneratorError! {
 }
 
 run: fn() {
-    if runtime_generators_main(process.args()) == {
-        .Ok(message) -> {
-            if message != "" -> print(message)
-        }
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
+    message: runtime_generators_main(process.args()) ?? process.fail(1, err.message)
+    if message != "" -> print(message)
 }
 
 // Heap-free runtime literals are process-static texts or little-endian 64-bit

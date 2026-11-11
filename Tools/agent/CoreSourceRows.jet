@@ -2922,15 +2922,7 @@ core_source_rows_main: fn(args: [String]) -[FS]> String CoreRowsError! {
     Ok("generated {written.join(", ")} ({summary})")
 }
 
-run: fn() {
-    if core_source_rows_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(core_source_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 // The error text effect_rows reports for `source`, or "" when it accepts it.
 effect_rows_error: fn(source: String, machine: [EffectRow]?) -> String Never! {

@@ -38,7 +38,6 @@ use {
     json: core.encoding.json
     process: core.process
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -2206,13 +2205,8 @@ safety_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int GateE
 absolute: fn(path: String) -[Env, FS]> String Never! { files.absolute(path) ?? path.copy() }
 
 run: fn() {
-    if safety_main(process.args()) == {
-        .Ok(code) -> process.exit(code)
-        .Err(error) -> {
-            term.eprint("safety-gate: {error.message}")
-            process.exit(2)
-        }
-    }
+    code: safety_main(process.args()) ?? process.fail(2, "safety-gate: {err.message}")
+    process.exit(code)
 }
 
 // ---------------------------------------------------------------- tests

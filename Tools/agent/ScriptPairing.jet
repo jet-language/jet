@@ -63,7 +63,6 @@ use {
     files: core.files
     process: core.process
     sys: core.sys
-    term: core.term
 }
 
 ENTRIES_ROOT: "Tools/gauntlet/entries"
@@ -472,18 +471,15 @@ repo_root: fn() -[Env, FS]> String Never! {
     files.cwd() ?? "."
 }
 
-usage: fn() -[Exec, IO]> Never { cannot_run("usage: jet Tools/agent/ScriptPairing.jet --check [--base REV] | --census") }
-
-cannot_run: fn(message: String) -[Exec, IO]> Never {
-    term.eprint(message)
-    process.exit(64)
+usage: fn() -[Exec, IO]> Never {
+    process.fail(64, "usage: jet Tools/agent/ScriptPairing.jet --check [--base REV] | --census")
 }
 
 run: fn() {
     args: process.args()
     repo: repo_root()
     if args.len() == 1 && args[0] == "--census" {
-        paths: checkout_files(repo) ?? return cannot_run(err.message)
+        paths: checkout_files(repo) ?? process.fail(64, err.message)
         rows: census_rows(repo, paths, read_entries(repo))
         loop row in rows -> print(row)
         print(census_counts(rows))
@@ -492,8 +488,8 @@ run: fn() {
     if args.len() == 0 || args[0] != "--check" -> usage()
     base: if args.len() == 3 && args[1] == "--base" -> args[2].copy() else -> "HEAD"
     if args.len() != 1 && args.len() != 3 -> usage()
-    added: added_files(repo, base) ?? return cannot_run(err.message)
-    changed: changed_files(repo, base) ?? return cannot_run(err.message)
+    added: added_files(repo, base) ?? process.fail(64, err.message)
+    changed: changed_files(repo, base) ?? process.fail(64, err.message)
     entries: read_entries(repo)
     refused := refusals(repo, added, entries)
     refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
@@ -501,8 +497,7 @@ run: fn() {
         print("script pairing: ok ({added.len()} added file(s))")
         return
     }
-    loop line in refused -> term.eprint("script-pairing: {line}")
-    process.exit(65)
+    process.fail(65, refused.map(line -> "script-pairing: {line}").join("\n"))
 }
 
 #Test("a script is named by its extension or a non-Jet `#!` line; browser JS, subjects and Nix are exempt") {

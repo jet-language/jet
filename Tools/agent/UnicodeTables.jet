@@ -15,7 +15,6 @@ use {
     crypto: core.crypto
     files: core.files
     process: core.process
-    term: core.term
 }
 
 UCD_DIR: "tests/data/unicode/ucd"
@@ -949,15 +948,7 @@ tables_main: fn(args: [String]) -[FS]> String TableError! {
     Ok("unicode-tables: wrote {stale.len()} of {outputs.len()} outputs")
 }
 
-run: fn() {
-    if tables_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(tables_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("a decision tree splits at the middle leaf and returns the missing value outside") {
     leaves: [Leaf]{Leaf{lo: 1, hi: 2, value: "a"}, Leaf{lo: 5, hi: 5, value: "b"}}

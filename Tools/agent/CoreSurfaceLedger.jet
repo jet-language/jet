@@ -20,7 +20,6 @@ use {
     json: core.encoding.json
     process: core.process
     sys: core.sys
-    term: core.term
     text: core.text
     time: core.time
 }
@@ -4833,15 +4832,7 @@ repo_root: fn() -[Env, FS]> String Never! {
     }
 }
 
-run: fn() {
-    if ledger_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(ledger_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("edited sets, adds, removes, pops and pushes the item at a path") {
     doc: parse_json("{{\"a\": {{\"b\": [1, 2]}}, \"c\": \"x\"}}", "doc") ?? panic("the fixture document did not parse: {err.message}")

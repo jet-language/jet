@@ -180,14 +180,11 @@ run: fn() {
     }
     check_pin(state, "source-integrity-after")
     verdict: if all_pass(state.rows) -> "PASS" else -> "FAIL"
-    term.eprint("verify-full: {verdict}; complete evidence: {evidence}/verify-full-summary.tsv")
-    process.exit(if verdict == "PASS" -> 0 else -> 1)
+    summary: "verify-full: {verdict}; complete evidence: {evidence}/verify-full-summary.tsv"
+    if verdict == "PASS" -> term.eprint(summary) else -> process.fail(1, summary)
 }
 
-abort: fn(text: String) -[Exec, IO]> Never {
-    term.eprint(text)
-    process.exit(1)
-}
+abort: fn(text: String) -[Exec, IO]> Never { process.fail(1, text) }
 
 // The shared scratch root of Tools/agent/roots.sh.
 scratch_root: fn() -[Env]> String Never! {

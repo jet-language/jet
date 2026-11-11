@@ -57,11 +57,7 @@ Lowered: struct {
 }
 
 run: fn() {
-    code: main(process.args()) ?? {
-        term.eprint("core-module-check: {err.message}")
-        process.exit(2)
-        return
-    }
+    code: main(process.args()) ?? process.fail(2, "core-module-check: {err.message}")
     process.exit(code)
 }
 

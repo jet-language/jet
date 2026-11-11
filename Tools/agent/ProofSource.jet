@@ -47,10 +47,7 @@ run: fn() {
     print(source)
 }
 
-abort: fn(text: String) -[Exec, IO]> Never {
-    term.eprint(text)
-    process.exit(1)
-}
+abort: fn(text: String) -[Exec, IO]> Never { process.fail(1, text) }
 
 // The shared scratch root of Tools/agent/roots.sh.
 scratch_root: fn() -[Env]> String Never! {

@@ -9,7 +9,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 OUTPUT: "Compiler/JetRuntime/Tests/PluginErrorGoldens.h"
@@ -62,15 +61,7 @@ goldens_main: fn(args: [String]) -[FS]> String GoldenError! {
     Ok("plugin-error golden vectors: {tsv.trim_end().split("\n").to_list().len()}; pinned rustc 1.97.1")
 }
 
-run: fn() {
-    if goldens_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(goldens_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("an oracle row renders as one C golden with byte lengths") {
     assert_eq(render("1\t0\t2\t4100\t0a\n") ?? err.message, "{HEADER}    {{ 1, 0, 2, \"\\x41\\x00\", \"\\x0a\", 2, 1 }},\n}};\n")

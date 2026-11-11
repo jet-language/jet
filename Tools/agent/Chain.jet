@@ -135,25 +135,10 @@ run: fn() {
 }
 
 usage: fn() -[Exec, IO]> Never {
-    term.eprint("usage: jet Tools/agent/Chain.jet TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]")
-    term.eprint("       (LEVEL: check, s1, full, full+threads)")
-    term.eprint("       jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]")
-    term.eprint("       jet Tools/agent/Chain.jet seed-published INSTALL_DIR")
-    term.eprint("       jet Tools/agent/Chain.jet slot [--small|--release] -- CMD...")
-    term.eprint("       jet Tools/agent/Chain.jet diff TREE BASE REPO")
-    term.eprint("       jet Tools/agent/Chain.jet plan TREE DIFF.json")
-    term.eprint("       jet Tools/agent/Chain.jet inputs TREE")
-    term.eprint("       jet Tools/agent/Chain.jet dirhash DIR")
-    term.eprint("       jet Tools/agent/Chain.jet packhash DIR")
-    term.eprint("       jet Tools/agent/Chain.jet evict STORE CAP_GB")
-    term.eprint("       jet Tools/agent/Chain.jet trapscan ELF")
-    process.exit(64)
+    process.fail(64, "usage: jet Tools/agent/Chain.jet TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]\n       (LEVEL: check, s1, full, full+threads)\n       jet Tools/agent/Chain.jet export DIR [COMMIT] [PATCH...]\n       jet Tools/agent/Chain.jet seed-published INSTALL_DIR\n       jet Tools/agent/Chain.jet slot [--small|--release] -- CMD...\n       jet Tools/agent/Chain.jet diff TREE BASE REPO\n       jet Tools/agent/Chain.jet plan TREE DIFF.json\n       jet Tools/agent/Chain.jet inputs TREE\n       jet Tools/agent/Chain.jet dirhash DIR\n       jet Tools/agent/Chain.jet packhash DIR\n       jet Tools/agent/Chain.jet evict STORE CAP_GB\n       jet Tools/agent/Chain.jet trapscan ELF")
 }
 
-fail: fn(message: String) -[Exec, IO]> Never {
-    term.eprint("Chain.jet: {message}")
-    process.exit(1)
-}
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "Chain.jet: {message}") }
 
 absolute: fn(path: String) -[Env, Exec, FS, IO]> String Never! {
     if path.starts_with("/") -> return path.copy()

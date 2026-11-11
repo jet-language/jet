@@ -13,7 +13,6 @@ use {
     files: core.files
     process: core.process
     regex: core.regex
-    term: core.term
 }
 
 SPEC_PATH: "Docs/spec/syntax-decisions.md"
@@ -158,15 +157,7 @@ decision_index_main: fn(args: [String]) -[Exec, Env, FS, Time.Wait]> String Inde
     Ok("wrote decision index: {rows.len()} ratified decisions")
 }
 
-run: fn() {
-    if decision_index_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(decision_index_main(process.args()) ?? process.fail(1, err.message)) }
 
 repeated: fn(text: String, count: Int) -> String Never! {
     parts := [String]{}

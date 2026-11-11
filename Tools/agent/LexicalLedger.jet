@@ -11,7 +11,6 @@
 use {
     files: core.files
     process: core.process
-    term: core.term
 }
 
 SYNTAX: "Compiler/JetFoundation/Data/Syntax/Spellings.jet"
@@ -268,15 +267,7 @@ lexical_ledger_main: fn(args: [String]) -[FS]> String LedgerError! {
     Ok("wrote lexical ledger: {rows.len()} rows")
 }
 
-run: fn() {
-    if lexical_ledger_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(lexical_ledger_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("a row resolves a constant spelling and unescapes literal braces") {
     constants: [String]{"KW_X: \"comptime\"", "OTHER: 1"}

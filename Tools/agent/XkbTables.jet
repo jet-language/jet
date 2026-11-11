@@ -16,7 +16,6 @@ use {
     crypto: core.crypto
     files: core.files
     process: core.process
-    term: core.term
 }
 
 KEYSYMS_PATH: "tests/data/xkb/xkbcommon-keysyms.h"
@@ -391,15 +390,7 @@ table_main: fn(args: [String]) -[FS]> String TableError! {
     Ok("xkb-tables: wrote {TARGET_PATH} and {DATA_DIRECTORY}/")
 }
 
-run: fn() {
-    if table_main(process.args()) == {
-        .Ok(message) -> print(message)
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(1)
-        }
-    }
-}
+run: fn() { print(table_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("keysym header rows and Compose sequences parse") {
     rows: parse_keysyms("#define XKB_KEY_adiaeresis                    0x00e4  /* U+00E4 LATIN SMALL LETTER A WITH DIAERESIS */\n#define XKB_KEY_dead_acute                    0xfe51\n") ?? panic(err.message)

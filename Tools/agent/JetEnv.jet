@@ -57,13 +57,8 @@ Request: struct {
 }
 
 run: fn() {
-    if parse(process.args()) == {
-        .Ok(request) -> process.exit(launch(request))
-        .Err(error) -> {
-            term.eprint(error.message)
-            process.exit(64)
-        }
-    }
+    request: parse(process.args()) ?? process.fail(64, err.message)
+    process.exit(launch(request))
 }
 
 parse: fn(args: [String]) -> Request Err! {
