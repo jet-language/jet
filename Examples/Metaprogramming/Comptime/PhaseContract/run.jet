@@ -1,0 +1,34 @@
+// `#phase` tells the three phases apart: `.Preparation` in `comptime` code,
+// `.Build` in `build: fn` and `.Runtime` in the running program. A value made
+// while preparing keeps the phase it was made in, so the program can tell a
+// prepared record from one it makes itself. The site decides the phase, not
+// the optimizer, so every tier and the built program print the same lines.
+PREPARED: comptime { #phase }
+
+Stamp: struct {
+    phase: Phase
+    value: Int
+}
+
+PREP_STAMP: comptime { Stamp{phase: #phase, value: 6 * 7} }
+
+phase_label: fn(phase: Phase) -> String {
+    if phase == {
+        .Preparation -> "preparation"
+        .Build -> "build"
+        .Runtime -> "runtime"
+    }
+}
+
+build: fn(b: Build) { b.contribute("build_phase", phase_label(#phase)) }
+
+run: fn() {
+    print(phase_label(PREPARED))
+    print(#build.settings.build_phase)
+    print(phase_label(#phase))
+    run_stamp: Stamp{phase: #phase, value: 6 * 7}
+    print("{phase_label(PREP_STAMP.phase)} {PREP_STAMP.value}")
+    print("{phase_label(run_stamp.phase)} {run_stamp.value}")
+    print(PREP_STAMP.value == run_stamp.value && PREP_STAMP.phase != run_stamp.phase)
+    if #phase == .Runtime -> print("this line runs in the program")
+}

@@ -317,9 +317,11 @@ exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
 block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
 program. The evaluation site decides it, so `print(#phase)` in `run` prints
 `Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
-shows both sites. Do not confuse that language phase with `CompilerStage`,
-which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and
-describes when a checked fact becomes available.
+shows both sites, and [`PhaseContract`](../../../Examples/Metaprogramming/Comptime/PhaseContract/run.jet)
+adds the `build: fn` site and a prepared record that keeps `.Preparation`
+while the program reads it. Do not confuse that language phase with
+`CompilerStage`, which contains `Parsed`, `Resolved`, `Typed`, `Prepared`,
+and `Emitted` and describes when a checked fact becomes available.
 
 Metadata queries use typed records and typed failure. The closed failure
 variants are:
