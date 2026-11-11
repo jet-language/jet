@@ -13,8 +13,8 @@ STORE_REPRO_REPORT_SCHEMA: "jet-reproducibility-report-v1"
 STORE_REPRO_CERTIFICATION_STAGE_DIR: "reproducibility-staging"
 STORE_REPRO_INDEPENDENT_PREFIX: "independent-agreeing-v1:"
 
-STORE_REPRO_REPORT_SEQUENCE: shared ProcessSequence{next: 0}
-STORE_REPRO_CERTIFICATION_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_REPRO_REPORT_SEQUENCE: Shared{ProcessSequence{next: 0}}
+STORE_REPRO_CERTIFICATION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]> Int StoreError! {
     parent: files.join(roots.hangar_dir(), STORE_REPRO_CERTIFICATION_STAGE_DIR)
@@ -363,7 +363,7 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
                 report_path: store_repro_persist_report(roots, action_key, report)
                 return Err(store_repro_unreproducible_error(action_key, "conflicting bytes or provenance at `{difference.path}`; report `{report_path}`"))
             }
-            else -> {}
+            .None -> {}
         }
     }
 }
@@ -433,7 +433,7 @@ store_repro_nix_action_outputs: fn(entry: StoreEntry, producer: ProducerRecord) 
         name: fact.key.removeprefix("nix.output.")
         digest: if entry.named_outputs.get(name) == {
             .Val(digest) -> digest
-            else -> {
+            .None -> {
                 if name != "out" -> next
                 entry.envelope.output_hash
             }

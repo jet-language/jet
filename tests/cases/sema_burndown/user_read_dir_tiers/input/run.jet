@@ -5,10 +5,10 @@ DirectoryHost: trait {
     read_dir: fn(self, path: paths.Path) -> [paths.Path]
 }
 
-Host: struct {}
-
-impl Host.DirectoryHost {
-    read_dir: fn(self, path: paths.Path) -> [paths.Path] { [paths.Path]{path} }
+Host: struct {
+    impl DirectoryHost {
+        read_dir: fn(self, path: paths.Path) -> [paths.Path] { [paths.Path]{path} }
+    }
 }
 
 listing: fn<H: DirectoryHost>(host: H, path: paths.Path) -> Int {

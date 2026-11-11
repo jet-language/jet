@@ -67,7 +67,7 @@ NixEvalError: enum {
     is_missing: fn(self) -> Bool Never! {
         if self == {
             .Missing(_) -> true
-            else -> false
+            .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .Invalid(_) | .ResourceLimit(_) | .Syntax(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> false
         }
     }
 }
@@ -77,7 +77,7 @@ NixEvalError: enum {
 nixeval_public_error: fn(error: NixEvalError) -> NixEvalError Never! {
     if error == {
         .Syntax(_) | .Invalid(_) | .Missing(_) | .Cycle | .TypeMismatch(_, _) -> return NixEvalError.Invalid(error.message())
-        else -> {}
+        .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .ResourceLimit(_) | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> {}
     }
     error.copy()
 }
@@ -106,7 +106,7 @@ NixEvalRequest: enum {
             .Import(path, flake) -> {
                 if flake == {
                     .Val(scope) -> "@flake-import:{scope}\n{path}"
-                    else -> path
+                    .None -> path
                 }
             }
             .CrossTarget(target) -> "@target:{target}"

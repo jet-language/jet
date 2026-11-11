@@ -16,22 +16,22 @@ PublicationSemVer: struct {
     patch: Int
     pre: String?
     build: String?
-}
 
-impl PublicationSemVer.Equatable {
-    equal: fn(self, rhs: PublicationSemVer) -> Bool {
-        publication_precedence(self, rhs) == Ordering.Equal
+    impl Equatable {
+        equal: fn(self, rhs: PublicationSemVer) -> Bool {
+            publication_precedence(self, rhs) == Ordering.Equal
+        }
     }
-}
 
-impl PublicationSemVer.Comparable {
-    compare: fn(self, rhs: PublicationSemVer) -> Ordering {
-        publication_precedence(self, rhs)
+    impl Comparable {
+        compare: fn(self, rhs: PublicationSemVer) -> Ordering {
+            publication_precedence(self, rhs)
+        }
     }
-}
 
-impl PublicationSemVer.Display {
-    display: fn(self) -> String { publication_semver_display(self) }
+    impl Display {
+        display: fn(self) -> String { publication_semver_display(self) }
+    }
 }
 
 // SemVer::parse (:37-73).
@@ -193,31 +193,31 @@ PublicationOp: enum {
 PublicationComparator: struct {
     op: PublicationOp
     version: PublicationSemVer
-}
 
-impl PublicationComparator.Equatable {
-    equal: fn(self, rhs: PublicationComparator) -> Bool {
-        self.op == rhs.op && self.version == rhs.version
+    impl Equatable {
+        equal: fn(self, rhs: PublicationComparator) -> Bool {
+            self.op == rhs.op && self.version == rhs.version
+        }
     }
 }
 
 PublicationVersionReq: struct {
     sets: [[PublicationComparator]]
     raw: String
-}
 
-impl PublicationVersionReq.Equatable {
-    equal: fn(self, rhs: PublicationVersionReq) -> Bool {
-        if self.raw != rhs.raw || self.sets.len() != rhs.sets.len() -> return false
-        loop index in 0..<self.sets.len() {
-            a: self.sets[index]
-            b: rhs.sets[index]
-            if a.len() != b.len() -> return false
-            loop at in 0..<a.len() {
-                if a[at] != b[at] -> return false
+    impl Equatable {
+        equal: fn(self, rhs: PublicationVersionReq) -> Bool {
+            if self.raw != rhs.raw || self.sets.len() != rhs.sets.len() -> return false
+            loop index in 0..<self.sets.len() {
+                a: self.sets[index]
+                b: rhs.sets[index]
+                if a.len() != b.len() -> return false
+                loop at in 0..<a.len() {
+                    if a[at] != b[at] -> return false
+                }
             }
+            true
         }
-        true
     }
 }
 

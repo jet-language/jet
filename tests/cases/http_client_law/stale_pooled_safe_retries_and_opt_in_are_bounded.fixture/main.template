@@ -49,7 +49,7 @@ run: fn() {
     // Reset-readiness point 5.
     if safe.send(request("PUT", "denied")) == {
         .Err(_) -> {}
-        else -> panic("Safe must refuse PUT retry")
+        .Ok(_) -> panic("Safe must refuse PUT retry")
     }
     idem: http.Client.new().protocols(false, true, false).retries(.Idempotent).timeouts(2000,2000,2000,2000,2000,2000,2000)
     sixth: idem.send(request("GET", "warm5")) ?? panic("warm5")

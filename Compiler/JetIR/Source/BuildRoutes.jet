@@ -170,69 +170,90 @@ ir_list_swap: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int, first: Int, s
     ir_list_swap_bytes(m, b, left, right, held, width)
 }
 
-// `xs.__fill(start, end, pattern)`: both bounds clamp into 0..len (as
-// slice does) and element `start + i` becomes a copy of
-// `pattern[i % pattern.len()]`; an empty window or pattern writes nothing.
-// Plain data (ir_copy_needs, no drop) goes as byte moves: the first period,
-// then the filled prefix doubling onto itself, each copy starting at a
-// multiple of the period. Any other element drops the one it replaces and
-// stores a copy of its pattern element.
-ir_list_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, start_value: Int, end_value: Int, pattern: Int, span: Span) Never! {
-    start: ir_native_index(m, b, start_value, span)
-    end: ir_native_index(m, b, end_value, span)
-    if ir_failed(b) -> return
+// `xs.fill(range, value)` and `xs.fill_repeat(range, pattern)`: a range
+// outside 0..len stops with the bounds fault of `xs[range]`
+// (jet_rt_slice_end), and element `range.start + i` becomes a copy of
+// `pattern[i % pattern.len()]`; `fill`'s pattern is its one value. An empty
+// `fill_repeat` pattern stops as reading `pattern[0]` does, and a span that
+// is not a whole number of patterns ends with a partial one.
+ir_list_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, range: Int, pattern: Int, repeat: Bool, span: Span) Never! {
     stride: ir_list_stride(m, row)
     if stride == 0 -> return
-    length: ir_load_word(m, b, list, 0)
-    zero: ir_word_const(m, b, 0)
-    first: ir_word_clamp(m, b, start, zero, length)
-    last: ir_word_clamp(m, b, end, first, length)
-    count: ir_word_op(m, b, IROp.Sub, last, first)
-    period: ir_load_word(m, b, pattern, 0)
-    source: ir_load_word(m, b, pattern, 16)
+    if ir_kind_of(m, b, range) != .Aggregate -> return ir_fail(b, span, "fill over a range that is not a Range value")
+    bounds := [Int]{}
+    names: [String]{"start", "end", "exclusive"}
+    loop name in names {
+        member: ir_member_of(m, p, b, range, name) ?? return ir_fail(b, span, "fill over a Range without {name}")
+        bounds.push(ir_member_value(m, b, range, member))
+    }
+    loop index in 0..<2 {
+        bounds[index] = ir_native_index(m, b, bounds[index], span)
+    }
+    if ir_failed(b) -> return
+    stop_args := [Int]{bounds[0], bounds[1], bounds[2], ir_list_length(m, b, list)}
+    loop value in ir_location(m, b, b.line) -> stop_args.push(value)
+    word: ir_word_row(m)
+    stop: ir_runtime(m, b, "jet_rt_slice_end", stop_args, word)
+    count: ir_word_op(m, b, IROp.Sub, stop, bounds[0])
+    if repeat {
+        period: ir_load_word(m, b, pattern, 0)
+        zero: ir_word_const(m, b, 0)
+        empty: ir_bool_op(m, b, IROp.Eq, period, zero)
+        ir_open_if(b.f, empty, b.line)
+        ir_list_bounds_stop(m, b, period, zero)
+        ir_end(b.f, b.line)
+        source: ir_load_word(m, b, pattern, 16)
+        ir_list_fill_span(m, p, b, list, row, bounds[0], count, source, period, false)
+        return
+    }
+    // The value's bytes are the one-element pattern: an aggregate's slot is
+    // its storage already, taken as its address; any other value is stored
+    // raw into a frame cell, which takes no ownership of it.
+    aggregate: ir_kind_of(m, b, pattern) == .Aggregate
+    source: if aggregate -> ir_address_at(m, b, pattern, 0) else -> ir_out_slot(m, b, (stride + 7) /% 8)
+    if !aggregate -> ir_emit(b.f, IROp.Store, -1, source, 0, pattern, b.line)
+    one: ir_word_const(m, b, 1)
+    ir_list_fill_span(m, p, b, list, row, bounds[0], count, source, one, true)
+}
+
+// The fill fast path: `count` elements of `list` from `first` (native words)
+// become copies of the `period` (> 0) elements at `source`, repeated. A
+// `single` source is the address of one value (a frame cell or an
+// aggregate's slot), not a buffer word, and its period is 1.
+// Plain data (ir_copy_needs, no drop) goes as one runtime fill of bytes
+// (JetRuntime Collections.jet jet_rt_mem_fill: a word store for a 1-, 2-, 4-
+// or 8-byte period, else block copies). Any other element drops the one it
+// replaces and stores a copy of its pattern element.
+ir_list_fill_span: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, first: Int, count: Int, source: Int, period: Int, single: Bool) Never! {
+    stride: ir_list_stride(m, row)
     data: ir_load_word(m, b, list, 16)
-    some: ir_bool_op(m, b, IROp.Lt, zero, period)
-    ir_open_if(b.f, some, b.line)
     if !ir_copy_needs(m, p, row) && m.types[row].drop == "" {
         width: ir_word_const(m, b, stride)
         total: ir_word_op(m, b, IROp.Mul, count, width)
         period_bytes: ir_word_op(m, b, IROp.Mul, period, width)
         to: ir_element_address(m, b, data, first, stride)
-        filled: ir_sort_run_size(m, b, period_bytes, total)
-        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, source, filled}, -1)
-        exit: ir_open(b.f, IROp.Block, b.line)
-        _: ir_open(b.f, IROp.Loop, b.line)
-        more: ir_bool_op(m, b, IROp.Lt, filled, total)
-        ir_exit_unless(m, b, more, exit)
-        remaining: ir_word_op(m, b, IROp.Sub, total, filled)
-        moved: ir_sort_run_size(m, b, filled, remaining)
-        onto: ir_word_op(m, b, IROp.Add, to, filled)
-        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{onto, to, moved}, -1)
-        ir_emit(b.f, IROp.Add, filled, filled, moved, IR_OVERFLOW_WRAP, b.line)
-        ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
-        ir_end(b.f, b.line)
-        ir_end(b.f, b.line)
-    } else {
-        one: ir_word_const(m, b, 1)
-        next: ir_word_const(m, b, 0)
-        index: ir_count_open(m, b, count)
-        at: ir_word_op(m, b, IROp.Add, first, index)
-        target: ir_element_address(m, b, data, at, stride)
-        if m.types[row].drop != "" {
-            old: ir_load_at(m, b, target, 0, row)
-            ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
-        }
-        from: ir_element_address(m, b, source, next, stride)
-        item: ir_load_at(m, b, from, 0, row)
-        ir_store_at(m, p, b, target, 0, item)
-        ir_emit(b.f, IROp.Add, next, next, one, IR_OVERFLOW_WRAP, b.line)
-        wrapped: ir_bool_op(m, b, IROp.Eq, next, period)
-        ir_open_if(b.f, wrapped, b.line)
-        ir_emit(b.f, IROp.Copy, next, zero, -1, -1, b.line)
-        ir_end(b.f, b.line)
-        ir_count_close(m, b, index)
+        _: ir_runtime(m, b, "jet_rt_mem_fill", [Int]{to, source, period_bytes, total}, -1)
+        return
     }
+    zero: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    next: ir_word_const(m, b, 0)
+    index: ir_count_open(m, b, count)
+    at: ir_word_op(m, b, IROp.Add, first, index)
+    target: ir_element_address(m, b, data, at, stride)
+    if m.types[row].drop != "" {
+        old: ir_load_at(m, b, target, 0, row)
+        ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
+    }
+    from: if single -> source else -> ir_element_address(m, b, source, next, stride)
+    item: ir_load_at(m, b, from, 0, row)
+    ir_store_at(m, p, b, target, 0, item)
+    ir_emit(b.f, IROp.Add, next, next, one, IR_OVERFLOW_WRAP, b.line)
+    wrapped: ir_bool_op(m, b, IROp.Eq, next, period)
+    ir_open_if(b.f, wrapped, b.line)
+    ir_emit(b.f, IROp.Copy, next, zero, -1, -1, b.line)
     ir_end(b.f, b.line)
+    ir_count_close(m, b, index)
 }
 
 // The write view of `length` elements of the buffer `data` from `first`
@@ -1004,11 +1025,13 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
                 ir_list_swap(m, b, subject, element, operands[1], operands[2], span)
                 return -1
             }
-            .ListFill -> {
-                if operands.len() != 4 || operands[1] < 0 || operands[2] < 0 || operands[3] < 0 -> return ir_fail_slot(b, span, "fill without a window and a pattern")
-                if ir_list_element(m, p, b, operands[3]) != Val((element)) -> return ir_fail_slot(b, span, "fill from a List of another element type")
-                ir_list_fill(m, p, b, subject, element, operands[1], operands[2], operands[3], span)
-                ir_release(m, b, operands[3])
+            .ListFill | .ListFillRepeat -> {
+                repeat: operation == .ListFillRepeat
+                if operands.len() != 3 || operands[1] < 0 || operands[2] < 0 -> return ir_fail_slot(b, span, "fill without a range and a value")
+                if repeat && ir_list_element(m, p, b, operands[2]) != Val((element)) -> return ir_fail_slot(b, span, "fill from a List of another element type")
+                ir_list_fill(m, p, b, subject, element, operands[1], operands[2], repeat, span)
+                ir_release(m, b, operands[1])
+                ir_release(m, b, operands[2])
                 return -1
             }
             .ExtendList -> {
@@ -1124,7 +1147,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
                     .DequePeekFront -> "jet_list_first"
                     .DequePeekBack -> "jet_list_last"
                     .DequeContains -> "jet_list_contains"
-                    else -> "jet_list_get_opt"
+                    .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequeCapacity | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> "jet_list_get_opt"
                 }
                 result: ir_list_route(m, p, b, symbol, operands, ty, span)
                 loop operand in operands -> ir_release(m, b, operand)
@@ -1143,7 +1166,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(b, span, "split without a position")
                 return ir_queue_split(m, p, b, ty, subject, element, operands[1], span)
             }
-            else -> {}
+            .AtomicMethod(_) | .LenString | .ListTryNew | .ListTryWithCapacity | .TryInsertMap | .TryStringPush | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .RemoveMap | .CountList | .Counts | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .OrderingThen | .OrderingReverse | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequeFrom | .TryCollect | .ViewNew(_) -> {}
         }
     }
     if kind == .String {
@@ -1155,7 +1178,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             .Contains -> "jet_string_contains"
             .StartsWith -> "jet_string_starts_with"
             .EndsWith -> "jet_string_ends_with"
-            else -> ""
+            .AtomicMethod(_) | .LenList | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .RemoveList(_, _) | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> ""
         }
         if symbol != "" {
             result_row: if operation == .LenString -> int_row else -> bool_row
@@ -1618,7 +1641,7 @@ ir_builtin_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if operation == {
         .ListMinMax | .Indexed | .MapToList | .ToString
         | .RemoveList(_, _) -> return ir_fail_slot(b, span, "builtin {ir_builtin_name(operation)}")
-        else -> {}
+        .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .Push | .ListTryNew | .ListTryWithCapacity | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop | .PriorityQueuePop | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .MapMerge | .MapMergeWith | .InsertList | .RemoveMap | .CountList | .Counts | .ExtendList | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .Reverse | .SwapList | .ListFill | .Sort | .SortDesc | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Clear | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterNext | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .MapEqual | .MapFirst | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .MapPopFirst | .ListReplace | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetInsert | .SortedSetRemove | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .KeyOrdered(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferWrite(_) | .ByteBufferToBytes | .ByteBufferMethod(_) | .ByteBufferWithCapacity | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeDelete | .DequeToList | .DequeJoin | .DequeReverse | .DequeSplit | .DequeFrom | .TryCollect | .ViewNew(_) | .SplitWrite | .GetDisjointWrite | .ListFillRepeat -> {}
     }
     // A runtime handle receiver is written through the value behind it (a
     // HandleMut route operand); no other receiver has a write route here.
@@ -1810,7 +1833,7 @@ ir_fn_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kind: BodyF
             if ir_body_node(p, b, value).kind == {
                 .Lambda(lambda) -> return ir_lambda(m, p, b, ty, lambda, span)
                 .FnValue(inner) -> return ir_fn_value(m, p, b, ty, inner, span)
-                else -> {}
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
             }
             return ir_expr(m, p, b, value)
         }
@@ -2051,7 +2074,7 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     // place (ir_builtin's receiver).
     in_place: if operation == {
         .UpdateFirst | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .MapMut | .EditDisjoint | .DedupBy -> true
-        else -> false
+        .Map | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .EachMap | .MapAny | .MapAll | .MapFilter | .MapMap | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .Find | .Any | .BagAny | .All | .CountWhere | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Scan | .Position | .MinBy | .MaxBy | .Fold | .GroupBy | .CountBy | .Partition | .IsSortedBy | .ChunkWhile | .FilterMap | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .OptionMap | .ViewFold | .ViewMap -> false
     }
     if walks {
         source: ir_expr(m, p, b, receiver)
@@ -2195,7 +2218,7 @@ ir_closure_map_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
             mapped: ir_call_callback(m, p, b, callback, callback_ty, [Int]{key, value}, mapped_shape.value.ty, span)
             ir_map_set(m, p, b, result_row, result, key, mapped)
         }
-        else -> {
+        .EditDisjoint | .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .Find | .Any | .All | .CountWhere | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Scan | .Position | .MinBy | .MaxBy | .Fold | .GroupBy | .CountBy | .UpdateFirst | .Partition | .DedupBy | .IsSortedBy | .ChunkWhile | .FilterMap | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .OptionMap | .ViewFold | .ViewMap -> {
             next_value: ir_call_callback(m, p, b, callback, callback_ty, [Int]{result, key, value}, result_row, span)
             if ir_has_drop(m, b, result) -> ir_emit(b.f, IROp.Drop, -1, result, -1, -1, b.line)
             if ir_kind_of(m, b, result) == .Aggregate {
@@ -2457,7 +2480,7 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         .TryFilter -> return ir_closure_try_filter(m, p, b, ty, list, element, callback, callback_ty, span)
         .GroupBy -> return ir_closure_group_by(m, p, b, result_row, list, element, callback, span)
         .CountBy -> return ir_closure_count_by(m, p, b, result_row, list, element, callback, span)
-        else -> return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)}")
+        .MapMut | .EachMap | .MapAny | .MapAll | .MapFilter | .MapMap | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .BagAny | .TakeWhile | .SkipWhile | .DedupBy | .IsSortedBy | .ChunkWhile | .FilterMap | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .OptionMap -> return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)}")
     }
 }
 
@@ -3670,16 +3693,19 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
 // Core's `__to_bits_f32(x)` (leaf "to_bits_f32"): F32 `value`'s binary32
 // bits as an Int in 0..<2^32, stored over a zeroed frame word and read back
 // whole; `__from_bits_f32(bits)` ("from_bits_f32"): the F32 whose bits are
-// the low 32 of Int `value`, which Core keeps in 0..<2^32 so the Int is its
-// own word. No conversion runs, so a payload and a signaling NaN cross
-// unchanged.
+// the low 32 of `value`, which Core keeps in 0..<2^32 so the Int is its own
+// word. The argument arrives as that Int or as the I64 word a native call
+// narrowed it to; both store the same frame word. No conversion runs, so a
+// payload and a signaling NaN cross unchanged.
 ir_f32_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, leaf: String, result: Type, span: Span) -> Int Never! {
     to_bits: leaf == "to_bits_f32"
-    input: m.types[b.f.slot_type[value]].kind
+    input_type: b.f.slot_type[value]
+    input: m.types[input_type].kind
     row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     output: m.types[row].kind
-    if to_bits && (input != .Float32 || output != .Int) -> return ir_fail_slot(b, span, "F32 bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
-    if !to_bits && (input != .Int || output != .Float32) -> return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(m.types[b.f.slot_type[value]].ty)}")
+    if to_bits && (input != .Float32 || output != .Int) -> return ir_fail_slot(b, span, "F32 bits of {ir_type_name(m.types[input_type].ty)}")
+    word_input: input == .Word && m.types[input_type].ty == (Type.IntN{signed: true, bits: 64})
+    if !to_bits && ((input != .Int && !word_input) || output != .Float32) -> return ir_fail_slot(b, span, "F32 from bits of {ir_type_name(m.types[input_type].ty)}")
     pointer: ir_pointer_row(m)
     area: ir_temp(m, b, pointer)
     ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
@@ -4330,12 +4356,21 @@ ir_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: 
 // ir_route whose tuple result's kernel items carry the declared `labels`
 // (core_call_native_return_labels).
 ir_route_labeled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
+    ir_route_declared(m, p, b, symbol, None, inputs, borrowed, result, labels, span)
+}
+
+// ir_route_labeled through `declared` when it is given: the route a
+// jet.runtime binding's Jet signature projects (ir_route_of_signature), which
+// no route table row repeats.
+ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name: ir_route_symbol(symbol)
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
         if ir_route_inline(m, p, b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
     if ir_environment_route(name) == .Val(environment) -> return ir_environment_call(m, p, b, environment, inputs, result, span)
-    route: ir_runtime_route(name) ?? return ir_fail_slot(b, span, "runtime route {name}")
+    found := declared.copy()
+    if found == None -> found = ir_runtime_route(name)
+    route: found ?? return ir_fail_slot(b, span, "runtime route {name}")
     if !route.native_lists && ir_route_nested(route) -> return ir_fail_slot(b, span, "runtime route {name} crosses a nested List, which only a Jet runtime provider reads")
     if route.params.len() != inputs.len() -> return ir_fail_slot(b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
     args := [Int]{}
@@ -4504,12 +4539,12 @@ ir_route_labeled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, 
                         held: ir_handle_runtime(p, item_name) ?? return ir_fail_slot(b, span, "runtime route {name} Option argument of {shown}")
                         !ir_option_inline(m, slot_row) && held.runtime == handle_name
                     }
-                    else -> false
+                    .Flag | .Float | .Text | .Unit | .HandleMut(_) | .List(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> false
                 }
                 if !lent -> return ir_fail_slot(b, span, "runtime route {name} Option argument of {shown}")
                 lowered.push(slot)
             }
-            else -> return ir_fail_slot(b, span, "runtime route {name} argument carrier {carrier}")
+            .Unit | .Tuple(_) -> return ir_fail_slot(b, span, "runtime route {name} argument carrier {carrier}")
         }
     }
     dst := -1
@@ -4895,7 +4930,7 @@ ir_route_store_tuple: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, o
 ir_route_shell: fn(m: &IRModule, p: IRProgram, ty: Type, carrier: IRRouteCarrier) -> Bool Never! {
     carrier_name: if carrier == {
         .Handle(name) | .HandleMut(name) -> name
-        else -> { return false }
+        .Word | .Flag | .Float | .Text | .Unit | .List(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> { return false }
     }
     name: ir_nominal_name(ir_untag(ty)) ?? return false
     handle: ir_handle_runtime(p, name) ?? return false
@@ -5350,24 +5385,7 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         .Prelude(name) -> name
         .SourceOwned -> { return ir_fail_slot(b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
-    // A compile-time value that reaches a route reading ambient state is
-    // refused as the call's effect when evaluation gets there
-    // (ir_comptime_ambient_refusal): the ambient random stream as
-    // non-deterministic, anything else as a Tier-2 effect.
-    if p.comptime_values && b.impure == 0 {
-        if ir_comptime_ambient_refusal(symbol) == .Val(what) {
-            refusal: if what == IR_COMPTIME_AMBIENT_RANDOM -> "Comptime.nondeterministic" else -> "Comptime.refuse"
-            _: ir_host_method_words(m, p, b, Type.Bool, "{refusal}:{what}", [Int]{}, span)
-        }
-    }
-    // Inside a build invocation's `#Impure` block, a route that reads or
-    // writes ambient process state with no system call the runtime child's
-    // filter could refuse is refused by the compiler as it is reached.
-    if p.invocation && b.impure > 0 {
-        if ir_invocation_ambient_refusal(symbol) == .Val(what) {
-            _: ir_host_method_words(m, p, b, Type.Bool, "Impure.refuse:{what}", [Int]{}, span)
-        }
-    }
+    ir_route_ambient_refusals(m, p, b, symbol, span)
     if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(m, p, b, ty, args, span)
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(m, p, b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(m, p, b, args, span)
@@ -5375,8 +5393,40 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
     if ir_lazy_core_call(m, p, b, symbol, ty, args, span) == .Val(result) -> return result
+    // Bounded Core slots take I64, but `keep<T>` returns its argument at
+    // the checked type: it does not narrow exact Int.
+    typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
+    labels: core_call_native_return_labels(canonical.module_name, canonical.member)
+    ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, typed_carrier_value, span)
+}
+
+// The refusals a route call reading ambient state meets before it runs. A
+// compile-time value that reaches one is refused as the call's effect when
+// evaluation gets there (ir_comptime_ambient_refusal): the ambient random
+// stream as non-deterministic, anything else as a Tier-2 effect. Inside a
+// build invocation's `#Impure` block, a route that reads or writes ambient
+// process state with no system call the runtime child's filter could refuse
+// is refused by the compiler as it is reached.
+ir_route_ambient_refusals: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, span: Span) Never! {
+    if p.comptime_values && b.impure == 0 {
+        if ir_comptime_ambient_refusal(symbol) == .Val(what) {
+            refusal: if what == IR_COMPTIME_AMBIENT_RANDOM -> "Comptime.nondeterministic" else -> "Comptime.refuse"
+            _: ir_host_method_words(m, p, b, Type.Bool, "{refusal}:{what}", [Int]{}, span)
+        }
+    }
+    if p.invocation && b.impure > 0 {
+        if ir_invocation_ambient_refusal(symbol) == .Val(what) {
+            _: ir_host_method_words(m, p, b, Type.Bool, "Impure.refuse:{what}", [Int]{}, span)
+        }
+    }
+}
+
+// The route `symbol` (`declared`, else its table row) on the checked
+// argument expressions `args`, typed `ty`: an exact Int argument the route
+// consumes (borrow_mask false) crosses as its native I64 unless
+// `typed_carrier_value`.
+ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], typed_carrier_value: Bool, span: Span) -> Int Never! {
     slots := [Int]{}
-    borrow_mask: canonical.signature.borrow_mask
     loop (index, arg) in args {
         slot: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
@@ -5385,9 +5435,6 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
             if access == .Write -> ir_make_unique(m, p, b, slot)
         }
-        // Bounded Core slots take I64, but `keep<T>` returns its argument at
-        // the checked type: it does not narrow exact Int.
-        typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
         if !typed_carrier_value && index < borrow_mask.len() && !borrow_mask[index] && ir_untag(ir_ty(p, b, arg)) == Type.Int {
             slots.push(ir_core_native_int(m, b, slot, span))
             if ir_failed(b) -> return -1
@@ -5396,8 +5443,70 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         }
     }
     result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
-    labels: core_call_native_return_labels(canonical.module_name, canonical.member)
-    ir_route_labeled(m, p, b, symbol, slots, borrow_mask, result, labels, span)
+    ir_route_declared(m, p, b, symbol, declared, slots, borrow_mask, result, labels, span)
+}
+
+// The route a jet.runtime binding's Jet signature projects onto its runtime
+// export `symbol`: Int and the machine integers as a Word, Bool as a Flag,
+// Float, String as Text, a List of those, and as a result also an Option of
+// one or of a tuple, or a tuple whose items are those or an Option of one (in
+// the checked tuple's member order), as sema admits them (Guest.jet
+// sema_guest_check_runtime_binding). None for a type no carrier holds.
+ir_route_of_signature: fn(symbol: String, params: [Type], returned: Type?) -> IRRoute? Never! {
+    carriers := [IRRouteCarrier]{}
+    loop ty in params {
+        carrier: ir_route_carrier_of(ty) ?? return None
+        carriers.push(carrier)
+    }
+    result: ir_route_result_of(returned) ?? return None
+    Val(IRRoute{symbol: symbol.copy(), export: symbol.copy(), native_lists: true, params: carriers, result: result})
+}
+
+ir_route_result_of: fn(returned: Type?) -> IRRouteResult? Never! {
+    ty: returned ?? return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_unit_type(ty) -> return Val(IRRouteResult.Plain{carrier: IRRouteCarrier.Unit})
+    if ir_untag(ty) == .Option(inner) {
+        some: ir_route_carrier_of(inner) ?? return None
+        return Val(IRRouteResult.Option{some: some})
+    }
+    if ir_untag(ty) == .Tuple(fields) {
+        items := [IRRouteCarrier]{}
+        loop field in fields {
+            item: ir_route_carrier_of(field.ty) ?? return None
+            items.push(item)
+        }
+        return Val(IRRouteResult.Tuple{items: items})
+    }
+    carrier: ir_route_carrier_of(ty) ?? return None
+    Val(IRRouteResult.Plain{carrier: carrier})
+}
+
+// The carrier of one value: the scalars, Text, a List, and inside a result an
+// Option or a tuple (sema admits those only there).
+ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
+    if ir_untag(ty) == {
+        .Int | .IntN(_, _) -> Val(IRRouteCarrier.Word)
+        .Bool -> Val(IRRouteCarrier.Flag)
+        .Float -> Val(IRRouteCarrier.Float)
+        .String -> Val(IRRouteCarrier.Text)
+        .List(item) -> {
+            elem: ir_route_carrier_of(item) ?? return None
+            Val(IRRouteCarrier.List{elem: elem})
+        }
+        .Option(inner) -> {
+            some: ir_route_carrier_of(inner) ?? return None
+            Val(IRRouteCarrier.Option{some: some})
+        }
+        .Tuple(fields) -> {
+            items := [IRRouteCarrier]{}
+            loop field in fields {
+                item: ir_route_carrier_of(field.ty) ?? return None
+                items.push(item)
+            }
+            Val(IRRouteCarrier.Tuple{items: items})
+        }
+        .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+    }
 }
 
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written
@@ -5553,7 +5662,7 @@ IR_COMPTIME_AMBIENT_RANDOM: "the ambient random stream"
 // (JetEval Native.jet jet_eval_native_refused) refuses the clock, OS
 // randomness, files and the terminal, but these routes answer from memory,
 // so a compile-time value would bake one build's answer into every run; the
-// builder puts a refusal before each such call (ir_core_call_routed).
+// builder puts a refusal before each such call (ir_route_ambient_refusals).
 // None for every other route. The wall-clock override stays: `time.now`
 // reads it before its clock read, which the filter refuses as the clock.
 ir_comptime_ambient_refusal: fn(symbol: String) -> String? Never! {
@@ -5564,6 +5673,7 @@ ir_comptime_ambient_refusal: fn(symbol: String) -> String? Never! {
         "jet_sys_executable_raw" -> Val("the running executable's path")
         "jet_sys_cpu_count_raw" -> Val("the host's processor count")
         "jet_compute_simd_lanes" -> Val("the host's SIMD dispatch")
+        "jet_sys_timing_host" -> Val("the host's fixed-timing admission")
         else -> None
     }
 }

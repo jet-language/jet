@@ -1,0 +1,29 @@
+apply: fn(f: fn(Int) -> Int, value: Int) -> Int {
+    f(value)
+}
+
+// Reached only as the value `run` passes to `apply`.
+double: fn(value: Int) -> Int {
+    value * 2
+}
+
+// Reached by a call.
+greet: fn(name: String) -> String {
+    "hello, {name}"
+}
+
+// Nothing reaches `never_called`.
+never_called: fn(count: Int) -> Int {
+    count * 3 + 1
+}
+
+// The program's first word selects the job; no call names it.
+#Job
+tidy: fn() {
+    print("tidied")
+}
+
+run: fn() {
+    print(greet("jet"))
+    print(apply(double, 21))
+}

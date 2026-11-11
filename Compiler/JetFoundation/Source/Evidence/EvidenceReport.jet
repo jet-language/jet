@@ -206,20 +206,12 @@ evidence_outcome_test_state: fn(value: EvidenceOutcome) -> Int? Never! {
         .Skipped -> Val(2)
         .Unavailable -> Val(3)
         .Error -> Val(4)
-        else -> None
+        .Proved | .Generated | .Checked | .Unchecked | .Incomplete | .NotObserved -> None
     }
 }
 
 evidence_expectation_code: fn(value: EvidenceExpectation) -> Int Never! {
     if value == EvidenceExpectation.Ordinary -> 0 else -> 1
-}
-
-evidence_expectation_from_code: fn(code: Int) -> EvidenceExpectation? Never! {
-    if code == {
-        0 -> Val(EvidenceExpectation.Ordinary)
-        1 -> Val(EvidenceExpectation.ExpectedFailure)
-        else -> None
-    }
 }
 
 evidence_merge_error_text: fn(error: EvidenceMergeError) -> String Never! {
@@ -319,53 +311,8 @@ evidence_record_with_expectation: fn(record: &&EvidenceRecord, expectation: Evid
     Ok(value)
 }
 
-// Consuming builders retain the record's single owner; the setters borrow only
-// the canonical payload/reference.
-evidence_record_with_facet: fn(record: &&EvidenceRecord, facet: EvidenceFacet) -> EvidenceRecord Never! {
-    value := record
-    value.facet = facet
-    value
-}
-
-evidence_record_set_facet: fn(record: &EvidenceRecord, facet: EvidenceFacet) Never! {
-    record.facet = facet
-}
-
-evidence_record_with_derivation: fn(record: &&EvidenceRecord, derivation: DerivationRecord) -> EvidenceRecord Never! {
-    value := record
-    value.derivation = Val(derivation_record_reference(derivation))
-    value
-}
-
 evidence_record_set_derivation: fn(record: &EvidenceRecord, derivation: DerivationRecord) Never! {
     record.derivation = Val(derivation_record_reference(derivation))
-}
-
-evidence_record_clear_derivation: fn(record: &EvidenceRecord) Never! { record.derivation = None }
-
-evidence_record_claim_name: fn(record: EvidenceRecord) -> String Never! {
-    record.identity.claim_id
-}
-
-// Despite its name the Rust accessor returns the source path, not detail.
-evidence_record_seed_or_detail: fn(record: EvidenceRecord) -> String Never! {
-    record.source.path
-}
-
-evidence_record_with_report_id: fn(record: &&EvidenceRecord, report_id: String) -> EvidenceRecord Never! {
-    value := record
-    if value.identity.report_id != report_id {
-        value.identity = evidence_identity_for_record(report_id, value.identity.claim_id, value.producer, value.kind, value.source, value.count, value.detail)
-    }
-    value
-}
-
-evidence_record_state_code: fn(record: EvidenceRecord) -> Int Never! {
-    evidence_outcome_test_state(record.outcome) ?? return if {
-        evidence_outcome_is_failure(record.outcome) -> 1
-        evidence_outcome_is_incomplete(record.outcome) -> 3
-        else -> 0
-    }
 }
 
 evidence_record_checked_derivation: fn(record: EvidenceRecord) -> DerivationRecord Never! {
@@ -397,16 +344,6 @@ evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&Der
     report.derivations = loop fresh_item in report.derivations -> fresh_item
     report.derivations.sort_by((left: DerivationRecord, right: DerivationRecord) -> left.id <=> right.id)
     reference
-}
-
-evidence_report_invalidate_derivations: fn(report: &EvidenceReport, current: DerivationIdentity) -> Int Never! {
-    count := 0
-    loop index in 0..<report.derivations.len() {
-        if derivation_record_invalidate_if_identity_changed(report.derivations[index], current) {
-            count += 1
-        }
-    }
-    count
 }
 
 evidence_report_add_record_with_derivation: fn(report: &EvidenceReport, record: &&EvidenceRecord, derivation: &&DerivationRecord) EvidenceMergeError! {
@@ -507,10 +444,6 @@ evidence_projection_from_record: fn(record: EvidenceRecord) -> EvidenceProjectio
     chain = loop fresh_item in chain -> fresh_item
     chain.sort_by((left: EvidenceChainLink, right: EvidenceChainLink) -> evidence_chain_order(left, right))
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
-}
-
-evidence_projection_name: fn(row: EvidenceProjection) -> String Never! {
-    "{row.source.path}:{row.source.line} via {evidence_producer_name(row.producer)}"
 }
 
 evidence_source_order: fn(left: EvidenceSource, right: EvidenceSource) -> Ordering Never! {

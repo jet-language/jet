@@ -26,7 +26,7 @@ compiler_fs_errno: fn(operation: I64, path: I64, code: I64, error: I64) -> I64 {
     }
     compiler_fs_error(kind, operation, path, code, compiler_fs_cause(operation, code), error)
 }
-// The cause of OS error `code`. A run that `jet run --allow=FS.Read:<path>`
+// The cause of OS error `code`. A run that `jet run --allow='FS.Read("<path>")'`
 // confined (JET_READ_SCOPE names the paths; JetBackend Loader.jet
 // x64_confine_reads) is refused every other read with EACCES: that cause
 // names the refusal E1803 and the paths the run may read.
@@ -37,11 +37,17 @@ compiler_fs_cause: fn(operation: I64, code: I64) -> I64 {
     if (scope == I64{0}) -> return cause
     jet_rt_string_builder_push(cause, rt_static_text("; E1803: this run may read only "))
     jet_rt_string_builder_push(cause, scope)
-    jet_rt_string_builder_push(cause, rt_static_text(" (`--allow=FS.Read:<path>`)"))
+    jet_rt_string_builder_push(cause, rt_static_text(" (`--allow='FS.Read(\"<path>\")'`)"))
     jet_rt_string_drop(scope)
     cause
 }
-compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool {
+// Whether a leaf may pass `path` to the kernel: no NUL byte, and the effect
+// scopes in force admit it (Authority.jet effect_scope_admit_path) as an
+// operation that follows a final link; compiler_fs_link_path is the one that
+// does not. Else the leaf's IOError goes through `error`.
+compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool { compiler_fs_admit(path, operation, true, error) }
+compiler_fs_link_path: fn(path: I64, operation: I64, error: I64) -> Bool { compiler_fs_admit(path, operation, false, error) }
+compiler_fs_admit: fn(path: I64, operation: I64, follow: Bool, error: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(path) {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
@@ -50,7 +56,7 @@ compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool {
         }
         at += I64{1}
     }
-    true
+    effect_scope_admit_path(path, follow, operation, error)
 }
 compiler_fs_fault: fn(path: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Read")) -> return false
@@ -232,7 +238,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     I64{1}
 }
 #Export(c) jet_files_read_link_os: fn(path: I64, output: I64, error: I64) -> I64 {
-    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    if !compiler_fs_link_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     scratch: jet_rt_alloc(I64{32}, I64{8})
     capacity := I64{256}
     loop {
@@ -298,6 +304,38 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     }
     jet_rt_free(scratch, I64{32}, I64{8})
     compiler_fs_bytes_take(bytes, limit, count, output, len)
+    I64{1}
+}
+// FileReader.read_into(buffer, limit) (#5976): one read of at most `limit`
+// bytes appended to the caller's List<U8> at `header` [len@0][capacity@8]
+// [data@16]; the count is the output, 0 at end of file. A List without room
+// grows (rt_host_u8_list_room), so a caller that clears and reuses its List
+// reads without allocating: the bytes go straight into it, and the read's
+// 32 error words sit in its spare capacity past the read.
+#Export(c) jet_std_file_reader_read_into: fn(reader: I64, header: I64, maximum: I64, output: I64, error: I64) -> I64 {
+    path: fd_word(reader, I64{24})
+    if compiler_fs_fault(path, error) -> return I64{0}
+    if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
+        count: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
+        cause: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("read_into needs a positive byte count, got "))
+        rt_text_push_number(cause, count)
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
+    }
+    limit := I64{16777216}
+    if (jet_int_compare(maximum, limit) < I64{0}) -> limit = jet_int_owned_to_i64(maximum)
+    rt_host_u8_list_room(header, limit + I64{40})
+    length: rt_text_word(header)
+    into: wrapping(rt_text_word(wrapping(header + I64{16})) + length * RT_HOST_U8_STRIDE)
+    scratch: wrapping(into + limit * RT_HOST_U8_STRIDE + I64{7}).bit_and(I64{-8})
+    count := I64{0}
+    loop {
+        count = jet_fd_read_raw(reader, into, limit, scratch)
+        if (count >= I64{0} || rt_text_word(wrapping(scratch + I64{8})) != I64{4}) -> break
+    }
+    if (count < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(wrapping(scratch + I64{8})), error)
+    rt_text_store(header, length + count)
+    rt_text_store(output, jet_int_owned_from_i64(count))
     I64{1}
 }
 // FileReader.seek(position): std Seek::seek(SeekFrom::Start(position)) on

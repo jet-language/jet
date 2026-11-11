@@ -3,12 +3,14 @@
 // (jet_cli_native_level: O2, O0 under the `debug` profile; the build option
 // flags over the profile), plus the functions the IR builder could not
 // build, each counted loop sema's loop proof covers as it lowered
-// (ir_loop_proof_rows), the main the build gives the program (JetIR
-// EntryOwned.jet) and the invocation's selected canonical-pass gaps.
+// (ir_loop_proof_rows), each masked branch (ir_masked_branch_rows), the main
+// the build gives the program (JetIR EntryOwned.jet), the host its
+// `timing: .Fixed` values start on, and the invocation's selected
+// canonical-pass gaps.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-    jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
-    jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
+    jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, body_fixed_timing, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
+    jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_masked_branch_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
     decisions_sys: core.sys
 }
 
@@ -19,9 +21,15 @@ JetCLIDecisions: struct {
     unbuilt: [String]
     // ir_loop_proof_rows of the built program.
     loops: [String]
+    // ir_masked_branch_rows of the built program.
+    masked: [String]
     // The program's main: "program-owned", or why it runs under the process
     // root (ir_entry_root_need).
     main: String
+    // The host the program's `timing: .Fixed` values start on: "" when it
+    // holds none; otherwise what an unconfirmed host does (the entry's
+    // admission under `policy.harden`, JetIR Build.jet ir_timing_admitted).
+    timing_host: String
 }
 
 // The build options `jet inspect decisions` optimizes under, as `jet build`
@@ -51,18 +59,24 @@ jet_cli_opt_options: fn(level: Int, build: BuildOptions) -> IROptOptions {
 }
 
 // Builds `inputs` into one IR module from its entry and optimizes it as
-// `build` (the build options) has `jet build` do.
-jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads) -> JetCLIDecisions {
+// `build` (the build options) has `jet build` do; `harden` is the entry
+// package's `policy.harden`.
+jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads, harden: Bool) -> JetCLIDecisions {
     checked := inputs.move()
     declarations := jet_driver_checked_declarations(checked)
-    built := ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", ir_checks_stock(), threads)
+    timing_host := ""
+    if body_fixed_timing(checked.functions) -> timing_host = if harden -> "policy.harden refuses an unconfirmed host at start" else -> "an unconfirmed host runs it; policy.harden would refuse one at start"
+    checks := ir_checks_stock()
+    checks.harden = harden
+    built := ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, threads)
     unbuilt := [String]{}
     loop failure in built.failures -> unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     loops: ir_loop_proof_rows(built.program)
+    masked: ir_masked_branch_rows(built.program)
     need: ir_entry_root_need(built.program)
     main: if need == "" -> "program-owned" else -> "process root: {need}"
     report: ir_optimize_module_measured(built.program, jet_cli_opt_options(jet_cli_native_level(build), build), threads)
-    JetCLIDecisions{report: report, unbuilt: unbuilt.move(), loops: loops, main: main}
+    JetCLIDecisions{report: report, unbuilt: unbuilt.move(), loops: loops, masked: masked, main: main, timing_host: timing_host.move()}
 }
 
 jet_cli_decisions_report: fn(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
@@ -71,7 +85,9 @@ jet_cli_decisions_report: fn(decisions: JetCLIDecisions, scope: String, file: St
         text := "decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
         loop row in decisions.unbuilt -> text = "{text}unbuilt {row}\n"
         loop row in decisions.loops -> text = "{text}{row}\n"
+        loop row in decisions.masked -> text = "{text}{row}\n"
         text = "{text}main: {decisions.main}\n"
+        if decisions.timing_host != "" -> text = "{text}timing host: {decisions.timing_host}\n"
         if canonical_route_gaps.len() > 0 -> text = "{text}{jet_cli_canonical_route_gap_text(canonical_route_gaps)}"
         return text
     }
@@ -86,7 +102,9 @@ jet_cli_decisions_report: fn(decisions: JetCLIDecisions, scope: String, file: St
         jet_cli_status_field("aggregates_replaced", jet_cli_status_int(r.aggregates_replaced)),
         jet_cli_status_field("unbuilt", jet_cli_status_texts(decisions.unbuilt)),
         jet_cli_status_field("loop_proofs", jet_cli_status_texts(decisions.loops)),
+        jet_cli_status_field("masked_branches", jet_cli_status_texts(decisions.masked)),
         jet_cli_status_field("main", jet_cli_status_text(decisions.main)),
+        jet_cli_status_field("timing_host", jet_cli_status_text(decisions.timing_host)),
     }
     // Explicit opt-in gaps are a separately labeled extension, never execution records.
     if canonical_route_gaps.len() > 0 -> fields.push(jet_cli_status_field("canonical_route_gaps", jet_cli_status_array(jet_cli_canonical_route_gap_values(canonical_route_gaps))))
@@ -121,7 +139,7 @@ jet_cli_inspect_decisions_host: fn(job: JetCLIInspectJob, source: String) -> Jet
             threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
             build := build_options_stock("build")
             if job.build == .Val(given) -> build = given.copy()
-            decisions: jet_cli_decisions(inputs, build, threads)
+            decisions: jet_cli_decisions(inputs, build, threads, front.compile.harden)
             report: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }

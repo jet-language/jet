@@ -1,0 +1,28 @@
+# #6151: under `dead_code: remove` the built package's own top-level functions
+# are lowered only when the entry's roots reach them, as a dependency's are.
+# The roots here are the entry `run` and the job `tidy`; `greet` is reached by a
+# call and `double` as a value `run` passes. `never_called` is checked but never
+# reaches the IR builder, and `dead_code: keep` lowers it again.
+# JET_TRACE_DETAIL=functions writes one `ir.function` event per body the IR
+# builder receives.
+fixture: entry_bodies_lower_only_when_reached.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_TRACE_DETAIL=functions
+step: jet build --optimize=none --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"never_called\",\"cat\":\"sema.function\"" # the unreached function is still checked
+file: trace.json !~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # but not lowered
+file: trace.json ~ "{\"name\":\"run\",\"cat\":\"ir.function\"" # the entry is lowered
+file: trace.json ~ "{\"name\":\"tidy\",\"cat\":\"ir.function\"" # so is the job, which no call names
+file: trace.json ~ "{\"name\":\"greet\",\"cat\":\"ir.function\"" # and the function the entry calls
+file: trace.json ~ "{\"name\":\"double\",\"cat\":\"ir.function\"" # and the callback it passes as a value
+step: jet build --optimize=none --dead-code=keep --trace=keep.json main.jet
+exit: 0
+file: keep.json ~ "{\"name\":\"never_called\",\"cat\":\"ir.function\"" # `dead_code: keep` lowers every function of the package
+step: jet run main.jet
+exit: 0
+stdout: = "hello, jet\n42\n"
+step: jet run main.jet -- tidy
+exit: 0
+stdout: = "tidied\n" # the job still runs by its word

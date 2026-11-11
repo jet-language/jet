@@ -9,12 +9,12 @@ contained: fn(name: String, err: PluginError) {
             assert(fault.frames[0].function == name)
             print("{name}:contained")
         }
-        else -> assert(false)
+        .Denied(_) | .Defect(_) | .Budget(_, _) -> assert(false)
     }
 }
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:."])
+    policy: Authority.from_rights(["FS.Read(\".\")"])
     reader: plugin.load("out_of_bounds.wat", policy)
     _peeked: reader.peek() ?? {
         contained("peek", err)

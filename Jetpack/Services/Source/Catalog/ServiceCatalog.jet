@@ -328,7 +328,7 @@ ServicePresetKind: enum {
             .Nginx | .Adminer -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/"}
             .Minio -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/minio/health/live"}
             .Blackfire | .Tailscale -> ReadyProbe.Exec{command: "true"}
-            else -> services_tcp_readiness(port)
+            .Caddy | .Cassandra | .Clickhouse | .Cockroachdb | .Couchdb | .DynamodbLocal | .Elasticmq | .Elasticsearch | .Garage | .Httpbin | .Influxdb | .KafkaConnect | .Kafka | .Keycloak | .Meilisearch | .Memcached | .Mongodb | .Mosquitto | .Nats | .Nixseparatedebuginfod | .Opensearch | .OpentelemetryCollector | .Prometheus | .Rabbitmq | .Rustfs | .Sqld | .Temporal | .Tideways | .Typesense | .Varnish | .Vault | .Wiremock -> services_tcp_readiness(port)
         }
     }
 
@@ -356,7 +356,7 @@ ServicePresetKind: enum {
             .OpentelemetryCollector -> services_prepare_config(files.join(data_dir, "otel-collector.yaml"), "receivers: {{}}\nprocessors: {{}}\nexporters: {{}}\nservice:\n  pipelines: {{}}\n", "OpenTelemetry")
             .Prometheus -> services_prepare_config(files.join(data_dir, "prometheus.yml"), "global:\n  scrape_interval: 15s\n", "Prometheus")
             .Varnish -> services_prepare_config(files.join(data_dir, "default.vcl"), "vcl 4.1;\nbackend default {{\n  .host = \"127.0.0.1\";\n  .port = \"8080\";\n}}\n", "Varnish")
-            else -> {}
+            .Redis | .Minio | .Adminer | .Blackfire | .Caddy | .Cassandra | .Clickhouse | .Cockroachdb | .Couchdb | .DynamodbLocal | .Elasticmq | .Elasticsearch | .Httpbin | .Influxdb | .Keycloak | .Meilisearch | .Memcached | .Mongodb | .Nats | .Nixseparatedebuginfod | .Opensearch | .Rabbitmq | .Rustfs | .Sqld | .Tailscale | .Temporal | .Tideways | .Typesense | .Vault | .Wiremock -> {}
         }
     }
 }

@@ -705,7 +705,7 @@ op_open_read: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
             is_table = false
         }
         .Int32(n) -> n_field = n
-        else -> {}
+        .NotUsed | .Text(_) | .Coll(_) | .Int64(_) | .Real(_) | .Program(_) | .Table(_) | .TableRef(_) | .FuncDef(_) | .FuncCtx(_, _) | .Mem(_) | .Vtab(_) | .IntArray(_) | .Expr(_) -> {}
     }
     ci: run.alloc_cursor<H>(h, db, v, r.p1, n_field, conn.CURTYPE_BTREE)
     v.csr[ci].i_db = i_db

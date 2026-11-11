@@ -14,23 +14,24 @@ use jet_foundation.[
     ImportKind,
     Item,
     MARKER_ALLOW,
-    MARKER_ARITHMETIC,
     MARKER_DEV_PANEL,
     MARKER_KERNEL,
     MARKER_MEMO,
+    MARKER_POLICY,
     MARKER_REACTIVE,
     MARKER_STATE,
     MARKER_TARGET,
-    MARKER_TRANSITION,
-    MARKER_WASM_EXPORT,
     Marker,
     NamedType,
+    PolicyDeclaration,
+    PolicyKey,
     Program,
     Span,
     Stmt,
     SymbolID,
     SymbolKind,
     Type,
+    arithmetic_mode_parse,
 ]
 
 SemaFunctionHeaderMarkerGate: struct {
@@ -301,62 +302,47 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
             sema_function_header_default_idents(then_value, found)
             sema_function_header_default_idents(else_value, found)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
-}
-
-sema_function_header_active_marker_gates: fn(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
-    gates := [SemaFunctionHeaderMarkerGate]{}
-    if function.is_unsafe -> gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
-    if function.is_replayable -> gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
-    if function.is_must_use -> gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
-    if function.is_inline -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_inline_always -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_reactive -> gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
-    gates
-}
-
-sema_function_header_check_marker_gates: fn(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
-    valid := true
-    loop gate in sema_function_header_active_marker_gates(function) {
-        allowed := false
-        loop name in function_allowed_markers {
-            if name == gate.name -> allowed = true
-        }
-        if !allowed {
-            diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
-            valid = false
-        }
-    }
-    valid
 }
 
 // The function rules whose meaning the parser projects onto `Func` fields
-// that the checker, foreign stage and lowering read, plus `#Arithmetic`,
-// which the body checker reads as the function's arithmetic policy
-// (sema_function_arithmetic_policy); the marker row itself adds nothing.
+// that the checker, foreign stage and lowering read.
 // The descriptive rules are read by their own passes, never by the body
-// check: `#Job` and its `#Every` schedule by the job artifact and name
+// check: `#Job` and its `every:` schedule by the job artifact and name
 // checks (Jobs.jet), `#Doc` by the job and CLI schema docs, `#Deprecated`
 // by the lifecycle pass (Edition.jet), `#Scalar` by Core usage, `#Meta` by
-// the marker rules, and `#Policy` by the policy wrappers and the call
-// routes that apply them (CallablePolicies.jet).
+// the marker rules, and `#Policy` by the policy wrappers, the call routes
+// that apply them (CallablePolicies.jet), and the body checker, which reads
+// `#Policy(arithmetic: mode)` as the function's arithmetic policy
+// (sema_function_arithmetic_policy).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post" || name == "Job" || name == "Every" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
 }
 
-// (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
-// a function opens its lexical fixed-width arithmetic mode for the whole
-// body; an argument that names no mode opens none.
+// The first `#Policy(arithmetic: mode)` of a function or
+// method opens its lexical fixed-width arithmetic mode for the whole body.
+// A mode the menu does not name is the parser's E0930 and opens none.
 sema_function_arithmetic_policy: fn(markers: [Marker]) -> ArithmeticPolicyFact? Never! {
     loop marker in markers {
-        if marker.name != MARKER_ARITHMETIC -> next
-        if marker.args.len() == 0 -> return None
-        mode: if marker.args[0] == {
-            .Expr(value) -> sema_function_arithmetic_mode(value)
-            else -> None
-        } ?? return None
-        return Val(ArithmeticPolicyFact{mode: mode, scope_span: marker.span, operation_span: marker.span, operation: None})
+        if marker.name != MARKER_POLICY -> next
+        loop index in 0..<marker.args.len() {
+            label: if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(written) -> written.name else -> ""
+            if label != "arithmetic" -> next
+            mode: if marker.args[index] == {
+                .Expr(value) -> sema_function_arithmetic_mode(value)
+                .EffectRow(_, _) -> None
+            } ?? return None
+            return Val(ArithmeticPolicyFact{mode: mode, scope_span: marker.span, operation_span: marker.span, operation: None})
+        }
+    }
+    None
+}
+
+// The arithmetic mode a `#Policy(…) { … }` block declares, if any.
+sema_policy_arithmetic_mode: fn(declarations: [PolicyDeclaration]) -> ArithmeticMode? Never! {
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.Arithmetic && declaration.value == .Arithmetic(mode) -> return Val(mode)
     }
     None
 }
@@ -367,14 +353,9 @@ sema_function_arithmetic_mode: fn(value: Expr) -> ArithmeticMode? Never! {
         .Ident(name, _, _) -> name
         .Field(_, member, _, _) -> member
         .EnumLit(_, variant, _, _, _, _, _) -> variant
-        else -> ""
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
     }
-    if word == {
-        "Checked" -> Val(ArithmeticMode.Checked)
-        "Wrapping" -> Val(ArithmeticMode.Wrapping)
-        "Saturating" -> Val(ArithmeticMode.Saturating)
-        else -> None
-    }
+    arithmetic_mode_parse(word)
 }
 
 // The header forms the body checker does not handle yet. Each one records
@@ -406,16 +387,16 @@ sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -
         // Kernel.jet checks. `#Memo` is checked by sema_check_memoized_function
         // (E0939/E0940) and the effect pass (E0938); its result cache is the
         // body's memo facts (sema_function_header_memo_config). A
-        // `#Target(JS|Wasm)` or `#WasmExport` marker is the parsed
+        // `#Target(JS|Wasm)` or `#Export(wasm)` marker is the parsed
         // `function.web_marker`, which WebPartition.jet checks. A
-        // `#State`/`#Transition` marker is the parsed
+        // `#State(S)` or `#State(A -> B)` marker is the parsed
         // `function.state_requires`/`state_transition`, which StateFacts.jet
         // validates and Typestate.jet checks at each call. An
         // `#Allow(jet.LintName, "why")` is a lint allowance over the body
         // (LintAllowances.jet), validated by MarkerRules. A `#DevPanel` panel is
         // an ordinary Jet body; the devtools publication gate
         // (Calls/Devtools.jet) reads the marker to find the panel's state.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || ((marker.name == MARKER_TARGET || marker.name == MARKER_WASM_EXPORT) && function.web_marker != None) || (marker.name == MARKER_STATE && function.state_requires != None) || (marker.name == MARKER_TRANSITION && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
+        if sema_function_header_marker_projected(marker.name) || (marker.name == MARKER_REACTIVE && function.is_reactive) || (marker.name == MARKER_KERNEL && function.kernel != None) || marker.name == MARKER_MEMO || marker.name == MARKER_ALLOW || marker.name == MARKER_DEV_PANEL || (marker.name == MARKER_TARGET && function.web_marker != None) || (sema_marker_is_wasm_export(marker) && function.web_marker != None) || (marker.name == MARKER_STATE && (function.state_requires != None || function.state_transition != None)) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next
@@ -441,7 +422,7 @@ sema_function_header_inline_has_core_mem: fn(module_row: SemaRegistrationModule)
             .Unqualified(module_alias, _, items, _, _) -> module_alias == "core.mem" || (loop item in items {
                 if "{module_alias}.{item.original}" == "core.mem" -> break true
             } ?? false)
-            else -> false
+            .File(_, _) -> false
         }
         if has_core_mem {
             return true
@@ -499,7 +480,6 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
                 .Local(local, local_span) -> {
                     if local == name -> uses.push(local_span.copy())
                 }
-                else -> {}
             }
             sema_function_header_variadic_expr(value, name, uses)
         }
@@ -548,7 +528,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
         }
         // Scope wrappers (`#Unsafe { }`, regions, groups, …) stay out of the
         // v1 scan, as in the Rust walk.
-        else -> {}
+        .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> {}
     }
 }
 
@@ -603,7 +583,7 @@ sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) 
                     sema_function_header_variadic_expr(entry.value, name, uses)
                 }
                 .Value(value) -> sema_function_header_variadic_expr(value, name, uses)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
         .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, uses)
@@ -616,6 +596,6 @@ sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) 
         .Str(parts, _, _) -> loop part in parts {
             if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, uses)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }

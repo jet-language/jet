@@ -176,10 +176,10 @@ ir_opt_stops_quiet: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
         }
         .Div | .Rem | .FloorDiv | .Mod -> {
             kind: ir_opt_stops_kind(m, f, f.a[at])
-            kind == .Float || kind == .Float32 || (kind == .Int && f.c[at] == IR_OVERFLOW_WRAP)
+            kind == .Float || kind == .Float32 || (kind == .Int && ir_overflow_wraps(f.c[at]))
         }
         .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Sqrt | .IntBig | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StreamStore | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable -> true
-        else -> false
+        .Shl | .Shr -> false
     }
 }
 

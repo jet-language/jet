@@ -1,0 +1,22 @@
+use core.process
+
+// Ending its own process is the `Exec.Exit` leaf, so a signature bound to
+// that leaf covers `process.exit` and `process.exit_unmapped`.
+stop_now: fn(code: Int) -[Exec.Exit]> Never {
+    process.exit(code)
+}
+
+#Unsafe("the case checks the leaf of the unmapped exit")
+stop_unmapped: fn(code: Int) -[Exec.Exit]> Never {
+    process.exit_unmapped(code)
+}
+
+run: fn() {
+    print("bye")
+    if process.args().len() > 5 {
+        #Unsafe("the case checks the leaf of the unmapped exit") {
+            stop_unmapped(4)
+        }
+    }
+    stop_now(3)
+}

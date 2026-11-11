@@ -109,7 +109,7 @@ priv chacha20_core: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -119,7 +119,7 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
@@ -152,7 +152,7 @@ priv u32_words: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
     state := chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -290,7 +290,7 @@ xchacha20poly1305_open: fn(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [
 }
 
 /// RFC 9106 Argon2id with bounded portable memory and one to eight lanes.
-argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
+#Unsafe("crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call") argon2id: fn(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 || memory_kib < 8192 || memory_kib > 262144 || iterations < 1 || iterations > 10 || lanes < 1 || lanes > 8 || output_len < 16 || output_len > 64 {
         return Err(.Length)
     }
@@ -329,13 +329,13 @@ all_zero: fn(bytes: [U8]) -> Bool Never! {
     diff == U8{0}
 }
 
-secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the secret's raw bytes and wipes them") secret_bytes: fn(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them") shared_secret_bytes: fn(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the signing seed's raw bytes and wipes them") signing_key_bytes: fn(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
+#Unsafe("crypto expert: the caller takes custody of the X25519 private key's raw bytes and wipes them") x25519_secret_bytes: fn(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 open_v1_body: fn(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)
@@ -505,7 +505,7 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
 }
 
 // Masks are explicitly wrapping fixed-width subtraction.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     a := x[0]
     b := x[1]
@@ -688,7 +688,7 @@ mix_columns: fn(s: &[U8]) Never! {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 xtime: fn(a: U8) -> U8 Never! {
     (a << 1).bit_xor((U8{0x1b}.bit_and((U8{0} - (a >> 7)))))
 }
@@ -774,11 +774,13 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     }
     work := [U64]{}
     saved := [U64]{}
+    reference := [U64]{}
     address_block := [U64]{}
     input_block := [U64]{}
     loop _ in 0..<128 {
         work.push(U64{0})
         saved.push(U64{0})
+        reference.push(U64{0})
         address_block.push(U64{0})
         input_block.push(U64{0})
     }
@@ -806,19 +808,8 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                     }
                     if data_independent && index %% 128 == 0 -> argon2_next_addresses(address_block, input_block, saved)
                     random_word: argon2_random_word(memory, address_block, data_independent, index, previous_position * 128)
-                    reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
-                    same_lane: reference_lane == lane
-                    area: if {
-                        pass == 0 && slice == 0 -> index - 1
-                        pass == 0 && same_lane -> slice * segment_length + index - 1
-                        pass == 0 -> slice * segment_length - (if index == 0 -> 1 else -> 0)
-                        same_lane -> lane_length - segment_length + index - 1
-                        else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
-                    }
-                    start: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
-                    reference_index: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
-                    reference_position: reference_lane * lane_length + reference_index
-                    argon2_fill_block(memory, work, saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
+                    __argon2_reference_block(memory, reference, random_word, pass, slice, index, lane, lanes, segment_length, lane_length)
+                    __argon2_fill_block(memory, work, saved, reference, previous_position * 128, position * 128, pass != 0)
                 }
             }
         }
@@ -870,6 +861,28 @@ argon2_random_word: fn(memory: [U64], address_block: [U64], data_independent: Bo
     memory[previous]
 }
 
+/// RFC 9106 3.4.1 and 3.4.2: copy into `block` the reference block for the
+/// block at `index` of `slice` in `lane`, chosen by the pseudo-random word:
+/// its high half picks the lane (the current one in the first slice of the
+/// first pass), its low half J1 the block of the reference area. From the
+/// second half of the first pass on, the word is a previous block's: the
+/// data-dependent addressing of Argon2id.
+__argon2_reference_block: fn(memory: [U64], block: &[U64], random_word: U64, pass: Int, slice: Int, index: Int, lane: Int, lanes: Int, segment_length: Int, lane_length: Int) Never! {
+    reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
+    same_lane: reference_lane == lane
+    area: if {
+        pass == 0 && slice == 0 -> index - 1
+        pass == 0 && same_lane -> slice * segment_length + index - 1
+        pass == 0 -> slice * segment_length - (if index == 0 -> 1 else -> 0)
+        same_lane -> lane_length - segment_length + index - 1
+        else -> lane_length - segment_length - (if index == 0 -> 1 else -> 0)
+    }
+    start: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
+    reference_index: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
+    at: (reference_lane * lane_length + reference_index) * 128
+    loop i in 0..<128 -> block[i] = memory[at + i]
+}
+
 /// RFC 9106 3.4.2: map J1 (below 2^32) onto the reference area.
 argon2_mapping: fn(j1: U64, area: Int) -> Int Never! {
     x: Int.from_u64((j1 * j1) >> 32)
@@ -895,11 +908,11 @@ argon2_next_addresses: fn(address_block: &[U64], input_block: &[U64], saved: &[U
     loop i in 0..<128 -> address_block[i] = (address_block[i]).bit_xor(saved[i])
 }
 
-/// Compress block `previous` with block `reference` into block `next` of
-/// `memory` (word offsets); later passes XOR into the existing block.
-argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], previous: Int, reference: Int, next: Int, with_xor: Bool) Never! {
+/// Compress block `previous` of `memory` with the reference block into
+/// block `next` (word offsets); later passes XOR into the existing block.
+__argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], reference: [U64], previous: Int, next: Int, with_xor: Bool) Never! {
     loop i in 0..<128 {
-        mixed: (memory[previous + i]).bit_xor(memory[reference + i])
+        mixed: (memory[previous + i]).bit_xor(reference[i])
         work[i] = mixed
         if with_xor -> saved[i] = (mixed).bit_xor(memory[next + i]) else -> saved[i] = mixed
     }
@@ -933,7 +946,7 @@ argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int
 
 /// BlaMka G: BLAKE2b G with each x + y replaced by
 /// x + y + 2 * lo32(x) * lo32(y), all modulo 2^64.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     lo: U64{0xffffffff}
     a := v[ia]
@@ -1197,7 +1210,7 @@ blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, en
 }
 
 /// BLAKE2b G (RFC 7693 3.1): right rotations by 32, 24, 16 and 63.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 blake2b_mix: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int, x: U64, y: U64) Never! {
     a := v[ia]
     b := v[ib]

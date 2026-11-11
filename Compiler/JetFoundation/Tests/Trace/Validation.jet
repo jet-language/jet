@@ -38,7 +38,7 @@ use jet_foundation.[
     loop text in invalid {
         if jettrace_unsigned(.Integer(text.copy()), "x") == {
             .Err(error) -> assert_eq(error.message, "x is not an unsigned integer")
-            else -> panic("unsigned overflow accepted")
+            .Ok(_) -> panic("unsigned overflow accepted")
         }
     }
     skeleton := jettrace_sample_skeleton()

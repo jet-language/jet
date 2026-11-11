@@ -58,7 +58,7 @@ nix_index_parse_oracle_record: fn(value: Dyn, system: String) -> NixIndexOracleC
         .Val(declared) -> {
             if nix_index_string_value(declared, "oracle record system") != system -> return Err(NixIndexError.Invalid("oracle record has the wrong system"))
         }
-        else -> {}
+        .None -> {}
     }
     outputs: nix_index_parse_oracle_outputs(nix_index_field(map, "outputs"))
     names := [String]{}
@@ -81,7 +81,7 @@ nix_index_parse_oracle_record: fn(value: Dyn, system: String) -> NixIndexOracleC
     cache_admitted := false
     if map.get("cache") == {
         .Val(flag) -> cache_admitted = pkg_json_bool(flag) ?? return Err(NixIndexError.Invalid("oracle cache field must be boolean"))
-        else -> {}
+        .None -> {}
     }
     Ok(NixIndexOracleCandidate{record, cache_admitted})
 }
@@ -106,7 +106,7 @@ nix_index_parse_oracle_outputs: fn(value: Dyn) -> [NixIndexOutputWire] NixIndexE
                 outputs.push(NixIndexOutputWire{name: entry.key, store_path: path})
             }
         }
-        else -> return Err(NixIndexError.Invalid("oracle outputs must be an array or object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(NixIndexError.Invalid("oracle outputs must be an array or object"))
     }
     Ok(outputs)
 }
@@ -144,7 +144,7 @@ nix_index_producer_generate_with_hydra_paths: fn(channel: String, system: String
         reason: nix_index_coverage_reason(candidate, store_paths, hydra_output_paths)
         if reason == {
             .Val(text) -> not_indexed.push(NixIndexCoverageMiss{attrpath: candidate.record.attrpath, reason: text})
-            else -> records.push(candidate.record)
+            .None -> records.push(candidate.record)
         }
     }
     document: nix_index_generated_document(channel, revision, system, released_unix, records, not_indexed)

@@ -206,7 +206,8 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
         }
         .Switched(marker: marker, body: body, span: span) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:switched"
-            badge: "#{marker.name}"
+            // `#Off(.Release)` names the condition menu's one entry.
+            badge: if marker.args.len() > 0 -> "#{marker.name}(.Release)" else -> "#{marker.name}"
             add_node(g, node_id, "switched", badge, span.into(), x, y, [badge], ["toggle_switch_state", "source_jump"])
             project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70)
         }

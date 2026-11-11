@@ -37,7 +37,7 @@ store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: Stri
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                else -> return Err(StoreError.IO(error))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(error))
             }
         }
     }
@@ -48,11 +48,11 @@ store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: Stri
             files.remove(temporary).drop("the partial bundle is disposable")
             if error == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(StoreError.IO(error))
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(StoreError.IO(error))
             }
             if files.read_bytes(path) != bytes -> return Err(StoreError.InvalidData("project Nix CAS bundle digest collides"))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     Ok(digest)
 }

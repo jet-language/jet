@@ -385,8 +385,8 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     source: registry_coverage_files.read("Compiler/Prelude/Facts.jet") ?? panic("read Compiler/Prelude/Facts.jet: {err}")
     declared := [String]{}
     loop line in source.split("\n") {
-        if !line.starts_with("fact ") || !line.contains("$gates: [provider") -> next
-        parts: line.split("$name: \"").to_list()
+        if !line.starts_with("fact ") || !line.contains("gates: [provider") -> next
+        parts: line.split("name: \"").to_list()
         if parts.len() < 2 -> next
         declared.push(parts[1].split("\"").to_list()[0])
     }

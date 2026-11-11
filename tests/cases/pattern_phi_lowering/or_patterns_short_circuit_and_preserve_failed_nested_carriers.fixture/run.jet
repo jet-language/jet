@@ -17,7 +17,7 @@ produce_option: fn(kind: Int) -> Payload? Never! {
 option_binding: fn(kind: Int) -> Int Never! {
     if produce_option(kind) == {
         .Val(.A(n)) | .Val(.B(n)) -> n
-        else -> 0
+        .None -> 0
     }
 }
 
@@ -30,14 +30,14 @@ produce_result: fn(kind: Int) -> Int Failure! {
 result_binding: fn(kind: Int) -> Int Never! {
     if produce_result(kind) == {
         .Ok(n) | .Err(.Expected(n)) -> n
-        else -> 0
+        .Err(_) -> 0
     }
 }
 
 result_nested_binding: fn(kind: Int) -> Int Never! {
     if produce_result(kind) == {
         .Err(.Other(n)) | .Err(.Expected(n)) -> n
-        else -> 0
+        .Ok(_) -> 0
     }
 }
 

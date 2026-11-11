@@ -54,7 +54,7 @@ hit_at: fn(expression: Expr) -> Int Never! {
         .MethodCall(_, _, method_span, _, _, _, _) -> method_span.start
         .Call(call, _) -> call.name_span.start
         .Ident(_, span, _) -> span.start
-        else -> -1
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> -1
     }
 }
 
@@ -210,7 +210,7 @@ fallback_frame: fn(fallback: OrFallback) -> String Never! {
             }
             "fallback:return"
         }
-        else -> "fallback:other"
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> "fallback:other"
     }
 }
 
@@ -300,7 +300,7 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
                 walk_expr(entry.value, with_frame(chain, "wrap"), walk, hits)
             }
             .Value(value) -> walk_expr(value, with_frame(chain, "wrap"), walk, hits)
-            else -> {}
+            .ByteText(_) | .Empty -> {}
         }
         .EnumLit(_, _, _, args, _, _, _) -> loop argument in args {
             if argument == { .Positional(value) | .Named(_, value) -> walk_expr(value, with_frame(chain, "wrap"), walk, hits) }
@@ -317,7 +317,7 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
                 }
                 .Return(returned, _) -> if returned == .Val(returned_value) -> walk_expr(returned_value, other, walk, hits)
                 .Panic(_, args) -> walk_args(args, "other", chain, walk, hits)
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
@@ -337,7 +337,7 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
             walk_expr(head, with_frame(chain, "other"), walk, hits)
             loop step in steps -> walk_expr(step.value, with_frame(chain, "other"), walk, hits)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -402,7 +402,7 @@ walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) N
             walk_body(then_body, block, walk, hits)
             if else_body == .Val(body) -> walk_body(body, block, walk, hits)
         }
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
 }
 
@@ -488,7 +488,7 @@ module_probes: fn(program: Program, module_name: String, member: String) -> [Pro
                     }
                 }
             }
-            else -> {}
+            .File(_, _) -> {}
         }
     }
     probes

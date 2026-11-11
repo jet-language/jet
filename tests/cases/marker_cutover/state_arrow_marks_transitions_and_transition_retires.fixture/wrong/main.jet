@@ -1,0 +1,12 @@
+Door: struct {
+    state { Closed, Open }
+
+    #State(_ -> Closed) new: fn() -[]> Door { Door{} }
+    #State(Closed -> Open) open: fn(self: &&Door) -[]> Door { self }
+    #State(Open) label: fn(self) -[]> String { "open" }
+}
+
+run: fn() {
+    door := Door.new()
+    print(door.label())
+}

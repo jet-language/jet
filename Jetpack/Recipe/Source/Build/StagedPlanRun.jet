@@ -409,14 +409,14 @@ StagedPlanWriteFailure: struct {
 recipe_write_staged_plan_files: fn(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) StagedPlanWriteFailure! -[FS]> {
     if files.write_bytes(files.join(staging, "fragment.plan"), fragment_bytes) == {
         .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.IO(error)}) }
-        else -> {}
+        .Ok(_) -> {}
     }
     if files.write(files.join(staging, "lock"), lock_text) == {
         .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.IO(error)}) }
-        else -> {}
+        .Ok(_) -> {}
     }
     if files.write(files.join(staging, "plan.fingerprint"), plan_fingerprint) == {
         .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.IO(error)}) }
-        else -> {}
+        .Ok(_) -> {}
     }
 }

@@ -70,8 +70,11 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
                 }
             }
             loop nominal in graph.modules[module_index].nominals {
+                // A trait impl written in the type's body stays checked like a
+                // top-level one: its methods sit among the nominal's own.
+                nested: sema_core_demand_nested_trait_spans(nominal)
                 loop method in nominal.methods {
-                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None -> next
+                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
                     rows[method.symbol.id.key] = module_index
                 }
             }
@@ -89,6 +92,18 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
 // An inherent, authored impl: no trait, operator, delegation or generator.
 sema_core_demand_impl_deferrable: fn(implementation: SemaRegistrationImpl) -> Bool Never! {
     implementation.trait_name == None && implementation.operator_marker == None && implementation.delegation_field == None && !implementation.compiler_generated
+}
+
+// The spans (`start:end`) of the methods of the `impl Trait { … }` blocks a
+// struct or enum writes in its body.
+sema_core_demand_nested_trait_spans: fn(nominal: SemaRegistrationNominal) -> [String:Bool] Never! {
+    spans := [String:Bool]{}
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            loop method in block.methods -> spans["{method.span.start}:{method.span.end}"] = true
+        }
+    }
+    spans
 }
 
 // Whether the body of function `key` waits for demand: it is deferred and no
@@ -125,9 +140,8 @@ sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, p
 // methods, whose waves follow it; waves repeat until no body names a new
 // deferred one. A program that names no Core body runs none. A compile that
 // lowers also lowers what the driver joins to the checked modules after
-// finalization, the comptime closures (jet_driver_merge_checked_text_functions)
-// and the startup functions (jet_driver_add_startup_functions), so the first
-// wave demands what those name too.
+// finalization, the comptime closures (jet_driver_merge_checked_text_functions),
+// so the first wave demands what those name too.
 sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
     if graph.core_demand_rows.len() == 0 -> return graph.move()
@@ -138,9 +152,6 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
             loop fact in result.call_facts {
                 if fact.callee == .Val(callee) -> seeds.push(callee.key)
             }
-        }
-        loop value in values {
-            if value.init == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, seeds)
         }
     }
     // Per module: how many of its functions and call-site facts were read.
@@ -337,7 +348,7 @@ sema_core_demand_expr_keys: fn(tree: BodyTree, expression: Int, decls: DeclTable
         .GlobalShared(initializer, _) -> sema_core_demand_decl_key(decls, initializer, keys)
         .Try(_, conversion, _) -> sema_core_demand_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_conversion_key(conversion, keys)
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 

@@ -4,10 +4,10 @@ nested_return_if: fn(value: Dyn, right: Dyn) -> Bool Never! {
         .Text(left_text) -> {
             return if right == {
                 .Text(right_text) -> left_text == right_text
-                else -> false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
             }
         }
-        else -> true
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

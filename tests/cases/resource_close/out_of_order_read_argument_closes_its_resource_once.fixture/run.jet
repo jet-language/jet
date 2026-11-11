@@ -1,20 +1,20 @@
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+
+    tell: fn(self, into: String?{None}, label: String) {
+        print("{label} {self.name} {into ?? "-"}")
+    }
+}
 show: fn(r: Res, label: String) {
     print("{label} {r.name}")
 }
 
 show_default: fn(r: Res, width: Int{2}, label: String) {
     print("{label} {r.name} {width}")
-}
-
-impl Res {
-    tell: fn(self, into: String?{None}, label: String) {
-        print("{label} {self.name} {into ?? "-"}")
-    }
 }
 
 // A read argument pinned out of declaration order (reordered labels, or a

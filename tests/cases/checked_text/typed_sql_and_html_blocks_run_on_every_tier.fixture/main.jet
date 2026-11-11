@@ -1,0 +1,25 @@
+// #6622 c4: the typed SQL and HTML text heads on the real path. SQL holes
+// become ordered bound parameters, HTML holes escape their text, an `HTML`
+// hole composes as it is, and `.raw` is the one unchecked escape.
+User: struct {
+    id: Int
+    name: String
+}
+
+run: fn() {
+    id: 7
+    active: true
+    name: "<Ada & co>"
+    #SQL(User) {
+        query: SQL{"select id, name from users where id = {id} and active = {active} and name = {name}"}
+        print(query.template())
+        print(query.params().len())
+    }
+    page: HTML{"<p>{name}</p>"}
+    print(page.text())
+    inner: HTML{"<b>{name}</b>"}
+    outer: HTML{"<div>{inner}</div>"}
+    print(outer.text())
+    print(SQL.raw("select 1").template())
+    print(HTML.raw("<hr>").text())
+}

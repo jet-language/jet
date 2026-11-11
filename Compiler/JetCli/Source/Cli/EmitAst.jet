@@ -75,7 +75,7 @@ jet_cli_emit_ast_find_functions: fn(item: Item, name: String, found: &[JetCLIEmi
         .GenericModule(value) -> {
             loop inner in value.body -> jet_cli_emit_ast_find_functions(inner, name, found)
         }
-        else -> {}
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -367,9 +367,10 @@ jet_cli_emit_ast_stmt: fn(statement: Stmt) -> JetCLIEmitNode Never! {
         .Switched(marker, body, _) -> jet_cli_emit_ast_body("switched", "switched #{marker.name}", body)
         .Region(name, _, body, _) -> jet_cli_emit_ast_body("region", "region {name}", body)
         .Policy(declarations, body, _) -> jet_cli_emit_ast_body("policy", "policy ({declarations.len()} declarations)", body)
-        .TaskGroup(name, _, limit, body, _) -> {
+        .TaskGroup(name, _, args, body, _) -> {
             children := [JetCLIEmitNode]{}
-            if limit == .Val(value) -> children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+            if args.limit == .Val(value) -> children.push(jet_cli_emit_node("limit", "limit", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
+            if args.stack == .Val(value) -> children.push(jet_cli_emit_node("stack", "stack", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)}))
             loop inner in body -> children.push(jet_cli_emit_ast_stmt(inner))
             jet_cli_emit_node("task-group", "task group {name}", children)
         }
@@ -583,6 +584,7 @@ jet_cli_emit_ast_expr: fn(expression: Expr) -> JetCLIEmitNode Never! {
         }
         .PtrFromAddr(alias, _, elem, address, _, _) -> jet_cli_emit_ast_unary("PtrFromAddr", "pointer {alias}: {type_name(elem)}", address)
         .ComptimeName(name, _, _, _) -> jet_cli_emit_leaf("ComptimeName", "comptime name {name}")
+        .TypeValue(ty, _, _) -> jet_cli_emit_leaf("TypeValue", "type {type_name(ty)}")
         .Paren(value, _, _) -> jet_cli_emit_ast_unary("Paren", "paren", value)
         .Pipe(head, steps, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(head)}

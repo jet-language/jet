@@ -20,7 +20,7 @@ NixDerivationStore: struct {
         key: "{mask_outputs}:{drv_path}"
         if self.memo.get(key) == {
             .Val(cached) -> return Ok(cached)
-            else -> {}
+            .None -> {}
         }
         loop name in drv.output_names() {
             output: drv.outputs[name]
@@ -73,7 +73,7 @@ NixDerivationStore: struct {
                     expected: nix_make_output_path(store_dir, name, digest, drv_name)
                     if expected != output.path -> return Err(NixError.Divergence{what: "input-addressed output `{name}`", expected, actual: output.path})
                 }
-                else -> return Err(NixError.DrvPath("missing modulo hash for output `{name}`"))
+                .None -> return Err(NixError.DrvPath("missing modulo hash for output `{name}`"))
             }
         }
     }

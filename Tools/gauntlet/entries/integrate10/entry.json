@@ -1,11 +1,15 @@
 {
   "name": "integrate10",
   "mode": "tool",
-  "description": "Main's integration pass integrate10.sh and its Jet twin Integrate10.jet (#5072 c15): export origin/dev from the dev worktree's repository, apply INTEG_PRE's stacked patches and then every SUB through integ-apply6.sh, stop on a failed regeneration, run the census (census-snap2.sh under capped.sh) with the files the applied SUBs touch, then every ratchet check with the seed at once, link the batch compiler and jetpacks, run each SUB's test lines four SUBs at a time with runsub6.sh, rerun the failing ones on a clean dev export with the seed, run the goldens that cite a touched Core or Prelude file, and write the report; it prints the applied SUBs' lines, the census and ratchet results, the jetpack choice and the report's path. The fixtures hold the dev repository (dev.git, whose export links back to the fixture's lanes and subs), the worktree's repository that fetches it (work.git), the SUBs (subs), the census rows (rows), a stand-in seed (seed), stand-ins for integ-apply6.sh, census-snap2.sh and the compiler the census builds (orch), and stand-ins for Main's capped.sh and runsub6.sh (lanes/scratch/Main). The cases run under LC_ALL=C, so the original's sorts keep the byte order the twin's do.",
+  "description": "Main's integration pass integrate10.sh and its Jet twin Integrate10.jet (#5072 c15, c35): export origin/dev from the dev worktree's repository, apply INTEG_PRE's stacked patches and then every SUB through integ-apply6.sh, stop on a failed regeneration, run the census (census-snap2.sh under capped.sh) with the files the applied SUBs touch, then every ratchet check with the seed at once, link the batch compiler and jetpacks, run each SUB's test lines four SUBs at a time with runsub6.sh, rerun the failing ones on a clean dev export with the seed, run the goldens that cite a touched Core or Prelude file, and write the report; it prints the applied SUBs' lines, the census and ratchet results, the jetpack choice and the report's path. The fixtures hold the dev repository (dev.git, whose export links back to the fixture's lanes and subs), the worktree's repository that fetches it (work.git), the SUBs (subs), the census rows (rows), a stand-in seed (seed), stand-ins for integ-apply6.sh, census-snap2.sh and the compiler the census builds (orch), and stand-ins for Main's capped.sh and runsub6.sh (lanes/scratch/Main). The cases run under LC_ALL=C, so the original's sorts keep the byte order the twin's do. Each case's check.jet states the job: what the pass printed, then for each batch every file and link it left (the composed tree aside) with the status, rc and list files whole, and the report.",
   "tool": {
     "original": "Tools/agent/orchestrator/integrate10.sh",
     "jet": "Tools/agent/orchestrator/Integrate10.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c39",
+      "#5072 c40"
+    ],
     "cases": [
       {
         "args": [
@@ -28,6 +32,7 @@
           "LC_ALL": "C",
           "INTEG_PRE": "pre1:subs/P-1 subs/P-2"
         },
+        "check": "check.jet",
         "expected": "expected/batch.out"
       },
       {
@@ -49,6 +54,7 @@
           "STANDIN_CENSUS": "sum",
           "STANDIN_RATCHET_FAIL": "1"
         },
+        "check": "check.jet",
         "expected": "expected/census-failed.out"
       },
       {
@@ -69,6 +75,7 @@
           "STANDIN_UNBUILT": "1",
           "STANDIN_NO_RATCHETS": "1"
         },
+        "check": "check.jet",
         "expected": "expected/unbuilt.out"
       },
       {
@@ -85,6 +92,7 @@
           "GIT_CONFIG_NOSYSTEM": "1",
           "LC_ALL": "C"
         },
+        "check": "check.jet",
         "expected": "expected/no-subs.out"
       },
       {
@@ -104,6 +112,7 @@
           "STANDIN_REGEN_RC": "1"
         },
         "exit": 3,
+        "check": "check.jet",
         "expected": "expected/regen-failed.out"
       },
       {
@@ -123,6 +132,7 @@
           "STANDIN_APPLY_FAIL": "1"
         },
         "exit": 2,
+        "check": "check.jet",
         "expected": "expected/apply-failed.out"
       },
       {
@@ -142,6 +152,7 @@
           "INTEG_PRE": "pre1:subs/P-1 pre1:subs/P-bad"
         },
         "exit": 2,
+        "check": "check.jet",
         "expected": "expected/pre-failed.out"
       },
       {
@@ -160,6 +171,7 @@
           "LC_ALL": "C"
         },
         "exit": 2,
+        "check": "check.jet",
         "expected": "expected/export-failed.out"
       },
       {
@@ -175,6 +187,7 @@
           "LC_ALL": "C"
         },
         "exit": 1,
+        "check": "check.jet",
         "expected": "expected/no-args.out"
       }
     ]

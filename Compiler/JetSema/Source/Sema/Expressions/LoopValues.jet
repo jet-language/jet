@@ -198,10 +198,10 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
             }
-            .TaskGroup(group, limit, body, span) -> {
+            .TaskGroup(group, args, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
-                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated_body, span: span}
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
             }
             .Layout(handle, label, body, span) -> {
                 updated_body := body
@@ -236,7 +236,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                     .Live(_, _) -> statements[index] = TStmt.Live{body: updated_body, span: span}
                     .Shield(_, _) -> statements[index] = TStmt.Shield{body: updated_body, span: span}
                     .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember{kind: kind, body: updated_body, span: span}
-                    else -> {}
+                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
                 }
             }
             .Transact(handle, snapshots, stm, body, span) -> {
@@ -244,7 +244,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated_body, span: span}
             }
-            else -> {}
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
         }
         index += 1
     }
@@ -385,10 +385,10 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.ContractScope{pre: pre, body: updated_body, post: post, result: result, span: span}
             }
-            .TaskGroup(group, limit, body, span) -> {
+            .TaskGroup(group, args, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
-                statements[index] = TStmt.TaskGroup{group: group, limit: limit, body: updated_body, span: span}
+                statements[index] = TStmt.TaskGroup{group: group, args: args, body: updated_body, span: span}
             }
             .Layout(handle, label, body, span) -> {
                 updated_body := body
@@ -418,7 +418,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                     .Live(_, _) -> statements[index] = TStmt.Live{body: updated_body, span: span}
                     .Shield(_, _) -> statements[index] = TStmt.Shield{body: updated_body, span: span}
                     .ScopeMember(kind, _, _) -> statements[index] = TStmt.ScopeMember{kind: kind, body: updated_body, span: span}
-                    else -> {}
+                    .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
                 }
             }
             .Unsafe(gate, body) -> {
@@ -431,7 +431,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.Transact{handle: handle, snapshots: snapshots, stm: stm, body: updated_body, span: span}
             }
-            else -> {}
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .Continue(_, _) | .Reactive(_, _) -> {}
         }
         index += 1
     }

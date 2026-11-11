@@ -18,7 +18,9 @@ Jet source
 
 This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).
 Every level reads the same Jet-owned IR and calls one runtime: the Prelude and
-Core, compiled once per Jet version and shipped with Jet. O0, O1 and O2 are all
+Core, compiled once per Jet version and shipped with Jet. The web target runs
+that runtime selected to WebAssembly (`jet_runtime.wasm`); its JavaScript host
+only answers system calls and marshals values. O0, O1 and O2 are all
 the Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
 fallback until Jet O2 beats it on every required cell and covers every
 supported target (card #4013). The Cranelift JIT is retired (D-EXEC2).
@@ -163,7 +165,11 @@ runtime objects and explicit extra roots. The Jet object writer publishes
 checked exports as globals and private functions as locals. Undefined symbols,
 hidden/internal definitions and implementation names do not become export
 roots; C archive members pulled to satisfy exports remain private dependencies.
-Rust-mangled symbols and Rust allocator providers are rejected. A pack requires
+Rust-mangled symbols and Rust allocator providers are rejected. Every named
+function and object of a kept section keeps its name in the pack as a local,
+including one a relocation reaches only through its section symbol, so a
+program's `.symtab` names the runtime's internal code for profilers and
+debuggers. A pack requires
 a standalone runtime object, never just archives.
 The `LinkPackRoots` row of `Tools/agent/CompilerRegistries.jet`
 (`Compiler/JetBackend/Tests/LinkPackRoots.fixture`) exercises this boundary
@@ -496,8 +502,8 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
-Compile-time fragment lowering binds direct nominal `$layout`, `$name`, and
-`$fields` reads before ordinary field lowering, including reads inside reached
+Compile-time fragment lowering binds direct nominal `T.reflect().layout`,
+`T.reflect().name` and `T.reflect().fields` reads before ordinary field lowering, including reads inside reached
 helper functions. These values use the fragment caller's selected target and
 the checked nominal declarations through the shared target-aware reflection
 builder; a type name is never an evaluator local. Lexical reflected-value
@@ -1226,7 +1232,7 @@ snapshots):
   the same capture and result checks as ordinary tasks.
 - `para_map`, `para_filter`, `para_partition`, and `para_fold` reject mutable
   captures and values that workers cannot safely share or transfer.
-- `Shared<T>` is the explicit shared-mutation path. `shared x` builds the
+- `Shared<T>` is the explicit shared-mutation path. `Shared{x}` builds the
   value; a field read is one locked read, a field write is one locked write,
   and each statement is one atomic step. `#Transact` groups several statements
   and commits them atomically, taking every touched value's write lock in
@@ -1271,8 +1277,8 @@ vetted runtime internal must also uphold its boundary contract.
 ### Private traced collector substrate
 
 D-DEP-GC1=A has one dependency-free collector. Its Rust-tier implementation
-left with Rust; the native runtime does not carry it yet, and the Web target's
-routes are in [`Gc.js`](../../Compiler/Prelude/Web/Core/Gc.js). The collector
+left with Rust; neither the native runtime nor the web runtime carries it yet.
+The collector
 has no source-facing wrapper, constructor, or module; only sema-proven
 automatic promotions call its traced allocation entry.
 
@@ -1605,6 +1611,28 @@ use the same sema-owned C-safe type law. D-FFI-UNIFY1=A keeps the generated
 bridge, descriptor, and native symbol as one mechanism. Where a declaration
 uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
+An `#Import(c)` that names one of the Jet runtime's own C exports (the generated
+RUNTIME_C_EXPORTS table) must be an audited `#[Import(c), Unsafe("…")]`
+declaration, or it is E3101. Ordinary C symbols stay ungated. An `#Import(c)`
+has no Jet body, so the effect row it declares is the effect each call
+performs: a caller whose row lacks it is E0740.
+
+The `jet.runtime` interface modules (core-library.md) are the one exemption
+from that gate, keyed on where the declaration comes from, not on its module
+name: a runtime binding is an `#Import(c)` of a generated interface unit, or
+an inline-module member of the runtime package itself that names one of its
+exports, from which the interface is rendered. A binding gets no E3101, no C
+signature check and no shared-symbol E1341; its parameters and result must be
+runtime route carriers (E3203 otherwise), and its call lowers through the
+route the IR projects from its Jet signature, as a Core call's does, not
+through the C marshalling of foreign rows. The raw export is the one body of
+each binding; the binding declares it and nothing else does. A member X of
+`jet.runtime.M` replaces the Core leaf `core.M.__X`, and
+`Tools/agent/RuntimeEffectRows.jet --check` (a verify-full gate) fails when the
+member's declared row differs from that leaf's CoreCallRecord effect
+(`effect_leaf`, else `effect_kind`) or only one of the leaf's record and
+`dispatcher_row` remains; `--before REV` reads the leaves at the revision
+before a cutover deleted them.
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

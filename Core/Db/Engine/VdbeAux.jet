@@ -814,7 +814,7 @@ display_p4: fn(db: conn.Conn, p4: conn.P4) -> [U8]? Never! {
         .Table(t) -> append_c_string(out, db.tables[t].name)
         .TableRef(t) -> append_c_string(out, db.tables[t].name)
         .Text(z) -> append_c_string(out, z)
-        else -> {}
+        .NotUsed | .Expr(_) -> {}
     }
     if out.len() == 0 -> return None
     Val(out)

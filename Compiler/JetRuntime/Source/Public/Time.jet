@@ -1,0 +1,56 @@
+// `jet.runtime.time` (#6615): the runtime's public time functions, in Jet
+// types with their declared effect rows. Each member is a runtime binding
+// (Guest.jet sema_guest_runtime_binding): an `#Import(c)` of the runtime
+// export that is its one body, crossing the runtime's route carriers (an Int
+// as its I64 word, a String as Text, an Option or tuple result through out
+// slots; BuildRoutes.jet ir_route_of_signature). A tuple result's items cross
+// in the checked tuple's label-sorted order, which is the export's slot
+// order. The runtime pack build renders each member into the jet.runtime
+// interface that jet embeds (Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet),
+// so Core and programs reach them with `use rt: jet.runtime.time`. A member
+// with no row is pure.
+time: module {
+    // The host's monotonic clock in nanoseconds (HostTime.jet).
+    #Import(c) host_monotonic_ns: fn() -[Time]> Int = "jet_time_raw_host_monotonic_ns"
+
+    // The same clock read as a pure value: a `Clock`'s own reading, which
+    // its owner already holds the Time authority for.
+    #Import(c) clock_mono_ns: fn() -> Int = "jet_time_raw_host_monotonic_ns"
+
+    // Sleeps `nanos` nanoseconds under the shared scheduler's wait policy
+    // (deadline checks, clamping, cancellation); a negative delay sleeps none.
+    #Import(c) sleep_ns: fn(nanos: Int) -[Time.Wait]> = "jet_std_time_sleep_duration_ns"
+
+    // Moves the task deadline to the earlier of the installed one and now
+    // plus `nanos` in whole milliseconds; a negative delay counts as none.
+    #Import(c) task_timeout: fn(nanos: Int) -[Time]> = "jet_task_timeout_duration_ns"
+
+    // Refuses an uncontrolled `what` (a clock or wait) under a controlled
+    // world (CompilerTime.jet).
+    #Import(c) reject_uncontrolled: fn(what: String) -[Time]> = "jet_scheduler_world_reject_uncontrolled"
+
+    // The wall clock: whole seconds since the epoch, the nanoseconds past
+    // them, and whether the instant is before the epoch.
+    #Import(c) wall_sample: fn() -[Time]> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
+
+    // The controlled world's wall clock in milliseconds, when one is installed.
+    #Import(c) world_wall_ms: fn() -[Time]> Int? = "jet_time_raw_world_wall_ms"
+
+    // The wall-clock override in milliseconds, when one is set.
+    #Import(c) wall_override_ms: fn() -[Time]> Int? = "jet_time_raw_wall_override_ms"
+
+    // The controlled monotonic clock in nanoseconds, when one is installed.
+    #Import(c) controlled_monotonic_ns: fn() -[Time]> Int? = "jet_time_raw_controlled_monotonic_ns"
+
+    // The controlled world's monotonic clock in nanoseconds, when one is installed.
+    #Import(c) world_monotonic_ns: fn() -[Time]> Int? = "jet_time_raw_world_monotonic_ns"
+
+    // The environment's zone name `name` (`TZ`), when set.
+    #Import(c) zone_env: fn(name: String) -[Env]> String? = "jet_time_raw_zone_env"
+
+    // The bytes of the zone file at `path`, when it reads.
+    #Import(c) zone_file_bytes: fn(path: String) -[FS.Read]> [U8]? = "jet_time_raw_zone_file_bytes"
+
+    // The zone data embedded for `path`, when the build embeds it.
+    #Import(c) embedded_zone_bytes: fn(path: String) -> [U8]? = "jet_time_raw_embedded_zone_bytes"
+}

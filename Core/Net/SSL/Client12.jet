@@ -818,7 +818,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
                     }
                     ssldefs.ssl_copy_into(ssl.out_buf, out + header_len, public, 0, public.len())
                 }
-                else -> {
+                .NoExchange | .RSA | .DHERSA | .ECDHERSA | .ECDHEECDSA | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> {
                     ssltls.ssl_ecdh_ready(ssl)
                     public := if &ssl.handshake.ecdh_ctx == {
                         .Val(ctx) -> ecdh.ecdh_make_public(ctx, ssldefs.SSL_OUT_CONTENT_LEN - header_len, rng) ?? return Err(.ECP(err))
@@ -834,7 +834,7 @@ ssl_cli12_write_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
             header_len = 4
             content_len = ssl_cli12_write_encrypted_pms(ssl, header_len, 0, rng) ?? return Err(err)
         }
-        else -> return Err(.InternalError)
+        .NoExchange -> return Err(.InternalError)
     }
     ssl.out_msglen = header_len + content_len
     ssl.out_msgtype = ssldefs.SSL_MSG_HANDSHAKE

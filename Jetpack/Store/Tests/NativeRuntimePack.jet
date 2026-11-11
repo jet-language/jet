@@ -57,7 +57,7 @@ native_pack_test_refused: fn(bytes: [U8]) -> Bool {
     assert_eq(NativeRuntimePackSubject.from_bytes(bytes) ?? panic("decode subject"), subject)
     pairs: if subject.to_tree() == {
         .Object(values) -> values
-        else -> { panic("subject object") }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { panic("subject object") }
     }
     fields := [String: Dyn]{}
     loop pair in pairs -> fields[pair.key] = pair.value
@@ -141,7 +141,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     prepared: native_runtime_pack_prepare(store, fixture.subject, fixture.evidence) ?? panic("prepare")
     if (store.lookup_artifact(NativeCandidateComposition.action_key(fixture.compiler)) ?? panic("lookup candidate")) == {
         .Missing -> {}
-        else -> panic("preparation published a candidate")
+        .Corrupt | .Hit(_) -> panic("preparation published a candidate")
     }
     authorization: native_pack_test_authorize(store, prepared, fixture.evidence)
     approval: fixture.evidence.approval(prepared, authorization)
@@ -212,7 +212,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
         .Err(error) -> {
             if error == {
                 .Store(store_error) -> assert_eq(store_artifact_test_kind(store_error), "conflict")
-                else -> panic("wrong conflict error")
+                .Encoding(_) | .IO(_) | .Invalid(_) -> panic("wrong conflict error")
             }
         }
     }

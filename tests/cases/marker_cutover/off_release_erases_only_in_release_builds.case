@@ -1,0 +1,35 @@
+# #4284 c14 (#4298): the switch-off marker is the closed `#Off` /
+# `#Off(.Release)` menu. A bare `#Off` erases its statement from every build;
+# `#Off(.Release)` keeps it in every build but a release build. The body is
+# still checked in a release build, two switch-offs on one statement are
+# E0344, and the retired `#DebugOnly` is an unknown marker (E0927).
+fixture: off_release_erases_only_in_release_builds.fixture
+env: NO_COLOR=1
+step dev: jet run main.jet
+exit: 0
+stdout: = "start\ndebug\ndebug block\nend\n"
+stderr: empty
+step release: jet run --release main.jet
+exit: 0
+stdout: = "start\nend\n"
+stderr: empty
+step checked: jet check checked/main.jet
+exit: 1
+stderr: ~ "Nothing named `missing_name` exists here" # an `#Off(.Release)` body is type-checked
+stderr: ~ "--> main.jet:2:26" # located inside the switched-off statement
+stderr: ~ "jet-lang.dev/e/E0107" # the ordinary unknown-name code
+step checked_release: jet run --release checked/main.jet
+exit: 1
+stderr: ~ "Nothing named `missing_name` exists here" # a release build still checks the erased body
+stderr: ~ "checked/main.jet:2:26" # the release driver prints the full path
+step doubled: jet check doubled/main.jet
+exit: 1
+stderr: ~ "Only one switch-off attribute can be written on a statement" # one `#Off` per statement
+stderr: ~ "--> main.jet:2:10" # located at the second marker
+stderr: ~ "jet-lang.dev/e/E0344" # the duplicate switch-off code
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "`#DebugOnly` isn't a known applied rule" # the old marker is retired
+stderr: ~ "--> main.jet:2:6" # located at the retired marker
+stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "1 problem found" # one diagnostic only

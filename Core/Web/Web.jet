@@ -64,16 +64,7 @@ page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, 
 __AppCall: struct {
     request: HTTPRequest
     data: String
-}
 
-__AppReply: enum {
-    Page(WebPage)
-    JSON(String)
-    Rejected(String)
-    Failed(String)
-}
-
-impl __AppCall {
     __input: fn<Target: Decode>(self, name: String) -> Target? { self.request.__route_input<Target>(name) }
 
     __body: fn<Target: Decode>(self) -[Net]> Target? Never! {
@@ -103,6 +94,13 @@ impl __AppCall {
     __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
 }
 
+__AppReply: enum {
+    Page(WebPage)
+    JSON(String)
+    Rejected(String)
+    Failed(String)
+}
+
 __AppHandlerCell: struct {
     call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!
 }
@@ -110,9 +108,7 @@ __AppHandlerCell: struct {
 // A registered adapter. Copies share the one handler.
 __AppHandler: struct {
     __cell: Shared<__AppHandlerCell>
-}
 
-impl __AppHandler {
     // A handler failure is the route's 500 answer, never the server's.
     run: fn(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
         guard: self.__cell.guard_read()
@@ -122,7 +118,7 @@ impl __AppHandler {
 }
 
 __app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
-    __AppHandler{__cell: shared __AppHandlerCell{call: call.move()}}
+    __AppHandler{__cell: Shared{__AppHandlerCell{call: call.move()}}}
 }
 
 // One route and the facts its registration fixed. An empty identity string
@@ -183,28 +179,7 @@ __AppState: struct {
 /// Copies share the one graph.
 App: struct {
     __state: Shared<__AppState>
-}
 
-app: fn() -> App Never! {
-    App{__state: shared __AppState{
-        routes: [__AppRoute]{},
-        actions: [__AppAction]{},
-        mounts: [__AppMount]{},
-        routes_from: [String]{},
-        not_found: None,
-        security: [String]{},
-        assets: [String]{},
-        split: [String]{},
-        cache: [String]{},
-        a11y: [String]{},
-        adapters: [String]{},
-        hydration: "dev-overlay",
-        mode: "csr",
-        explicit_mode: false,
-    }}
-}
-
-impl App {
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding.
     __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
@@ -358,6 +333,25 @@ impl App {
     serve: fn(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
     serve_on: fn(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+}
+
+app: fn() -> App Never! {
+    App{__state: Shared{__AppState{
+        routes: [__AppRoute]{},
+        actions: [__AppAction]{},
+        mounts: [__AppMount]{},
+        routes_from: [String]{},
+        not_found: None,
+        security: [String]{},
+        assets: [String]{},
+        split: [String]{},
+        cache: [String]{},
+        a11y: [String]{},
+        adapters: [String]{},
+        hydration: "dev-overlay",
+        mode: "csr",
+        explicit_mode: false,
+    }}}
 }
 
 __app_mode: fn(app: App, mode: String) -> App Never! {
@@ -742,10 +736,10 @@ LiveRegistry: struct {
 // module's explicit input/action-name record API.
 
 
-// The web backend's DOM binding is DomRuntime.js::on. `jet_web_on` has
-// registry entries but no Rust implementation in this repository; this
-// forwarding declaration is not a Rust-to-Jet implementation or cutover.
-// Native callback admission must keep the actual backend contract.
+// `jet_web_on` has registry entries but no implementation in this
+// repository: the generated web host binds no DOM route by path. This
+// forwarding declaration is not an implementation or cutover. Native
+// callback admission must keep the actual backend contract.
 on: fn(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
@@ -767,10 +761,13 @@ __openapi_mux: fn(routes: HTTPMux) -> String Never! {
 
 // An OpenAPI contract or document problem: `web.openapi` stops with it.
 #Error
-__OpenAPIFault: struct { message: String }
-impl __OpenAPIFault.Display { display: fn(self) -> String { self.message.copy() } }
-impl __OpenAPIFault.Debug { debug: fn(&&self) -> String { self.message } }
+__OpenAPIFault: struct {
+    message: String
 
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
 __openapi_fault: fn(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
 
 __OpenAPIParameter: struct {
@@ -813,8 +810,10 @@ __OpenAPIPattern: struct {
 }
 
 __OpenAPIRoute: struct {
-    // Index into __openapi_methods(), JetOpenApiHttpMethod order.
+    // Index into __openapi_methods(), JetOpenApiHttpMethod order; a custom
+    // method ranks after them all and is `token`, exactly as sent.
     method: Int
+    token: String
     path: String
     names: [String]
     catch_alls: [String]
@@ -826,7 +825,27 @@ __OpenAPIRoute: struct {
     security: [__OpenAPISecurity]
 }
 
-__openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace"} }
+// The eight OpenAPI 3.1 Path Item operation fields, then `connect`: 3.1 has no
+// field for CONNECT or for a custom method, so their operations go under
+// OpenAPI 3.2 `additionalOperations` (keyed by the method as sent) and that
+// document says 3.2.0.
+__openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace", "connect"} }
+
+__openapi_additional_method: fn(route: __OpenAPIRoute) -> Bool Never! { route.token != "" || __openapi_methods()[route.method] == "connect" }
+
+// A route's method as sent: the upper-case standard name, or the custom
+// token exactly (so `get` and `GET` are two routes).
+__openapi_route_method: fn(route: __OpenAPIRoute) -> String Never! {
+    if route.token != "" -> return route.token.copy()
+    __openapi_methods()[route.method].to_upper()
+}
+
+// The method part of a derived operation id: the Path Item field of a
+// standard method, or `custom_` and the token, which no standard field is.
+__openapi_operation_method: fn(route: __OpenAPIRoute) -> String Never! {
+    if route.token != "" -> return "custom_{route.token}"
+    __openapi_methods()[route.method].copy()
+}
 
 __openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
 
@@ -837,15 +856,14 @@ __openapi_index: fn(values: [String], value: String) -> Int? {
     None
 }
 
-// A method name in any ASCII case.
-__openapi_method: fn(value: String) -> Int? {
-    lower := [U8]{}
-    loop byte in value.bytes() {
-        n: Int.from_u8(byte)
-        lower.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
+// The rank of a method as sent: a standard method is exactly its upper-case
+// name, and any other token (`get` too) is a custom method, ranked last.
+__openapi_method: fn(value: String) -> Int Never! {
+    methods: __openapi_methods()
+    loop index in 0..<methods.len() {
+        if methods[index].to_upper() == value -> return index
     }
-    text: String.from_bytes(lower) ?? return None
-    __openapi_index(__openapi_methods(), text)
+    methods.len()
 }
 
 __openapi_problem: fn(path: String, reason: String) -> String Never! {
@@ -887,14 +905,14 @@ __openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
 __openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] __OpenAPIFault! {
     if value == {
         .Object(members) -> return Ok(members)
-        else -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
     }
 }
 
 __openapi_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
 }
 
@@ -914,7 +932,7 @@ __openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String 
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
     }
 }
 
@@ -923,7 +941,7 @@ __openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -
     if value == {
         .Null -> return Ok(String?{None})
         .Text(text) -> return Ok(Val(text))
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text or null"))
     }
 }
 
@@ -931,7 +949,7 @@ __openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool __
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
     }
 }
 
@@ -939,7 +957,7 @@ __openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] 
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
     }
 }
 
@@ -951,7 +969,7 @@ __openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int 
             number: Int.parse(text) ?? return Err(__openapi_fault("OpenAPI route contract field `{name}` is out of range"))
             return Ok(number)
         }
-        else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
     }
 }
 
@@ -964,7 +982,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
     if __openapi_member(fields, "anyOf") == .Val(any_of) {
         items: if any_of == {
             .Array(entries) -> entries
-            else -> { return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array")) }
         }
         if items.len() == 2 && __openapi_is_object(items[1]) {
             probe := [String]{}
@@ -978,7 +996,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
     if __openapi_member(fields, "oneOf") == .Val(one_of) {
         items: if one_of == {
             .Array(entries) -> entries
-            else -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
         }
         if items.len() == 0 -> errors.push(__openapi_problem(path, "oneOf needs at least one schema"))
         rendered := [String]{}
@@ -993,7 +1011,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
 __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String __OpenAPIFault! {
     name: if kind == {
         .Text(text) -> text
-        else -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
     }
     if name == "null" -> return Ok("{{\"type\":\"null\"}}")
     if name == "boolean" -> return Ok("{{\"type\":\"boolean\"}}")
@@ -1009,25 +1027,25 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
     declared: __openapi_field(fields, "properties") ?? return Err(err)
     properties := if declared == {
         .Object(members) -> members
-        else -> { return Err(__openapi_fault("OpenAPI object schema `properties` must be an object")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { return Err(__openapi_fault("OpenAPI object schema `properties` must be an object")) }
     }
     required := [String]{}
     if __openapi_member(fields, "required") == .Val(listed) {
         entries: if listed == {
             .Array(items) -> items
-            else -> { return Err(__openapi_fault("OpenAPI schema `required` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `required` must be an array")) }
         }
         loop entry in entries {
             if entry == {
                 .Text(text) -> required.push(text)
-                else -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
             }
         }
     }
     additional: __openapi_field(fields, "additionalProperties") ?? return Err(err)
     open: if additional == {
         .Bool(flag) -> flag
-        else -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
     }
     properties.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
     rendered := [String]{}
@@ -1088,7 +1106,7 @@ __openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
     loop scope in listed {
         if scope == {
             .Text(text) -> scopes.push(text)
-            else -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
         }
     }
     scheme: __openapi_text(fields, "scheme") ?? return Err(err)
@@ -1101,7 +1119,8 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
     value: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
     fields: __openapi_object(value) ?? return Err(err)
     method_text: __openapi_text(fields, "method") ?? return Err(err)
-    rank: __openapi_method(method_text) ?? return Err(__openapi_fault("unsupported OpenAPI HTTP method `{method_text}`"))
+    rank: __openapi_method(method_text)
+    token: if rank == __openapi_methods().len() -> method_text.copy() else -> ""
     pattern_text: __openapi_text(fields, "pattern") ?? return Err(err)
     parsed: __openapi_pattern(pattern_text) ?? return Err(err)
     path: __openapi_text(fields, "path") ?? return Err(err)
@@ -1132,15 +1151,16 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
         .Err(fault) -> { return Err(fault) }
     }
     registered: __openapi_pattern(pattern) ?? return Err(err)
-    if (__openapi_method(method) ?? -1) != rank || registered.key != parsed.key -> return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
-    id: if operation_id == "" -> __openapi_operation_id(rank, parsed.path) else -> operation_id
-    Ok(__OpenAPIRoute{method: rank, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: id, summary: summary, parameters: parameters, body: body, responses: responses, security: security})
+    if method != method_text || registered.key != parsed.key -> return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
+    route := __OpenAPIRoute{method: rank, token: token, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: operation_id, summary: summary, parameters: parameters, body: body, responses: responses, security: security}
+    if route.operation_id == "" -> route.operation_id = __openapi_operation_id(__openapi_operation_method(route), route.path)
+    Ok(route)
 }
 
 // jet_openapi_operation_id_for_path: FNV-1a 64 of
-// `jet-openapi-operation-v1:<method>\0<path>`.
-__openapi_operation_id: fn(method: Int, path: String) -> String Never! {
-    name: __openapi_methods()[method]
+// `jet-openapi-operation-v1:<method>\0<path>`, the method as
+// __openapi_operation_method names it.
+__openapi_operation_id: fn(name: String, path: String) -> String Never! {
     bytes := "jet-openapi-operation-v1:".bytes()
     loop byte in name.bytes() -> bytes.push(byte)
     bytes.push(U8{0})
@@ -1196,6 +1216,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
     routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
         if left.path != right.path -> return left.path <=> right.path
         if left.method != right.method -> return left.method <=> right.method
+        if left.token != right.token -> return left.token <=> right.token
         left.operation_id <=> right.operation_id
     })
     if title == "" || version == "" -> return Err(__openapi_fault("OpenAPI info title and version must not be empty"))
@@ -1210,7 +1231,7 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         } else {
             operation_ids.push(route.operation_id.copy())
         }
-        key: "{__openapi_methods()[route.method]} {route.path}"
+        key: "{__openapi_route_method(route)} {route.path}"
         if keys.contains(key) {
             errors.push("duplicate OpenAPI route `{key}`")
         } else {
@@ -1267,17 +1288,29 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
     }
     if errors.len() > 0 -> return Err(__openapi_fault(errors.join("; ")))
     paths := [String]{}
+    additional_operations := false
     index := 0
     loop index < routes.len() {
         path: routes[index].path.copy()
         methods := [String]{}
+        additional := [String]{}
         loop index < routes.len() && routes[index].path == path {
-            methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
+            if __openapi_additional_method(routes[index]) {
+                // Keyed by the method as sent: CONNECT, or the custom token.
+                additional.push("{__app_json_string(__openapi_route_method(routes[index]))}:{__openapi_route_json(routes[index])}")
+            } else {
+                methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
+            }
             index += 1
+        }
+        if additional.len() > 0 {
+            methods.push("\"additionalOperations\":{{{additional.join(",")}}}")
+            additional_operations = true
         }
         paths.push("{__app_json_string(path)}:{{{methods.join(",")}}}")
     }
-    Ok("{{\"openapi\":\"3.1.0\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
+    openapi_version: if additional_operations -> "3.2.0" else -> "3.1.0"
+    Ok("{{\"openapi\":\"{openapi_version}\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
 }
 
 // jet_openapi_route_json and jet_openapi_parameter_json.

@@ -48,6 +48,10 @@ use {
         JetDriverCompileRequest,
         JetDriverGeneratedModule,
         JetDriverCompileResult,
+        JetDriverComptimeInputRecord,
+        jet_driver_comptime_input_unchanged,
+        jet_driver_comptime_glob_membership,
+        jet_driver_shared_build_inputs,
         JetDriverDocModule,
         JetDriverForeignLinkFacts,
         JetDriverLoweringInputs,
@@ -207,7 +211,9 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // `recording` publishes the outcome as the invocation's receipt before the
 // process ends (CheckReceipt.jet). `profile` is the `--profile` the compile
 // selects ("" for the default); the machine and verbose outcomes name it.
-jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+// `style` (`jet check --style`) adds the opt-in style checks' findings
+// (StyleCheck.jet) to the compile's own.
+jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     watch: cli_time.start()
     // copy: `profile` still selects the compile below.
     selected: if profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> profile.copy()
@@ -225,6 +231,9 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if lacks_run && !jet_cli_package_is_library_only(file, result) -> diagnostics.push(sema_no_run_diagnostic())
+            if style {
+                loop finding in jet_driver_present_diagnostics(jet_cli_style_diagnostics(snapshot), snapshot, result.generated_source_files) -> diagnostics.push(finding)
+            }
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if jet_cli_rust_foreign_check(result.rust_foreign, result.foreign_link) == .Err(error) -> diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }
@@ -303,11 +312,12 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
 // `jet check` of a workspace root: each member no other member depends on
 // checks in project scope; its compile loads every other member, and a
 // failing member's errors are reported inline before its E0626. Each outcome
-// is written as it finishes; the exit status is the most severe one.
-jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, settings: [BuildSettingOverride], profile: String, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+// is written as it finishes; the exit status is the most severe one. `style`
+// adds the style checks to each member's check.
+jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     exit_code := JET_DRIVER_EXIT_OK
     loop index in 0..<files.len() {
-        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, profile, trace_sink, false)
+        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, profile, style, trace_sink, false)
         jet_cli_write_output(output)
         if output.exit_code > exit_code -> exit_code = output.exit_code
     }
@@ -517,7 +527,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     config := jet_cli_eval_config()
     config.runtime_execution = true
     config.eval_entry = true
-    program := jet_eval_native_load(JetEvalIRComptime{code: built.program.move(), layouts: shared [IRProgram]{layouts.move()}, items: [Int]{entry}, build_failures: [String]{}}, config)
+    program := jet_eval_native_load(JetEvalIRComptime{code: built.program.move(), layouts: Shared{[IRProgram]{layouts.move()}}, items: [Int]{entry}, build_failures: [String]{}}, config)
     evaluated: jet_eval_native_run(program, 0, [TComptimeValue]{}, config, span)
     if evaluated.error == .Val(failure) {
         report: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color)
@@ -1134,6 +1144,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checks.observe = options.observe
     checks.log_package = result.log_filter.copy()
     checks.log_flag = options.log.copy()
+    checks.harden = result.harden
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
@@ -1152,6 +1163,18 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
         if function.key == entry_key {
             entry_source = function.source_file.copy()
             break
+        }
+    }
+    // With per-function detail (JET_TRACE_DETAIL=functions) each function the
+    // IR builder receives is one `ir.function` event, so a trace names every
+    // body a compile lowers.
+    if trace_sink == .Val(sink) {
+        if sink.functions() {
+            total: checked.functions.len()
+            loop (index, function) in checked.functions {
+                sink.begin("ir.function", function.name, index, total)
+                sink.end("ir.function", 1)
+            }
         }
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
@@ -1420,6 +1443,9 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     // declared to its unknown-job report, and a selectable one's word is
     // refused with the fix (IRJob stripped).
     release: options.profile == "release"
+    // A release build erases `#Off(.Release)` code: the
+    // `release` and `hardened` profiles, and a custom profile named release.
+    checks.release = release || options.profile == "hardened"
     loop job in inputs.jobs {
         stripped: release && !job.shipped
         if !stripped -> checks.declared_jobs.push(job.name.copy())
@@ -1605,6 +1631,8 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     if built.exit_code == JET_DRIVER_EXIT_OK {
         rows: if options.locked -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK} else -> jet_cli_lock_effect_rows(file, result, snapshot, false, color, json)
         if rows.exit_code != JET_DRIVER_EXIT_OK -> return rows
+        read_inputs: jet_cli_lock_comptime_inputs(file, result, options.locked, color)
+        if read_inputs.exit_code != JET_DRIVER_EXIT_OK -> return read_inputs
         if json {
             built.stdout = jet_cli_build_effects_json(authority)
         } else {
@@ -1688,7 +1716,7 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
 // it: the exit returns the whole program's memory at once, where drop glue
 // would walk every IR row and fault every swapped-out page back in (minutes
 // after the self-host unit's link). A verb with nothing compiled returns its
-// output to `jet_cli_main` instead. Callers keep the shapes the seed backends
+// output to `jet_cli_main`, which ends here with it. Callers keep the shapes the seed backends
 // lower: a value-returning function ends in a value, never in this call, and
 // a `??` fallback calls it directly, not from a block of statements.
 // A Jet defect (JET_CLI_EXIT_ICE, I2) ends through process.exit_unmapped
@@ -1716,7 +1744,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
 // (`jet run [--profile=…] [--optimize=…] [--log=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
-// A run confined by `--allow=FS.Read:<path>` (jet_cli_read_scope) reads
+// A run confined by `--allow='FS.Read("<path>")'` (jet_cli_read_scope) reads
 // only those paths, and JET_READ_SCOPE names them, so the runtime's refusal
 // of any other read names the grant.
 jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
@@ -2419,7 +2447,7 @@ jet_cli_new_run_source: fn(template: String) -> String Never! {
     if template == {
         "cli" -> "#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    print(greeting(args.name))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
         "ui" -> "use ui: core.ui\n\n#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    message: greeting(args.name)\n    print(message)\n    backend: ui.null_backend()\n    ui.reactive_render(() -> {{\n        tree: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    }})\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
-        "web" -> "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse {{\n    ui: core.ui\n    reactive: core.reactive\n}}\n#Target(Web)\n\nrun: fn() {{\n    count: reactive.signal(0)\n    ui.reactive_render(() -> {{\n        n := count.get()\n        tree: ui.box([\n            ui.node_color(\"Clicks: {{n}}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {{\n                count.set(count.get() + 1)\n            }}\n        ])\n        backend: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    }})\n}}\n\n#Test(\"the counter increments\") {{\n    count: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}}\n"
+        "web" -> "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse {{\n    ui: core.ui\n    reactive: core.reactive\n}}\n#Target(Web)\n\nrun: fn() {{\n    count: reactive.signal(0)\n    ui.reactive_render(() -> {{\n        n := count.get()\n        tree: ui.box([\n            ui.node_color(\"Clicks: {{n}}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\", () -> {{\n                count.set(count.get() + 1)\n            }})\n        ])\n        backend: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    }})\n}}\n\n#Test(\"the counter increments\") {{\n    count: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}}\n"
         else -> "greeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn() {{\n    print(greeting(\"world\"))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
     }
 }
@@ -2750,10 +2778,6 @@ jet_cli_fmt_is_typed_package_source: fn(source: String, origin: String) -> Bool 
     if !value.starts_with("Config") -> return false
     rest: value.slice(6..<value.len()).trim()
     rest.starts_with(".{{") || rest.starts_with("{{")
-}
-
-jet_cli_fmt_plural: fn(count: Int, singular: String, plural: String) -> String Never! {
-    if count == 1 -> singular else -> plural
 }
 
 // `is_package_manifest_file` the one reserved Package root filename; its
@@ -3350,42 +3374,40 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 // target of `--trace[=FILE]` (which the front door admits only on those
 // verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
-// every other verb's output is written here, as its `--json` outcome
-// (jet_cli_json_outcome), and its exit code returned to
-// run.jet, which exits with it. This is round 3's entry shape: every seed
-// (a0_001 included) checks and lowers it.
-jet_cli_main: fn(args: [String]) -> Int {
+// every other verb's output ends it here, as its `--json` outcome
+// (jet_cli_json_outcome), through jet_cli_finish too, so its ICE exits 101.
+// This is round 3's entry shape: every seed (a0_001 included) checks and
+// lowers it.
+jet_cli_main: fn(args: [String]) {
     plan: jet_cli_front(args)
     owned: jet_cli_owned_flags(args)
     recording := JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {
-        .Replay(replayed) -> {
-            jet_cli_write_output(replayed)
-            return replayed.exit_code
-        }
+        .Replay(replayed) -> jet_cli_finish(replayed)
         .Run(claimed) -> recording = claimed
     }
     done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned), recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
-    jet_cli_write_output(output)
     // A check that ends here (refused before its compile) is still recorded.
     if recording == .Val(claimed) -> jet_cli_check_receipt_publish(claimed, output, [JetCLIReceiptInput]{})
-    output.exit_code
+    jet_cli_finish(output)
 }
 
 // Carry out a compiling verb's plan as a task, on a scheduler worker rather
-// than the main thread. A compile recurses once per nesting level of an
-// expression that it does not walk as a loop; for a left-leaning operator
-// chain the deepest such recursion left is the drop of its expression tree,
-// about 100 bytes a level, so a 100,000-term `a + a + ...` sum needs about
-// 10 MiB (measured at the default -O0 `jet run`). That is more than the main
-// thread's default 8 MiB and far less than a worker's stack (the runtime's
-// thread_stack_bytes, at least 192 MiB). The program `jet run` launches keeps
-// the main thread and every stack default. The trace sink is made on the
-// worker, the thread the compile runs on.
+// than the main thread, in a group that asks for JET_CLI_COMPILE_STACK_BYTES of
+// stack. A compile recurses once per nesting level of an expression that it
+// does not walk as a loop; for a left-leaning operator chain the deepest such
+// recursion left is the drop of its expression tree, about 100 bytes a level,
+// so a 100,000-term `a + a + ...` sum needs about 10 MiB (measured at the
+// default -O0 `jet run`), more than the default 8 MiB stack every task gets.
+// The compile's own groups and tasks inherit the size; the program `jet run`
+// launches keeps the main thread and every stack default. The trace sink is
+// made on the worker, the thread the compile runs on.
+JET_CLI_COMPILE_STACK_BYTES: 201326592
+
 jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     steps := [JetCLIRunStep]{}
-    task.group compile_stack {
+    task.group compile_stack(stack: JET_CLI_COMPILE_STACK_BYTES) {
         compiling: task jet_cli_execute_compiling(plan, trace, recording)
         steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))
     }
@@ -3421,8 +3443,8 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
-        else -> false
+        .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .LockedBuild(_, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .Jobs(_, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> false
     }
 }
 
@@ -3446,7 +3468,7 @@ jet_cli_locked_plan: fn(plan: &&JetCLIPlan) -> JetCLIPlan Never! {
             locked.locked = true
             return JetCLIPlan.Build{file: file.move(), source: source.move(), color: color, options: locked, threads: threads, invocation: invocation.move(), notice: notice.move(), json: json, sbom: sbom, quiet: quiet, verbose: verbose}
         }
-        else -> {}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
@@ -3459,13 +3481,13 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .Done(done) -> output = done.move()
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
-        .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings, profile) -> {
+        .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings, profile, style) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, profile, trace_sink, true, recording)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, profile, style, trace_sink, true, recording)
         }
-        .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings, profile) -> {
+        .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings, profile, style) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, trace_sink)
+            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, style, trace_sink)
         }
         .CheckPrelude(file, source, color, quiet, threads, json) -> output = jet_cli_compile_prelude_check(file, source, color, quiet, threads, json, trace_sink)
         .CheckCore(core, color, quiet, threads, json) -> output = jet_cli_compile_core_check(core, color, quiet, threads, json, trace_sink)
@@ -3513,9 +3535,9 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         }
         .Fmt(request) -> output = jet_cli_format_run(request, request.json)
         .FmtLang(argv, color) -> output = jet_cli_external_fmt(argv, color)
-        .Fix(file, dry_run, all, markers, color, quiet, json, notice) -> {
+        .Fix(file, dry_run, all, markers, style, color, quiet, json, notice) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_fix_run(file, dry_run, all, markers, color, quiet, json)
+            output = jet_cli_fix_run(file, dry_run, all, markers, style, color, quiet, json)
         }
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)
@@ -3548,6 +3570,10 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .AuditCopies(file, source, color, json, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_audit_copies(file, source, color, json)
+        }
+        .AuditWrites(file, source, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_audit_writes(file, source, color, json)
         }
         .AuditForeign(file, source, color, json, notice) -> {
             jet_cli_write_notice(notice)
@@ -3612,6 +3638,7 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
             cli_term.eprint("jet dev: in-process hot reload isn't available yet; restarting the program on each change")
             hot_noted = true
         }
+        read := [JetDriverComptimeInputRecord]{}
         compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
         if compiled.move() == {
             .Refused(refusal) -> {
@@ -3619,11 +3646,19 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
                 if first -> return JetDriverVerbOutput{stdout: "", stderr: if configured -> refusal.stderr else -> "", exit_code: refusal.exit_code}
                 if configured -> cli_term.eprint(refusal.stderr)
             }
-            .Checked(result, inputs, snapshot) -> if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+            .Checked(result, inputs, snapshot) -> {
+                read = result.comptime_inputs.copy()
+                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+            }
         }
         first = false
+        // The inputs' stamp is taken before their bytes are checked, so an
+        // edit made after the check still moves it.
+        inputs_stamp: jet_cli_dev_inputs_stamp(read)
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
-        loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)
+        if jet_cli_dev_inputs_current(read) {
+            loop jet_cli_dev_stamp(root, config.watch) == stamp && jet_cli_dev_inputs_stamp(read) == inputs_stamp -> cli_time.sleep(200ms)
+        }
         if child == {
             .Memory(pid) -> x64_process_stop(pid)
             .File(running) -> {
@@ -3725,6 +3760,46 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
         if modified > latest -> latest = modified
     }
     "{count}:{latest}"
+}
+
+// A change stamp over the comptime inputs a build read (`read`, files outside
+// the package's .jet sources and `d.watch` paths, such as an `embed_file`
+// asset): their latest modification time and how many of them exist, as
+// jet_cli_dev_stamp, then each `find`'s membership digest now, so that a file
+// added to or removed from a glob moves it.
+jet_cli_dev_inputs_stamp: fn(read: [JetDriverComptimeInputRecord]) -[FS]> String {
+    inputs: jet_driver_shared_build_inputs(JetCLIBuildInputs{})
+    latest := 0
+    count := 0
+    globs := ""
+    loop record in read {
+        if record.glob != "" {
+            globs = "{globs}:{jet_driver_comptime_glob_membership(inputs, record) ?? "unwalkable"}"
+            next
+        }
+        info: cli_files.stat(record.file) ?? next
+        count += 1
+        modified: info.modified.to_unix_ns() ?? next
+        if modified > latest -> latest = modified
+    }
+    "{count}:{latest}{globs}"
+}
+
+// Whether every comptime input in `read` still holds the bytes the build
+// read, and every `find` still matches the files it matched; an input edited
+// while the build compiled (or since removed, or added to a glob) is not,
+// and `jet dev` rebuilds at once.
+jet_cli_dev_inputs_current: fn(read: [JetDriverComptimeInputRecord]) -[FS]> Bool {
+    inputs: jet_driver_shared_build_inputs(JetCLIBuildInputs{})
+    loop record in read {
+        if record.glob != "" {
+            if jet_driver_comptime_glob_membership(inputs, record) != Val((record.sha256)) -> return false
+            next
+        }
+        bytes: cli_files.read_bytes(record.file) ?? return false
+        if !jet_driver_comptime_input_unchanged(record, bytes) -> return false
+    }
+    true
 }
 
 // Every file under `directory`.

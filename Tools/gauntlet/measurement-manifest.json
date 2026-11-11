@@ -215,14 +215,14 @@
     "evidence": {
       "file": "Tools/gauntlet/performance-surface-evidence.json",
       "path": "pairs",
-      "tier": "interpreter",
+      "tier": "native",
       "metric": "wall_time_ms",
-      "target": "jet run --interpret",
+      "target": "jet build --optimize=full",
       "input": "100000-element integer reduction: total starts at 0 and consumes range 0..<100000",
-      "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
+      "setup": "one jet build --optimize=full per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory",
       "warmups": 10,
       "trials": 100,
-      "output_oracle": "performance-surface:compound_assign_vs_binary_assign:4999950000"
+      "output_oracle": "performance-surface:compound_assign_vs_binary_assign:4999950000\n"
     },
     "pair_measurement": {
       "inputs": {
@@ -230,11 +230,11 @@
         "range": "0..<100000",
         "expected_sum": 4999950000
       },
-      "tier": "interpreter",
-      "target": "jet run --interpret",
+      "tier": "native",
+      "target": "jet build --optimize=full",
       "artifact_binding": "one_artifact_sha256",
       "environment_binding": "one_host_toolchain_affinity_identity",
-      "sampling": "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+      "sampling": "balanced_seeded_fisher_yates; one build per arm, fresh process and fresh empty directory per sample",
       "output_validation": "exact_utf8_stdout_bytes"
     },
     "comparator": {
@@ -266,15 +266,121 @@
         "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
         "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
         "input_range": "0..<100000",
-        "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
+        "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000\n",
         "measured": {
           "surface_wall_time_ms": 2251.736,
           "plain_wall_time_ms": 2232.34,
           "ratio": 1.0086886406192603
         },
         "verdict": "inconclusive",
-        "verdict_reason": "Measurements across four unrelated clean binaries straddle 1.00; this workload is noise-dominated and does not prove a surface benefit.",
+        "verdict_reason": "Historical: measured on the retired interpreter tier, where runs across four unrelated clean binaries straddled 1.00. The pair needs a new measurement on the native tier.",
         "bug_card": "#2977"
+      },
+      {
+        "id": "list_fill_vs_index_loop",
+        "surface": "list fill",
+        "plain": "index loop storing one value",
+        "workload": "65536-pixel RGBA struct row (a 256x256 image) cleared to one pixel over 2048 frames with an identical checksum",
+        "surface_program": "gauntlet:performance-surface:list_fill_vs_index_loop:surface",
+        "plain_program": "gauntlet:performance-surface:list_fill_vs_index_loop:plain",
+        "evidence_key": "list_fill_vs_index_loop",
+        "evidence_file": "Tools/gauntlet/performance-surface-list-fill-evidence.json",
+        "surface_field": "surface_wall_time_ms",
+        "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: list_fill_vs_index_loop surface spelling\nPixel: struct {\n    r: U8\n    g: U8\n    b: U8\n    a: U8\n}\n\nrun: fn() {\n    row := [Pixel]{}\n    loop i in 0..<65536 {\n        row.push(Pixel{r: 0, g: 0, b: 0, a: 255})\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        shade: U8.from_int(frame % 256) ?? 0\n        value: Pixel{r: shade, g: shade, b: shade, a: 255}\n        row.fill(0..<65536, value)\n        total = total + Int.from_u8(row[frame].r)\n    }\n    loop pixel in row {\n        total = total + Int.from_u8(pixel.r)\n    }\n    print(\"performance-surface:list_fill_vs_index_loop:{total}\")\n}",
+        "plain_source": "// Real paired workload: list_fill_vs_index_loop plain spelling\nPixel: struct {\n    r: U8\n    g: U8\n    b: U8\n    a: U8\n}\n\nrun: fn() {\n    row := [Pixel]{}\n    loop i in 0..<65536 {\n        row.push(Pixel{r: 0, g: 0, b: 0, a: 255})\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        shade: U8.from_int(frame % 256) ?? 0\n        value: Pixel{r: shade, g: shade, b: shade, a: 255}\n        loop i in 0..<65536 {\n            row[i] = value\n        }\n        total = total + Int.from_u8(row[frame].r)\n    }\n    loop pixel in row {\n        total = total + Int.from_u8(pixel.r)\n    }\n    print(\"performance-surface:list_fill_vs_index_loop:{total}\")\n}",
+        "input_range": "0..<65536",
+        "inputs": {
+          "frames": 2048,
+          "range": "0..<65536",
+          "expected_total": 16972800
+        },
+        "expected_output": "performance-surface:list_fill_vs_index_loop:16972800\n",
+        "measured": {
+          "surface_wall_time_ms": 9.89,
+          "plain_wall_time_ms": 58.586,
+          "ratio": 0.16881166148909296
+        },
+        "verdict": "win",
+        "verdict_reason": "Strict win on the native tier: median ratio 0.169, paired-bootstrap 95% upper bound 0.174 (100 trials, 10 warmups)."
+      },
+      {
+        "id": "list_fill_repeat_vs_index_loop",
+        "surface": "list fill_repeat",
+        "plain": "index loop storing pattern[i % 4]",
+        "workload": "65536-byte U8 row (a 128x128 RGBA image) tiled with a 4-byte pixel over 2048 frames with an identical checksum",
+        "surface_program": "gauntlet:performance-surface:list_fill_repeat_vs_index_loop:surface",
+        "plain_program": "gauntlet:performance-surface:list_fill_repeat_vs_index_loop:plain",
+        "evidence_key": "list_fill_repeat_vs_index_loop",
+        "evidence_file": "Tools/gauntlet/performance-surface-list-fill-repeat-evidence.json",
+        "surface_field": "surface_wall_time_ms",
+        "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: list_fill_repeat_vs_index_loop surface spelling\nrun: fn() {\n    row := [U8]{}\n    loop i in 0..<65536 {\n        row.push(0)\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        pattern: [U8]{U8.from_int(frame % 256) ?? 0, U8.from_int((frame + 1) % 256) ?? 0, U8.from_int((frame + 2) % 256) ?? 0, U8.from_int((frame + 3) % 256) ?? 0}\n        row.fill_repeat(0..<65536, pattern)\n        total = total + Int.from_u8(row[frame])\n    }\n    loop value in row {\n        total = total + Int.from_u8(value)\n    }\n    print(\"performance-surface:list_fill_repeat_vs_index_loop:{total}\")\n}",
+        "plain_source": "// Real paired workload: list_fill_repeat_vs_index_loop plain spelling\nrun: fn() {\n    row := [U8]{}\n    loop i in 0..<65536 {\n        row.push(0)\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        pattern: [U8]{U8.from_int(frame % 256) ?? 0, U8.from_int((frame + 1) % 256) ?? 0, U8.from_int((frame + 2) % 256) ?? 0, U8.from_int((frame + 3) % 256) ?? 0}\n        loop i in 0..<65536 {\n            row[i] = pattern[i % 4]\n        }\n        total = total + Int.from_u8(row[frame])\n    }\n    loop value in row {\n        total = total + Int.from_u8(value)\n    }\n    print(\"performance-surface:list_fill_repeat_vs_index_loop:{total}\")\n}",
+        "input_range": "0..<65536",
+        "inputs": {
+          "frames": 2048,
+          "range": "0..<65536",
+          "expected_total": 4487168
+        },
+        "expected_output": "performance-surface:list_fill_repeat_vs_index_loop:4487168\n",
+        "measured": {
+          "surface_wall_time_ms": 3.14,
+          "plain_wall_time_ms": 55.722,
+          "ratio": 0.056351171889020495
+        },
+        "verdict": "win",
+        "verdict_reason": "Strict win on the native tier: median ratio 0.056, paired-bootstrap 95% upper bound 0.058 (100 trials, 10 warmups)."
+      },
+      {
+        "id": "net_read_into_vs_read",
+        "card": "#5976 c112",
+        "surface": "read_into into one cleared buffer",
+        "plain": "read(4096) returning a fresh list",
+        "workload": "64 MiB over loopback TCP, written in 4 KiB blocks by a writer task, read in 4096-byte reads until end of stream",
+        "surface_program": "gauntlet:performance-surface:net_read_into_vs_read:surface",
+        "plain_program": "gauntlet:performance-surface:net_read_into_vs_read:plain",
+        "evidence_key": "net_read_into_vs_read",
+        "evidence_file": "Tools/gauntlet/performance-surface-read-into-evidence.json",
+        "memory_evidence_file": "Tools/gauntlet/performance-surface-read-into-memory.json",
+        "surface_field": "surface_wall_time_ms",
+        "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: net_read_into_vs_read surface spelling\npackage: {\n    name: \"read_into_pair_surface\"\n    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }\n}\nuse net: core.net\n\nrun: fn() {\n    listener: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"listen\")\n    address: net.listener_local_socket_addr(listener) ?? panic(\"listener address\")\n    writer: task {\n        accepting := listener.move()\n        side: accepting.accept() ?? panic(\"accept\")\n        block := [U8]{}\n        loop _ in 0..<4096 { block.push(U8{97}) }\n        loop _ in 0..<16384 { side.write_all(block) ?? panic(\"write\") }\n        side.close() ?? panic(\"close\")\n    }\n    client := net.tcp_connect_addr(address) ?? panic(\"connect\")\n    total := 0\n    reads := 0\n    buffer := [U8]{}\n    loop {\n        buffer.clear()\n        count: client.read_into(buffer, 4096) ?? panic(\"read_into\")\n        if count == 0 -> break\n        total += count\n        reads += 1\n    }\n    writer.join() ?? panic(\"writer\")\n    eprint(\"reads={reads}\")\n    print(\"performance-surface:net_read_into_vs_read:{total}\")\n}",
+        "plain_source": "// Real paired workload: net_read_into_vs_read plain spelling\npackage: {\n    name: \"read_into_pair_plain\"\n    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }\n}\nuse net: core.net\n\nrun: fn() {\n    listener: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"listen\")\n    address: net.listener_local_socket_addr(listener) ?? panic(\"listener address\")\n    writer: task {\n        accepting := listener.move()\n        side: accepting.accept() ?? panic(\"accept\")\n        block := [U8]{}\n        loop _ in 0..<4096 { block.push(U8{97}) }\n        loop _ in 0..<16384 { side.write_all(block) ?? panic(\"write\") }\n        side.close() ?? panic(\"close\")\n    }\n    client := net.tcp_connect_addr(address) ?? panic(\"connect\")\n    total := 0\n    reads := 0\n    loop {\n        bytes: client.read(4096) ?? panic(\"read\")\n        if bytes.len() == 0 -> break\n        total += bytes.len()\n        reads += 1\n    }\n    writer.join() ?? panic(\"writer\")\n    eprint(\"reads={reads}\")\n    print(\"performance-surface:net_read_into_vs_read:{total}\")\n}",
+        "input_range": "0..<16384",
+        "inputs": {
+          "blocks": 16384,
+          "block_bytes": 4096,
+          "read_limit": 4096,
+          "range": "0..<16384",
+          "expected_total": 67108864
+        },
+        "expected_output": "performance-surface:net_read_into_vs_read:67108864\n",
+        "metrics": [
+          "wall_time_ms",
+          "allocations_per_read",
+          "peak_live_heap_bytes",
+          "peak_rss_kb"
+        ],
+        "measured": {
+          "surface_wall_time_ms": 46.709,
+          "plain_wall_time_ms": 55.039,
+          "ratio": 0.8486527734878905,
+          "surface_allocations_per_read": 3.042,
+          "plain_allocations_per_read": 5.047,
+          "surface_peak_live_heap_bytes": 145240,
+          "plain_peak_live_heap_bytes": 147240,
+          "surface_peak_rss_kb": 15212,
+          "plain_peak_rss_kb": 15220
+        },
+        "metric_verdicts": {
+          "wall_time_ms": "win",
+          "allocations_per_read": "win",
+          "peak_live_heap_bytes": "win",
+          "peak_rss_kb": "inconclusive"
+        },
+        "verdict": "win",
+        "verdict_reason": "Strict win on the native tier: median ratio 0.849, paired-bootstrap 95% upper bound 0.947 (100 trials, 10 warmups); allocations per read and peak live heap win; peak RSS ratio 0.9995 with its 95% interval 0.9984..1.0008 across 1, inconclusive at page resolution."
       }
     ]
   },

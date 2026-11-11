@@ -1718,18 +1718,18 @@ subst_select: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, s0: Int, do_prior:
 ColUsedWalker: struct {
     cursor: Int
     hits: [Int]
-}
 
-impl ColUsedWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == self.cursor && a.exprs[e].icolumn >= 0 -> self.hits.push(e)
-        ast.WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == self.cursor && a.exprs[e].icolumn >= 0 -> self.hits.push(e)
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // recomputeColumnsUsed: FROM item si's colUsed from what SELECT s uses.
@@ -1767,26 +1767,26 @@ srclist_renumber_cursors: fn(p: &cg.Parse, a: &ast.AST, csr_map: &[Int], src: In
 // renumberCursorsCb: the references to renumbered cursors follow them.
 RenumberWalker: struct {
     csr_map: [Int]
+
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            op: a.exprs[e].op
+            if op == tk.TK_COLUMN || op == tk.TK_IF_NULL_ROW -> a.exprs[e].itable = renumber_mapping(self.csr_map, a.exprs[e].itable)
+            if ast.has(a, e, ast.EP_OUTER_ON) -> a.exprs[e].w = renumber_mapping(self.csr_map, a.exprs[e].w)
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+    }
 }
 
 // renumberCursorDoMapping.
 renumber_mapping: fn(m: [Int], c: Int) -> Int Never! {
     if c >= 0 && c < m[0] && m[c + 1] > 0 -> return m[c + 1]
     c
-}
-
-impl RenumberWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        op: a.exprs[e].op
-        if op == tk.TK_COLUMN || op == tk.TK_IF_NULL_ROW -> a.exprs[e].itable = renumber_mapping(self.csr_map, a.exprs[e].itable)
-        if ast.has(a, e, ast.EP_OUTER_ON) -> a.exprs[e].w = renumber_mapping(self.csr_map, a.exprs[e].w)
-        ast.WRC_CONTINUE
-    }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // renumberCursors: new cursors for the FROM items of SELECT s (but
@@ -2061,30 +2061,30 @@ propagate_constant_rewrite_one: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int, ig
 // propagateConstantExprRewrite.
 PropagateConstWalker: struct {
     unused: Int
-}
 
-impl PropagateConstWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        t: cg.walk_top(p)
-        if p.walks[t].e_code != 0 {
-            op: a.exprs[e].op
-            if (op >= tk.TK_EQ && op <= tk.TK_GE) || op == tk.TK_IS {
-                l: a.exprs[e].left
-                _: propagate_constant_rewrite_one(p, a, t, l, false)
-                if p.db.malloc_failed -> return ast.WRC_PRUNE
-                if ex.expr_affinity(p.db, a, l) != base.AFF_TEXT {
-                    r: a.exprs[e].right
-                    _: propagate_constant_rewrite_one(p, a, t, r, false)
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            t: cg.walk_top(p)
+            if p.walks[t].e_code != 0 {
+                op: a.exprs[e].op
+                if (op >= tk.TK_EQ && op <= tk.TK_GE) || op == tk.TK_IS {
+                    l: a.exprs[e].left
+                    _: propagate_constant_rewrite_one(p, a, t, l, false)
+                    if p.db.malloc_failed -> return ast.WRC_PRUNE
+                    if ex.expr_affinity(p.db, a, l) != base.AFF_TEXT {
+                        r: a.exprs[e].right
+                        _: propagate_constant_rewrite_one(p, a, t, r, false)
+                    }
                 }
             }
+            propagate_constant_rewrite_one(p, a, t, e, p.walks[t].e_code != 0)
         }
-        propagate_constant_rewrite_one(p, a, t, e, p.walks[t].e_code != 0)
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // propagateConstants: the WHERE-clause constant propagation of SELECT s
@@ -2291,15 +2291,15 @@ indexed_by_lookup: fn(p: &cg.Parse, a: &ast.AST, si: Int) -> Int Never! {
 // which multiSelectOrderBy's merge needs.
 ConvertCompoundWalker: struct {
     unused: Int
-}
 
-impl ConvertCompoundWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { convert_compound_select_to_subquery(a, s) }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { convert_compound_select_to_subquery(a, s) }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+    }
 }
 
 convert_compound_select_to_subquery: fn(a: &ast.AST, s: Int) -> Int Never! {
@@ -2746,15 +2746,15 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 // The sqlite3SelectExpand walker: selectExpander, then sqlite3SelectPopWith.
 ExpanderWalker: struct {
     unused: Int
-}
 
-impl ExpanderWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { select_expander(p, a, s) }
-    has_select2: fn(self) -[]> Bool Never! { true }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_pop_with(a, s) }
-    win_defn: fn(self) -[]> Bool Never! { true }
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { select_expander(p, a, s) }
+        has_select2: fn(self) -[]> Bool Never! { true }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_pop_with(a, s) }
+        win_defn: fn(self) -[]> Bool Never! { true }
+    }
 }
 
 // sqlite3SelectExpand: SELECT s and its subqueries expanded.
@@ -2773,15 +2773,15 @@ select_expand: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {
 // each SELECT's subtrees.
 TypeInfoWalker: struct {
     unused: Int
-}
 
-impl TypeInfoWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select: fn(self) -[]> Bool Never! { true }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { true }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_add_subquery_type_info(p, a, s) }
-    win_defn: fn(self) -[]> Bool Never! { false }
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select: fn(self) -[]> Bool Never! { true }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { true }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> { select_add_subquery_type_info(p, a, s) }
+        win_defn: fn(self) -[]> Bool Never! { false }
+    }
 }
 
 // selectAddSubqueryTypeInfo: the column types of the FROM subqueries'
@@ -2853,28 +2853,28 @@ optimize_aggregate_use_of_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, s: Int, ai
 // an indexed expression computes reads its AggInfo column.
 IdxEprRefWalker: struct {
     unused: Int
-}
 
-impl IdxEprRefWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        ai: a.exprs[e].agg_info
-        if ai < 0 -> return ast.WRC_CONTINUE
-        op: a.exprs[e].op
-        if op == tk.TK_AGG_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_IF_NULL_ROW -> return ast.WRC_CONTINUE
-        iagg: a.exprs[e].iagg
-        if iagg >= p.aggs[ai].cols.len() -> return ast.WRC_CONTINUE
-        col: p.aggs[ai].cols[iagg]
-        a.exprs[e].op = tk.TK_AGG_COLUMN
-        a.exprs[e].itable = col.itable
-        a.exprs[e].icolumn = col.icolumn
-        ast.clear_flags(a, e, ast.EP_SKIP.bit_or(ast.EP_COLLATE).bit_or(ast.EP_UNLIKELY))
-        ast.WRC_PRUNE
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            ai: a.exprs[e].agg_info
+            if ai < 0 -> return ast.WRC_CONTINUE
+            op: a.exprs[e].op
+            if op == tk.TK_AGG_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_IF_NULL_ROW -> return ast.WRC_CONTINUE
+            iagg: a.exprs[e].iagg
+            if iagg >= p.aggs[ai].cols.len() -> return ast.WRC_CONTINUE
+            col: p.aggs[ai].cols[iagg]
+            a.exprs[e].op = tk.TK_AGG_COLUMN
+            a.exprs[e].itable = col.itable
+            a.exprs[e].icolumn = col.icolumn
+            ast.clear_flags(a, e, ast.EP_SKIP.bit_or(ast.EP_COLLATE).bit_or(ast.EP_UNLIKELY))
+            ast.WRC_PRUNE
+        }
+        has_select: fn(self) -[]> Bool Never! { false }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { false }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // aggregateConvertIndexedExprRefToColumn.
@@ -3101,31 +3101,31 @@ explain_simple_count: fn(p: &cg.Parse, a: ast.AST, t: Int, ix: Int) Never! {
 // moved.
 HavingToWhereWalker: struct {
     unused: Int
-}
 
-impl HavingToWhereWalker.WalkCb {
-    on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
-        if a.exprs[e].op == tk.TK_AND -> return ast.WRC_CONTINUE
-        t: cg.walk_top(p)
-        s: p.walks[t].u
-        gb: a.selects[s].group_by
-        if ex.expr_is_constant_or_group_by(p, a, e, gb) && !ast.always_false(a, e) && a.exprs[e].agg_info < 0 {
-            nw: ast.expr_alloc(a, tk.TK_INTEGER, Val("1".bytes()), false)
-            // SWAP(Expr, *pNew, *pExpr): the term moves to nw's slot.
-            tmp: a.exprs[nw].copy()
-            a.exprs[nw] = a.exprs[e].copy()
-            a.exprs[e] = tmp
-            w: ast.expr_and(a, a.selects[s].where_expr, nw)
-            a.selects[s].where_expr = w
-            p.walks[t].e_code = 1
+    impl WalkCb {
+        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+            if a.exprs[e].op == tk.TK_AND -> return ast.WRC_CONTINUE
+            t: cg.walk_top(p)
+            s: p.walks[t].u
+            gb: a.selects[s].group_by
+            if ex.expr_is_constant_or_group_by(p, a, e, gb) && !ast.always_false(a, e) && a.exprs[e].agg_info < 0 {
+                nw: ast.expr_alloc(a, tk.TK_INTEGER, Val("1".bytes()), false)
+                // SWAP(Expr, *pNew, *pExpr): the term moves to nw's slot.
+                tmp: a.exprs[nw].copy()
+                a.exprs[nw] = a.exprs[e].copy()
+                a.exprs[e] = tmp
+                w: ast.expr_and(a, a.selects[s].where_expr, nw)
+                a.selects[s].where_expr = w
+                p.walks[t].e_code = 1
+            }
+            ast.WRC_PRUNE
         }
-        ast.WRC_PRUNE
+        has_select: fn(self) -[]> Bool Never! { false }
+        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        has_select2: fn(self) -[]> Bool Never! { false }
+        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
+        win_defn: fn(self) -[]> Bool Never! { false }
     }
-    has_select: fn(self) -[]> Bool Never! { false }
-    on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
-    has_select2: fn(self) -[]> Bool Never! { false }
-    on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) Never! -[DB]> {}
-    win_defn: fn(self) -[]> Bool Never! { false }
 }
 
 // havingToWhere.

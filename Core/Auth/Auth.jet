@@ -163,7 +163,7 @@ claims_object: fn(text: String) -> encoding.Dyn AuthError! {
 is_object: fn(tree: encoding.Dyn) -> Bool Never! {
     if tree == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
 }
 
@@ -198,7 +198,7 @@ int_claim: fn(fields: encoding.Dyn, text: String, name: String) -> Int? AuthErro
             number: json_i64(lexeme) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
             Val(number)
         }
-        else -> Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
     }
 }
 
@@ -214,7 +214,7 @@ audience_claim: fn(fields: encoding.Dyn, expected: String) -> String AuthError! 
                 values.push(text)
             }
         }
-        else -> {
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
             text: value.text() ?? return Err(AuthError.MalformedToken("claim `aud` must be text or a text list"))
             values.push(text)
         }

@@ -33,9 +33,7 @@ SessionState: enum {
     Finished
     Stale
     Cancelled
-}
 
-impl SessionState {
     as_str: fn(self) -> String Never! {
         if self == {
             .Running -> "running"
@@ -50,9 +48,7 @@ impl SessionState {
 EvaluationMode: enum {
     ReadOnly
     Mutate
-}
 
-impl EvaluationMode {
     as_str: fn(self) -> String Never! {
         if self == {
             .ReadOnly -> "read_only"
@@ -65,9 +61,7 @@ Publication: enum {
     Published
     Redacted
     Absent
-}
 
-impl Publication {
     as_str: fn(self) -> String Never! {
         if self == {
             .Published -> "published"
@@ -84,9 +78,7 @@ AggregateKind: enum {
     Set
     Tuple
     Variant
-}
 
-impl AggregateKind {
     as_str: fn(self) -> String Never! {
         if self == {
             .Record -> "record"
@@ -108,9 +100,7 @@ TypedValue: enum {
     Text(text: String)
     Bytes(length: Int, sha256: String)
     Aggregate(kind: AggregateKind, length: Int)
-}
 
-impl TypedValue {
     validate: fn(self) PausedEvaluateError! {
         if self == {
             .Text(text) -> valid_text(text, "typed text", MAX_VALUE_BYTES)
@@ -157,9 +147,7 @@ SourceLocation: struct {
     source_revision: String
     start: Int
     end: Int
-}
 
-impl SourceLocation {
     new: fn(source_id: String, source_revision: String, start: Int, end: Int) -> SourceLocation PausedEvaluateError! {
         location: SourceLocation{source_id: source_id, source_revision: source_revision, start: start, end: end}
         location.validate()
@@ -184,9 +172,7 @@ SessionIdentity: struct {
     source_revision: String
     pause_id: String
     frame_id: String
-}
 
-impl SessionIdentity {
     new: fn(session_id: String, source_id: String, source_revision: String, pause_id: String, frame_id: String) -> SessionIdentity PausedEvaluateError! {
         identity: SessionIdentity{session_id: session_id, source_id: source_id, source_revision: source_revision, pause_id: pause_id, frame_id: frame_id}
         identity.validate()
@@ -215,9 +201,7 @@ impl SessionIdentity {
 AuthorityRequirement: struct {
     capability: String
     scope_id: String
-}
 
-impl AuthorityRequirement {
     new: fn(capability: String, scope_id: String) -> AuthorityRequirement PausedEvaluateError! {
         requirement: AuthorityRequirement{capability: capability, scope_id: scope_id}
         requirement.validate()
@@ -241,9 +225,7 @@ impl AuthorityRequirement {
 AuthorityGrant: struct {
     capability: String
     scope_id: String
-}
 
-impl AuthorityGrant {
     new: fn(capability: String, scope_id: String) -> AuthorityGrant PausedEvaluateError! {
         grant: AuthorityGrant{capability: capability, scope_id: scope_id}
         valid_id(grant.capability, "authority capability")
@@ -254,9 +236,7 @@ impl AuthorityGrant {
 
 AuthoritySet: struct {
     grants: [AuthorityGrant]
-}
 
-impl AuthoritySet {
     // The grants in canonical `capability@scope` order, each once.
     new: fn(grants: [AuthorityGrant]) -> AuthoritySet Never! {
         keys := [String]{}
@@ -314,11 +294,7 @@ EvaluationBudget: struct {
     max_nodes: Int
     max_bytes: Int
     max_steps: Int
-}
 
-DEFAULT_EVALUATION_BUDGET: EvaluationBudget{max_depth: 32, max_nodes: 1024, max_bytes: 262144, max_steps: 100000}
-
-impl EvaluationBudget {
     new: fn(max_depth: Int, max_nodes: Int, max_bytes: Int, max_steps: Int) -> EvaluationBudget PausedEvaluateError! {
         budget: EvaluationBudget{max_depth: max_depth, max_nodes: max_nodes, max_bytes: max_bytes, max_steps: max_steps}
         budget.validate()
@@ -346,26 +322,32 @@ impl EvaluationBudget {
     }
 }
 
+DEFAULT_EVALUATION_BUDGET: EvaluationBudget{max_depth: 32, max_nodes: 1024, max_bytes: 262144, max_steps: 100000}
+
 EvaluationUsage: struct {
     depth: Int
     nodes: Int
     bytes: Int
     steps: Int
+
+    json: fn(self) -> String Never! {
+        "{{\"depth\":{self.depth},\"nodes\":{self.nodes},\"bytes\":{self.bytes},\"steps\":{self.steps}}}"
+    }
 }
 
 evaluation_usage_zero: fn() -> EvaluationUsage Never! {
     EvaluationUsage{depth: 0, nodes: 0, bytes: 0, steps: 0}
 }
 
-impl EvaluationUsage {
-    json: fn(self) -> String Never! {
-        "{{\"depth\":{self.depth},\"nodes\":{self.nodes},\"bytes\":{self.bytes},\"steps\":{self.steps}}}"
-    }
-}
-
 Cancellation: struct {
     requested: Bool
     reason: String?
+
+    validate: fn(self) PausedEvaluateError! {
+        if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)
+        if !self.requested && self.reason != None -> return Err(paused_error("a non-requested cancellation cannot carry a reason"))
+        Ok()
+    }
 }
 
 cancellation_none: fn() -> Cancellation Never! {
@@ -377,14 +359,6 @@ cancellation_requested: fn(reason: String) -> Cancellation PausedEvaluateError! 
     Ok(Cancellation{requested: true, reason: Val(reason)})
 }
 
-impl Cancellation {
-    validate: fn(self) PausedEvaluateError! {
-        if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)
-        if !self.requested && self.reason != None -> return Err(paused_error("a non-requested cancellation cannot carry a reason"))
-        Ok()
-    }
-}
-
 ValueProjection: struct {
     id: String
     name: String
@@ -394,25 +368,7 @@ ValueProjection: struct {
     value: TypedValue?
     children: [ValueProjection]
     truncated: Bool
-}
 
-value_projection: fn(id: String, name: String, type_name: String, source: SourceLocation, publication: Publication, value: TypedValue?) -> ValueProjection Never! {
-    ValueProjection{id: id, name: name, type_name: type_name, source: source, publication: publication, value: value, children: [ValueProjection]{}, truncated: false}
-}
-
-value_projection_published: fn(id: String, name: String, type_name: String, source: SourceLocation, value: TypedValue) -> ValueProjection Never! {
-    value_projection(id, name, type_name, source, Publication.Published, Val(value))
-}
-
-value_projection_redacted: fn(id: String, name: String, type_name: String, source: SourceLocation) -> ValueProjection Never! {
-    value_projection(id, name, type_name, source, Publication.Redacted, None)
-}
-
-value_projection_absent: fn(id: String, name: String, type_name: String, source: SourceLocation) -> ValueProjection Never! {
-    value_projection(id, name, type_name, source, Publication.Absent, None)
-}
-
-impl ValueProjection {
     validate: fn(self) PausedEvaluateError! {
         ids := [String:Bool]{}
         nodes := 0
@@ -447,6 +403,22 @@ impl ValueProjection {
         }
         Val("{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"type\":\"{foundation_json_escape(self.type_name)}\",\"source\":{self.source.json()},\"publication\":\"{self.publication.as_str()}\"{value},\"children\":{array_json(children)},\"truncated\":{self.truncated}}}")
     }
+}
+
+value_projection: fn(id: String, name: String, type_name: String, source: SourceLocation, publication: Publication, value: TypedValue?) -> ValueProjection Never! {
+    ValueProjection{id: id, name: name, type_name: type_name, source: source, publication: publication, value: value, children: [ValueProjection]{}, truncated: false}
+}
+
+value_projection_published: fn(id: String, name: String, type_name: String, source: SourceLocation, value: TypedValue) -> ValueProjection Never! {
+    value_projection(id, name, type_name, source, Publication.Published, Val(value))
+}
+
+value_projection_redacted: fn(id: String, name: String, type_name: String, source: SourceLocation) -> ValueProjection Never! {
+    value_projection(id, name, type_name, source, Publication.Redacted, None)
+}
+
+value_projection_absent: fn(id: String, name: String, type_name: String, source: SourceLocation) -> ValueProjection Never! {
+    value_projection(id, name, type_name, source, Publication.Absent, None)
 }
 
 validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, depth: Int, ids: &[String:Bool], nodes: &Int) PausedEvaluateError! {
@@ -493,9 +465,7 @@ LexicalScope: struct {
     parent_id: String?
     source: SourceLocation
     bindings: [ValueProjection]
-}
 
-impl LexicalScope {
     new: fn(id: String, name: String, parent_id: String?, source: SourceLocation, bindings: [ValueProjection]) -> LexicalScope PausedEvaluateError! {
         scope: LexicalScope{id: id, name: name, parent_id: parent_id, source: source, bindings: bindings}
         scope.validate(None)
@@ -523,6 +493,18 @@ ScopeProjection: struct {
     parent_id: String?
     source: SourceLocation
     bindings: [ValueProjection]
+
+    json: fn(self) -> String Never! {
+        bindings := [String]{}
+        loop binding in self.bindings {
+            if binding.json() == .Val(text) -> bindings.push(text)
+        }
+        parent_id: if self.parent_id == {
+            .Val(id) -> "\"{foundation_json_escape(id)}\""
+            else -> "null"
+        }
+        "{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"parent_id\":{parent_id},\"source\":{self.source.json()},\"bindings\":{array_json(bindings)}}}"
+    }
 }
 
 ProjectionStats: struct {
@@ -540,20 +522,6 @@ projection_stats_zero: fn() -> ProjectionStats Never! {
 ScopeProjectionResult: struct {
     scope: ScopeProjection
     stats: ProjectionStats
-}
-
-impl ScopeProjection {
-    json: fn(self) -> String Never! {
-        bindings := [String]{}
-        loop binding in self.bindings {
-            if binding.json() == .Val(text) -> bindings.push(text)
-        }
-        parent_id: if self.parent_id == {
-            .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
-        }
-        "{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"parent_id\":{parent_id},\"source\":{self.source.json()},\"bindings\":{array_json(bindings)}}}"
-    }
 }
 
 // The visible bindings of `scope` (only `selected_value` when given), ordered
@@ -592,6 +560,19 @@ PausedSession: struct {
     authority: AuthoritySet
     budget: EvaluationBudget
     cancellation: Cancellation
+
+    cancel: fn(&self, reason: String) PausedEvaluateError! {
+        self.cancellation = cancellation_requested(reason)
+        self.state = .Cancelled
+        Ok()
+    }
+
+    scope: fn(self, id: String) -> LexicalScope? Never! {
+        loop scope in self.scopes {
+            if scope.id == id -> return Val(scope)
+        }
+        None
+    }
 }
 
 paused_session: fn(identity: SessionIdentity, state: SessionState, scopes: [LexicalScope], authority: AuthoritySet, budget: EvaluationBudget) -> PausedSession PausedEvaluateError! {
@@ -613,21 +594,6 @@ paused_session: fn(identity: SessionIdentity, state: SessionState, scopes: [Lexi
     Ok(PausedSession{identity: identity, state: state, scopes: scopes, authority: authority, budget: budget, cancellation: cancellation_none()})
 }
 
-impl PausedSession {
-    cancel: fn(&self, reason: String) PausedEvaluateError! {
-        self.cancellation = cancellation_requested(reason)
-        self.state = .Cancelled
-        Ok()
-    }
-
-    scope: fn(self, id: String) -> LexicalScope? Never! {
-        loop scope in self.scopes {
-            if scope.id == id -> return Val(scope)
-        }
-        None
-    }
-}
-
 InspectRequest: struct {
     request_id: String
     identity: SessionIdentity
@@ -636,9 +602,7 @@ InspectRequest: struct {
     budget: EvaluationBudget
     authority: [AuthorityRequirement]
     cancellation: Cancellation
-}
 
-impl InspectRequest {
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.request_id, "request id")
         self.identity.validate()
@@ -669,9 +633,7 @@ EvaluateRequest: struct {
     authority: [AuthorityRequirement]
     budget: EvaluationBudget
     cancellation: Cancellation
-}
 
-impl EvaluateRequest {
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.request_id, "request id")
         self.identity.validate()
@@ -707,9 +669,7 @@ ObservationFact: struct {
     scope_id: String
     target_id: String
     effect_ref: String
-}
 
-impl ObservationFact {
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.event_id, "observation id")
         valid_id(self.kind, "observation kind")
@@ -759,9 +719,7 @@ evaluator_cancelled: fn(identity: SessionIdentity, scope_id: String, usage: Eval
 AuditOutcome: enum {
     Accepted
     Rejected
-}
 
-impl AuditOutcome {
     as_str: fn(self) -> String Never! {
         if self == {
             .Accepted -> "accepted"
@@ -789,9 +747,7 @@ RejectReason: enum {
     MutationNotAllowed
     ObservationMissing
     InvalidEvaluatorResult
-}
 
-impl RejectReason {
     as_str: fn(self) -> String Never! {
         if self == {
             .InvalidRequest -> "invalid_request"
@@ -829,6 +785,18 @@ AuditReceipt: struct {
     published_values: Int
     redacted_values: Int
     observation_id: String?
+
+    json: fn(self) -> String Never! {
+        reason: if self.reason == {
+            .Val(why) -> "\"{why.as_str()}\""
+            else -> "null"
+        }
+        observation_id: if self.observation_id == {
+            .Val(id) -> "\"{foundation_json_escape(id)}\""
+            else -> "null"
+        }
+        "{{\"receipt_id\":\"{foundation_json_escape(self.receipt_id)}\",\"operation\":\"{foundation_json_escape(self.operation)}\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"outcome\":\"{self.outcome.as_str()}\",\"reason\":{reason},\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"authority\":{requirements_json(self.authority)},\"usage\":{self.usage.json()},\"truncated\":{self.truncated},\"published_values\":{self.published_values},\"redacted_values\":{self.redacted_values},\"observation_id\":{observation_id}}}"
+    }
 }
 
 // The receipt id hashes the canonical `paused-audit-v1|...` material and keeps
@@ -861,28 +829,12 @@ audit_receipt: fn(operation: String, request_id: String, identity: SessionIdenti
     }
 }
 
-impl AuditReceipt {
-    json: fn(self) -> String Never! {
-        reason: if self.reason == {
-            .Val(why) -> "\"{why.as_str()}\""
-            else -> "null"
-        }
-        observation_id: if self.observation_id == {
-            .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
-        }
-        "{{\"receipt_id\":\"{foundation_json_escape(self.receipt_id)}\",\"operation\":\"{foundation_json_escape(self.operation)}\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"outcome\":\"{self.outcome.as_str()}\",\"reason\":{reason},\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"authority\":{requirements_json(self.authority)},\"usage\":{self.usage.json()},\"truncated\":{self.truncated},\"published_values\":{self.published_values},\"redacted_values\":{self.redacted_values},\"observation_id\":{observation_id}}}"
-    }
-}
-
 // A rejected paused request: why, plus the audit receipt of the rejection.
 #Error
 RequestError: struct {
     reason: RejectReason
     audit: AuditReceipt
-}
 
-impl RequestError {
     json: fn(self) -> String Never! {
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"{self.reason.as_str()}\",\"audit\":{self.audit.json()}}}"
     }
@@ -894,9 +846,7 @@ InspectResponse: struct {
     selected_value_id: String?
     truncated: Bool
     audit: AuditReceipt
-}
 
-impl InspectResponse {
     json: fn(self) -> String Never! {
         selected_value_id: if self.selected_value_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
@@ -916,9 +866,7 @@ EvaluateResponse: struct {
     observation: ObservationFact?
     truncated: Bool
     audit: AuditReceipt
-}
 
-impl EvaluateResponse {
     json: fn(self) -> String Never! {
         value: if self.value == {
             .Val(projection) -> projection.json() ?? "null"
@@ -1020,9 +968,7 @@ PausedEvaluateHostError: enum {
     EvaluatorUnavailable
     InvalidRequest(detail: String)
     Rejected(rejection: RequestError)
-}
 
-impl PausedEvaluateHostError {
     json: fn(self) -> String Never! {
         if self == {
             .SessionUnavailable -> "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"session_unavailable\"}}"
@@ -1046,13 +992,7 @@ impl PausedEvaluateHostError {
 PausedEvaluateHost: struct {
     session: PausedSession?
     evaluator_result: EvaluatorResult?
-}
 
-paused_evaluate_host: fn() -> PausedEvaluateHost Never! {
-    PausedEvaluateHost{session: None, evaluator_result: None}
-}
-
-impl PausedEvaluateHost {
     set_session: fn(&self, session: PausedSession) Never! { self.session = Val(session) }
 
     clear_session: fn(&self) Never! {

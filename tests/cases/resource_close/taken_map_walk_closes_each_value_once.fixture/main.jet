@@ -3,11 +3,13 @@
 // value once. The entries a walk leaves close when the walk ends, in key
 // order, as the Map's own close orders them; a borrowed walk closes nothing
 // until the Map ends.
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 fill: fn(prefix: String) -> [String: Res] Never! {
     table := [String: Res]{}
     parts: [String]{"c", "a", "b", "d"}

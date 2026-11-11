@@ -33,8 +33,7 @@ ParquetFailure: struct {
     impl Debug {
         debug: fn(&&self) -> String { self.display_text() }
     }
-}
-impl ParquetFailure {
+
     display_text: fn(self) -> String Never! {
         kind: if self.kind == {
             .Decode -> "Decode"
@@ -44,7 +43,6 @@ impl ParquetFailure {
         "{kind}: {self.reason}"
     }
 }
-
 // The Thrift kinds (compact protocol type nibbles) the footer uses.
 THRIFT_BYTE: 3
 THRIFT_I32: 5
@@ -105,9 +103,7 @@ logical_name: fn(logical: Int) -> String Never! {
 Cursor: struct {
     pos: Int
     end: Int
-}
 
-impl Cursor {
     byte: fn(&self, input: [U8]) -> Int ParquetFailure! {
         if self.pos >= self.end -> return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
         value: Int.from_u8(input[self.pos])

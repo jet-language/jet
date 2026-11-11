@@ -3,8 +3,13 @@
 // parser locations.
 use {
     jet_foundation.[
+        AccessConvention,
+        CallablePolicy,
+        CallablePolicyChain,
         CallContractRow,
         EffectRowEntry,
+        FunctionCallMetadata,
+        FunctionDefaultRef,
         Measure,
         MeasureRule,
         ParamZone,
@@ -20,6 +25,8 @@ use {
         foundation_named_type,
     ]
     jet_lexer.[
+        TOKEN_AMP,
+        TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -227,17 +234,6 @@ parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Ne
     out
 }
 
-// Source text of a type written before a suffix mark,
-// grouped when the mark would otherwise bind to its last member.
-parser_marked_type_text: fn(state: JetParserState, ty: Type, first: Int, end: Int) -> String Never! {
-    text: parser_tokens_text(state, first, end)
-    grouped: if ty == {
-        .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
-        else -> false
-    }
-    if grouped && !text.starts_with("(") -> return "({text})"
-    text
-}
 
 parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
@@ -273,7 +269,7 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
     mark: parser_bump(state)
     already_optional: if base.ty == {
         .Option(_) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     span: parser_cover(base.span, mark.span)
     if kind == TOKEN_QUESTION_QUESTION || already_optional {
@@ -310,7 +306,9 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
     start: parser_current(state)
     kind: start.kind
 
-    if parser_type_tag_ahead(state) {
+    // A site value such as `#build.target.os` is a value read, never a type tag.
+    site_value: kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state)
+    if !site_value && parser_type_tag_ahead(state) {
         parser_bump(state)
         marker_token: parser_bump(state)
         inner: parser_parse_type(state, depth + 1)
@@ -326,7 +324,7 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
         TOKEN_LBRACKET -> parser_parse_collection_type(state, depth + 1)
         TOKEN_LPAREN -> parser_parse_tuple_type(state, depth + 1)
         else -> {
-            if kind != TOKEN_IDENT && kind != TOKEN_SELF {
+            if kind != TOKEN_IDENT && kind != TOKEN_SELF && !site_value {
                 found: parser_text(state, start)
                 parser_add_error(state, start.span, "expected a type, found `{found}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(state)
@@ -342,6 +340,13 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
             parser_bump(state)
             name := parser_value(state, start)
             end := start.span
+            head := start.span
+            if site_value {
+                word: parser_bump(state)
+                name = "#{parser_value(state, word)}"
+                end = word.span
+                head = parser_cover(start.span, word.span)
+            }
             loop parser_current_kind(state) == TOKEN_DOT {
                 parser_bump(state)
                 member: parser_expect_name(state, "after `.` in a type path")
@@ -359,14 +364,29 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
                 return ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, empty.span)}
             }
-            // E0119: a `$fact` path segment reads a compile-time fact value,
-            // which never names a type outside a derive template.
-            if state.derive_template_depth == 0 && (name.starts_with("$") || name.contains(".$")) {
-                parser_add_error_code(state, "E0119", start.span, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
+            // E0119: a fact read `T.reflect().fact`, a build fact such as
+            // `#build.target.os` or a `$fact` segment reads a compile-time
+            // fact value, which never names a type.
+            if name.ends_with(".reflect") && parser_current_kind(state) == TOKEN_LPAREN && parser_kind_at(state, 1) == TOKEN_RPAREN && parser_kind_at(state, 2) == TOKEN_DOT && parser_kind_at(state, 3) == TOKEN_IDENT {
+                parser_bump(state)
+                parser_bump(state)
+                parser_bump(state)
+                member: parser_bump(state)
+                read: "{name}().{parser_value(state, member)}"
+                parser_add_error_code(state, "E0119", start.span, "`{read}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
+                return ParsedType{ty: foundation_named_type(read), span: parser_cover(start.span, member.span)}
+            }
+            if name.starts_with("$") || name.contains(".$") || parser_build_fact_type_path(name) {
+                parser_add_error_code(state, "E0119", head, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
             }
             ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }
     }
+}
+
+// A registered build-fact path of the compiler value `#build`.
+parser_build_fact_type_path: fn(name: String) -> Bool Never! {
+    name == "#build.target.os" || name == "#build.profile" || name.starts_with("#build.settings.") || name.starts_with("#build.stamp.") || name.starts_with("#build.cpu.")
 }
 
 parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
@@ -441,6 +461,8 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
     params := [Type]{}
     names := [String]{}
     zones := [ParamZone]{}
+    conventions := [AccessConvention]{}
+    marked := false
     zone := ParamZone.Either
     saw_slash := false
     saw_star := false
@@ -475,9 +497,20 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
                         parser_bump(state)
                         name = parser_value(state, token)
                     }
+                    // A parameter type marks a written input `&` or a taken input
+                    // `&&`, as a declared parameter does: `fn(&[Int])` writes its
+                    // argument and `fn(&&Map)` takes it.
+                    convention := AccessConvention.Read
+                    mark_kind: parser_current_kind(state)
+                    if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+                        parser_bump(state)
+                        convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
+                        marked = true
+                    }
                     params.push(parser_parse_type(state, depth + 1).ty)
                     names.push(name)
                     zones.push(zone.copy())
+                    conventions.push(convention)
                 }
             }
             if parser_current_kind(state) == TOKEN_RPAREN -> break
@@ -550,7 +583,19 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
         if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(state))
     }
     end = parser_lookahead(state, -1).span
-    ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
+    // Only a marked parameter needs call metadata; its names repeat the contract's labels so
+    // the mark adds no label a plain function type lacks.
+    call_metadata := FunctionCallMetadata?{None}
+    if marked {
+        call_metadata = Val(FunctionCallMetadata{
+            names: loop index in 0..<zones.len() -> if zones[index] == ParamZone.LabelOnly -> names[index] else -> "",
+            defaults: loop _ in params -> FunctionDefaultRef?{None},
+            variadic: loop _ in params -> false,
+            conventions: conventions,
+            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
+        })
+    }
+    ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view}
     ParsedType{ty: ty, span: parser_cover(start, end)}
 }
 
@@ -584,7 +629,7 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
                     args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
                 }
                 else -> {
-                    args.push(parser_parse_type(state, depth + 1).ty)
+                    args.push(parser_parse_type_argument(state, depth + 1))
                 }
             }
             if parser_type_close_here(state) -> break
@@ -605,6 +650,18 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
     close: parser_type_gt_span(state)
     ty: parser_apply_named_type(name, args)
     ParsedType{ty: ty, span: parser_cover(prefix, close)}
+}
+
+// One written type argument. An integer literal is the argument of a
+// `<comptime N: Int>` number parameter (`Packet<4>`), the same length
+// measure `[T#4]` spells; anything else is a type. A named constant
+// (`Packet<SIZE>`) parses as a type name and sema reads its value.
+parser_parse_type_argument: fn(state: &JetParserState, depth: Int) -> Type {
+    if parser_current_kind(state) == TOKEN_INT {
+        token: parser_bump(state)
+        return Type.Measure{measure: Measure.Literal{kind: "length", value: parser_integer(state, token) ?? 0}}
+    }
+    parser_parse_type(state, depth).ty
 }
 
 parser_parse_measure: fn(state: &JetParserState, kind: String, depth: Int) -> Measure {

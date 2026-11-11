@@ -1,11 +1,11 @@
 Error [jet.EffectBoundExceeded]: `log_box` uses the effect `Log`, which its signature doesn't allow
-  --> tests/ui/effects/generic_row_is_per_instance.jet:19:31
+  --> tests/ui/effects/generic_row_is_per_instance.jet:25:31
     |
- 19 | log_box: fn(b: Box<Logger>) -[Net]> Int { b.get() }
+ 25 | log_box: fn(b: Box<Logger>) -[Net]> Int { b.get() }
     |                               ^^^
-  --> tests/ui/effects/generic_row_is_per_instance.jet:19:45
+  --> tests/ui/effects/generic_row_is_per_instance.jet:25:45
     |
- 19 | log_box: fn(b: Box<Logger>) -[Net]> Int { b.get() }
+ 25 | log_box: fn(b: Box<Logger>) -[Net]> Int { b.get() }
     |                                             ^^^ `Box<Logger>` runs `Logger::get` here, which uses `Log`
  Why: The signature declares `-[Net]>`, so the body may only use those; `Log` is outside that set
  Fix: Add `Log` to the effect list, or stop using it in `log_box`

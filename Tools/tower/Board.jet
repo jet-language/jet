@@ -100,6 +100,18 @@ CardRow: struct {
     // Why the record fails Tower's normalization, "" when it does not.
     invalid: String
     record: String
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> CardRow [FieldError]! {
+            invalid := ""
+            if normalize_card(tree) == {
+                .Ok(_) -> {}
+                .Err(failure) -> invalid = failure.message.copy()
+            }
+            record: compact(tree) ?? return Err(err)
+            Ok(CardRow{id: text(field(tree, "id")), num: integer(field(tree, "num")), num_text: json.dumps(field(tree, "num")) ?? "", phase: text(field(tree, "phase")), milestone: text(field(tree, "milestoneId")), invalid: invalid, record: record})
+        }
+    }
 }
 
 DecisionRow: struct {
@@ -110,6 +122,18 @@ DecisionRow: struct {
     draft: Bool
     invalid: String
     record: String
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> DecisionRow [FieldError]! {
+            invalid := ""
+            if normalize_decision(tree) == {
+                .Ok(_) -> {}
+                .Err(failure) -> invalid = failure.message.copy()
+            }
+            record: compact(tree) ?? return Err(err)
+            Ok(DecisionRow{id: text(field(tree, "id")), card_id: text(field(tree, "cardId")), status: text(field(tree, "status")), group: text(field(tree, "group")), draft: truthy(field(tree, "draft")), invalid: invalid, record: record})
+        }
+    }
 }
 
 QuestionRow: struct {
@@ -118,49 +142,25 @@ QuestionRow: struct {
     kind: String
     status: String
     record: String
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> QuestionRow [FieldError]! {
+            record: compact(tree) ?? return Err(err)
+            Ok(QuestionRow{card_id: text(field(tree, "cardId")), decision_id: text(field(tree, "decisionId")), kind: text(field(tree, "kind")), status: text(field(tree, "status")), record: record})
+        }
+    }
 }
 
 EventRow: struct {
     draft: Bool
     // The text of a present `ref`.
     ref: String?
-}
 
-impl CardRow.Decode {
-    decode: fn(tree: Dyn) -> CardRow [FieldError]! {
-        invalid := ""
-        if normalize_card(tree) == {
-            .Ok(_) -> {}
-            .Err(failure) -> invalid = failure.message.copy()
+    impl Decode {
+        decode: fn(tree: Dyn) -> EventRow [FieldError]! {
+            ref: field(tree, "ref")
+            Ok(EventRow{draft: truthy(field(tree, "draft")), ref: if truthy(ref) -> Val(text(ref)) else -> None})
         }
-        record: compact(tree) ?? return Err(err)
-        Ok(CardRow{id: text(field(tree, "id")), num: integer(field(tree, "num")), num_text: json.dumps(field(tree, "num")) ?? "", phase: text(field(tree, "phase")), milestone: text(field(tree, "milestoneId")), invalid: invalid, record: record})
-    }
-}
-
-impl DecisionRow.Decode {
-    decode: fn(tree: Dyn) -> DecisionRow [FieldError]! {
-        invalid := ""
-        if normalize_decision(tree) == {
-            .Ok(_) -> {}
-            .Err(failure) -> invalid = failure.message.copy()
-        }
-        record: compact(tree) ?? return Err(err)
-        Ok(DecisionRow{id: text(field(tree, "id")), card_id: text(field(tree, "cardId")), status: text(field(tree, "status")), group: text(field(tree, "group")), draft: truthy(field(tree, "draft")), invalid: invalid, record: record})
-    }
-}
-
-impl QuestionRow.Decode {
-    decode: fn(tree: Dyn) -> QuestionRow [FieldError]! {
-        record: compact(tree) ?? return Err(err)
-        Ok(QuestionRow{card_id: text(field(tree, "cardId")), decision_id: text(field(tree, "decisionId")), kind: text(field(tree, "kind")), status: text(field(tree, "status")), record: record})
-    }
-}
-
-impl EventRow.Decode {
-    decode: fn(tree: Dyn) -> EventRow [FieldError]! {
-        ref: field(tree, "ref")
-        Ok(EventRow{draft: truthy(field(tree, "draft")), ref: if truthy(ref) -> Val(text(ref)) else -> None})
     }
 }
 
@@ -420,7 +420,7 @@ integer: fn(tree: Dyn) -> Int? Never! {
     if tree == {
         .Int(value) -> Val(value)
         .Number(lexeme) -> whole(lexeme)
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -433,7 +433,7 @@ truthy: fn(tree: Dyn) -> Bool Never! {
         .Float(value) -> value != 0.0
         .Number(lexeme) -> !((whole(lexeme) ?? 1) == 0 || lexeme == "-0" || lexeme == "0.0" || lexeme == "-0.0")
         .Text(value) -> value != ""
-        else -> true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

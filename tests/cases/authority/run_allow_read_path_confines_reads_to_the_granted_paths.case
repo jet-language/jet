@@ -1,4 +1,4 @@
-# Claim (#5949 c11): `jet run --allow=FS.Read:<path>` lets the program read the
+# Claim (#5949 c11): `jet run --allow='FS.Read("<path>")'` lets the program read the
 # granted directory and everything beneath it, or exactly the granted file, and
 # refuses every other read with E1803 naming the refused path and the grant:
 # a file beside the grant, a `..` path and a symbolic link (to a file or to a
@@ -10,19 +10,22 @@ env: XDG_CACHE_HOME={work}/cache
 env: JET_STORE_DIR={work}/store
 step links: sh -c "ln -s ../other.txt data/link.txt && ln -s .. data/up"
 exit: 0
-step directory: jet run --allow=FS.Read:./data bin/s.jet data/a.txt data/b.txt other.txt data/../other.txt data/link.txt data/up/other.txt
+step directory: jet run '--allow=FS.Read("./data")' bin/s.jet data/a.txt data/b.txt other.txt data/../other.txt data/link.txt data/up/other.txt
 exit: 0
-stdout: = "data/a.txt: data-a\ndata/b.txt: data-b\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/../other.txt: permission denied during read `data/../other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/link.txt: permission denied during read `data/link.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\ndata/up/other.txt: permission denied during read `data/up/other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\n"
+stdout: = "data/a.txt: data-a\ndata/b.txt: data-b\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow='FS.Read(\"<path>\")'`)\ndata/../other.txt: permission denied during read `data/../other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow='FS.Read(\"<path>\")'`)\ndata/link.txt: permission denied during read `data/link.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow='FS.Read(\"<path>\")'`)\ndata/up/other.txt: permission denied during read `data/up/other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow='FS.Read(\"<path>\")'`)\n"
 stderr: = ""
-step file: jet run --allow=FS.Read:./data/a.txt bin/s.jet data/a.txt data/b.txt
+step file: jet run '--allow=FS.Read("./data/a.txt")' bin/s.jet data/a.txt data/b.txt
 exit: 0
-stdout: = "data/a.txt: data-a\ndata/b.txt: permission denied during read `data/b.txt`: Permission denied (os error 13); E1803: this run may read only ./data/a.txt (`--allow=FS.Read:<path>`)\n"
+stdout: = "data/a.txt: data-a\ndata/b.txt: permission denied during read `data/b.txt`: Permission denied (os error 13); E1803: this run may read only ./data/a.txt (`--allow='FS.Read(\"<path>\")'`)\n"
 stderr: = ""
-step release: jet run --release --allow=FS.Read:./data bin/s.jet data/a.txt other.txt
+step release: jet run --release '--allow=FS.Read("./data")' bin/s.jet data/a.txt other.txt
 exit: 0
-stdout: = "data/a.txt: data-a\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow=FS.Read:<path>`)\n"
+stdout: = "data/a.txt: data-a\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only ./data (`--allow='FS.Read(\"<path>\")'`)\n"
 stderr: = ""
 step unscoped: jet run --allow=FS.Read bin/s.jet data/a.txt other.txt data/link.txt
 exit: 0
 stdout: = "data/a.txt: data-a\nother.txt: other\ndata/link.txt: other\n"
 stderr: = ""
+step old_spelling: jet run --allow=FS.Read:./data bin/s.jet data/a.txt
+exit: 2
+stderr: ~ "E2104" # the colon form is no longer an authority right

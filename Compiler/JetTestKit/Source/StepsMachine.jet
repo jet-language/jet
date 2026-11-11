@@ -5,7 +5,7 @@ use json: core.encoding.json
 kit_steps_machine_object: fn(value: Dyn) -> Dyn? {
     if value == {
         .Object(_) -> Val(value)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
@@ -13,7 +13,7 @@ kit_steps_machine_string: fn(fields: Dyn, key: String) -> String? {
     child: fields.get(key) ?? return None
     if child == {
         .Text(text) -> Val(text)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -59,7 +59,7 @@ kit_steps_machine_report: fn(object: Dyn) -> String? {
                         _: kit_steps_machine_string(edit, "safety") ?? return Val("report edit is missing string `safety`")
                     }
                 }
-                else -> return Val("report `fix_edits` is not an array")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("report `fix_edits` is not an array")
             }
         }
         .None -> {}
@@ -84,7 +84,7 @@ kit_steps_machine_status: fn(object: Dyn) -> String? {
     ok: object.get("ok") ?? return Val("status record is missing `ok`")
     if ok == {
         .Bool(_) -> {}
-        else -> return Val("status record field `ok` is not boolean")
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Val("status record field `ok` is not boolean")
     }
     reports: object.get("reports") ?? return Val("status record is missing `reports`")
     if reports == {
@@ -97,7 +97,7 @@ kit_steps_machine_status: fn(object: Dyn) -> String? {
                 if failure != None -> return failure
             }
         }
-        else -> return Val("status record `reports` is not an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Val("status record `reports` is not an array")
     }
     None
 }

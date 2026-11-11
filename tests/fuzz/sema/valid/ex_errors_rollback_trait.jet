@@ -4,18 +4,18 @@
 Ledger: struct {
     balance: Int
     name: String
+
+    impl Rollback {
+        Snapshot: LedgerSnap
+
+        snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+
+        restore: fn(&self, snap: &&LedgerSnap) { self.balance = snap.balance }
+    }
 }
 
 LedgerSnap: struct {
     balance: Int
-}
-
-impl Ledger.Rollback {
-    Snapshot: LedgerSnap
-
-    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
-
-    restore: fn(&self, snap: &&LedgerSnap) { self.balance = snap.balance }
 }
 
 TxnErr: enum {

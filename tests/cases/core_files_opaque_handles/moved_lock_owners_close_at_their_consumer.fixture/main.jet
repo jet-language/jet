@@ -18,19 +18,17 @@ lock: fn(name: String) -[FS, Env]> FileLock {
 Holder: struct {
     note: String
     lock: FileLock
+
+    // Owns self: its lock closes when this returns.
+    finish: fn(&&self) -[FS]> Int {
+        held()
+    }
 }
 
 Outer: struct {
     name: String
     owner: Holder
     spare: FileLock
-}
-
-impl Holder {
-    // Owns self: its lock closes when this returns.
-    finish: fn(&&self) -[FS]> Int {
-        held()
-    }
 }
 
 consume_holder: fn(&&h: Holder) -[FS]> Int {
@@ -52,13 +50,11 @@ Guard: struct {
     lock: FileLock
     marker: FileReader
     state: Shared<Count>
-}
 
-impl Guard.Close {
-    close: fn(&&self) {}
-}
+    impl Close {
+        close: fn(&&self) {}
+    }
 
-impl Guard {
     finish: fn(&&self) -[FS]> Int {
         held()
     }
@@ -70,7 +66,7 @@ Prepared: struct {
 }
 
 prepared: fn(name: String) -[FS, Env]> Prepared {
-    Prepared{note: name, guard: Guard{lock: lock("{name}.lk"), marker: files.open("{name}-marker.lk") ?? panic("open {name}-marker"), state: shared Count{n: 1}}}
+    Prepared{note: name, guard: Guard{lock: lock("{name}.lk"), marker: files.open("{name}-marker.lk") ?? panic("open {name}-marker"), state: Shared{Count{n: 1}}}}
 }
 
 // A consumed receiver with no clone glue rebound to a local moves there: the

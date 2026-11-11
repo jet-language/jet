@@ -1,0 +1,581 @@
+// The `mixed` profile of Generate.jet, the twin of mixed.mjs: one
+// deterministic Jet package sized by nonblank, noncomment ("code") lines,
+// shaped like the assembled self-hosted compiler (Tower #4529, SPEED-PLAN.md
+// section 4.3): about 25 lines per function and 53 bytes per line, structs,
+// enums with payloads, a trait called through trait values, generic
+// functions, closures, value and variant matches, maps, strings and
+// interpolation, and about 4.7% compile-time (`comptime`) items. `run: fn`
+// prints one checksum line.
+//
+// The package is one source file (main.jet) of numbered sections, like the
+// assembled compiler unit (see mixed.mjs for why it is one file).
+//
+// The generator also evaluates every generated function itself, so the
+// expected output is derived from the same template parameters that wrote
+// the source; the harness pins it as the golden. Every combine is reduced
+// modulo MODULUS, so the model and the program agree exactly.
+use {
+    packages: "Packages"
+}
+
+M: packages.MODULUS
+// Sections of about 820 lines, the mean size of an L5 source file.
+UNITS_PER_SECTION: 6
+MAX_SEED: 4294967295
+WORDS: ["alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "island", "juniper", "kestrel", "lantern", "meadow", "nectar", "orchid", "prairie"]
+PACKAGE_MANIFEST: "name: \"mixed_bench\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
+
+// Templates are written with short local names; the emitted source spells
+// them the way the compiler's code does, which brings lines to L5's length.
+rename: fn(word: String) -> String {
+    if word == {
+        "seed" -> "seed_value"
+        "accumulator" -> "running_total"
+        "index" -> "position"
+        "records" -> "built_records"
+        "shapes" -> "built_shapes"
+        "counts" -> "word_counts"
+        "table" -> "lookup_table"
+        "probes" -> "probe_keys"
+        "steps" -> "step_count"
+        "step" -> "step_value"
+        "marker" -> "marker_value"
+        "found" -> "found_value"
+        else -> word
+    }
+}
+
+is_word: fn(byte: U8) -> Bool { (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95} }
+
+// `line` with every whole word RENAMES names spelled its long way.
+renamed: fn(line: String) -> String {
+    bytes: line.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        end := at
+        loop end < bytes.len() && is_word(bytes[end]) -> end += 1
+        if end == at {
+            out.push(bytes[at])
+            at += 1
+            next
+        }
+        out.extend(rename(String.from_bytes_lossy(bytes.slice(at, end))).bytes())
+        at = end
+    }
+    String.from_bytes_lossy(out)
+}
+
+md: fn(value: Int) -> Int { value % M }
+
+blend: fn(left: Int, right: Int, weight: Int) -> Int { md(left * weight + right) }
+
+Stats: struct {
+    functions: Int
+    types: Int
+    comptime_items: Int
+    sections: Int
+}
+
+// The template parameters of each worker kind, in draw order.
+RecordsModel: struct {
+    count: Int
+    a: Int
+    b: Int
+    c: Int
+    threshold: Int
+    index: Int
+    score_a: Int
+    score_b: Int
+}
+
+ShapesModel: struct {
+    count: Int
+    a: Int
+    b: Int
+    c: Int
+    d: Int
+    e: Int
+}
+
+WordsModel: struct {
+    words: [String]
+    buckets: Int
+    rounds: Int
+    a: Int
+    limit: Int
+    start_label: String
+}
+
+OptionsModel: struct {
+    keys: [Int]
+    values: [Int]
+    rounds: Int
+    spread: Int
+    fallback: Int
+    factor: Int
+    offset: Int
+    constant_value: Int
+}
+
+NumbersModel: struct {
+    limit: Int
+    a: Int
+    b: Int
+}
+
+Model: enum {
+    Records(RecordsModel)
+    Shapes(ShapesModel)
+    Words(WordsModel)
+    Options(OptionsModel)
+    Numbers(NumbersModel)
+}
+
+Worker: struct {
+    name: String
+    text: [String]
+    model: Model
+}
+
+Generated: struct {
+    lines: [String]
+    value: Int
+    total_name: String
+}
+
+MixedPackage: struct {
+    files: [String:String]
+    expected: String
+    physical_lines: Int
+    code_lines: Int
+    bytes: Int
+    stats: Stats
+    source_sha256: String
+}
+
+// What the generated worker returns for `seed`.
+evaluate: fn(model: Model, seed: Int) -> Int {
+    if model == {
+        .Records(p) -> records_value(p, seed)
+        .Shapes(p) -> shapes_value(p, seed)
+        .Words(p) -> words_value(p, seed)
+        .Options(p) -> options_value(p, seed)
+        .Numbers(p) -> numbers_value(p, seed)
+    }
+}
+
+scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int { md(identifier * p.score_a + weight * p.score_b + label) }
+
+records_value: fn(p: RecordsModel, seed: Int) -> Int {
+    identifiers := [Int]{}
+    weights := [Int]{}
+    labels := [Int]{}
+    loop index in 0..<p.count {
+        marker: (index * p.a + seed) % 97
+        identifiers.push(index + marker)
+        weights.push((index * p.b + p.c) % 31)
+        labels.push("record-{index}-{marker}".len())
+    }
+    last: p.count - 1
+    first_three: md(md(scored(p, identifiers[0], weights[0], labels[0]) + scored(p, identifiers[1], weights[1], labels[1])) + scored(p, identifiers[2], weights[2], labels[2]))
+    accumulator := md(md(seed) + first_three + md(scored(p, identifiers[last], weights[last], labels[last]) * 2))
+    loop index in 0..<p.count {
+        accumulator = if weights[index] > p.threshold -> md(accumulator * 3 + 2) else -> md(accumulator + identifiers[index] * 5)
+    }
+    chosen: p.index < p.count
+    identifier: if chosen -> identifiers[p.index] else -> 0
+    label: if chosen -> labels[p.index] else -> "none".len()
+    md(accumulator + identifier + label)
+}
+
+shapes_value: fn(p: ShapesModel, seed: Int) -> Int {
+    accumulator := md(seed * p.a)
+    loop index in 0..<p.count {
+        step: if (seed + index) % 4 == {
+            0 -> ((seed + index * p.b) % 101) * p.d
+            1 -> index * 5 + (seed + p.c) % 53
+            2 -> "shape-{index}-{seed % 7}".len() * 7
+            else -> p.e
+        }
+        accumulator = md(accumulator * 31 + step)
+    }
+    accumulator
+}
+
+words_value: fn(p: WordsModel, seed: Int) -> Int {
+    counts := [String:Int]{}
+    loop (index, word) in p.words {
+        key: "{word}-{(seed + index) % p.buckets}"
+        counts[key] = (counts.get(key) ?? 0) + index + 1
+    }
+    accumulator := counts.len()
+    loop (key, value) in counts -> accumulator = md(accumulator + key.len() * value * 17)
+    // copy: the label grows from the unit's name
+    label := p.start_label.copy()
+    loop index in 0..<p.rounds -> label = "{label}:{index * p.a % 10}"
+    if label.len() > p.limit -> return md(accumulator + label.len())
+    md(accumulator + 3)
+}
+
+options_value: fn(p: OptionsModel, seed: Int) -> Int {
+    table := [Int:Int]{}
+    loop (i, key) in p.keys -> table[key] = p.values[i]
+    probes: [Int]{p.keys[0], p.keys[1], p.keys[2], seed % 100}
+    accumulator := md(seed)
+    loop round in 0..<p.rounds {
+        probe: probes[round % 4] + (round /% 4) * p.spread
+        found: if table.get(probe) == {
+            .Val(value) -> value * 2
+            .None -> p.fallback
+        }
+        accumulator = md(accumulator + round + found)
+    }
+    accumulator = md(accumulator * p.factor + p.constant_value)
+    md(accumulator + probes[0] + p.offset)
+}
+
+numbers_value: fn(p: NumbersModel, seed: Int) -> Int {
+    value := seed % 1000 + 2
+    steps := 0
+    loop value > 1 && steps < p.limit {
+        value = if value % 2 == 0 -> value /% 2 else -> value * 3 + 1
+        steps += 1
+    }
+    weight := p.b
+    loop step in 0..<steps {
+        weight = if step % 3 == {
+            0 -> md(weight * p.a + step)
+            1 -> md(weight + step * step)
+            else -> md(weight + 7)
+        }
+    }
+    md(weight * 1000 + steps + value)
+}
+
+// 1. Records built in a loop, scored through trait values.
+records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, score_a: Int, score_b: Int, r: &packages.Seeded) -> Worker {
+    name: "{unit_name}_build_records"
+    count: r.int(3, 6)
+    a: r.int(3, 29)
+    b: r.int(3, 17)
+    c: r.int(1, 13)
+    threshold: r.int(5, 25)
+    index: r.int(0, 7)
+    text: [String]{
+        "{name}: fn(seed: Int) -> Int {{",
+        "    accumulator := seed % {M}",
+        "    records := [{rec}]{{}}",
+        "    loop index in 0..<{count} {{",
+        "        marker: (index * {a} + seed) % 97",
+        "        &records.push({rec}{{identifier: index + marker, weight: (index * {b} + {c}) % 31, label: \"record-{{index}}-{{marker}}\", markers: [Int]{{index, marker}}}})",
+        "    }}",
+        "    scored: [{trait_name}]{{records[0], records[1], records[2]}}",
+        "    accumulator = (accumulator + total_score_m{m}(scored) + score_one_m{m}(records[{count - 1}])) % {M}",
+        "    loop record in records {{",
+        "        accumulator = if {{",
+        "            record.weight > {threshold} -> (accumulator * 3 + record.markers.len()) % {M}",
+        "            else -> (accumulator + record.identifier * 5) % {M}",
+        "        }}",
+        "    }}",
+        "    fallback: {rec}{{identifier: 0, weight: 0, label: \"none\", markers: [Int]{{}}}}",
+        "    chosen: pick_m{m}(records, {index}, fallback)",
+        "    accumulator = (accumulator + chosen.identifier + chosen.label.len()) % {M}",
+        "    accumulator",
+        "}}",
+    }
+    Worker{name: name, text: text, model: .Records(RecordsModel{count: count, a: a, b: b, c: c, threshold: threshold, index: index, score_a: score_a, score_b: score_b})}
+}
+
+// 2. Enum values built by a value match, consumed by a variant match.
+shapes_worker: fn(unit_name: String, shape: String, r: &packages.Seeded) -> Worker {
+    name: "{unit_name}_match_shapes"
+    count: r.int(4, 8)
+    a: r.int(3, 41)
+    b: r.int(2, 23)
+    c: r.int(1, 19)
+    d: r.int(2, 9)
+    e: r.int(7, 97)
+    text: [String]{
+        "{name}: fn(seed: Int) -> Int {{",
+        "    accumulator := (seed * {a}) % {M}",
+        "    shapes := [{shape}]{{}}",
+        "    loop index in 0..<{count} {{",
+        "        next_shape: if (seed + index) % 4 == {{",
+        "            0 -> {shape}.Dot((seed + index * {b}) % 101)",
+        "            1 -> {shape}.Segment{{start: index, finish: (seed + {c}) % 53}}",
+        "            2 -> {shape}.Named(\"shape-{{index}}-{{seed % 7}}\")",
+        "            else -> {shape}.Empty",
+        "        }}",
+        "        &shapes.push(next_shape)",
+        "    }}",
+        "    loop item in shapes {{",
+        "        step: if item == {{",
+        "            .Dot(value) -> value * {d}",
+        "            .Segment(start, finish) -> start * 5 + finish",
+        "            .Named(text) -> text.len() * 7",
+        "            .Empty -> {e}",
+        "        }}",
+        "        accumulator = (accumulator * 31 + step) % {M}",
+        "    }}",
+        "    accumulator",
+        "}}",
+    }
+    Worker{name: name, text: text, model: .Shapes(ShapesModel{count: count, a: a, b: b, c: c, d: d, e: e})}
+}
+
+// 3. String keys, interpolation, and a map read through `??`.
+words_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
+    name: "{unit_name}_count_words"
+    words: [String]{r.pick(WORDS), r.pick(WORDS), r.pick(WORDS), r.pick(WORDS)}
+    buckets: r.int(2, 5)
+    rounds: r.int(3, 6)
+    a: r.int(3, 9)
+    limit: r.int(20, 32)
+    quoted: words.map(word -> "\"{word}\"").join(", ")
+    text: [String]{
+        "{name}: fn(seed: Int) -> Int {{",
+        "    counts := [String:Int]{{}}",
+        "    words: [String]{{{quoted}}}",
+        "    loop (index, word) in words {{",
+        "        key: \"{{word}}-{{(seed + index) % {buckets}}}\"",
+        "        counts[key] = (counts.get(key) ?? 0) + index + 1",
+        "    }}",
+        "    accumulator := counts.len()",
+        "    loop (key, value) in counts {{",
+        "        accumulator = (accumulator + key.len() * value * 17) % {M}",
+        "    }}",
+        "    label := \"{unit_name}\"",
+        "    loop index in 0..<{rounds} {{",
+        "        label = \"{{label}}:{{index * {a} % 10}}\"",
+        "    }}",
+        "    accumulator = if {{",
+        "        label.len() > {limit} -> (accumulator + label.len()) % {M}",
+        "        else -> (accumulator + 3) % {M}",
+        "    }}",
+        "    accumulator",
+        "}}",
+    }
+    // copy: the model keeps the name the label starts from
+    Worker{name: name, text: text, model: .Words(WordsModel{words: words, buckets: buckets, rounds: rounds, a: a, limit: limit, start_label: unit_name.copy()})}
+}
+
+// 4. Optional values mapped through closures, and a local closure.
+options_worker: fn(unit_name: String, constant_value: Int, r: &packages.Seeded) -> Worker {
+    name: "{unit_name}_map_options"
+    k0: r.int(1, 30)
+    k1: r.int(31, 60)
+    k2: r.int(61, 90)
+    v0: r.int(1, 999)
+    v1: r.int(1, 999)
+    v2: r.int(1, 999)
+    rounds: r.int(3, 7)
+    spread: r.int(3, 11)
+    fallback: r.int(1, 50)
+    factor: r.int(2, 13)
+    offset: r.int(1, 99)
+    text: [String]{
+        "{name}: fn(seed: Int) -> Int {{",
+        "    table: [Int:Int]{{{k0}: {v0}, {k1}: {v1}, {k2}: {v2}}}",
+        "    probes: [Int]{{{k0}, {k1}, {k2}, seed % 100}}",
+        "    accumulator := seed % {M}",
+        "    loop round in 0..<{rounds} {{",
+        "        probe: probes[round % 4] + (round /% 4) * {spread}",
+        "        found: table.get(probe)",
+        "        accumulator = (accumulator + round + (found.map((value) -> value * 2) ?? {fallback})) % {M}",
+        "    }}",
+        "    adjust: (value: Int) -> (value * {factor} + {constant_value}) % {M}",
+        "    accumulator = adjust(accumulator)",
+        "    first: probes.first()",
+        "    accumulator = (accumulator + (first.map((value) -> value + {offset}) ?? 0)) % {M}",
+        "    accumulator",
+        "}}",
+    }
+    model: OptionsModel{keys: [Int]{k0, k1, k2}, values: [Int]{v0, v1, v2}, rounds: rounds, spread: spread, fallback: fallback, factor: factor, offset: offset, constant_value: constant_value}
+    Worker{name: name, text: text, model: .Options(model)}
+}
+
+// 5. Integer loops and ordered arm tables.
+numbers_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
+    name: "{unit_name}_settle_numbers"
+    limit: r.int(20, 60)
+    a: r.int(2, 9)
+    b: r.int(1, 30)
+    text: [String]{
+        "{name}: fn(seed: Int) -> Int {{",
+        "    value := seed % 1000 + 2",
+        "    steps := 0",
+        "    loop value > 1 && steps < {limit} {{",
+        "        value = if {{",
+        "            value % 2 == 0 -> value /% 2",
+        "            else -> value * 3 + 1",
+        "        }}",
+        "        steps += 1",
+        "    }}",
+        "    weight := {b}",
+        "    loop step in 0..<steps {{",
+        "        weight = if step % 3 == {{",
+        "            0 -> (weight * {a} + step) % {M}",
+        "            1 -> (weight + step * step) % 1000003",
+        "            else -> (weight + 7) % 1000003",
+        "        }}",
+        "    }}",
+        "    (weight * 1000 + steps + value) % {M}",
+        "}}",
+    }
+    Worker{name: name, text: text, model: .Numbers(NumbersModel{limit: limit, a: a, b: b})}
+}
+
+// One unit: a record struct, a shape enum, the section trait's impl, five
+// worker functions of different construct mixes, and the unit total.
+unit: fn(m: Int, u: Int, r: &packages.Seeded, stats: &Stats) -> Generated {
+    unit_name: "section_{m}_unit_{u}"
+    rec: "RecordM{m}U{u}"
+    shape: "ShapeM{m}U{u}"
+    trait_name: "ScoredM{m}"
+    lines := [String]{}
+    constant: if u % 5 == 0 || u % 5 == 2 -> "SEED_M{m}_U{u}" else -> ""
+    constant_a: r.int(3, 40)
+    constant_b: r.int(5, 90)
+    constant_value: constant_a * 7 + constant_b
+    if constant != "" {
+        lines.push("// Prepared once while building; folded into every use below.")
+        lines.extend(["{constant}: comptime {{ {constant_a} * 7 + {constant_b} }}", ""])
+        stats.comptime_items += 1
+    }
+    score_a: r.int(3, 19)
+    score_b: r.int(2, 11)
+    lines.extend(["{rec}: struct {{", "    identifier: Int", "    weight: Int", "    label: String", "    markers: [Int]", "}}", ""])
+    lines.extend(["{shape}: enum {{", "    Dot(Int)", "    Segment(start: Int, finish: Int)", "    Named(String)", "    Empty", "}}", ""])
+    lines.extend(["impl {rec}.{trait_name} {{", "    score: fn(self) -> Int {{ (self.identifier * {score_a} + self.weight * {score_b} + self.label.len()) % {M} }}", "}}", ""])
+    stats.types += 2
+    stats.functions += 1
+    workers: [Worker]{
+        records_worker(unit_name, m, rec, trait_name, score_a, score_b, r),
+        shapes_worker(unit_name, shape, r),
+        words_worker(unit_name, r),
+        options_worker(unit_name, constant_value, r),
+        numbers_worker(unit_name, r),
+    }
+    start: if constant != "" -> constant else -> "{constant_value}"
+    total := [String]{"{unit_name}_total: fn() -> Int {{", "    accumulator := {start} % {M}"}
+    accumulator := md(constant_value)
+    loop (index, worker) in workers {
+        // Every worker folds its result through the section's three-argument
+        // blend (the call shape of the compiler's own helpers) and a short
+        // trace label, as the compiler's passes report what they did.
+        first: r.int(2, 97)
+        second: r.int(2, 97)
+        third: r.int(2, 97)
+        fourth: r.int(2, 97)
+        label_limit: r.int(34, 42)
+        tail: worker.text[worker.text.len() - 2].trim()
+        text := worker.text.slice(0, worker.text.len() - 2)
+        text.extend([
+            "    worker_result: {tail}",
+            "    checkpoint: blend_m{m}(worker_result, seed % 1000, {first})",
+            "    trace_label: \"{worker.name}:{{worker_result % 1000}}:{{checkpoint % 1000}}\"",
+            "    trace_weight: if trace_label.len() > {label_limit} -> blend_m{m}(checkpoint, trace_label.len(), {third}) else -> blend_m{m}(checkpoint, 1, {third})",
+            "    blended_parts: [Int]{{worker_result % 997, checkpoint % 991, trace_weight % 983}}",
+            "    combined := 0",
+            "    loop part in blended_parts -> combined = blend_m{m}(combined, part, {fourth})",
+            "    blend_m{m}(combined, worker_result % 997, {second})",
+            "}}",
+        ])
+        if index % 2 == 0 -> lines.push("// Worker {index} of {unit_name}.")
+        loop line in text -> lines.push(renamed(line))
+        lines.push("")
+        total.push("    accumulator = (accumulator * 7 + {worker.name}(accumulator + {index + 1})) % {M}")
+        seed: accumulator + index + 1
+        result: evaluate(worker.model, seed)
+        checkpoint: blend(result, seed % 1000, first)
+        label_length: "{worker.name}:{result % 1000}:{checkpoint % 1000}".len()
+        trace_weight: blend(checkpoint, if label_length > label_limit -> label_length else -> 1, third)
+        combined := 0
+        loop part in [result % 997, checkpoint % 991, trace_weight % 983] -> combined = blend(combined, part, fourth)
+        accumulator = md(accumulator * 7 + blend(combined, result % 997, second))
+        stats.functions += 1
+    }
+    total.extend(["    accumulator", "}}"])
+    lines.extend(total)
+    lines.push("")
+    stats.functions += 1
+    Generated{lines: lines, value: accumulator, total_name: "{unit_name}_total"}
+}
+
+section_header: fn(m: Int) -> [String] {
+    trait_name: "ScoredM{m}"
+    [String]{
+        "// Section {m} of the mixed compile-throughput benchmark.",
+        "{trait_name}: trait {{", "    score: fn(self) -> Int", "}}", "",
+        "pick_m{m}: fn<T>(items: [T], index: Int, fallback: T) -> T {{",
+        "    if index < items.len() -> return items[index]",
+        "    fallback",
+        "}}", "",
+        "total_score_m{m}: fn(items: [{trait_name}]) -> Int {{",
+        "    sum := 0",
+        "    loop item in items -> sum = (sum + item.score()) % {M}",
+        "    sum",
+        "}}", "",
+        "score_one_m{m}: fn(item: {trait_name}) -> Int {{ item.score() * 2 }}", "",
+        "blend_m{m}: fn(left: Int, right: Int, weight: Int) -> Int {{ (left * weight + right) % {M} }}", "",
+    }
+}
+
+// The problem with a mixed package of `code_lines` code lines from `seed`.
+check_inputs: fn(code_lines: Int, seed: Int) packages.Problem! {
+    if code_lines < 1 -> return Err(packages.Problem{message: "--code-lines must be a positive safe integer"})
+    if seed < 0 || seed > MAX_SEED -> return Err(packages.Problem{message: "--seed must be an integer in 0..4294967295"})
+}
+
+// The package for `code_lines` code lines (check_inputs passed): package.jet
+// plus main.jet, filled section by section, unit by unit, until main.jet
+// reaches the target.
+mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
+    r := packages.seeded(seed, .Remainder)
+    stats := Stats{functions: 1, types: 0, comptime_items: 0, sections: 0}
+    lines := [String]{"// Deterministic mixed compile-throughput workload: --code-lines {code_lines} --seed {seed}", ""}
+    section_totals := [Int]{}
+    // `run: fn() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
+    code := 4
+    loop code < code_lines {
+        m: stats.sections
+        header: section_header(m)
+        code += packages.code_of(header) + 1
+        lines.extend(header)
+        stats.functions += 4
+        stats.types += 1
+        total := [String]{"section_total_m{m}: fn() -> Int {{", "    accumulator := 0"}
+        value := 0
+        u := 0
+        loop u < UNITS_PER_SECTION && (u == 0 || code < code_lines) {
+            generated: unit(m, u, r, stats)
+            code += packages.code_of(generated.lines)
+            total.push("    accumulator = (accumulator * 13 + {generated.total_name}()) % {M}")
+            value = md(value * 13 + generated.value)
+            lines.extend(generated.lines)
+            u += 1
+        }
+        total.extend(["    accumulator", "}}", ""])
+        code += packages.code_of(total)
+        lines.extend(total)
+        stats.functions += 1
+        section_totals.push(value)
+        stats.sections += 1
+    }
+    checksum := 0
+    lines.extend(["run: fn() {{", "    checksum := 0"])
+    loop (m, value) in section_totals {
+        lines.push("    checksum = (checksum * 31 + section_total_m{m}()) % {M}")
+        checksum = md(checksum * 31 + value)
+    }
+    lines.extend(["    print(\"mixed checksum {{checksum}} sections {stats.sections}\")", "}}"])
+    // main.jet is `lines` joined, so its lines are `lines`.
+    physical_lines: lines.len()
+    main_code_lines: packages.code_of(lines)
+    main: "{lines.join("\n")}\n"
+    bytes: main.bytes().len()
+    files: [String:String]{"package.jet": PACKAGE_MANIFEST, "main.jet": main}
+    digest: packages.source_digest(files)
+    MixedPackage{files: files, expected: "mixed checksum {checksum} sections {stats.sections}\n", physical_lines: physical_lines, code_lines: main_code_lines, bytes: bytes, stats: stats, source_sha256: digest}
+}

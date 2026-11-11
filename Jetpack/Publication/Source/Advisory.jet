@@ -424,7 +424,7 @@ publication_lock_maturity_diagnostics: fn(lock: LockFile, feed: PublicationAdvis
             exempt: if package.source == {
                 .Root -> true
                 .Path(_) -> true
-                else -> false
+                .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
             }
             if !exempt -> result.maturity.push(publication_e2610("advisory feed", "no trusted release record exists for {package.name}#{package.version}"))
             next

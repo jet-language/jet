@@ -6,9 +6,7 @@
 Pair2: struct<T, A, B> {
     left: Int
     right: Int
-}
 
-impl Pair2 {
     make: fn(left: Int, right: Int) -> Pair2<T, A, B> {
         Pair2<T, A, B>{left: left, right: right}
     }
@@ -20,9 +18,9 @@ Pair<A, B>: Pair2<Float, A, B>
 
 Fixed<B>: Pair2<Int, Screen, B>
 
-PAIR_NAME: comptime { Pair.$name }
-PAIR2_NAME: comptime { Pair2.$name }
-FIXED_NAME: comptime { Fixed.$name }
+PAIR_NAME: comptime { Pair.reflect().name }
+PAIR2_NAME: comptime { Pair2.reflect().name }
+FIXED_NAME: comptime { Fixed.reflect().name }
 
 keep: fn(value: Pair<Screen, World>) -> Int { value.sum() }
 

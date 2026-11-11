@@ -399,7 +399,7 @@ jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites:
                     if jet_cli_prove_collect_tests(member, body, sites) -> found = true
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     found
@@ -632,7 +632,7 @@ jet_cli_prove_item_facts: fn(identity: JetCLIProveIdentity, member: JetCLIProveM
             .CodeModule(nested) -> {
                 if nested.body == .Val(body) -> jet_cli_prove_item_facts(identity, member, body, items, contracts)
             }
-            else -> {}
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

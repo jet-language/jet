@@ -771,7 +771,7 @@ JSONPull: struct {
                     } else { return Err(self.error(.State, "expected an object key")) }
                 }
             }
-            else -> return Err(self.error(.State, "expected a JSON value"))
+            .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> return Err(self.error(.State, "expected a JSON value"))
         }
     }
 }
@@ -1288,7 +1288,7 @@ JSONPush: struct {
                 if self.frames.len() == 0 -> return Err(self.state_error("ArrayEnd does not match an open array"))
                 if self.frames[self.frames.len() - 1] == {
                     .Array(_) -> {}
-                    else -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                    .ObjectKey(_) | .ObjectValue -> return Err(self.state_error("ArrayEnd does not match an open array"))
                 }
                 self.write_byte(U8{93})
                 _: self.frames.pop()
@@ -1299,13 +1299,13 @@ JSONPush: struct {
                 if self.frames[self.frames.len() - 1] == .ObjectValue -> return Err(self.state_error("object key has no value"))
                 if self.frames[self.frames.len() - 1] == {
                     .ObjectKey(_) -> {}
-                    else -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                    .Array(_) | .ObjectValue -> return Err(self.state_error("ObjectEnd does not match an open object"))
                 }
                 self.write_byte(U8{125})
                 _: self.frames.pop()
                 return
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ObjectStart -> {}
         }
         payload := ""
         size := 0
@@ -1326,7 +1326,7 @@ JSONPush: struct {
                 if self.frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
                 size = 1
             }
-            else -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
+            .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
         }
         self.ensure_total(self.value_prefix_len() + size)
         self.before_value()
@@ -1345,7 +1345,7 @@ JSONPush: struct {
                 self.write_byte(U8{123})
                 self.frames.push(.ObjectKey(true))
             }
-            else -> self.write_text(payload)
+            .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> self.write_text(payload)
         }
     }
 
@@ -1496,7 +1496,7 @@ JSONPush: struct {
                 self.canonical_complete_value()
                 return
             }
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ObjectStart -> {}
         }
         if (event == .ArrayStart || event == .ObjectStart) && self.canonical_frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
         encoded := [U8]{}
@@ -1516,7 +1516,7 @@ JSONPush: struct {
             .Text(value) -> encoded = self.canonical_quote(value)
             .ArrayStart | .ObjectStart -> {}
             .Bytes(_) -> return Err(self.error(.Unsupported, "JSON cannot encode Bytes; encode bytes as Text explicitly"))
-            else -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
+            .Number(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
         }
         self.canonical_before_value()
         if event == {
@@ -1525,7 +1525,7 @@ JSONPush: struct {
                 self.canonical_frames.push(canonical_frame(false))
             }
             .ObjectStart -> self.canonical_frames.push(canonical_frame(true))
-            else -> {
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayEnd | .Key(_) | .ObjectEnd -> {
                 window: encoded[0..<encoded.len()]
                 self.canonical_emit(window)
                 self.canonical_complete_value()
@@ -1906,7 +1906,7 @@ jsonl_tree_size: fn(value: Dyn, depth: Int, limits: EncodingLimits) -> Int Encod
                 size += entry.key.count_bytes() + child
             }
         }
-        else -> {
+        .Number(_) | .Bytes(_) | .DateTime(_) -> {
             reason := "internal JSON carrier escaped typed decode"
             kind := EncodingErrorKind.State
             #Unsafe("classify the private Bytes carrier without borrowing or exposing its payload") {
@@ -1963,7 +1963,7 @@ jsonl_wire_size: fn(writer: JSONPush, value: Dyn) -> Int EncodingError! {
             }
             Ok(size)
         }
-        else -> Err(writer.error(.State, "internal JSON carrier escaped typed decode"))
+        .Number(_) | .Bytes(_) | .DateTime(_) -> Err(writer.error(.State, "internal JSON carrier escaped typed decode"))
     }
 }
 
@@ -2082,7 +2082,7 @@ jsonl_writer: fn(output: &&FileWriter, limits: EncodingLimits) -> JSONLinesPush 
             assert_eq(error.kind, EncodingErrorKind.Limit)
             assert_eq(error.path, "$[\"a\"]")
         }
-        else -> panic("oversized nested text must fail before any output")
+        .Ok(_) -> panic("oversized nested text must fail before any output")
     }
     projected: jsonl_under(stream_error(.State, 0, 1, 1, "state"), "$[2]")
     assert_eq(projected.path, "$[2]")
@@ -2097,7 +2097,7 @@ jsonl_writer: fn(output: &&FileWriter, limits: EncodingLimits) -> JSONLinesPush 
                 assert_eq(error.reason, "JSON cannot encode Bytes; encode bytes as Text explicitly")
                 assert_eq(error.path, "$")
             }
-            else -> panic("JSON must reject byte carriers before output")
+            .Ok(_) -> panic("JSON must reject byte carriers before output")
         }
     }
 }

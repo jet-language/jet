@@ -14,7 +14,7 @@ SemaGateContext: struct {
 
 sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
     inspection := sema_unsafe_inspect(modules, gates)
-    context: shared SemaGateContext{checked_text_types: checked_text_types, unsafe_gates: inspection.gates.move()}
+    context: Shared{SemaGateContext{checked_text_types: checked_text_types, unsafe_gates: inspection.gates.move()}}
     context_permit: context.guard_read()
     ledger := GateLedger{}
     loop gate in context_permit.value.unsafe_gates {
@@ -123,7 +123,7 @@ sema_gate_checked_text_items: fn(items: [Item], distinct: &[String:Bool], implem
             .GenericModule(row) -> {
                 sema_gate_checked_text_items(row.body, distinct, implementations)
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -188,7 +188,7 @@ sema_gate_items: fn(source: String, items: [Item], ledger: &GateLedger, context:
             .MarkerDecl(marker) -> {
                 if marker.body == .Val(body) -> sema_gate_template(source, body, ledger, context)
             }
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -215,7 +215,7 @@ sema_gate_function: fn(source: String, function: Func, ledger: &GateLedger, cont
     }
     if function.state_transition == .Val(transition) {
         from: transition.from ?? "_"
-        spelling: "#Transition({from}, {transition.to})"
+        spelling: "#State({from} -> {transition.to})"
         gate_ledger_push(ledger, gate_source_entry(GateKind.StateTransition, "knowledge", "function", source, transition.span, spelling, Val(spelling), "state transition {from} -> {transition.to}", "recorded"))
     }
     if function.scrub_tag == .Val(scrubbed) {
@@ -311,7 +311,7 @@ sema_gate_expression_value: fn(source: String, expression: Expr, ledger: &GateLe
         .RawOf(_, span, _) -> {
             gate_ledger_push(ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -322,7 +322,7 @@ sema_gate_checked_receiver: fn(receiver: Expr, names: [String:Bool]) -> Bool Nev
         .Field(base, name, _, _) -> {
             if base == .Ident(_, _, _) -> candidate = Val(name)
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     name: candidate ?? return false
     if names.get(name) != None -> return true
@@ -368,7 +368,7 @@ sema_gate_marker_expr: fn(marker: Marker, position: Int) -> Expr? Never! {
     if marker.args[position] == {
         // copy: `value` is a payload of read parameter `marker`, which keeps the original; the Val carrier owns this one
         .Expr(value) -> Val(value.copy())
-        else -> None
+        .EffectRow(_, _) -> None
     }
 }
 
@@ -379,7 +379,7 @@ sema_gate_literal_text: fn(expression: Expr?) -> String? Never! {
     loop part in parts {
         if part == {
             .Lit(literal) -> text = "{text}{literal}"
-            else -> return None
+            .Interp(_, _) | .Byte(_) -> return None
         }
     }
     Val(text)
@@ -432,7 +432,7 @@ sema_gate_statement_gates: fn(source: String, body: [Stmt], ledger: &GateLedger)
             .AssumeDet(reason, _, _, span) -> {
                 gate_ledger_push(ledger, gate_source_entry(GateKind.Nondeterministic, "security", "block", source, span, "assume_deterministic", Val(reason), "determinism escape", "recorded"))
             }
-            else -> {}
+            .Expr(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
         if statement == .Unsafe(_, _, nested, _) {
             sema_gate_statement_gates(source, nested, ledger)
@@ -475,7 +475,7 @@ sema_gate_policy_diagnostics: fn(ledger: GateLedger, modules: [SemaGateModule], 
 // read before registration as the obligation pass is. Only a module under
 // some `.Forbid` is walked.
 sema_gate_source_policy_diagnostics: fn(modules: [SemaGateModule]) -> [GateDiagnostic] Never! {
-    context: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: [UnsafeGateInspection]{}}
+    context: Shared{SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: [UnsafeGateInspection]{}}}
     ledger := GateLedger{}
     loop row in modules {
         if !sema_gate_module_forbids(row) -> next

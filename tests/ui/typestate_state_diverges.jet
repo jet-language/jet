@@ -5,18 +5,16 @@
 Order: struct {
     state { Draft, Confirmed, Cancelled }
     id: Int
-}
 
-impl Order {
-    #Transition(_, Draft) start: fn(id: Int) -> Order { Order{id: id} }
+    #State(_ -> Draft) start: fn(id: Int) -> Order { Order{id: id} }
 
-    #Transition(Draft, Confirmed) confirm: fn(self: &&Order) -> Order { self }
+    #State(Draft -> Confirmed) confirm: fn(self: &&Order) -> Order { self }
 
-    #Transition(Draft, Cancelled) cancel: fn(self: &&Order) -> Order { self }
+    #State(Draft -> Cancelled) cancel: fn(self: &&Order) -> Order { self }
 
-    #Transition(Confirmed, Draft) reopen: fn(self: &&Order) -> Order { self }
+    #State(Confirmed -> Draft) reopen: fn(self: &&Order) -> Order { self }
 
-    #Transition(Cancelled, Draft) restore: fn(self: &&Order) -> Order { self }
+    #State(Cancelled -> Draft) restore: fn(self: &&Order) -> Order { self }
 }
 
 job: fn(cents: Int) {

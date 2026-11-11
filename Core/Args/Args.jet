@@ -171,7 +171,7 @@ add_flag_entry: fn(entries: &[(key: String, value: Dyn)], key: String, old: Dyn,
                 object_set(entries, key, value)
             }
         }
-        else -> { object_set(entries, key, value) }
+        .Null | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { object_set(entries, key, value) }
     }
 }
 
@@ -190,7 +190,7 @@ put_entry: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
                 object_set(entries, key, value)
             }
         }
-        else -> {
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             object_set(entries, key, value)
         }
     }
@@ -248,10 +248,10 @@ get_text: fn(tree: Dyn, key: String) -> String Never! {
                     if b -> return "true"
                     return "false"
                 }
-                else -> return ""
+                .Null | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return ""
             }
         }
-        else -> return ""
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return ""
     }
     ""
 }
@@ -268,10 +268,10 @@ get_bool: fn(tree: Dyn, key: String) -> Bool Never! {
                     if s == "true" || s == "1" || s == "yes" -> return true
                     return false
                 }
-                else -> return false
+                .Null | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
-        else -> return false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
     }
     false
 }
@@ -283,10 +283,10 @@ get_int: fn(tree: Dyn, key: String) -> Int Never! {
             value: v ?? return 0
             if value == {
                 .Int(n) -> return n
-                else -> return 0
+                .Null | .Bool(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return 0
             }
         }
-        else -> return 0
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return 0
     }
     0
 }
@@ -302,14 +302,14 @@ positionals: fn(tree: Dyn) -> [String] Never! {
                     loop item in items {
                         if item == {
                             .Text(s) -> out.push(s.copy())
-                            else -> { _ := 0 }
+                            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { _ := 0 }
                         }
                     }
                 }
-                else -> { _ := 0 }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { _ := 0 }
             }
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { _ := 0 }
     }
     out
 }
@@ -325,7 +325,7 @@ has: fn(tree: Dyn, key: String) -> Bool Never! {
             if v == .None -> return false
             return true
         }
-        else -> return false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
     }
     false
 }
@@ -417,7 +417,7 @@ apply_defaults: fn(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
                     out = Dyn.Object(next_entries)
                 }
             }
-            else -> { _ := 0 }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { _ := 0 }
         }
     }
     out

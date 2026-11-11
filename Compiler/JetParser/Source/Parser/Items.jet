@@ -56,6 +56,7 @@ use {
         StateDecl,
         StateTransition,
         Stmt,
+        STATE_ARROW_LABEL,
         StructDef,
         TagDef,
         TextEdit,
@@ -85,6 +86,8 @@ use {
         expr_span,
         diagnostic_with_edit,
         diagnostic_with_structured_edit,
+        effect_scope_argument_valid,
+        effect_scope_name,
         marker_registered,
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
@@ -424,10 +427,12 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
                 written: Span{start: open.start, end: marker_span.end}
                 if !package -> parser_add_error_code_edit(state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
             }
-            if item_visibility && parser_current_kind(state) != TOKEN_KW_MODULE {
-                deletion: parser_deletion_edit(state, marker_span)
-                parser_add_error_code_edit(state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", deletion)
-                next
+            // `priv` hides any declaration. At a file's top
+            // level it already keeps the declaration inside the package, so
+            // `priv(package)` there names nothing more (a module keeps it).
+            if item_visibility && package && state.module_depth == 0 && parser_current_kind(state) != TOKEN_KW_MODULE {
+                parser_add_error_code_edit(state, "E0414", marker_span, "a top-level declaration takes plain `priv`, not `priv(package)`", "at a file's top level `priv` already keeps a declaration inside its package; only a module takes `priv(package)` there", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})
+                package = false
             }
             if !item_visibility && package {
                 parser_add_error_code_edit(state, "E0417", marker_span, "a field takes plain `priv`, not `priv(package)`", "a `priv` field is usable only by its type's module; package privacy belongs to modules", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})
@@ -506,7 +511,8 @@ parser_parse_marker: fn(state: &JetParserState) -> Marker {
     end := name.span
     if parser_current_kind(state) == TOKEN_LPAREN {
         open: parser_current(state).span
-        args = parser_parse_marker_args(state)
+        arrow: parser_value(state, name) == "State"
+        args = parser_parse_marker_args(state, arrow)
         if state.position > 0 -> end = parser_lookahead(state, -1).span
         if args.args.len() == 0 {
             marker_name: parser_value(state, name)
@@ -529,7 +535,7 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
         .Expr(value) -> return Val(value)
-        else -> return None
+        .EffectRow(_, _) -> return None
     }
 }
 
@@ -828,12 +834,21 @@ parser_validate_param_labels: fn(state: &JetParserState, params: [Param]) {
     loop index in 0..<params.len() {
         param: params[index]
         if param.name == "self" -> next
-        label: if param.public_label == {.Val(value) -> value.name else -> param.name}
-        label_span: if param.public_label == {.Val(value) -> value.span else -> param.name_span}
+        label: if param.public_label == {
+            .Val(value) -> value.name
+            .None -> param.name
+        }
+        label_span: if param.public_label == {
+            .Val(value) -> value.span
+            .None -> param.name_span
+        }
         loop earlier_index in 0..<index {
             earlier: params[earlier_index]
             if earlier.name == "self" -> next
-            earlier_label: if earlier.public_label == {.Val(value) -> value.name else -> earlier.name}
+            earlier_label: if earlier.public_label == {
+                .Val(value) -> value.name
+                .None -> earlier.name
+            }
             if earlier_label == label {
                 parser_add_error_code(state, "E0770", label_span, "two parameters both publish the label `{label}`", "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called", "give one of them a different label, as in `{label}_2 {param.name}: …`")
                 break
@@ -1338,7 +1353,7 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
             prohibited: parser_current_kind(state) == TOKEN_BANG
             if prohibited -> parser_bump(state)
             entry: parser_expect_effect_path_name(state)
-            if !prohibited && entry.name.contains("(") {
+            if !prohibited && entry.name.starts_with("Mem.Alloc(") {
                 parser_add_fatal_code(state, "E0119", entry.span, "`{entry.name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `-[!{entry.name}]>`")
                 break
             }
@@ -1351,8 +1366,9 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
     effects
 }
 
-// An effect path `ident (.ident)*`; the one
-// parameterized entry is the bounded memory denial `Mem.Alloc(above: N)`.
+// An effect path `ident (.ident)*`, with an optional argument: the bounded
+// memory denial `Mem.Alloc(above: N)`, or a scope string naming a folder, a
+// host or a device (`FS.Read("templates/")`, `Net("api.example.com")`).
 parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "for an effect name")
     name := parser_value(state, first)
@@ -1362,6 +1378,22 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         segment: parser_expect_name(state, "for an effect path segment after `.`")
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
+    }
+    if name != "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
+        parser_bump(state)
+        token: parser_current(state)
+        if token.kind != TOKEN_STRING || parser_interpolations(state, token) > 0 {
+            parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` takes one plain string scope", "an effect argument names a folder, a host or a device as fixed text", "write `{name}(\"templates/\")`")
+            return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+        }
+        parser_bump(state)
+        scope: parser_value(state, token)
+        if !effect_scope_argument_valid(scope) {
+            parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` needs a non-empty scope without quotes or backslashes", "a scope is a folder, a host or a device name", "write `{name}(\"templates/\")`")
+            return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+        }
+        close: parser_expect(state, TOKEN_RPAREN, "`)` after the effect scope")
+        return NamedSpan{name: effect_scope_name(name, scope), span: Span{start: first.span.start, end: close.span.end}}
     }
     if name == "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
@@ -1434,31 +1466,27 @@ parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
 }
 
 // The result after the one arrow. Current forms are `-> T`,
-// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`. A `->` with no type after it is left for the
+// `-[E]> T`, unit `-[E]>` and unit-fallible `E!`, which also follows an
+// effect row (`-[E]> C!`). A `->` with no type after it is left for the
 // body parser, so `f: fn() -> expr` still reads as a one-line body.
 parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult {
     prefix_effect: parser_func_effect_starts_here(state)
-    effect_start: parser_current(state).span.start
     effects: parser_parse_opt_func_effects(state)
-    arrow_return := false
     plain_arrow := false
     result := ParsedType?{None}
     if {
         effects.effects != None || effects.via != None -> {
-            arrow_return = true
             result = if parser_result_type_follows_arrow(state) -> Val(parser_parse_type(state, 0)) else -> parser_parse_unit_fallible_return(state)
         }
         parser_at_unified_arrow(state) -> {
             before: state.position
             parser_bump(state)
             if parser_result_type_follows_arrow(state) {
-                arrow_return = true
                 plain_arrow = true
                 result = Val(parser_parse_type(state, 0))
             } else {
                 result = parser_parse_unit_fallible_return(state)
                 if parser_has_type(result) {
-                    arrow_return = true
                     plain_arrow = true
                 } else {
                     state.position = before
@@ -1474,15 +1502,8 @@ parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult
     if result == .Val(parsed) {
         return_type = Val(parsed.ty)
         return_type_span = Val(parsed.span)
-        if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            if plain_arrow {
-                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
-            } else {
-                // The error contract precedes the effect arrow.
-                contract: parser_source_slice(state, parsed.span.start, parsed.span.end)
-                arrow: parser_source_slice(state, effect_start, parsed.span.start).trim()
-                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible error contract comes before the effect arrow", "a function that can fail but returns no value has no result after its effect arrow; its error contract is written first", "write `{contract} {arrow}`, as in `save: fn(path: String) IOError! -[FS]>`")
-            }
+        if plain_arrow && parser_is_unit_fallible(parsed.ty) {
+            parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
     ParsedCallableResult{return_type: return_type.move(), return_type_span: return_type_span.move(), effects: effects.effects, via: effects.via, prefix_effect: prefix_effect.move(), plain_arrow: plain_arrow}
@@ -1669,7 +1690,7 @@ parser_return_type_has_value: fn(return_type: Type?) -> Bool Never! {
     if ty == {
         .Named(name) -> name != "Unit"
         .Result(ok, _) -> ok != (Type.Named{name: "Unit"})
-        else -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -1711,8 +1732,12 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     func.must_use_span = Val(marker.span)
                 }
             }
-            "WasmExport" -> {
-                if marker.args.len() == 0 -> func.web_marker = Val(WebPartitionMarker.WasmExport)
+            // `#Export(wasm)` is the JS-to-Wasm bridge entry;
+            // `#Export(c)` is the native Library export sema reads.
+            "Export" -> {
+                if marker.args.len() == 1 && marker.args[0] == .Expr(written) {
+                    if written == .Ident(name, _, _) && name == "wasm" -> func.web_marker = Val(WebPartitionMarker.WasmExport)
+                }
             }
             // `#Scrub(Tag)` names the one fact tag removed.
             "Scrub" -> {
@@ -1737,7 +1762,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                             else -> {}
                         }
                     }
-                    else -> func.is_inline = true
+                    .None -> func.is_inline = true
                 }
             }
             // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
@@ -1789,21 +1814,19 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     return
                 }
             }
+            // `#State(S)` requires S; `#State(A -> B)` moves A
+            // to B, and `_` as A is the entry transition.
             "State" -> {
-                paths: parser_marker_path_arguments(marker, [String]{"state"}) ?? {
-                    parser_marker_shape_fatal(state, marker)
+                paths: parser_state_marker_paths(marker) ?? {
+                    parser_state_marker_shape_fatal(state, marker)
                     return
                 }
-                func.state_requires = Val(NamedSpan{name: paths[0], span: marker.span})
-            }
-            // `_` as the source state is the entry transition.
-            "Transition" -> {
-                paths: parser_marker_path_arguments(marker, [String]{"from", "to"}) ?? {
-                    parser_marker_shape_fatal(state, marker)
-                    return
+                if paths.len() == 1 {
+                    func.state_requires = Val(NamedSpan{name: paths[0], span: marker.span})
+                } else {
+                    from: if paths[0] == "_" -> String?{None} else -> Val(paths[0])
+                    func.state_transition = Val(StateTransition{from: from, to: paths[1], span: marker.span})
                 }
-                from: if paths[0] == "_" -> String?{None} else -> Val(paths[0])
-                func.state_transition = Val(StateTransition{from: from, to: paths[1], span: marker.span})
             }
             "Undo" -> {
                 values: parser_marker_bindings(marker, [String]{"inverse"}) ?? [Expr?]{None}
@@ -1829,22 +1852,31 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             else -> {}
         }
     }
-    // `#Job` metadata and its `#Every` schedule (E0925).
+    // `#Job` metadata and its `every:` schedule.
     _ := parser_project_function_job_markers(state, func, markers)
     loop index in 0..<policy.len() -> policy[index].target = Val(func.span)
     loop declaration in policy -> state.block_policy_declarations.push(declaration)
 }
 
-// The `#State` / `#Transition` arguments: one written state path per
-// parameter, all required. None when any is missing or not a path.
-parser_marker_path_arguments: fn(marker: Marker, names: [String]) -> [String]? {
-    values: parser_marker_bindings(marker, names) ?? return None
-    paths := [String]{}
-    loop value in values {
-        written: value ?? return None
-        paths.push(parser_marker_ident_path(written) ?? return None)
+// A `#State` argument is exactly a state name, or a state
+// name or `_`, `->`, and a state name. The one path, or the from and to paths.
+parser_state_marker_paths: fn(marker: Marker) -> [String]? {
+    if marker.args.len() == 1 && parser_marker_label(marker, 0) == "" {
+        state_name: parser_marker_ident_path(parser_marker_expression(marker, 0) ?? return None) ?? return None
+        if state_name == "_" -> return None
+        return Val([String]{state_name})
     }
-    Val(paths)
+    if marker.args.len() != 2 || parser_marker_label(marker, 0) != "" || parser_marker_label(marker, 1) != STATE_ARROW_LABEL -> return None
+    from: parser_marker_ident_path(parser_marker_expression(marker, 0) ?? return None) ?? return None
+    to: parser_marker_ident_path(parser_marker_expression(marker, 1) ?? return None) ?? return None
+    if to == "_" -> return None
+    Val([String]{from, to})
+}
+
+// The `#State` shape error names the two written forms, not the registered
+// field list: `#State(A, to: B)` binds that list but is not the arrow form.
+parser_state_marker_shape_fatal: fn(state: &JetParserState, marker: Marker) {
+    parser_add_fatal_code(state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#State` arguments do not match `State(S)` or `State(A -> B)`", "a typestate marker names the state a call requires, or one transition from a state (`_` at entry) to a state", "write `#State(S)`, `#State(A -> B)`, or `#State(_ -> B)`")
 }
 
 // Rust `web_target_from_marker` at a function: `#Target(Wasm)` or
@@ -1924,7 +1956,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             section := parser_parse_state_section(state, type_name, name.span)
             if value.state == {
                 .None -> value.state = Val(section)
-                else -> parser_report_repeated_state_section(state, section, type_name)
+                .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
             }
             if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
             next
@@ -2704,14 +2736,24 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         parts.push(parser_expect_name(state, "after `.` in `impl`"))
     }
     // `impl Stack<T> {`: an impl names its type bare and its methods already
-    // see the struct's type parameters.
+    // see the struct's type parameters. A list with a bound is a conditional
+    // impl, `impl Pair<T: Priced>.Describe`, which applies only where `T`
+    // meets its bounds; sema checks the list names the type's parameters.
+    type_params := [TypeParam]{}
     if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) {
         open: parser_current(state).span
-        _: parser_parse_type_params(state)
-        written := parser_value(state, parts[0])
-        loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
-        params_span: Span{start: open.start, end: parser_prev_token_end(state)}
-        parser_add_error_code_edit(state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
+        params: parser_parse_type_params(state)
+        bounded: loop param in params {
+            if param.bounds.len() > 0 -> break true
+        } ?? false
+        if bounded {
+            type_params = params
+        } else {
+            written := parser_value(state, parts[0])
+            loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
+            params_span: Span{start: open.start, end: parser_prev_token_end(state)}
+            parser_add_error_code_edit(state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
+        }
         loop parser_current_kind(state) == TOKEN_DOT && !parser_aborting(state) {
             parser_bump(state)
             parts.push(parser_expect_name(state, "after `.` in `impl`"))
@@ -2777,7 +2819,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         parser_bump(state)
         field: parser_expect_name(state, "after `using` for the delegation field")
         parser_finish_statement(state)
-        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers}}
+        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers, type_params: type_params}}
     }
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl` body")
     methods := [Func]{}
@@ -2819,7 +2861,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     if trait_name == .Val(text) -> written = "{written}.{text}"
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, start.span.start, close.span.start, "impl `{written}`")
     if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
-    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers}}
+    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers, type_params: type_params}}
 }
 
 // The native OS an impl is gated to by `#Target(OS.Linux|MacOS|Windows)`
@@ -2889,7 +2931,7 @@ parser_derive_nested_impl_span: fn(body: [DeriveBodyItem]) -> Span? Never! {
             .Item(item) -> if item == {
                 .Impl(implementation) -> return Val(implementation.span)
                 .ErrorConv(conversion) -> return Val(conversion.from_span)
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             .Loop(_, _, _, nested, _) -> {
                 if parser_derive_nested_impl_span(nested) == .Val(span) -> return Val(span)

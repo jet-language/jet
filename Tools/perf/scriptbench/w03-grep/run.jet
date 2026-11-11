@@ -1,4 +1,5 @@
 // w03: scan a 100 MB log for `status=5xx ms=N`, count the matches and total N.
+// The log streams a line at a time, as the peers read it; it is never held whole.
 package: {
     name: "run"
     authority: { allow: [IO, Mem.Alloc, FS.Read] }
@@ -11,10 +12,10 @@ use {
 
 run: fn() {
     rx: re.compile("status=5\\d\\d ms=(\\d+)") ?? panic("bad pattern")
-    text: fs.read("data/log100m.txt") ?? panic("read failed")
+    log: fs.open("data/log100m.txt") ?? panic("open failed")
     count := 0
     total := 0
-    loop line in text.lines() {
+    loop line in log.lines() {
         if re.match(rx, line) == .Val(m) {
             count += 1
             total += Int.parse(m.groups[0]) ?? panic("bad ms")

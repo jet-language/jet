@@ -1,8 +1,11 @@
 use fs: core.files
 #FX(!FS)
 Source: trait { text: fn(self) -> String }
-Doc: struct { path: String }
-impl Doc.Source {
-    text: fn(self) -> String { fs.read(self.path) ?? "" }
+Doc: struct {
+    path: String
+
+    impl Source {
+        text: fn(self) -> String { fs.read(self.path) ?? "" }
+    }
 }
 run: fn() { print(Doc{path: "notes.txt"}.text()) }

@@ -123,8 +123,8 @@ JET_CLI_KEYWORD_LIST: [String]{
     "fn", "pub", "priv", "use", "as", "extern", "rust", "module", "if", "else", "loop", "in", "break", "next",
     "return", "yield", "defer", "struct", "enum", "impl", "policy", "wrap", "trait", "tag",
     "effect", "derive", "comptime", "fact", "distinct", "migration", "rename", "add", "remove", "change", "via",
-    "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test",
-    "Todo", "State", "Transition", "state", "protocol", "client", "server", "validate",
+    "self", "Unsafe", "Impure", "Context", "task", "freeze", "Transact", "Job", "Test",
+    "Todo", "State", "state", "protocol", "client", "server", "validate",
     "check", "true", "false", "None", "it",
 }
 
@@ -156,7 +156,7 @@ JET_CLI_RESERVED_SIGILS: [JetCLIReservedEntry]{
     {spelling: "&", kind: "sigil", note: "borrow for write"},
     {spelling: "&&", kind: "sigil", note: "take ownership"},
     {spelling: "@", kind: "sigil", note: "prefix `@` marks a live link"},
-    {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$holds:`"},
+    {spelling: "$", kind: "sigil", note: "config-surface environment read `$NAME`"},
     {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence"},
     {spelling: ":>", kind: "sigil", note: "close a statement-expansion fence"},
     {spelling: "...", kind: "sigil", note: "spread elements"},
@@ -227,10 +227,6 @@ jet_cli_digest_list: fn(values: [String]) -> String Never! {
     }
     rows: loop value in unique -> "- {value}"
     rows.join("\n")
-}
-
-jet_cli_digest_quote: fn(value: String) -> String Never! {
-    value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
 // Rust `split_whitespace().join(" ")`.
@@ -909,14 +905,15 @@ jet_cli_codemod: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
     }
 }
 
-// `jet inspect audit [copies|foreign|memory|<entry.jet>] [--advisory-db <path>]`
-// (`"audit"`): `copies` and `foreign` audit one entry (AuditCopies.jet,
-// AuditForeign.jet); `memory` runs the memory witnesses (AuditMemory.jet).
+// `jet inspect audit [copies|writes|foreign|memory|<entry.jet>] [--advisory-db <path>]`
+// (`"audit"`): `copies`, `writes` and `foreign` audit one entry (AuditCopies.jet,
+// AuditWrites.jet, AuditForeign.jet); `memory` runs the memory witnesses (AuditMemory.jet).
 // Inside a project, the bare form checks its lockfile against the signed
 // advisory feed (AuditAdvisory.jet).
 jet_cli_audit: fn(args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && args[0] == "copies" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, jet_cli_tail(args, 1), color, json)
+    if args.len() > 0 && args[0] == "writes" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Writes, jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && args[0] == "foreign" -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Foreign, jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && args[0].ends_with(".jet") -> return jet_cli_audit_entry_plan(JetCLIAuditSubject.Copies, args, color, json)
     if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect audit` inside a project", color) == {

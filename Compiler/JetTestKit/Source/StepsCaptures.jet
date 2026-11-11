@@ -177,7 +177,7 @@ kit_steps_captured_subject: fn(name: String, captures: [KitCapture]) -> String? 
                 loop number in numbers -> values.push("{number}")
                 return Val(values.join("\n"))
             }
-            else -> return None
+            .Bytes(_) | .Tree(_) | .Absent -> return None
         }
     }
     None
@@ -200,7 +200,7 @@ kit_steps_state_subject: fn(name: String, state: KitStepState) -> String? {
         if binding.name != name -> next
         return if binding.value == {
             .Text(text) -> Val(text)
-            else -> None
+            .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> None
         }
     }
     kit_steps_captured_subject(name, state.captures)

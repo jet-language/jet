@@ -622,7 +622,7 @@ File: struct {
     state { Closed, Open }
 }
 #State(Open) write_line: fn(self, s: String) { }       // valid only when Open
-#Transition(Closed, Open) open: fn(self) -> File { } // consume Closed, yield Open
+#State(Closed -> Open) open: fn(self) -> File { } // consume Closed, yield Open
 
 // Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.
 taint: fn(raw: String) {

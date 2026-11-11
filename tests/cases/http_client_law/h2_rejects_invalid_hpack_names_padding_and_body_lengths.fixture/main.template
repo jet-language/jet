@@ -6,20 +6,20 @@ run: fn() {
         .Err(error) -> {
             if error == {
                 .InvalidHeader -> print("InvalidHeader")
-                else -> panic("expected InvalidHeader")
+                .InvalidMethod | .InvalidURL | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> panic("expected InvalidHeader")
             }
         }
-        else -> panic("expected send error")
+        .Ok(_) -> panic("expected send error")
     }
     client1: http.Client.new().protocols(true, false, true)
     if client1.send(http.request("GET", "http://{cap:addr}/h2")) == {
         .Err(error) -> {
             if error == {
                 .Protocol(_) -> print("Protocol")
-                else -> panic("expected Protocol")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> panic("expected Protocol")
             }
         }
-        else -> panic("expected send error")
+        .Ok(_) -> panic("expected send error")
     }
     client2: http.Client.new().protocols(true, false, true)
     response: client2.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third send")
@@ -33,7 +33,7 @@ run: fn() {
                         print("InvalidFraming")
                         saw_error = true
                     }
-                    else -> panic("expected InvalidFraming")
+                    .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> panic("expected InvalidFraming")
                 }
                 break
             }

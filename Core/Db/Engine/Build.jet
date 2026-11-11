@@ -89,6 +89,56 @@ DBFixer: struct {
     z_type: String
     name: String
     name_off: Int
+
+    impl SQLWalker {
+        // fixExprCb.
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if !self.b_temp -> ast.set_flags(a, e, ast.EP_FROM_DDL)
+            if a.exprs[e].op == tk.TK_VARIABLE {
+                if self.busy {
+                    a.exprs[e].op = tk.TK_NULL
+                } else {
+                    ast.error(a, "{self.z_type} cannot use variables")
+                    return ast.WRC_ABORT
+                }
+            }
+            ast.WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        // fixSelectCb.
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+            list: a.selects[s].src
+            if list < 0 -> return ast.WRC_CONTINUE
+            loop i in 0..<a.srclists[list].items.len() {
+                si: a.srclists[list].items[i]
+                if !self.b_temp {
+                    db_opt: a.items[si].database.copy()
+                    if db_opt == .Val(zdb) {
+                        if self.i_db != fixer_find_db(self, zdb) {
+                            ast.error_at(a, "{self.z_type} {self.name} cannot reference objects in database {ast.text(zdb)}", self.name_off)
+                            return ast.WRC_ABORT
+                        }
+                        a.items[si].database = None
+                        a.items[si].not_cte = true
+                    }
+                    a.items[si].schema = self.schema
+                    a.items[si].from_ddl = true
+                }
+                if !a.items[si].is_using && ast.walk_expr<DBFixer>(self, a, a.items[si].u3) != 0 -> return ast.WRC_ABORT
+            }
+            w: a.selects[s].with_clause
+            if w >= 0 {
+                loop c in a.withs[w].ctes.copy() {
+                    if ast.walk_select<DBFixer>(self, a, a.ctes[c].select) != 0 -> return ast.WRC_ABORT
+                }
+            }
+            ast.WRC_CONTINUE
+        }
+        // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback.
+        walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { true }
+    }
 }
 
 // sqlite3FindDbName over the database names the fixer copied.
@@ -100,56 +150,6 @@ fixer_find_db: fn(f: DBFixer, name: [U8]) -> Int Never! {
         i -= 1
     }
     -1
-}
-
-impl DBFixer.SQLWalker {
-    // fixExprCb.
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if !self.b_temp -> ast.set_flags(a, e, ast.EP_FROM_DDL)
-        if a.exprs[e].op == tk.TK_VARIABLE {
-            if self.busy {
-                a.exprs[e].op = tk.TK_NULL
-            } else {
-                ast.error(a, "{self.z_type} cannot use variables")
-                return ast.WRC_ABORT
-            }
-        }
-        ast.WRC_CONTINUE
-    }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    // fixSelectCb.
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
-        list: a.selects[s].src
-        if list < 0 -> return ast.WRC_CONTINUE
-        loop i in 0..<a.srclists[list].items.len() {
-            si: a.srclists[list].items[i]
-            if !self.b_temp {
-                db_opt: a.items[si].database.copy()
-                if db_opt == .Val(zdb) {
-                    if self.i_db != fixer_find_db(self, zdb) {
-                        ast.error_at(a, "{self.z_type} {self.name} cannot reference objects in database {ast.text(zdb)}", self.name_off)
-                        return ast.WRC_ABORT
-                    }
-                    a.items[si].database = None
-                    a.items[si].not_cte = true
-                }
-                a.items[si].schema = self.schema
-                a.items[si].from_ddl = true
-            }
-            if !a.items[si].is_using && ast.walk_expr<DBFixer>(self, a, a.items[si].u3) != 0 -> return ast.WRC_ABORT
-        }
-        w: a.selects[s].with_clause
-        if w >= 0 {
-            loop c in a.withs[w].ctes.copy() {
-                if ast.walk_select<DBFixer>(self, a, a.ctes[c].select) != 0 -> return ast.WRC_ABORT
-            }
-        }
-        ast.WRC_CONTINUE
-    }
-    // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback.
-    walk_has_select_cb2: fn(&self) -> Bool Never! { true }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { true }
 }
 
 // sqlite3FixInit: a fixer for database i_db; `name` is the object's name

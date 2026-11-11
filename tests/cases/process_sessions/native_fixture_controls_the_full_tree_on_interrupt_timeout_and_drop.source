@@ -33,7 +33,10 @@ run: fn() {
     if interrupt.stdin.write_text("late") == {
         .Ok(_) -> panic("interrupt cleanup left stdin open")
         .Err(error) -> {
-            if error == { .Closed(_) -> {} else -> panic("interrupt cleanup was not typed") }
+            if error == {
+                .Closed(_) -> {}
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("interrupt cleanup was not typed")
+            }
         }
     }
 
@@ -46,7 +49,10 @@ run: fn() {
     if terminate.stdin.write_text("late") == {
         .Ok(_) -> panic("terminate cleanup left stdin open")
         .Err(error) -> {
-            if error == { .Closed(_) -> {} else -> panic("terminate cleanup was not typed") }
+            if error == {
+                .Closed(_) -> {}
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("terminate cleanup was not typed")
+            }
         }
     }
 
@@ -59,7 +65,10 @@ run: fn() {
     if kill.stdin.write_text("late") == {
         .Ok(_) -> panic("kill cleanup left stdin open")
         .Err(error) -> {
-            if error == { .Closed(_) -> {} else -> panic("kill cleanup was not typed") }
+            if error == {
+                .Closed(_) -> {}
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("kill cleanup was not typed")
+            }
         }
     }
 

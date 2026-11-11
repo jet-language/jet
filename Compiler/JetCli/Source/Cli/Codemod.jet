@@ -1382,10 +1382,6 @@ jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTa
     JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: jet_cli_codemod_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
 }
 
-jet_cli_codemod_unit_entries: fn(units: [JetCLICodemodUnit]) -> [String] Never! {
-    loop unit in units -> unit.entry.copy()
-}
-
 // Rust apply_rule `Rule::Rename`.
 jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
     anchors := [SemAnchor]{}

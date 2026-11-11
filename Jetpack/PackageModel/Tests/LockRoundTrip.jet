@@ -64,7 +64,7 @@ pkg_lock_test_v0_fixture: fn() -> String Never! {
 pkg_lock_test_reported: fn(error: LockError) -> Diagnostic Never! {
     if error == {
         .Reported(diagnostic) -> diagnostic
-        else -> panic("expected a registered lock diagnostic, got {error.message()}")
+        .Invalid(_) | .UnsupportedVersion(_) | .IO(_) | .Incomplete(_) -> panic("expected a registered lock diagnostic, got {error.message()}")
     }
 }
 

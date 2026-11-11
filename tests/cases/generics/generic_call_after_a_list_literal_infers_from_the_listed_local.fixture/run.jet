@@ -1,0 +1,33 @@
+#Numeric Meters: distinct Float
+
+P: struct {
+    v: Int
+}
+
+double: fn<T: Numeric>(x: T) -> T { x + x }
+
+id: fn<T>(x: T) -> T { x }
+
+total: fn<T: Numeric>(xs: [T]) -> T {
+    sum := xs[0] - xs[0]
+    loop x in xs -> sum = sum + x
+    sum
+}
+
+run: fn() {
+    a: Meters.from_float(3.0)
+    b: Meters.from_float(-1.5)
+    // The list takes copies of `a` and `b`, which are still used below.
+    print(total([a, b]).raw())
+    print(double(b).raw())
+    print(max(a, b).raw())
+    f: 2.5
+    g: 4.0
+    floats: [f, g]
+    print(floats.len())
+    print(id(g))
+    p: P{v: 7}
+    ps: [p]
+    print(ps.len())
+    print(id(p).v)
+}

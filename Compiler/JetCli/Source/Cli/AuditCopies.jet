@@ -33,13 +33,22 @@ JetCLICopySite: struct {
 JetCLIAuditSubject: enum {
     Copies
     Foreign
+    Writes
 }
 
-// `"audit"`: `copies [file]` and a `.jet` argument audit copies; `foreign
-// [file]` audits foreign code. `words` is the argv after the subject (flags
-// included); the target is its first non-flag word, else the project around the
-// working directory, and a directory resolves to its stock entry as `jet lint`
-// resolves one.
+// The modules of the entry's source root once it checks clean, or the report
+// that it doesn't.
+JetCLIAuditModules: struct {
+    modules: [JetDriverAuthorizedSourceFile]
+    refusal: JetDriverVerbOutput?
+}
+
+// `"audit"`: `copies [file]` and a `.jet` argument audit copies; `writes
+// [file]` audits the calls that change or take a named value (AuditWrites.jet);
+// `foreign [file]` audits foreign code. `words` is the argv after the subject
+// (flags included); the target is its first non-flag word, else the project
+// around the working directory, and a directory resolves to its stock entry as
+// `jet lint` resolves one.
 jet_cli_audit_entry_plan: fn(subject: JetCLIAuditSubject, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     target := ""
     loop word in words {
@@ -62,30 +71,14 @@ jet_cli_audit_entry_plan: fn(subject: JetCLIAuditSubject, words: [String], color
     }
     source: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     if subject == .Foreign -> return JetCLIPlan.AuditForeign{file: file, source: source, color: color, json: json, notice: notice}
+    if subject == .Writes -> return JetCLIPlan.AuditWrites{file: file, source: source, color: color, json: json, notice: notice}
     JetCLIPlan.AuditCopies{file: file, source: source, color: color, json: json, notice: notice}
 }
 
 jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    modules := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Check) == {
-        .Refused(refusal) -> return refusal
-        .Compiled(result, snapshot) -> {
-            errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
-            if errors.len() > 0 {
-                rendered: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors) else -> jet_driver_report_problems(file, source, errors, color, false)
-                return JetDriverVerbOutput{stdout: "", stderr: rendered, exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            }
-            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            loop root in snapshot.roots {
-                if root.identity != snapshot.entry_root_identity -> next
-                loop member in root.files {
-                    if !member.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(member.path) || jet_cli_fmt_is_typed_package_source(member.source, member.path) -> next
-                    modules.push(member)
-                }
-            }
-        }
-    }
-    sites := jet_cli_audit_copy_sites(file, modules, color)
+    entry: jet_cli_audit_entry_modules(file, source, color, json)
+    if entry.refusal == .Val(refusal) -> return refusal
+    sites := jet_cli_audit_copy_sites(file, entry.modules, color)
     sites.sort_by((left: JetCLICopySite, right: JetCLICopySite) -> (left.path <=> right.path).then(left.start <=> right.start))
     if json {
         rows: loop site in sites -> jet_cli_status_object([JetCLIStatusField]{
@@ -101,6 +94,31 @@ jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) 
     lines := "implicit read-view copies: {sites.len()}\n"
     loop site in sites -> lines = "{lines}  {site.path}:{site.line}:{site.column}  span={site.start}..{site.end}  size=dynamic  kind=implicit\n"
     JetDriverVerbOutput{stdout: lines, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The first compile: the entry must check clean, and its source root's
+// ordinary `.jet` modules are the ones the audit lays its policy over.
+jet_cli_audit_entry_modules: fn(file: String, source: String, color: Bool, json: Bool) -> JetCLIAuditModules {
+    modules := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Check) == {
+        .Refused(refusal) -> return JetCLIAuditModules{modules: modules, refusal: Val(refusal)}
+        .Compiled(result, snapshot) -> {
+            errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+            if errors.len() > 0 {
+                rendered: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors) else -> jet_driver_report_problems(file, source, errors, color, false)
+                return JetCLIAuditModules{modules: modules, refusal: Val(JetDriverVerbOutput{stdout: "", stderr: rendered, exit_code: JET_DRIVER_EXIT_USER_ERROR})}
+            }
+            if result.internal_problem == .Val(problem) -> return JetCLIAuditModules{modules: modules, refusal: Val(jet_cli_ice(problem))}
+            loop root in snapshot.roots {
+                if root.identity != snapshot.entry_root_identity -> next
+                loop member in root.files {
+                    if !member.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(member.path) || jet_cli_fmt_is_typed_package_source(member.source, member.path) -> next
+                    modules.push(member)
+                }
+            }
+        }
+    }
+    JetCLIAuditModules{modules: modules, refusal: None}
 }
 
 // The second compile, every module under the explicit-copies policy: each

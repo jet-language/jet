@@ -116,37 +116,37 @@ PrintfArgs: trait {
 MemList: struct {
     args: [Mem]
     used: Int
+
+    impl PrintfArgs {
+        int_arg: fn(&self) -> Int Never! {
+            if self.used >= self.args.len() -> return 0
+            self.used += 1
+            m: self.args[self.used - 1]
+            if m.flags.bit_and(MEM_INT) != 0 -> return m.i
+            0
+        }
+        double_arg: fn(&self) -> Float Never! {
+            if self.used >= self.args.len() -> return Float{0}
+            self.used += 1
+            m: self.args[self.used - 1]
+            if m.flags.bit_and(MEM_REAL) != 0 -> return m.r
+            if m.flags.bit_and(MEM_INT) != 0 -> return util.int_to_double(m.i)
+            Float{0}
+        }
+        next_text: fn(&self, out: &[U8]) -> Bool Never! {
+            if self.used >= self.args.len() -> return false
+            self.used += 1
+            m: self.args[self.used - 1]
+            if m.flags.bit_and(MEM_STR) == 0 -> return false
+            out.clear()
+            loop b in m.z -> out.push(b)
+            true
+        }
+    }
 }
 
 new_mem_list: fn(args: [Mem]) -> MemList Never! {
     MemList{args: args, used: 0}
-}
-
-impl MemList.PrintfArgs {
-    int_arg: fn(&self) -> Int Never! {
-        if self.used >= self.args.len() -> return 0
-        self.used += 1
-        m: self.args[self.used - 1]
-        if m.flags.bit_and(MEM_INT) != 0 -> return m.i
-        0
-    }
-    double_arg: fn(&self) -> Float Never! {
-        if self.used >= self.args.len() -> return Float{0}
-        self.used += 1
-        m: self.args[self.used - 1]
-        if m.flags.bit_and(MEM_REAL) != 0 -> return m.r
-        if m.flags.bit_and(MEM_INT) != 0 -> return util.int_to_double(m.i)
-        Float{0}
-    }
-    next_text: fn(&self, out: &[U8]) -> Bool Never! {
-        if self.used >= self.args.len() -> return false
-        self.used += 1
-        m: self.args[self.used - 1]
-        if m.flags.bit_and(MEM_STR) == 0 -> return false
-        out.clear()
-        loop b in m.z -> out.push(b)
-        true
-    }
 }
 
 // ---------------------------------------------------------------------------

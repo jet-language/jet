@@ -167,17 +167,17 @@ run: fn() {
                 if chunked {
                     if stream.write_all("{size}{PEER_CRLF}".bytes()) == {
                         .Err(_) -> break
-                        else -> {}
+                        .Ok(_) -> {}
                     }
                 }
                 if stream.write_all(block.slice(0, count)) == {
                     .Err(_) -> break
-                    else -> {}
+                    .Ok(_) -> {}
                 }
                 if chunked {
                     if stream.write_all(PEER_CRLF.bytes()) == {
                         .Err(_) -> break
-                        else -> {}
+                        .Ok(_) -> {}
                     }
                 }
                 remaining -= count

@@ -13,7 +13,7 @@
 
 use {
     jet_backend.[LINK_FAULT_REPORT]
-    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_x64_overflow_message]
+    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_overflow_wraps, ir_timing_marked, ir_x64_overflow_message]
     jet_foundation.[name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
 }
@@ -107,11 +107,16 @@ web_select_function: fn(st: &WebState, m: IRModule, tables: IRX64Tables, row: In
     web_select_body(st, m, f, tables)
 }
 
+// A function with a fixed slot (JetIR Timing.jet ir_timing_marked) records
+// where each instruction's code starts, for the fixed-timing check
+// (Timing.jet web_timing_check).
 web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables) -> WebBody Never! {
     e := web_emitter(m, f)
     web_layout_frame(e, m, f)
     frame_size: e.frame_size
     frame: e.frame
+    checked: ir_timing_marked(f)
+    marks := [Int]{}
     if frame_size > 0 {
         web_global_get(e, WEB_GLOBAL_SP)
         web_i64(e, frame_size)
@@ -121,6 +126,10 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
     }
     at := 0
     loop at < f.op.len() {
+        if checked {
+            marks.push(e.code.len())
+            marks.push(at)
+        }
         if st.stop_points && e.pad_ends.len() == 0 {
             resume: web_stop_point(e, st, m, f, at)
             if resume >= 0 {
@@ -134,8 +143,14 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
         at += 1
     }
     if e.pad_ends.len() > 0 -> st.errors.push("{f.name}: {e.pad_ends.len()} stop edges are never closed")
+    if checked {
+        marks.push(e.code.len())
+        marks.push(-1)
+    }
     web_return(e, st, m, f, -1)
-    web_finish(e)
+    body: web_finish(e)
+    if checked -> web_timing_check(st, m, f, body, marks)
+    body
 }
 
 // The stop point at `at`, if it is one: its check and the opened edge.
@@ -673,7 +688,7 @@ web_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables
     ty: m.types[f.slot_type[f.a[at]]]
     if ty.kind == {
         .Int -> {
-            if f.c[at] == IR_OVERFLOW_WRAP {
+            if ir_overflow_wraps(f.c[at]) {
                 shape := ty.copy()
                 shape.kind = .Word
                 shape.signed = true
@@ -688,7 +703,7 @@ web_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables
             web_fail(e, st, f, at, "String operands take Concat or a comparison")
         }
         .Word | .Bool | .Char | .Pointer -> web_word_binary(e, st, m, f, tables, at, ty)
-        else -> web_fail(e, st, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
+        .Unit | .Aggregate -> web_fail(e, st, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -704,7 +719,7 @@ web_compare_op: fn(op: IROp, unsigned: Bool) -> Int Never! {
         .Lt -> if unsigned -> 0x54 else -> 0x53
         .Gt -> if unsigned -> 0x56 else -> 0x55
         .Le -> if unsigned -> 0x58 else -> 0x57
-        else -> if unsigned -> 0x5a else -> 0x59
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> if unsigned -> 0x5a else -> 0x59
     }
 }
 
@@ -900,7 +915,7 @@ web_division_symbol: fn(op: IROp) -> String Never! {
         .Div -> "jet_int_div"
         .Rem -> "jet_int_rem"
         .FloorDiv -> "jet_int_floor_div"
-        else -> "jet_int_mod"
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> "jet_int_mod"
     }
 }
 
@@ -1022,7 +1037,7 @@ web_word_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, t
         .BitAnd -> web_op(e, 0x83)
         .BitOr -> web_op(e, 0x84)
         .BitXor -> web_op(e, 0x85)
-        else -> return web_fail(e, st, f, at, "no fixed-width form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return web_fail(e, st, f, at, "no fixed-width form")
     }
     web_store(e, dst)
 }
@@ -1134,7 +1149,7 @@ web_word_division: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction,
     right: e.locals[f.b[at]]
     dst: e.locals[f.dst[at]]
     bits: web_bits(ty)
-    trap: f.c[at] != IR_OVERFLOW_WRAP
+    trap: !ir_overflow_wraps(f.c[at])
     remainder: op == .Rem || op == .Mod
     quotient: if remainder -> e.t1 else -> e.t0
     if web_slot_kind(m, f, f.a[at]) == .Int {
@@ -1203,7 +1218,7 @@ web_float_binary: fn(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, ty: 
             .Lt -> 0x63
             .Gt -> 0x64
             .Le -> 0x65
-            else -> 0x66
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> 0x66
         }
         web_op(e, if single -> code - 0x06 else -> code)
         return web_store_truth(e, dst)
@@ -1214,7 +1229,7 @@ web_float_binary: fn(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, ty: 
         .Sub -> web_op(e, base + 1)
         .Mul -> web_op(e, base + 2)
         .Div | .FloorDiv -> web_op(e, base + 3)
-        else -> return web_fail(e, st, f, at, "no Float form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Rem | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return web_fail(e, st, f, at, "no Float form")
     }
     if op == .FloorDiv -> web_op(e, if single -> 0x8e else -> 0x9c)
     web_store(e, dst)
@@ -1283,7 +1298,7 @@ web_neg: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: I
             web_narrow(e, ty.signed, bits)
             web_store(e, dst)
         }
-        else -> web_fail(e, st, f, at, "no negation of {ir_kind_name(ty.kind)}")
+        .Unit | .Bool | .Char | .String | .Pointer | .Aggregate -> web_fail(e, st, f, at, "no negation of {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -1347,7 +1362,7 @@ web_not: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) 
             web_store(e, dst)
             web_end(e)
         }
-        else -> web_fail(e, st, f, at, "no `not` of {ir_kind_name(ty.kind)}")
+        .Unit | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> web_fail(e, st, f, at, "no `not` of {ir_kind_name(ty.kind)}")
     }
 }
 

@@ -111,7 +111,7 @@ store_repro_compare_entries: fn(verification: &StoreVerification, left_roots: Ha
     if left_snapshot.digest != right_snapshot.digest {
         if store_repro_first_node_difference(left_snapshot, right_snapshot) == {
             .Val(difference) -> return Ok(Val(difference))
-            else -> return Ok(Val(FirstDifference{path: ".", kind: .CanonicalOutput, left: left_snapshot.digest, right: right_snapshot.digest}))
+            .None -> return Ok(Val(FirstDifference{path: ".", kind: .CanonicalOutput, left: left_snapshot.digest, right: right_snapshot.digest}))
         }
     }
     Ok(store_repro_metadata_difference(left, right))
@@ -129,7 +129,7 @@ store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semant
     hook := EnvelopeWalkHook.recording()
     digest: if hangar_root == {
         .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
-        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
+        .None -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
     }
     nodes := [String: NodeObservation]{}
     hardlink_first := [String: String]{}
@@ -142,7 +142,7 @@ store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semant
     }
     confirmed_digest: if hangar_root == {
         .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs) ?? return Err(StoreError.Other(err.message()))
-        else -> pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
+        .None -> pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
     }
     if confirmed_digest != digest -> return Err(store_repro_invalid("output changed while collecting reproducibility evidence"))
     Ok(OutputSnapshot{digest, nodes})
@@ -168,7 +168,7 @@ store_repro_observe_node: fn(path: String, relative: String, hardlink_first: &[S
         identity: "{info.id.device}:{info.id.inode}"
         if hardlink_first.get(identity) == {
             .Val(first) -> hardlink = Val(store_repro_path_display(first))
-            else -> {}
+            .None -> {}
         }
         hardlink_first[identity] = relative
     }
@@ -210,10 +210,10 @@ store_repro_first_node_difference: fn(left: OutputSnapshot, right: OutputSnapsho
                     .Val(right_node) -> {
                         if left_node != right_node -> return Val(store_repro_node_difference(path, left_node, right_node))
                     }
-                    else -> return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingRight, left: left_node.value(), right: "<missing>"})
+                    .None -> return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingRight, left: left_node.value(), right: "<missing>"})
                 }
             }
-            else -> {
+            .None -> {
                 right_node: right.nodes[path]
                 return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingLeft, left: "<missing>", right: right_node.value()})
             }

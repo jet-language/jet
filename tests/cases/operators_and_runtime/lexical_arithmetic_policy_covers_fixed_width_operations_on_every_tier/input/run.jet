@@ -1,26 +1,26 @@
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 wrapped: fn(left: U8, right: U8) -> U8 {
     return left + right
 }
 
-#Arithmetic(.Saturating)
+#Policy(arithmetic: .Saturating)
 saturated: fn(left: U8, right: U8) -> U8 {
     return left + right
 }
 
-Accumulator: struct { value: U8 }
-impl Accumulator {
-    #Arithmetic(.Wrapping)
+Accumulator: struct {
+    value: U8
+
+    #Policy(arithmetic: .Wrapping)
     step: fn(self, right: U8) -> U8 {
         return self.value + right
     }
 }
-
 run: fn() {
     left: U8{200}
     right: U8{100}
-    #Arithmetic(.Wrapping) {
+    #Policy(arithmetic: .Wrapping) {
         print(left + right)
         print(left - U8{250})
         print(left * U8{2})

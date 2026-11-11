@@ -16,6 +16,8 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [KeyedPriorityQueue](KeyedPriorityQueue.jet) — `PriorityQueue.by(key)` pops the item with the smallest key first and `by_desc(key)` the one with the largest; items with equal keys pop in the order they went in.
 - [KeyedRank](KeyedRank.jet) — `Rank.by(key)` keeps the item with the smallest key first and `by_desc(key)` the one with the largest; items with equal keys stay in the order they went in, and set operations keep the receiver's order.
 - [ListBounds](ListBounds.jet)
+- [ListFill](ListFill.jet) — `xs.fill(range, value)` sets a span of a list to one value, and `xs.fill_repeat(range, pattern)` tiles a pattern across it.
+- [ListFillBounds](ListFillBounds.jet) — `fill` does not clamp: a range that runs past the list stops with the same bounds fault as `xs[range]`.
 - [ListPredicateOps](ListPredicateOps.jet) — List predicate traversal and first-match replacement.
 - [ListRangeSlice](ListRangeSlice.jet) — List range slices copy the selected items.
 - [ListRemoveSelector](ListRemoveSelector.jet) — A literal `.Slot` or `.Val` selector picks the removal form at compile time.

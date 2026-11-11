@@ -3,7 +3,8 @@
 // form and wrapper chains collapse into their callers. A direct Call is
 // replaced by the callee's body when the callee is not recursive, its size
 // (ir_opt_size) is at most the level's callee limit and the caller's budget
-// still covers it, it never writes a parameter, it is not a
+// still covers it, it never writes a parameter, it reveals no fixed value
+// (IRFunction.slot_fixed) to a call whose result is public, it is not a
 // last-owner routine (BuildOwn.jet IR_LAST_OWNER: one shared copy the drop
 // sites call), and its stops name the caller's source file (selection
 // reports a stop at the function's file, so a callee whose arithmetic can
@@ -75,6 +76,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.host_symbol = caller.host_symbol.copy()
     out.inline_sites = caller.inline_sites.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    out.slot_fixed = caller.slot_fixed.copy()
     out.result = caller.result
     loop value in caller.args -> out.args.push(value)
     loop at in 0..<caller.op.len() {
@@ -102,6 +104,10 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     if callee.name == IR_LAST_OWNER && callee.source_file == "" -> return -1
     if caller.c[at] != callee.param_count -> return -1
     if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) -> return -1
+    // A callee holding a fixed value (IRFunction.slot_fixed) whose result
+    // the call does not hold as fixed reveals it (a `#Scrub` routine):
+    // inlined, IR Lint's fixed rule would follow the value on past it.
+    if caller.dst[at] >= 0 && !caller.slot_fixed[caller.dst[at]] && ir_timing_marked(callee) -> return -1
     // A parameter becomes the call's argument slot: same type rows only.
     loop slot in 0..<callee.param_count {
         if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
@@ -145,7 +151,7 @@ ir_opt_located: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if kind == {
         .Int -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Shl || op == .Shr
         .Word -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || f.c[at] != IR_OVERFLOW_WRAP
-        else -> false
+        .Unit | .Bool | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> false
     }
 }
 
@@ -161,7 +167,9 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
         }
         name: if same_file -> callee.slot_name[slot] else -> -1
         line: if same_file -> callee.slot_line[slot] else -> 0
-        map.push(ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line))
+        added: ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line)
+        f.slot_fixed[added] = callee.slot_fixed[slot]
+        map.push(added)
     }
     dst: caller.dst[at]
     callee_facts: ir_opt_facts(callee)
@@ -229,7 +237,7 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
             a = map[a]
             c = map[c]
         }
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .Call | .CallRuntime | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Return | .Unreachable -> {}
     }
     if op == .Call || op == .CallRuntime || op == .CallIndirect {
         start: f.args.len()

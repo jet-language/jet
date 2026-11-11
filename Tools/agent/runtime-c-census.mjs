@@ -6,6 +6,9 @@
 // strong undefined references pull the first archive member that defines
 // them, repeated until nothing changes. Weak references pull nothing.
 //
+// The original of gauntlet tool entry runtime-c-census; its Jet twin is
+// RuntimeCCensus.jet beside it.
+//
 //   node Tools/agent/runtime-c-census.mjs [options] <object>... -- <archive>...
 //
 //   --start          also reference musl's `__libc_start_main`, as a program

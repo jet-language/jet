@@ -10,7 +10,7 @@
 // in each output is shared, because linking two equal files within one output
 // changes its canonical archive identity.
 
-STORE_SHARED_CAS_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_SHARED_CAS_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 SharedCASReport: struct {
     optimized_files: Int
@@ -177,7 +177,7 @@ store_io_link_refused: fn(error: IOError) -> Bool Never! {
     if error == {
         .PermissionDenied(_) -> true
         .Other(context) -> context.os_code == Val(18)
-        else -> false
+        .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 

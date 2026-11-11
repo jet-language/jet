@@ -123,26 +123,6 @@ marker_source_flag: fn(value: String, line: String) -> Bool Never! {
     }
 }
 
-marker_source_unquote: fn(value: String, line: String) -> String Never! {
-    if !value.starts_with("\"") || !value.ends_with("\"") || value.len() < 2 -> panic("expected a quoted value, found `{value}` in {line}")
-    inner: marker_source_slice(value, 1, value.len() - 1).bytes()
-    out := [U8]{}
-    escaped := false
-    loop byte in inner {
-        if escaped {
-            out.push(byte)
-            escaped = false
-            next
-        }
-        if Int.from_u8(byte) == 92 {
-            escaped = true
-            next
-        }
-        out.push(byte)
-    }
-    String.from_bytes(out) ?? panic("a marker fact quote is not UTF-8 in {line}")
-}
-
 marker_source_unprefixed: fn(written: String) -> String Never! {
     if written.starts_with(".") -> return marker_source_slice(written, 1, written.len())
     written.copy()
@@ -168,6 +148,7 @@ marker_source_resolution: fn(written: String, line: String) -> String Never! {
 
 // A written parameter type names a typed argument shape
 // or a closed `core.compiler.lang` menu, read as an identifier from it.
+// `String | NamingCase` is a string or a word of that menu.
 // `PolicySetting` entries are `key = value`, so it binds as a free value.
 marker_source_arg_type: fn(source_type: String) -> TAppliedRuleArgKind Never! {
     if source_type == {
@@ -178,6 +159,7 @@ marker_source_arg_type: fn(source_type: String) -> TAppliedRuleArgKind Never! {
         "Bool" -> TAppliedRuleArgKind.Bool
         "Int" -> TAppliedRuleArgKind.Int
         "Duration | String" -> TAppliedRuleArgKind.DurationOrString
+        "String | NamingCase" -> TAppliedRuleArgKind.StringOrMenu
         "[Effect]" -> TAppliedRuleArgKind.EffectRoots
         else -> TAppliedRuleArgKind.Ident
     }

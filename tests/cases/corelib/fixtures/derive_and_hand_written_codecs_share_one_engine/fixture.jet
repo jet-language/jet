@@ -4,18 +4,21 @@ use json: core.encoding.json
 #Codable
 DerivedEmail: struct { address: String }
 
-HandEmail: struct { address: String }
-impl HandEmail.Encode {
-    encode: fn(self) -> Dyn { Dyn.Object(["address": Dyn.Text(self.address.copy())]) }
-}
-impl HandEmail.Decode {
-    decode: fn(tree: Dyn) -> HandEmail [FieldError]! {
-        field: tree.field("address") ?? Dyn.Text("")
-        address: field.text() ?? ""
-        return Ok(HandEmail{ address: address })
+HandEmail: struct {
+    address: String
+
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.Object(["address": Dyn.Text(self.address.copy())]) }
+    }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> HandEmail [FieldError]! {
+            field: tree.field("address") ?? Dyn.Text("")
+            address: field.text() ?? ""
+            return Ok(HandEmail{ address: address })
+        }
     }
 }
-
 run: fn() {
     derived: DerivedEmail{ address: "ada@jet" }
     hand: HandEmail{ address: "ada@jet" }

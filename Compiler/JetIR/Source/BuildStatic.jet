@@ -187,29 +187,6 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
     address
 }
 
-// The address of the cell of a constant computed at startup
-// (TConstantDef.init): a zeroed static object holding a state word (0: not
-// computed, 1: computing, 2: computed) and, from byte 8, the value of type
-// row `row` the constant's startup function returned, which the cell owns
-// for the life of the process.
-ir_startup_cell: fn(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: Int) -> Int Never! {
-    memo: "startup:{definition.key}"
-    object := name_rows_value(m.constant_rows, memo) ?? -1
-    if object < 0 {
-        object = m.data.len()
-        cell := [U8]{}
-        loop _ in 0..<(8 + ir_align8(m.types[row].size)) -> cell.push(U8{0})
-        m.data.push(cell)
-        // No address words; the entry marks a word-aligned static object.
-        m.data_relocs[object] = [IRDataReloc]{}
-        name_rows_set(m.constant_rows, memo, object)
-    }
-    pointer: ir_pointer_row(m)
-    address: ir_temp(m, b, pointer)
-    ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)
-    address
-}
-
 // Lays `value` of `ty` (type row `row`) at `offset` of local object
 // `object` the way memory holds a value of that row: an aggregate's bytes in
 // place, any other value's word. false when it cannot be frozen.
@@ -276,7 +253,7 @@ ir_static_word: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row:
             }
             return None
         }
-        else -> return None
+        .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Unit -> return None
     }
 }
 
@@ -409,7 +386,7 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             ir_static_put(s, object, offset + 16, IRStaticWord{word: 0, target: ir_intern_bytes(m, bytes)}, 8)
             return true
         }
-        else -> return false
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return false
     }
 }
 
@@ -465,7 +442,7 @@ ir_static_map_order: fn(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Ne
             }
             .Bool(flag) -> words.push((key: if flag -> 1 else -> 0, at: index))
             .String(text) -> texts.push((key: text, at: index))
-            else -> return None
+            .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> return None
         }
     }
     kept := [Int]{}

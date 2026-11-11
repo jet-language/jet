@@ -85,23 +85,9 @@ ComponentSignatureDescriptor: struct {
     result: ComponentTypeDescriptor
 }
 
-TypedHeadKind: enum { SQL HTML Sh URL Path DateTime }
-
-// The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
-typed_head_kind_of: fn(head: Type) -> TypedHeadKind? {
-    if head == {
-        .Named(name) -> {
-            if name == "SQL" -> return Val(TypedHeadKind.SQL)
-            if name == "HTML" -> return Val(TypedHeadKind.HTML)
-            if name == "Sh" -> return Val(TypedHeadKind.Sh)
-            if name == "URL" -> return Val(TypedHeadKind.URL)
-            if name == "Path" -> return Val(TypedHeadKind.Path)
-            if name == "DateTime" -> return Val(TypedHeadKind.DateTime)
-        }
-        else -> {}
-    }
-    None
-}
+// The built-in boundary typed heads; boundary_head_owner_module names each
+// one's owner module.
+BOUNDARY_TYPED_HEADS: [String]{"Path", "URL", "DateTime", "HTML", "Sh", "SQL"}
 
 // The Core module whose runtime serves a boundary typed head (its usage and
 // linkage key), not necessarily a record of the same type.
@@ -119,24 +105,6 @@ boundary_head_carrier_module: fn(name: String) -> String? {
     if name == "Sh" -> return Val("core.process")
     if name == "SQL" -> return Val("core.db")
     None
-}
-
-TypedHeadLiteralConstructor: struct {
-    module_name: String
-    member: String
-}
-
-// The Core function that builds a holed `Head{"…{x}…"}` literal from its
-// literal pieces and hole values. DateTime literals have no holes.
-typed_head_literal_constructor: fn(kind: TypedHeadKind) -> TypedHeadLiteralConstructor? {
-    if kind == {
-        .URL -> Val(TypedHeadLiteralConstructor{module_name: "core.net.url", member: "literal"})
-        .Path -> Val(TypedHeadLiteralConstructor{module_name: "core.files", member: "__path_literal"})
-        .HTML -> Val(TypedHeadLiteralConstructor{module_name: "core.text.html", member: "__html_literal"})
-        .Sh -> Val(TypedHeadLiteralConstructor{module_name: "core.process", member: "__sh_literal"})
-        .SQL -> Val(TypedHeadLiteralConstructor{module_name: "core.db", member: "__sql_literal"})
-        .DateTime -> None
-    }
 }
 
 // #4318: why a checked clone duplicates its operand. Every copy carries the
@@ -567,6 +535,7 @@ TBuiltinOp: enum {
     Reverse
     SwapList
     ListFill
+    ListFillRepeat
     Sort
     SortDesc
     OrderingThen

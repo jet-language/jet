@@ -33,17 +33,51 @@ ClientConfig: struct {
     identity: ClientIdentity?{None}
     min_version: TLSVersion{TLSVersion.TLS12}
     max_version: TLSVersion{TLSVersion.TLS13}
+
+    // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
+    default: fn() -> ClientConfig Never! { ClientConfig{} }
+
+    with_alpn: fn(self, protocols: [String]) -> ClientConfig IOError! {
+        message: __alpn_problem(protocols)
+        if message != "" -> return Err(__config_error("ClientConfig.with_alpn", message))
+        Ok(__config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    with_trust: fn(self, trust: TLSClientTrust) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    with_client_identity: fn(self, identity: ClientIdentity) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.min_version, self.max_version))
+    }
+
+    with_version_bounds: fn(self, /, *, min: TLSVersion, max: TLSVersion) -> ClientConfig IOError! {
+        if __version_rank(min) > __version_rank(max) -> return Err(__config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), min, max))
+    }
 }
 // `from_pem` stores the validated PEM text; `identity(cert, key)` is a plain
 // carrier that the handshake validates.
 ClientIdentity: struct {
     cert: String{""}
     key: String{""}
+
+    // Validates a PEM certificate chain and the leaf's PEM private key.
+    from_pem: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
+        identity: __identity_validate(cert_chain, private_key) ?? return Err(__config_error("ClientIdentity.from_pem", err.message))
+        Ok(identity)
+    }
 }
 // `from_pem` stores validated PEM roots; `roots(path)` names a bundle file.
 RootCertificates: struct {
     path: String{""}
     pem: String{""}
+
+    // Validates one or more PEM CERTIFICATE blocks and nothing else.
+    from_pem: fn(pem: [U8]) -> RootCertificates IOError! {
+        text: __roots_validate(pem) ?? return Err(__config_error("RootCertificates.from_pem", err.message))
+        Ok(RootCertificates{pem: text})
+    }
 }
 TLSClientTrust: enum {
     System
@@ -73,163 +107,27 @@ TLSVersion: enum {
 }
 
 // A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
-TLSStream: struct { state: Shared<__TLSState>?{None} }
+TLSStream: struct {
+    state: Shared<__TLSState>?{None}
 
-// A configuration before setup: the engine's config, the roots loaded so
-// far, and the generator the connection draws from.
-__TLSContext: struct {
-    conf: ssldefs.SSLConfig
-    ca: [x509crt.X509Crt]
-    rng: drbg.HMACDrbg
-}
-
-__TLSState: struct {
-    ssl: ssldefs.SSLContext
-    rng: drbg.HMACDrbg
-    tcp: TCPStream
-    // The plaintext buffer the engine reads into, C_RECORD_BYTES long.
-    buffer: [U8]
-    peer: TLSPeerIdentity?
-    pending: [U8]
-    read_eof: Bool
-    write_closed: Bool
-    closed: Bool
-}
-
-// The engine's secrets and the plaintext the stream holds die wiped: when the
-// last handle to the state goes, after a failed handshake included, the
-// engine is freed (mbedtls_ssl_free) and the buffers zeroed. `close` does the
-// same at once.
-impl __TLSState.Close {
-    close: fn(&&self) {
-        ssl := self.ssl.move()
-        ssltls.ssl_free(ssl)
-        buffer := self.buffer.move()
-        ssldefs.ssl_wipe(buffer)
-        pending := self.pending.move()
-        ssldefs.ssl_wipe(pending)
-    }
-}
-
-// Free the engine and wipe the buffers of a stream that is done.
-__release: fn(&tls: __TLSState) Never! {
-    ssltls.ssl_free(tls.ssl)
-    ssldefs.ssl_wipe(tls.buffer)
-    ssldefs.ssl_wipe(tls.pending)
-    tls.pending = [U8]{}
-}
-
-// One engine read: the byte count or the status, and the bytes read.
-__Got: struct {
-    status: Int
-    bytes: [U8]
-}
-
-#Error
-__TLSFailure: struct { message: String }
-impl __TLSFailure.Display { display: fn(self) -> String { self.message.copy() } }
-impl __TLSFailure.Debug { debug: fn(&&self) -> String { self.message } }
-__fail: fn(message: String) -> __TLSFailure Never! { __TLSFailure{message: message} }
-
-// Mbed TLS 3.6 status codes this policy acts on; the engine's errors map to
-// them through ssldefs.ssl_error_code.
-C_WANT_READ: -26880 // MBEDTLS_ERR_SSL_WANT_READ -0x6900
-C_WANT_WRITE: -26752 // MBEDTLS_ERR_SSL_WANT_WRITE -0x6880
-C_NEW_SESSION_TICKET: -31488 // MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET -0x7B00
-C_PEER_CLOSE_NOTIFY: -30848 // MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY -0x7880
-// The socket statuses mbedtls_net_recv and mbedtls_net_send return.
-C_NET_CONN_RESET: -80 // MBEDTLS_ERR_NET_CONN_RESET -0x0050
-C_NET_RECV_FAILED: -76 // MBEDTLS_ERR_NET_RECV_FAILED -0x004C
-C_NET_SEND_FAILED: -78 // MBEDTLS_ERR_NET_SEND_FAILED -0x004E
-// An unreadable file (mbedtls_x509_crt_parse_file, through
-// mbedtls_pk_load_file) and an unreadable directory
-// (mbedtls_x509_crt_parse_path).
-C_PK_FILE_IO_ERROR: -15872 // MBEDTLS_ERR_PK_FILE_IO_ERROR -0x3E00
-C_X509_FILE_IO_ERROR: -10496 // MBEDTLS_ERR_X509_FILE_IO_ERROR -0x2900
-C_NO_DEADLINE: 9223372036854775807
-C_WAIT_SLICE_NS: 3600000000000
-C_RECORD_BYTES: 16384
-// The generator's seed: HMAC_DRBG-SHA-256's entropy and nonce lengths.
-C_SEED_BYTES: 48
-C_TRUNCATION: "TLS protocol truncation: peer closed connection without sending TLS close_notify"
-
-// The two-argument native leaf consumes a connected TCPStream and a server
-// name. Do not manufacture a descriptor or call the leaf with host/port text:
-// the transport and TLS capabilities are separate typed boundaries.
-client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
-    if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
-    if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
-    tcp := if net.tcp_connect(format_host_port(host, port)) == {
-        .Ok(stream) -> stream
-        .Err(_) -> { return Err(tls_error("client", host, "transport connect failed")) }
-    }
-    __client_stream_entry(tcp, host)
-}
-
-// Checked Core call rows keep the moved-stream and labelled handshake forms
-// of `client`; Sema selects one of these by argument count.
-__client_stream_entry: fn(stream: &&TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
-    tls := __client_connect(stream, server_name, ClientConfig{}, __forever()) ?? return Err(__net_to_io(err))
-    Ok(tls)
-}
-
-__client_deadline_entry: fn(stream: &&TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
-    __client_connect(stream, server_name, ClientConfig{}, deadline)
-}
-
-__client_config_deadline_entry: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
-    __client_connect(stream, server_name, config, deadline)
-}
-
-__client_connect: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
-    tcp := stream.move()
-    end_ns: __deadline_end(deadline, "tls handshake") ?? return Err(err)
-    context := __client_context(server_name, config) ?? return Err(__net_error("tls handshake", err.message))
-    state := __open(context, tcp, server_name) ?? return Err(__net_error("tls handshake", "TLS handshake with `{server_name}` failed: {__ssl_text(err)}"))
-    _: __handshake(state, server_name, end_ns) ?? return Err(err)
-    peer: __peer_identity(state.ssl, server_name) ?? return Err(NetError.TLS(__detail("tls peer identity", err.message)))
-    state.peer = Val(peer)
-    Ok(TLSStream{state: Val(shared state)})
-}
-
-// Internal server handshake for Core's own TLS servers and loopback proofs.
-// The client certificate is not requested, so the stream has no peer identity.
-__server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
-    tcp := stream.move()
-    end_ns: __deadline_end(deadline, "tls accept") ?? return Err(err)
-    context := __server_context(cert_pem, key_pem) ?? return Err(__net_error("tls accept", err.message))
-    _: __add_alpn(context, alpn) ?? return Err(__net_error("tls accept", err.message))
-    context.conf.authmode = ssldefs.SSL_VERIFY_NONE
-    state := __open(context, tcp, "") ?? return Err(__net_error("tls accept", "TLS handshake failed: {__ssl_text(err)}"))
-    _: __handshake(state, "", end_ns) ?? return Err(err)
-    Ok(TLSStream{state: Val(shared state)})
-}
-
-// A server context holding the certificate chain and private key. The HTTPS
-// listener (`tls: server.tls(cert, key)`) also builds one at bind to reject an
-// unusable identity before serving (
-// Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
-// (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
-// holds a PKCS#8, PKCS#1 or SEC1 private key block.
-__server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
-    if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(__fail("TLS certificate PEM did not contain a certificate"))
-    if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
-        return Err(__fail("TLS private key PEM did not contain a private key"))
-    }
-    context := __context_new(ssldefs.SSL_IS_SERVER) ?? return Err(err)
-    if __has_nul(cert_pem) || __has_nul(key_pem) -> return Err(__fail("TLS server identity is invalid: PEM text contains a NUL byte"))
-    identity: __own_identity(context, cert_pem, key_pem)
-    if identity != 0 -> return Err(__fail("TLS certificate and private key do not match: {__mbedtls_text(identity)}"))
-    Ok(context)
-}
-
-impl TLSStream {
     read: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
         if max_bytes <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read limit must be positive")))
         end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
         state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
         guard := state.guard_edit()
         __read(guard.value, max_bytes, end_ns)
+    }
+
+    // Appends up to `limit` plaintext bytes to `buffer` and returns the
+    // count, 0 at the end of the stream. The bytes move from the engine's
+    // record buffer into `buffer`, so a caller that clears and reuses one
+    // List reads without allocating (#5976).
+    read_into: fn(self, &buffer: [U8], limit: Int, /, *, deadline: Duration) -[Net, Time.Wait]> Int IOError! {
+        if limit <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read_into limit must be positive")))
+        end_ns: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
+        state: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __read_into(guard.value, buffer, limit, end_ns)
     }
 
     write_all: fn(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
@@ -293,6 +191,158 @@ impl TLSStream {
         if guard.value.peer == .Val(peer) -> return peer.copy()
         __empty_identity()
     }
+}
+
+// A configuration before setup: the engine's config, the roots loaded so
+// far, and the generator the connection draws from.
+__TLSContext: struct {
+    conf: ssldefs.SSLConfig
+    ca: [x509crt.X509Crt]
+    rng: drbg.HMACDrbg
+}
+
+__TLSState: struct {
+    ssl: ssldefs.SSLContext
+    rng: drbg.HMACDrbg
+    tcp: TCPStream
+    // The plaintext buffer the engine reads into, C_RECORD_BYTES long.
+    buffer: [U8]
+    peer: TLSPeerIdentity?
+    pending: [U8]
+    read_eof: Bool
+    write_closed: Bool
+    closed: Bool
+
+    // The engine's secrets and the plaintext the stream holds die wiped: when the
+    // last handle to the state goes, after a failed handshake included, the
+    // engine is freed (mbedtls_ssl_free) and the buffers zeroed. `close` does the
+    // same at once.
+    impl Close {
+        close: fn(&&self) {
+            ssl := self.ssl.move()
+            ssltls.ssl_free(ssl)
+            buffer := self.buffer.move()
+            ssldefs.ssl_wipe(buffer)
+            pending := self.pending.move()
+            ssldefs.ssl_wipe(pending)
+        }
+    }
+}
+
+// Free the engine and wipe the buffers of a stream that is done.
+__release: fn(&tls: __TLSState) Never! {
+    ssltls.ssl_free(tls.ssl)
+    ssldefs.ssl_wipe(tls.buffer)
+    ssldefs.ssl_wipe(tls.pending)
+    tls.pending = [U8]{}
+}
+
+// One engine read: the byte count or the status, and the bytes read.
+__Got: struct {
+    status: Int
+    bytes: [U8]
+}
+
+#Error
+__TLSFailure: struct {
+    message: String
+
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
+__fail: fn(message: String) -> __TLSFailure Never! { __TLSFailure{message: message} }
+
+// Mbed TLS 3.6 status codes this policy acts on; the engine's errors map to
+// them through ssldefs.ssl_error_code.
+C_WANT_READ: -26880 // MBEDTLS_ERR_SSL_WANT_READ -0x6900
+C_WANT_WRITE: -26752 // MBEDTLS_ERR_SSL_WANT_WRITE -0x6880
+C_NEW_SESSION_TICKET: -31488 // MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET -0x7B00
+C_PEER_CLOSE_NOTIFY: -30848 // MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY -0x7880
+// The socket statuses mbedtls_net_recv and mbedtls_net_send return.
+C_NET_CONN_RESET: -80 // MBEDTLS_ERR_NET_CONN_RESET -0x0050
+C_NET_RECV_FAILED: -76 // MBEDTLS_ERR_NET_RECV_FAILED -0x004C
+C_NET_SEND_FAILED: -78 // MBEDTLS_ERR_NET_SEND_FAILED -0x004E
+// An unreadable file (mbedtls_x509_crt_parse_file, through
+// mbedtls_pk_load_file) and an unreadable directory
+// (mbedtls_x509_crt_parse_path).
+C_PK_FILE_IO_ERROR: -15872 // MBEDTLS_ERR_PK_FILE_IO_ERROR -0x3E00
+C_X509_FILE_IO_ERROR: -10496 // MBEDTLS_ERR_X509_FILE_IO_ERROR -0x2900
+C_NO_DEADLINE: 9223372036854775807
+C_WAIT_SLICE_NS: 3600000000000
+C_RECORD_BYTES: 16384
+// The generator's seed: HMAC_DRBG-SHA-256's entropy and nonce lengths.
+C_SEED_BYTES: 48
+C_TRUNCATION: "TLS protocol truncation: peer closed connection without sending TLS close_notify"
+
+// The two-argument native leaf consumes a connected TCPStream and a server
+// name. Do not manufacture a descriptor or call the leaf with host/port text:
+// the transport and TLS capabilities are separate typed boundaries.
+client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+    if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
+    if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
+    tcp := if net.tcp_connect(format_host_port(host, port)) == {
+        .Ok(stream) -> stream
+        .Err(_) -> { return Err(tls_error("client", host, "transport connect failed")) }
+    }
+    __client_stream_entry(tcp, host)
+}
+
+// Checked Core call rows keep the moved-stream and labelled handshake forms
+// of `client`; Sema selects one of these by argument count.
+__client_stream_entry: fn(stream: &&TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
+    tls := __client_connect(stream, server_name, ClientConfig{}, __forever()) ?? return Err(__net_to_io(err))
+    Ok(tls)
+}
+
+__client_deadline_entry: fn(stream: &&TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    __client_connect(stream, server_name, ClientConfig{}, deadline)
+}
+
+__client_config_deadline_entry: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    __client_connect(stream, server_name, config, deadline)
+}
+
+__client_connect: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    tcp := stream.move()
+    end_ns: __deadline_end(deadline, "tls handshake") ?? return Err(err)
+    context := __client_context(server_name, config) ?? return Err(__net_error("tls handshake", err.message))
+    state := __open(context, tcp, server_name) ?? return Err(__net_error("tls handshake", "TLS handshake with `{server_name}` failed: {__ssl_text(err)}"))
+    _: __handshake(state, server_name, end_ns) ?? return Err(err)
+    peer: __peer_identity(state.ssl, server_name) ?? return Err(NetError.TLS(__detail("tls peer identity", err.message)))
+    state.peer = Val(peer)
+    Ok(TLSStream{state: Val(Shared{state})})
+}
+
+// Internal server handshake for Core's own TLS servers and loopback proofs.
+// The client certificate is not requested, so the stream has no peer identity.
+__server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    tcp := stream.move()
+    end_ns: __deadline_end(deadline, "tls accept") ?? return Err(err)
+    context := __server_context(cert_pem, key_pem) ?? return Err(__net_error("tls accept", err.message))
+    _: __add_alpn(context, alpn) ?? return Err(__net_error("tls accept", err.message))
+    context.conf.authmode = ssldefs.SSL_VERIFY_NONE
+    state := __open(context, tcp, "") ?? return Err(__net_error("tls accept", "TLS handshake failed: {__ssl_text(err)}"))
+    _: __handshake(state, "", end_ns) ?? return Err(err)
+    Ok(TLSStream{state: Val(Shared{state})})
+}
+
+// A server context holding the certificate chain and private key. The HTTPS
+// listener (`tls: server.tls(cert, key)`) also builds one at bind to reject an
+// unusable identity before serving (
+// Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
+// (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
+// holds a PKCS#8, PKCS#1 or SEC1 private key block.
+__server_context: fn(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
+    if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(__fail("TLS certificate PEM did not contain a certificate"))
+    if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
+        return Err(__fail("TLS private key PEM did not contain a private key"))
+    }
+    context := __context_new(ssldefs.SSL_IS_SERVER) ?? return Err(err)
+    if __has_nul(cert_pem) || __has_nul(key_pem) -> return Err(__fail("TLS server identity is invalid: PEM text contains a NUL byte"))
+    identity: __own_identity(context, cert_pem, key_pem)
+    if identity != 0 -> return Err(__fail("TLS certificate and private key do not match: {__mbedtls_text(identity)}"))
+    Ok(context)
 }
 
 read: fn(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
@@ -365,46 +415,6 @@ is_tls13: fn(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
 is_tls12: fn(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
 
 // ---- client configuration ---------------------------------------------------
-
-impl ClientConfig {
-    // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
-    default: fn() -> ClientConfig Never! { ClientConfig{} }
-
-    with_alpn: fn(self, protocols: [String]) -> ClientConfig IOError! {
-        message: __alpn_problem(protocols)
-        if message != "" -> return Err(__config_error("ClientConfig.with_alpn", message))
-        Ok(__config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.min_version, self.max_version))
-    }
-
-    with_trust: fn(self, trust: TLSClientTrust) -> ClientConfig IOError! {
-        Ok(__config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.min_version, self.max_version))
-    }
-
-    with_client_identity: fn(self, identity: ClientIdentity) -> ClientConfig IOError! {
-        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.min_version, self.max_version))
-    }
-
-    with_version_bounds: fn(self, /, *, min: TLSVersion, max: TLSVersion) -> ClientConfig IOError! {
-        if __version_rank(min) > __version_rank(max) -> return Err(__config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
-        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), min, max))
-    }
-}
-
-impl RootCertificates {
-    // Validates one or more PEM CERTIFICATE blocks and nothing else.
-    from_pem: fn(pem: [U8]) -> RootCertificates IOError! {
-        text: __roots_validate(pem) ?? return Err(__config_error("RootCertificates.from_pem", err.message))
-        Ok(RootCertificates{pem: text})
-    }
-}
-
-impl ClientIdentity {
-    // Validates a PEM certificate chain and the leaf's PEM private key.
-    from_pem: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
-        identity: __identity_validate(cert_chain, private_key) ?? return Err(__config_error("ClientIdentity.from_pem", err.message))
-        Ok(identity)
-    }
-}
 
 __config_with: fn(config: ClientConfig, alpn: [String], trust: TLSClientTrust, identity: ClientIdentity?, min: TLSVersion, max: TLSVersion) -> ClientConfig Never! {
     ClientConfig{host: config.host.copy(), alpn: alpn, trust: trust, identity: identity, min_version: min, max_version: max}
@@ -1101,9 +1111,9 @@ __take: fn(&tls: __TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
     remaining: end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
-    if tls.tcp.read(C_RECORD_BYTES, deadline: slice) == {
-        .Ok(bytes) -> {
-            if bytes.len() == 0 -> tls.ssl.bio.rx_eof = true else -> tls.ssl.bio.rx.extend(bytes)
+    if tls.tcp.read_into(tls.ssl.bio.rx, C_RECORD_BYTES, deadline: slice) == {
+        .Ok(count) -> {
+            if count == 0 -> tls.ssl.bio.rx_eof = true
             0
         }
         .Err(err) -> {
@@ -1117,7 +1127,7 @@ __socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
     if err == {
         .ConnectionReset(_) -> C_NET_CONN_RESET
         .Closed(_) -> C_NET_CONN_RESET
-        else -> fallback
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> fallback
     }
 }
 
@@ -1131,6 +1141,14 @@ __await: fn(&tls: __TLSState, status: Int, end_ns: Int, operation: String) -[Net
 
 // One engine read of at most `limit` bytes (mbedtls_ssl_read).
 __engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> __Got NetError! {
+    status: __engine_read_status(tls, limit, end_ns, operation) ?? return Err(err)
+    if status > 0 -> return Ok(__Got{status: status, bytes: __slice(tls.buffer, 0, status)})
+    Ok(__Got{status: status, bytes: [U8]{}})
+}
+
+// One engine read of at most `limit` bytes into `tls.buffer`: the count, or
+// the settled status when no byte came.
+__engine_read_status: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) -[Net, Time.Wait]> Int NetError! {
     size: if limit < C_RECORD_BYTES -> limit else -> C_RECORD_BYTES
     status := 0
     if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
@@ -1138,8 +1156,8 @@ __engine_read: fn(&tls: __TLSState, limit: Int, end_ns: Int, operation: String) 
         .Err(e) -> status = __code(e)
     }
     sent: __flush(tls, end_ns, operation) ?? return Err(err)
-    if status > 0 -> return Ok(__Got{status: status, bytes: __slice(tls.buffer, 0, status)})
-    Ok(__Got{status: __settle(status, sent), bytes: [U8]{}})
+    if status > 0 -> return Ok(status)
+    Ok(__settle(status, sent))
 }
 
 // ---- handshake and I/O --------------------------------------------------------
@@ -1205,14 +1223,14 @@ __want: fn(status: Int) -> NetReadyInterest Never! {
 __wants_write_only: fn(interest: NetReadyInterest) -> Bool Never! {
     if interest == {
         .Write -> true
-        else -> false
+        .Read | .ReadWrite -> false
     }
 }
 
 __wants_write: fn(interest: NetReadyInterest) -> Bool Never! {
     if interest == {
         .Read -> false
-        else -> true
+        .Write | .ReadWrite -> true
     }
 }
 
@@ -1232,6 +1250,38 @@ __read: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8
         if status == C_PEER_CLOSE_NOTIFY {
             tls.read_eof = true
             return Ok([U8]{})
+        }
+        // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
+        if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            status = __await(tls, status, end_ns, "tls read") ?? return Err(__net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(__io_error(.Read, "TLS read failed: {__mbedtls_text(status)}"))
+    }
+}
+
+// read_into under the stream's lock: __read's steps, the bytes appended to
+// `buffer` rather than returned.
+__read_into: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+    if tls.closed -> return Err(__io_error(.Read, "TLS stream is closed"))
+    if tls.pending.len() > 0 {
+        count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
+        loop index in 0..<count -> buffer.push(tls.pending[index])
+        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        return Ok(count)
+    }
+    if tls.read_eof -> return Ok(0)
+    loop {
+        status := __engine_read_status(tls, limit, end_ns, "tls read") ?? return Err(__net_to_io(err))
+        if status > 0 {
+            loop index in 0..<status -> buffer.push(tls.buffer[index])
+            return Ok(status)
+        }
+        if status == C_PEER_CLOSE_NOTIFY {
+            tls.read_eof = true
+            return Ok(0)
         }
         // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
         if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))
@@ -1436,7 +1486,7 @@ __test_released: fn(tls: __TLSState) -> Bool Never! {
         assert(!__test_zero(server.buffer))
         // close: close_notify goes out, then the engine is freed and the
         // plaintext wiped.
-        stream := TLSStream{state: Val(shared server)}
+        stream := TLSStream{state: Val(Shared{server})}
         _: stream.close() ?? panic("close: {err}")
         state: __state(stream) ?? panic("the closed stream lost its state")
         guard := state.guard_edit()
@@ -1567,7 +1617,7 @@ __close_write: fn(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[N
 __not_connected: fn(err: NetError) -> Bool Never! {
     if err == {
         .NotConnected(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
@@ -1595,7 +1645,7 @@ __wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: S
 __timed_out: fn(err: NetError) -> Bool Never! {
     if err == {
         .Timeout(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 

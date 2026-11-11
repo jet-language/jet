@@ -169,7 +169,7 @@ cli_add_component: fn(theme: Theme, component: StarterComponent) -[IO, FS, Env, 
         .Err(error) -> {
             if error == {
                 .AlreadyExists(path) -> theme.error("{path} already exists", "it may already be customized — `jetpack add` never overwrites a component you own.", "edit it directly, or remove it first if you want a fresh copy.")
-                else -> theme.error("could not add that component", error.message(), "check write permissions here.")
+                .IO(_) -> theme.error("could not add that component", error.message(), "check write permissions here.")
             }
             EXIT_USER_ERROR
         }

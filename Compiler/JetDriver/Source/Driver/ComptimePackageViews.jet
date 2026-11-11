@@ -189,38 +189,38 @@ JetDriverPackageSourceLoader: struct {
     resolver: AuthorityResolver
     checked_inputs: [CheckedFile]
     last_file: String
-}
 
-impl JetDriverPackageSourceLoader.SourceLoader {
-    read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {
-        self.last_file = relative
-        file: self.resolver.checked_file(relative) ?? return Err(jet_driver_package_authority_diagnostic(err))
-        text: file.text() ?? return Err(jet_driver_package_authority_diagnostic(err))
-        self.checked_inputs.push(file)
-        Ok(text)
-    }
-
-    list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
-        self.last_file = relative
-        files: self.resolver.discover_files(relative, Val(FILE_EXT)) ?? return Err(jet_driver_package_authority_diagnostic(err))
-        found := [String]{}
-        loop file in files.move() {
-            found.push(file.relative)
+    impl SourceLoader {
+        read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {
+            self.last_file = relative
+            file: self.resolver.checked_file(relative) ?? return Err(jet_driver_package_authority_diagnostic(err))
+            text: file.text() ?? return Err(jet_driver_package_authority_diagnostic(err))
             self.checked_inputs.push(file)
+            Ok(text)
         }
-        Ok(found)
-    }
 
-    package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
-        self.last_file = PACKAGE_FILE
-        if self.resolver.checked_root_package() == {
-            .Ok(package) -> Ok(Val(package.facts))
-            .Err(error) -> {
-                if !error.is_missing() -> return Err(EnvModelEvalError{diagnostic: error.diagnostic()})
-                cache := WorkspaceDeclarationCache.new()
-                if pkg_package_facts_for_root(cache, self.resolver.root) == {
-                    .Ok(facts) -> Ok(facts)
-                    .Err(failure) -> Err(EnvModelEvalError{diagnostic: failure.diagnostic})
+        list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError! {
+            self.last_file = relative
+            files: self.resolver.discover_files(relative, Val(FILE_EXT)) ?? return Err(jet_driver_package_authority_diagnostic(err))
+            found := [String]{}
+            loop file in files.move() {
+                found.push(file.relative)
+                self.checked_inputs.push(file)
+            }
+            Ok(found)
+        }
+
+        package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError! {
+            self.last_file = PACKAGE_FILE
+            if self.resolver.checked_root_package() == {
+                .Ok(package) -> Ok(Val(package.facts))
+                .Err(error) -> {
+                    if !error.is_missing() -> return Err(EnvModelEvalError{diagnostic: error.diagnostic()})
+                    cache := WorkspaceDeclarationCache.new()
+                    if pkg_package_facts_for_root(cache, self.resolver.root) == {
+                        .Ok(facts) -> Ok(facts)
+                        .Err(failure) -> Err(EnvModelEvalError{diagnostic: failure.diagnostic})
+                    }
                 }
             }
         }

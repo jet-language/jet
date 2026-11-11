@@ -182,6 +182,12 @@ BodyContract: struct {
     site: TContractSite
 }
 
+// `task.group g(limit: n, stack: bytes)`'s argument node ids.
+BodyTaskGroupArgs: struct {
+    limit: Int?
+    stack: Int?
+}
+
 StmtKind: enum {
     Contract(contract: BodyContract)
     ContractScope(pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span)
@@ -196,7 +202,7 @@ StmtKind: enum {
     Range(label: String?, variable: TLocal, source: Int?, start: Int, end: Int, step: Int?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
     ExprStmt(value: Int, span: Span)
     Return(value: Int?, span: Span)
-    TaskGroup(group: TLocal, limit: Int?, body: [Int], span: Span)
+    TaskGroup(group: TLocal, args: BodyTaskGroupArgs, body: [Int], span: Span)
     DeferClose(close: Int, resource: SymbolID, span: Span)
     If(condition: BodyIfCond, then_body: [Int], else_body: [Int]?, else_is_elseif: Bool, span: Span)
     Loop(label: String?, body: [Int], span: Span)
@@ -258,6 +264,10 @@ NodeKind: enum {
     // the constant of the implementation of `trait_name` (its short name)
     // that the concrete `owner` has.
     TraitConst(owner: Type, trait_name: String, name: String)
+    // `N`, a `<comptime N: Int>` number parameter read as an Int: `param` is
+    // the parameter as a type (`Type.Named`), which each instance's type
+    // rows bind to its Type.Measure number, so the build reads a constant.
+    NumberParam(param: Type)
     GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
     Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
     IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)
@@ -394,13 +404,22 @@ BodyHostCall: enum {
     YieldSend(value: Int)
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
-    // checked literal path or glob, relative to the source file being
-    // compiled. The compiler reads and records it; it never runs at runtime.
-    ComptimeInput(builtin: String, path: String)
+    // node of its String path or glob, relative to the source file being
+    // compiled, or after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the
+    // toolchain tree. A literal is the checked, normalized literal; a
+    // computed value is checked against the same path law when the comptime
+    // evaluation reaches it. The compiler reads and records the input; it
+    // never runs at runtime.
+    ComptimeInput(builtin: String, path: Int)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
 }
+
+// The prefix of a comptime input named in the toolchain tree the compile takes
+// Core from (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`), not
+// beside the file doing the embedding.
+JET_COMPTIME_TOOLCHAIN_PREFIX: "toolchain:"
 
 BodyCoreClosureKind: enum {
     Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)
@@ -426,7 +445,8 @@ BodyHandleOp: enum {
     Hardware(operation: THardwareCall)
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
-    FileReaderRead
+    // `into`: read_into, appending to the caller's List<U8> (#5976).
+    FileReaderRead(into: Bool)
     FileReaderSeek
     FileReaderPath
     MappedFileWindow
@@ -526,8 +546,9 @@ BodyHandleOp: enum {
     TCPStreamPeerAddr
     TCPStreamLocalAddr
     TCPStreamClose
-    TCPStreamReadBytes
-    TCPStreamReadBytesDeadline
+    // `into`: read_into, appending to the caller's List<U8> (#5976).
+    TCPStreamReadBytes(into: Bool)
+    TCPStreamReadBytesDeadline(into: Bool)
     TCPStreamReadText
     TCPStreamReadTextDeadline
     TCPStreamWriteBytes
@@ -543,7 +564,7 @@ BodyHandleOp: enum {
     UDPSocketReceiveDeadline
     UDPSocketSendToDeadline
     UnixListenerAcceptDeadline
-    UnixStreamReadDeadline
+    UnixStreamReadDeadline(into: Bool)
     UnixStreamWriteAllDeadline
     UnixStreamReady
     UnixStreamClose
@@ -714,6 +735,9 @@ BodyLambda: struct {
     materialized_captures: [String]
     frozen_captures: [String]
     uses_stack_sentry: Bool
+    // As FnBody.effect_scope, for a lambda with its own written row; an
+    // inline loop body has none (it builds into its owner's code).
+    effect_scope: String{""}
 }
 
 BodyLambdaBody: enum {
@@ -764,8 +788,35 @@ FnBody: struct {
     // `#Pre` clauses; only the solver reads them.
     index_proofs: [TIndexProof]{[TIndexProof]{}}
     pre: [BodyContract]{[BodyContract]{}}
+    // The branches on a `timing: .Fixed` value that sema masked (JetSema
+    // Taint.jet sema_taint_mask_branch), by span: the IR builds each with
+    // no jump (JetIR BuildMask.jet).
+    masked: [Span]{[Span]{}}
+    // The `timing: .Fixed` tags of the function's module (JetSema Taint.jet
+    // sema_taint_fixed_tags) when one of the body's checked types carries
+    // one, else empty: the IR builder marks each slot of such a type fixed
+    // (JetIR IRFunction.slot_fixed).
+    fixed_tags: [String]{[String]{}}
+    // The run-time half of a written row that scopes FS or Net (JetRuntime
+    // Authority.jet "Effect-scope frames"): the function's name, then the
+    // row's FS and Net entries, one per line (a denial keeps its `!`), for a
+    // function whose row scopes one of them; `@` and the published effect
+    // for a Core scope publisher (effect_scope_published_effect); else "".
+    // The IR builder enters it as a frame on entry and leaves it on every
+    // exit (JetIR ir_effect_scope_frame).
+    effect_scope: String{""}
     // The function's nodes, statements and expression-type column.
     tree: BodyTree
+}
+
+// Whether a body of `functions` holds a `timing: .Fixed` value
+// (FnBody.fixed_tags): a package that sets `policy.harden` admits such a
+// program only on a host its vendor confirms (core.sys.timing_host).
+body_fixed_timing: fn(functions: [FnBody]) -> Bool Never! {
+    loop function in functions {
+        if function.fixed_tags.len() > 0 -> return true
+    }
+    false
 }
 
 BodyParameter: struct {
@@ -793,7 +844,7 @@ body_each_str_part_child: fn(tree: BodyTree, value: BodyStrPart, visit: fn(Int) 
         .Interpolation(f0, _) -> {
             visit(f0)
         }
-        else -> {}
+        .Literal(_) -> {}
     }
 }
 
@@ -817,7 +868,7 @@ body_each_enum_payload_child: fn(tree: BodyTree, value: BodyEnumPayload, visit: 
                 body_each_named_enum_arg_child(tree, item, visit)
             }
         }
-        else -> {}
+        .Unit -> {}
     }
 }
 
@@ -867,7 +918,7 @@ body_each_pattern_shape_child: fn(tree: BodyTree, value: BodyPatternShape, visit
                 body_each_map_pattern_entry_child(tree, item, visit)
             }
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
     }
 }
 
@@ -887,7 +938,7 @@ body_each_pattern_binding_child: fn(tree: BodyTree, value: BodyPatternBinding, v
         .Value(f0) -> {
             visit(f0)
         }
-        else -> {}
+        .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
     }
 }
 
@@ -899,7 +950,7 @@ body_each_pattern_field_child: fn(tree: BodyTree, value: BodyPatternField, visit
         .Nested(_, f1, _) -> {
             body_each_nested_pattern_child(tree, f1, visit)
         }
-        else -> {}
+        .Bind(_, _, _) -> {}
     }
 }
 
@@ -928,7 +979,6 @@ body_each_if_cond_child: fn(tree: BodyTree, value: BodyIfCond, visit: fn(Int) -[
             body_each_pattern_child(tree, f0, visit)
             visit(f1)
         }
-        else -> {}
     }
 }
 
@@ -1018,7 +1068,10 @@ body_each_stmt_child: fn(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.A
             }
         }
         .TaskGroup(_, f1, f2, _) -> {
-            if f1 == .Val(inner) {
+            if f1.limit == .Val(inner) {
+                visit(inner)
+            }
+            if f1.stack == .Val(inner) {
                 visit(inner)
             }
             loop item in f2 {
@@ -1178,7 +1231,7 @@ body_each_stmt_child: fn(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.A
             }
             body_each_stmt_child(tree, tree.stmts[f5 - tree.stmt_base], visit)
         }
-        else -> {}
+        .Break(_, _) | .Continue(_, _) -> {}
     }
 }
 
@@ -1530,7 +1583,7 @@ body_each_node_kind_child: fn(tree: BodyTree, value: NodeKind, visit: fn(Int) -[
         .FnValue(f0) -> {
             body_each_fn_value_kind_child(tree, f0, visit)
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -1555,7 +1608,6 @@ body_each_list_spread_part_child: fn(tree: BodyTree, value: BodyListSpreadPart, 
         .Spread(f0) -> {
             visit(f0)
         }
-        else -> {}
     }
 }
 
@@ -1564,7 +1616,7 @@ body_each_scope_member_kind_child: fn(tree: BodyTree, value: BodyScopeMemberKind
         .Timeout(f0) -> {
             visit(f0)
         }
-        else -> {}
+        .Setup | .ExpectFail(_, _) | .Measure | .Skip -> {}
     }
 }
 
@@ -1581,7 +1633,7 @@ body_each_or_fallback_child: fn(tree: BodyTree, value: BodyOrFallback, visit: fn
         .Panic(f0, _) -> {
             visit(f0)
         }
-        else -> {}
+        .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> {}
     }
 }
 
@@ -1605,7 +1657,10 @@ body_each_host_call_child: fn(tree: BodyTree, value: BodyHostCall, visit: fn(Int
         .YieldSend(f0) -> {
             visit(f0)
         }
-        else -> {}
+        .ComptimeInput(_, f1) -> {
+            visit(f1)
+        }
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }
 
@@ -1648,7 +1703,6 @@ body_each_core_closure_kind_child: fn(tree: BodyTree, value: BodyCoreClosureKind
         .UIReactiveRender(f0) -> {
             body_each_lambda_child(tree, f0, visit)
         }
-        else -> {}
     }
 }
 
@@ -1674,7 +1728,6 @@ body_each_fn_value_kind_child: fn(tree: BodyTree, value: BodyFnValueKind, visit:
         .Send(f0) -> {
             visit(f0)
         }
-        else -> {}
     }
 }
 
@@ -1693,7 +1746,6 @@ body_each_require_kind_child: fn(tree: BodyTree, value: BodyRequireKind, visit: 
         .Panic(f0) -> {
             visit(f0)
         }
-        else -> {}
     }
 }
 
@@ -1711,7 +1763,6 @@ body_each_lambda_body_child: fn(tree: BodyTree, value: BodyLambdaBody, visit: fn
                 body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
         }
-        else -> {}
     }
 }
 
@@ -1720,6 +1771,6 @@ body_each_place_child: fn(tree: BodyTree, value: BodyPlace, visit: fn(Int) -[Mem
         .Expr(f0) -> {
             visit(f0)
         }
-        else -> {}
+        .Local(_) -> {}
     }
 }

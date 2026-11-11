@@ -14,35 +14,35 @@ comparison_json_field: fn(value: CanonicalJSON, key: String) -> CanonicalJSON Co
             }
             Err(comparison_decode_error("comparison value is missing `{key}`"))
         }
-        else -> Err(comparison_decode_error("comparison value must be an object"))
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> Err(comparison_decode_error("comparison value must be an object"))
     }
 }
 
 comparison_json_text: fn(value: CanonicalJSON, key: String) -> String ComparisonRecordError! {
     if comparison_json_field(value, key) == {
         .String(text) -> Ok(text)
-        else -> Err(comparison_decode_error("comparison field `{key}` must be a string"))
+        .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be a string"))
     }
 }
 
 comparison_json_integer: fn(value: CanonicalJSON, key: String) -> String ComparisonRecordError! {
     if comparison_json_field(value, key) == {
         .Integer(text) -> Ok(text)
-        else -> Err(comparison_decode_error("comparison field `{key}` must be an integer"))
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be an integer"))
     }
 }
 
 comparison_json_bool: fn(value: CanonicalJSON, key: String) -> Bool ComparisonRecordError! {
     if comparison_json_field(value, key) == {
         .Bool(flag) -> Ok(flag)
-        else -> Err(comparison_decode_error("comparison field `{key}` must be a boolean"))
+        .Null | .Integer(_) | .String(_) | .Array(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be a boolean"))
     }
 }
 
 comparison_json_array: fn(value: CanonicalJSON, key: String) -> [CanonicalJSON] ComparisonRecordError! {
     if comparison_json_field(value, key) == {
         .Array(values) -> Ok(values)
-        else -> Err(comparison_decode_error("comparison field `{key}` must be an array"))
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be an array"))
     }
 }
 
@@ -56,7 +56,7 @@ comparison_json_optional_string: fn(value: CanonicalJSON, key: String) -> String
     child: comparison_json_optional_value(value, key) ?? return Ok(None)
     if child == {
         .String(text) -> Ok(Val(text))
-        else -> Err(comparison_decode_error("comparison field `{key}` must be a string or null"))
+        .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be a string or null"))
     }
 }
 
@@ -64,7 +64,7 @@ comparison_json_optional_integer: fn(value: CanonicalJSON, key: String) -> Strin
     child: comparison_json_optional_value(value, key) ?? return Ok(None)
     if child == {
         .Integer(text) -> Ok(Val(text))
-        else -> Err(comparison_decode_error("comparison field `{key}` must be an integer or null"))
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> Err(comparison_decode_error("comparison field `{key}` must be an integer or null"))
     }
 }
 
@@ -119,7 +119,7 @@ comparison_json_strings: fn(value: CanonicalJSON, key: String) -> [String] Compa
     loop child in comparison_json_array(value, key) {
         if child == {
             .String(text) -> result.push(text)
-            else -> return Err(comparison_decode_error("comparison field `{key}` entries must be strings"))
+            .Null | .Bool(_) | .Integer(_) | .Array(_) | .Object(_) -> return Err(comparison_decode_error("comparison field `{key}` entries must be strings"))
         }
     }
     Ok(result)
@@ -160,7 +160,7 @@ comparison_sample_from_json: fn(value: CanonicalJSON, index: Int) -> ComparisonS
     if comparison_json_optional_value(value, "declared_equal") == .Val(child) {
         if child == {
             .Bool(flag) -> sample.declared_equal = Val(flag)
-            else -> return Err(comparison_decode_error("comparison sample {index} declared_equal must be bool or null"))
+            .Null | .Integer(_) | .String(_) | .Array(_) | .Object(_) -> return Err(comparison_decode_error("comparison sample {index} declared_equal must be bool or null"))
         }
     }
     Ok(sample)

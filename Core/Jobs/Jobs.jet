@@ -149,7 +149,7 @@ queue: fn() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     }
     queue_finish(driver, initialized) ?? return Err(err)
     queue := JobQueue{
-        data: shared QueueData{driver: driver.move()}, endpoint: endpoint,
+        data: Shared{QueueData{driver: driver.move()}}, endpoint: endpoint,
         authority: authority, name: name,
     }
     _: queue.status() ?? return Err(err)
@@ -162,116 +162,7 @@ JobQueue: struct {
     endpoint: ServiceEndpoint
     authority: String
     name: String
-}
 
-// Only the immutable startup snapshot is read: logical Env overlays do not
-// redirect this named configuration exception.
-queue_default_path: fn() -> String Never! {
-    loop entry in core.sys.__startup_env() {
-        if entry.name == "JET_JOB_QUEUE_DB".bytes() {
-            value: String.from_bytes(entry.value) ?? return ".jet/state/jobs.db"
-            if value.len() > 0 -> return value
-            return ".jet/state/jobs.db"
-        }
-    }
-    ".jet/state/jobs.db"
-}
-// The old public Int-to-usize bridge rejected negative limits before the
-// endpoint and queue-specific policy checks.
-queue_validate_nonnegative_limit: fn(limit: Int, label: String) ServiceError! {
-    if limit < 0 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
-    Ok()
-}
-
-#Test("public signed queue limits preserve the bridge error and zero reaches policy validation") {
-    if queue_validate_nonnegative_limit(0, "claim limit") == {
-        .Ok(_) -> assert(true)
-        else -> assert(false)
-    }
-    if queue_validate_nonnegative_limit(-1, "inspection limit") == {
-        .Err(.Unavailable(message)) -> assert_eq(message, "queue inspection limit is outside the supported range")
-        else -> assert(false)
-    }
-}
-
-queue_mkdir_error: fn(error: IOError) -> ServiceError Never! {
-    cause: if error == {
-        .InvalidInput(context) -> context.cause ?? "{error}"
-        .NotFound(context) -> context.cause ?? "{error}"
-        .PermissionDenied(context) -> context.cause ?? "{error}"
-        .TimedOut(context) -> context.cause ?? "{error}"
-        .Cancelled(context) -> context.cause ?? "{error}"
-        .Closed(context) -> context.cause ?? "{error}"
-        .Protocol(context) -> context.cause ?? "{error}"
-        .Other(context) -> context.cause ?? "{error}"
-        .AlreadyExists(context) -> context.cause ?? "{error}"
-        .Unsupported(context) -> context.cause ?? "{error}"
-        .ResourceLimit(_) -> "{error}"
-    }
-    queue_unavailable("queue SQLite directory failed: {cause}")
-}
-
-#Test("queue mkdir retains the raw OS cause rather than the public IOError display prefix") {
-    context: IOContext{operation: .Write, resource: Val("/jobs"), os_code: Val(13), cause: Val("Permission denied (os error 13)")}
-    if queue_mkdir_error(.PermissionDenied(context)) == {
-        .Unavailable(message) -> assert_eq(message, "queue SQLite directory failed: Permission denied (os error 13)")
-        else -> assert(false)
-    }
-}
-
-// Rust service_authority_now: duration_since(UNIX_EPOCH).ok(), bounded
-// signed-i64 milliseconds, otherwise MAX. Controlled time is not consulted.
-queue_now: fn() -[Time]> Int Never! {
-    sample: core.time.__wall_sample()
-    if sample.before_epoch -> return 9223372036854775807
-    millis: sample.seconds * 1000 + sample.nanoseconds /% 1000000
-    if millis > 9223372036854775807 -> return 9223372036854775807
-    millis
-}
-queue_begin: fn(driver: &db.__Driver) ServiceError! -[DB]> {
-    if !db.__driver_begin(driver) -> return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
-    Ok()
-}
-// Operations unwrap inside the guarded transaction and roll back there on
-// failure. Only a successful value reaches commit; failed commits roll back.
-queue_finish: fn<T>(driver: &db.__Driver, value: &&T) -[DB]> T ServiceError! {
-    if db.__driver_commit(driver) -> return Ok(value)
-    _: db.__driver_rollback(driver)
-    Err(queue_sql_error("commit", queue_unavailable("queue SQLite commit failed")))
-}
-queue_encoded_payload: fn<T: Encode>(job_type: String, payload: T) -> JobPayload ServiceError! {
-    if core.encoding.cbor.to_bytes_canonical<T>(payload) == {
-        .Ok(bytes) -> Ok(JobPayload{type_id: job_type, bytes: bytes, publish: false})
-        .Err(error) -> {
-            location: if error.path == "" -> "byte {error.byte_offset}" else -> "{error.path} at byte {error.byte_offset}"
-            Err(ServiceError.Policy("job payload cannot be encoded as canonical CBOR ({error.kind:Debug}, {location}): {error.reason}"))
-        }
-    }
-}
-// Checked #Job receiver normalization forwards here, after its payload schema
-// and declared job identity have been checked (no string-selected public job).
-__enqueue: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
-    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
-    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
-}
-__delay: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
-    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
-    millis: duration.ns /% 1000000
-    if millis < 0 || millis > 9223372036854775807 -> return Err(queue_unavailable("queue delay duration is outside the supported range"))
-    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: None, request_id: None, delay_ms: millis})
-}
-queue_enqueue_request: fn(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> JobQueueReceipt ServiceError! {
-    requests: [EnqueueRequest]{request}
-    queue_validate_bulk(requests) ?? return Err(err)
-    now: queue_now()
-    service.__authority_validate(queue.endpoint) ?? return Err(err)
-    committed: queue_enqueue_transaction(queue, requests, now) ?? return Err(err)
-    queue_publish_transitions(committed.observations)
-    if committed.receipts.len() == 0 -> return Err(queue_unavailable("queue enqueue returned no receipt"))
-    Ok(committed.receipts[0])
-}
-
-impl JobQueue {
     receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
         queue_validate_text(id, "queue job id", 1024, false) ?? return Err(err)
@@ -376,6 +267,113 @@ impl JobQueue {
         }
         queue_finish(guard.value.driver, result)
     }
+}
+
+// Only the immutable startup snapshot is read: logical Env overlays do not
+// redirect this named configuration exception.
+queue_default_path: fn() -> String Never! {
+    loop entry in core.sys.__startup_env() {
+        if entry.name == "JET_JOB_QUEUE_DB".bytes() {
+            value: String.from_bytes(entry.value) ?? return ".jet/state/jobs.db"
+            if value.len() > 0 -> return value
+            return ".jet/state/jobs.db"
+        }
+    }
+    ".jet/state/jobs.db"
+}
+// The old public Int-to-usize bridge rejected negative limits before the
+// endpoint and queue-specific policy checks.
+queue_validate_nonnegative_limit: fn(limit: Int, label: String) ServiceError! {
+    if limit < 0 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
+    Ok()
+}
+
+#Test("public signed queue limits preserve the bridge error and zero reaches policy validation") {
+    if queue_validate_nonnegative_limit(0, "claim limit") == {
+        .Ok(_) -> assert(true)
+        .Err(_) -> assert(false)
+    }
+    if queue_validate_nonnegative_limit(-1, "inspection limit") == {
+        .Err(.Unavailable(message)) -> assert_eq(message, "queue inspection limit is outside the supported range")
+        .Ok(_) | .Err(_) -> assert(false)
+    }
+}
+
+queue_mkdir_error: fn(error: IOError) -> ServiceError Never! {
+    cause: if error == {
+        .InvalidInput(context) -> context.cause ?? "{error}"
+        .NotFound(context) -> context.cause ?? "{error}"
+        .PermissionDenied(context) -> context.cause ?? "{error}"
+        .TimedOut(context) -> context.cause ?? "{error}"
+        .Cancelled(context) -> context.cause ?? "{error}"
+        .Closed(context) -> context.cause ?? "{error}"
+        .Protocol(context) -> context.cause ?? "{error}"
+        .Other(context) -> context.cause ?? "{error}"
+        .AlreadyExists(context) -> context.cause ?? "{error}"
+        .Unsupported(context) -> context.cause ?? "{error}"
+        .ResourceLimit(_) -> "{error}"
+    }
+    queue_unavailable("queue SQLite directory failed: {cause}")
+}
+
+#Test("queue mkdir retains the raw OS cause rather than the public IOError display prefix") {
+    context: IOContext{operation: .Write, resource: Val("/jobs"), os_code: Val(13), cause: Val("Permission denied (os error 13)")}
+    if queue_mkdir_error(.PermissionDenied(context)) == {
+        .Unavailable(message) -> assert_eq(message, "queue SQLite directory failed: Permission denied (os error 13)")
+        .Full(_) | .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Policy(_) | .Partitioned(_) | .Revoked(_) | .Stale(_) | .Expired(_) -> assert(false)
+    }
+}
+
+// Rust service_authority_now: duration_since(UNIX_EPOCH).ok(), bounded
+// signed-i64 milliseconds, otherwise MAX. Controlled time is not consulted.
+queue_now: fn() -[Time]> Int Never! {
+    sample: core.time.__wall_sample()
+    if sample.before_epoch -> return 9223372036854775807
+    millis: sample.seconds * 1000 + sample.nanoseconds /% 1000000
+    if millis > 9223372036854775807 -> return 9223372036854775807
+    millis
+}
+queue_begin: fn(driver: &db.__Driver) ServiceError! -[DB]> {
+    if !db.__driver_begin(driver) -> return Err(queue_sql_error("begin", queue_unavailable("queue SQLite begin failed")))
+    Ok()
+}
+// Operations unwrap inside the guarded transaction and roll back there on
+// failure. Only a successful value reaches commit; failed commits roll back.
+queue_finish: fn<T>(driver: &db.__Driver, value: &&T) -[DB]> T ServiceError! {
+    if db.__driver_commit(driver) -> return Ok(value)
+    _: db.__driver_rollback(driver)
+    Err(queue_sql_error("commit", queue_unavailable("queue SQLite commit failed")))
+}
+queue_encoded_payload: fn<T: Encode>(job_type: String, payload: T) -> JobPayload ServiceError! {
+    if core.encoding.cbor.to_bytes_canonical<T>(payload) == {
+        .Ok(bytes) -> Ok(JobPayload{type_id: job_type, bytes: bytes, publish: false})
+        .Err(error) -> {
+            location: if error.path == "" -> "byte {error.byte_offset}" else -> "{error.path} at byte {error.byte_offset}"
+            Err(ServiceError.Policy("job payload cannot be encoded as canonical CBOR ({error.kind:Debug}, {location}): {error.reason}"))
+        }
+    }
+}
+// Checked #Job receiver normalization forwards here, after its payload schema
+// and declared job identity have been checked (no string-selected public job).
+__enqueue: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
+    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
+}
+__delay: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
+    encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
+    millis: duration.ns /% 1000000
+    if millis < 0 || millis > 9223372036854775807 -> return Err(queue_unavailable("queue delay duration is outside the supported range"))
+    queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: None, request_id: None, delay_ms: millis})
+}
+queue_enqueue_request: fn(queue: JobQueue, request: EnqueueRequest) -[DB, Time]> JobQueueReceipt ServiceError! {
+    requests: [EnqueueRequest]{request}
+    queue_validate_bulk(requests) ?? return Err(err)
+    now: queue_now()
+    service.__authority_validate(queue.endpoint) ?? return Err(err)
+    committed: queue_enqueue_transaction(queue, requests, now) ?? return Err(err)
+    queue_publish_transitions(committed.observations)
+    if committed.receipts.len() == 0 -> return Err(queue_unavailable("queue enqueue returned no receipt"))
+    Ok(committed.receipts[0])
 }
 queue_set_paused: fn(queue: JobQueue, paused: Bool) -[DB, Time]> JobQueueStatus ServiceError! {
     now: queue_now()
@@ -698,7 +696,7 @@ queue_row_optional_text: fn(row: [String: DBValue], name: String) -> String? Ser
     if value == {
         .Null -> Ok(None)
         .Text(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither text nor null"))
+        .Int(_) | .Float(_) | .Bool(_) | .Blob(_) -> Err(queue_unavailable("queue column `{name}` is neither text nor null"))
     }
 }
 queue_row_optional_int: fn(row: [String: DBValue], name: String) -> Int? ServiceError! {
@@ -706,7 +704,7 @@ queue_row_optional_int: fn(row: [String: DBValue], name: String) -> Int? Service
     if value == {
         .Null -> Ok(None)
         .Int(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither integer nor null"))
+        .Float(_) | .Text(_) | .Bool(_) | .Blob(_) -> Err(queue_unavailable("queue column `{name}` is neither integer nor null"))
     }
 }
 queue_row_optional_blob: fn(row: [String: DBValue], name: String) -> [U8]? ServiceError! {
@@ -714,7 +712,7 @@ queue_row_optional_blob: fn(row: [String: DBValue], name: String) -> [U8]? Servi
     if value == {
         .Null -> Ok(None)
         .Blob(found) -> Ok(Val(found))
-        else -> Err(queue_unavailable("queue column `{name}` is neither blob nor null"))
+        .Int(_) | .Float(_) | .Text(_) | .Bool(_) -> Err(queue_unavailable("queue column `{name}` is neither blob nor null"))
     }
 }
 queue_row_bool: fn(row: [String: DBValue], name: String) -> Bool ServiceError! {
@@ -936,7 +934,7 @@ queue_sql_error: fn(operation: String, detail: ServiceError) -> ServiceError Nev
         .Policy(message) -> ServiceError.Policy("queue {operation}: {message}")
         .Revoked(message) -> ServiceError.Revoked("queue {operation}: {message}")
         .Stale(message) -> ServiceError.Stale("queue {operation}: {message}")
-        else -> detail
+        .Full(_) | .Ambiguous(_) | .Unknown(_) | .NotStarted(_) | .Partitioned(_) | .Expired(_) -> detail
     }
 }
 queue_execute: fn(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -[DB]> Int ServiceError! {
@@ -1187,12 +1185,12 @@ queue_enqueue_on_driver: fn(driver: &db.__Driver, authority: String, name: Strin
     if queue_row_optional_int(row, "bad") == {
         .Val(_) | .None -> assert(false)
         .Err(.Unavailable(message)) -> assert_eq(message, "queue column `bad` is neither integer nor null")
-        else -> assert(false)
+        .Err(_) -> assert(false)
     }
     if queue_row_value(row, "absent") == {
         .Ok(_) -> assert(false)
         .Err(.Unavailable(message)) -> assert_eq(message, "queue row has no `absent` column")
-        else -> assert(false)
+        .Err(_) -> assert(false)
     }
     assert_eq(queue_saturating_add(9223372036854775807, 1), 9223372036854775807)
     assert_eq(queue_saturating_sub(-9223372036854775808, 1), -9223372036854775808)

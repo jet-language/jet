@@ -4,10 +4,12 @@ use fs: core.files
 
 Source: trait { text: fn(self) -> String }
 
-Disk: struct { path: String }
+Disk: struct {
+    path: String
 
-impl Disk.Source {
-    text: fn(self) -> String { fs.read(self.path) ?? "" }
+    impl Source {
+        text: fn(self) -> String { fs.read(self.path) ?? "" }
+    }
 }
 
 #FX(!FS)

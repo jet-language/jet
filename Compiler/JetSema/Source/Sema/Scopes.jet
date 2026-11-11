@@ -112,6 +112,11 @@ SemaScopeBinding: struct {
     // `:`: the E0111 machine edit replaces it with ` :=`, so `x: 1` becomes
     // `x := 1`.
     binding_sigil: Span?{None}
+    // A name bound to a number literal, or to arithmetic on such literals and
+    // names, keeps that literal (with each name replaced by its own): where a
+    // use refuses the name's type, it reads as the literal written there
+    // (Expressions/NumberNames.jet).
+    number_literal: Expr?{None}
 }
 
 SemaOriginFact: struct {
@@ -231,22 +236,6 @@ SemaLoopBreakFlows: struct {
     paths: [SemaOwnershipState]
 }
 
-sema_loop_value_kind_effect: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Effect
-}
-
-sema_loop_value_kind_collecting: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Collecting
-}
-
-sema_loop_value_kind_result: fn() -> SemaLoopValueKind Never! {
-    SemaLoopValueKind.Result
-}
-
-sema_loop_value_set_pending: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?) Never! {
-    context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: None})
-}
-
 sema_loop_value_set_pending_type: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
@@ -296,11 +285,6 @@ sema_loop_value_set_result_type: fn(context: &SemaCheckContext, frame_index: Int
     context.loop_value_frames[frame_index].ty = Val(ty)
 }
 
-sema_loop_value_result_type: fn(context: SemaCheckContext, frame_index: Int) -> Type? {
-    if frame_index < 0 || frame_index >= context.loop_value_frames.len() -> return None
-    context.loop_value_frames[frame_index].ty
-}
-
 sema_loop_value_break_flows: fn(context: SemaCheckContext, frame_index: Int) -> [SemaOwnershipState] Never! {
     if frame_index < 0 || frame_index >= context.loop_break_flows.len() -> return [SemaOwnershipState]{}
     context.loop_break_flows[frame_index].paths
@@ -323,26 +307,6 @@ sema_loop_value_collecting_type: fn(context: SemaCheckContext) -> Type? {
 sema_loop_value_set_collecting_type: fn(context: &SemaCheckContext, ty: Type) Never! {
     if context.collect_item_types.len() == 0 -> return
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
-}
-
-sema_loop_value_append_collecting_item_type: fn(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if ty == (Type.Named{name: "Unit"}) {
-        diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
-        return false
-    }
-    existing: sema_loop_value_collecting_type(context)
-    if existing == None {
-        sema_loop_value_set_collecting_type(context, ty)
-        return true
-    }
-    expected: existing
-    if type_identity_equal(expected, ty) -> return true
-    joined: sema_expr_numeric_join(expected, ty) ?? {
-        diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but this item is {type_name(ty)} instead of {type_name(expected)}", "convert every item to one type, or split the loops"))
-        return false
-    }
-    sema_loop_value_set_collecting_type(context, joined)
-    true
 }
 
 SemaScopeLoopLabel: struct {
@@ -378,6 +342,10 @@ sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statement
     body_id
 }
 
+// A pure check staged at a call site: a checked text literal's
+// `CheckedText.check`, or a static HTTP route method token's core.http
+// check. A Result error refuses the site as `code` with `what` and `fix`;
+// the error's reason is the Why.
 SemaCheckedTextEvaluation: struct {
     module_identity: String
     key: String
@@ -391,6 +359,9 @@ SemaCheckedTextEvaluation: struct {
     reachable_function_keys: [String]
     dependencies: [String]
     span: Span
+    code: String
+    what: String
+    fix: String
 }
 
 SemaComptimeRequest: struct {
@@ -519,7 +490,7 @@ SemaScopeEnvironment: struct {
     // reconstructed/copy-indexed list. Both carriers name the same fact cell.
     comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
     comptime_body_values: SemaComptimeBodyValues
-    // L0303 (#3716): the module's dispatch-table `else` arms, from the parser.
+    // E0641: the module's dispatch-table `else` arms, from the parser.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // The module's proven length-preserving list write
     // parameters, copied into each function's ownership state.
@@ -751,7 +722,7 @@ SemaCheckContext: struct {
     host_hooks: SemaHostHookAccess?{None}
     // (Rust `arithmetic_policy_stack`): the active lexical
     // fixed-width arithmetic mode of the function being checked, from its
-    // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
+    // `#Policy(arithmetic: mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
     // The overflow word (`wrapping`, `saturating` or `checked`) written
     // directly around the typed-literal conversion being checked. The
@@ -781,6 +752,20 @@ SemaCheckContext: struct {
     // keep a view into their source inside the literal; any other field owns
     // its value (sema_stmt_local_view_facts_fields).
     view_field_values: [Span]{[Span]{}}
+    // The `:=` number names whose type a use decided on an earlier check pass
+    // of this function, and the refusals this pass found. A probe's rollback
+    // keeps the refusals it found: each is a use the source writes, and the
+    // earliest one decides (Expressions/NumberNames.jet).
+    number_retypes_known: [SemaNumberRetype]{[SemaNumberRetype]{}}
+    number_retypes_found: [SemaNumberRetype]{[SemaNumberRetype]{}}
+}
+
+// A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
+// at `use_span` needs where its default type is refused.
+SemaNumberRetype: struct {
+    binding: Span
+    ty: Type
+    use_span: Span
 }
 
  
@@ -788,6 +773,7 @@ SemaCheckContext: struct {
 SemaScopeModulePolicy: struct {
     unit_explicit_units: Bool
     copies_explicit: Bool
+    writes_explicit: Bool
     // Split the exact span key into scalar indexes, without formatting it.
     function_unit_starts: [Int:Int]
     function_unit_ends: [[Int:Bool]]
@@ -818,6 +804,9 @@ SemaScopeTable: struct {
     // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     copies_explicit: Bool{false}
+    // `writes: .Explicit` is active: every call writes the `&`/`&&` mark its
+    // signature implies (Ownership/CallMarks.jet).
+    writes_explicit: Bool{false}
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
     context_allocation: Int{0}
@@ -862,11 +851,11 @@ SemaScopeTable: struct {
 // the counts are not part of the table's facts.
 SemaScopeLookupCounters: struct {
     counters: Shared<SemaLookupCounters>
-}
 
-impl SemaScopeLookupCounters.Debug {
-    debug: fn(self) -> String {
-        "SemaScopeLookupCounters"
+    impl Debug {
+        debug: fn(self) -> String {
+            "SemaScopeLookupCounters"
+        }
     }
 }
 
@@ -1403,7 +1392,8 @@ sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 
 // Restores `context` to `mark`: appended rows are dropped (a check only appends
 // to these lists; the one in-place row edit, a discarded call fact, stays
-// inside the rows its statement appended) and every other field is restored.
+// inside the rows its statement appended) and every other field is restored,
+// except the number-name refusals, which stay (number_retypes_found).
 sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
     loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
@@ -1533,7 +1523,7 @@ sema_check_context_return_expr_ids: fn(copied: SemaCheckContext, target: &SemaCh
 }
 
 // Rolls `context` back to `mark` but keeps the source ids filed since it,
-// with the id count: the facts of an erased `#DebugOnly` body stay inside it,
+// with the id count: the facts of an erased `#Off(.Release)` body stay inside it,
 // while its checked statements stay in the tree and keep their ids.
 sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
     kept := [Int]{}
@@ -1576,6 +1566,7 @@ sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        writes_explicit: source.writes_explicit,
         context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
@@ -1615,6 +1606,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            writes_explicit: table.writes_explicit,
             context_allocation: table.context_allocation,
             open_marks: table.open_marks,
         },
@@ -1655,6 +1647,7 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
+    table.writes_explicit = saved.writes_explicit
     table.context_allocation = saved.context_allocation
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
@@ -1806,18 +1799,6 @@ sema_scope_join_hardware_paths: fn(table: &SemaScopeTable, before: SemaScopeHard
     table.hardware_pending_transfers = sema_scope_hardware_transfers_snapshot(joined.pending)
 }
 
-sema_scope_enter_existing: fn(table: &SemaScopeTable, owner: String) -> Bool Never! {
-    if table.frames[table.current].owner == owner -> return true
-    parent: table.current
-    loop (index, frame) in table.frames {
-        if frame.parent == parent && frame.owner == owner {
-            table.current = index
-            return true
-        }
-    }
-    false
-}
-
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
@@ -1847,7 +1828,7 @@ sema_knowledge_plane_name: fn(plane: SemaKnowledgePlane) -> String Never! {
         .Exactness -> "exactness"
         .Unit -> "unit"
         .State -> "state"
-        else -> "classification"
+        .Classification -> "classification"
     }
 }
 
@@ -1858,7 +1839,7 @@ sema_knowledge_gate_spelling: fn(gate: SemaKnowledgeGate) -> String Never! {
         .RoundedConversion -> "rounded"
         .RawProjection -> "raw"
         .StateTransition -> "transition"
-        else -> "scrub"
+        .ClassificationScrub -> "scrub"
     }
 }
 
@@ -1866,25 +1847,24 @@ sema_knowledge_gate_allows: fn(plane: SemaKnowledgePlane, gate: SemaKnowledgeGat
     if plane == {
         .Range -> if gate == {
             .BoundedArithmetic | .RawProjection -> true
-            else -> false
+            .Approximation | .RoundedConversion | .StateTransition | .ClassificationScrub -> false
         }
         .Exactness -> if gate == {
             .Approximation | .RoundedConversion | .RawProjection -> true
-            else -> false
+            .BoundedArithmetic | .StateTransition | .ClassificationScrub -> false
         }
         .Unit -> if gate == {
             .RoundedConversion | .RawProjection -> true
-            else -> false
+            .BoundedArithmetic | .Approximation | .StateTransition | .ClassificationScrub -> false
         }
         .State -> if gate == {
             .StateTransition | .RawProjection -> true
-            else -> false
+            .BoundedArithmetic | .Approximation | .RoundedConversion | .ClassificationScrub -> false
         }
         .Classification -> if gate == {
             .ClassificationScrub | .RawProjection -> true
-            else -> false
+            .BoundedArithmetic | .Approximation | .RoundedConversion | .StateTransition -> false
         }
-        else -> false
     }
 }
 
@@ -1918,6 +1898,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
     policy := SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
+        writes_explicit: false,
         function_unit_starts: [Int:Int]{},
         function_unit_ends: [[Int:Bool]]{},
     }
@@ -1940,6 +1921,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
                 if declaration.scope != PolicyScope.Package && !(declaration.scope == PolicyScope.Module && graph.modules[declaration_index].module_identity == module_identity) -> next
                 if declaration.key == PolicyKey.ExplicitUnits -> policy.unit_explicit_units = true
                 if sema_string_view_copies_declaration(declaration) -> policy.copies_explicit = true
+                if sema_call_marks_writes_declaration(declaration) -> policy.writes_explicit = true
             }
         }
     }
@@ -1990,7 +1972,7 @@ sema_scope_binding_is_compiler_builtin: fn(binding: SemaScopeBinding, name: Stri
 sema_scope_name_blocks_binding: fn(kind: SymbolKind) -> Bool Never! {
     if kind == {
         .Local | .Parameter | .Constant -> true
-        else -> false
+        .Module | .Function | .Type | .Trait | .Impl | .Field | .Variant | .Import | .Foreign | .Label -> false
     }
 }
 
@@ -2178,6 +2160,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        writes_explicit: source.writes_explicit,
         context_allocation: source.context_allocation,
         policy_modules: source.policy_modules.copy(),
         policy_rows: source.policy_rows.copy(),
@@ -2246,7 +2229,7 @@ sema_scope_place_root: fn(place: Expr) -> String? Never! {
         .Ident(name, _, _) -> return Val(name)
         .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> return sema_scope_place_root(base)
         .Paren(inner, _, _) | .Place(inner, _, _, _) -> return sema_scope_place_root(inner)
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -2279,6 +2262,14 @@ sema_scope_mark_fresh_cell: fn(table: &SemaScopeTable, name: String, init: Expr)
     sema_scope_note_binding_edit(table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Keeps `literal` on the binding `name` just declared (see
+// SemaScopeBinding.number_literal).
+sema_scope_mark_number_literal: fn(table: &SemaScopeTable, name: String, literal: &&Expr?) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].number_literal = literal
 }
 
 // Keeps the name-end-through-`:` span of the binding `name` just declared
@@ -2355,7 +2346,7 @@ sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
         .Struct(_) -> SemaScopeDeclarationKind.Struct
         .Enum(_) -> SemaScopeDeclarationKind.Enum
         .Distinct(_) -> SemaScopeDeclarationKind.Distinct
-        else -> SemaScopeDeclarationKind.Other
+        .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> SemaScopeDeclarationKind.Other
     }
 }
 
@@ -2531,17 +2522,17 @@ sema_scope_nominal_function_type_params: fn(graph: SemaRegistrationGraph, module
     [TypeParam]{}
 }
 
-// The first `&` or `&&` parameter when sema_scope_declaration_site(environment,
-// program, id) is a function, else none. Such a function is direct-call-only:
-// a function type has read parameters only.
-sema_scope_declaration_function_marked_param: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
+// The parameters when sema_scope_declaration_site(environment, program, id)
+// is a function, else none. A function with a `&` or `&&` parameter is a
+// value only where a function type marks the same parameters.
+sema_scope_declaration_function_params: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [Param]? {
     site: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) {
-        if environment.declarations[index].item == .Func(func) -> return sema_scope_first_marked_param(func.params)
+        if environment.declarations[index].item == .Func(func) -> return Val(func.params.copy())
         return None
     }
     if program.registration_graph == .Val(graph) {
-        if site == .Function(module_index, row) -> return sema_scope_first_marked_param(graph.modules[module_index].functions[row].declaration.params)
+        if site == .Function(module_index, row) -> return Val(graph.modules[module_index].functions[row].declaration.params.copy())
     }
     None
 }

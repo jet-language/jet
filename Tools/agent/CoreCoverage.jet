@@ -10,7 +10,8 @@
 // of a compiler-private source part (Compiler/Prelude/CoreSourceParts.tsv: not
 // a Core module, not importable, its members not user items) are outside it,
 // counted on their own line, and reached only through the public functions
-// that call them. Prelude functions and types are in scope unqualified.
+// that call them. Prelude functions and types, and the compiler's bare
+// spellings of Core types (`Path`, `URL`), are in scope unqualified.
 //
 // Usage (from anywhere in the checkout):
 //     jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]
@@ -31,8 +32,12 @@ use {
 TOOL: "/Tools/agent/CoreCoverage.jet"
 RATCHET: "Tools/agent/core-coverage-ratchet.json"
 PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
+BARE_SPELLINGS: "Compiler/JetFoundation/Source/Registry/CoreModules.jet"
 USAGE: "usage: jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
+// The typed-literal kinds (`Regex{"…"}`, `Sh{"…"}`, `SQL{"…"}`, `HTML{"…"}`): a
+// user names each unqualified, though each lives in its own module.
+LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "core.text.html.HTML"}
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
 // A host literal holds a Jet program when it declares a function or imports
 // from core or app.
@@ -136,6 +141,12 @@ Call: struct {
 Owner: struct {
     name: String
     kind: String
+}
+
+// A name a program starts with and the declaration it stands for.
+Alias: struct {
+    name: String
+    target: String
 }
 
 Chain: struct {
@@ -611,13 +622,16 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
         if is_owner_kind(value) && token(tokens, i - 1) == ":" -> pending = Owner{name: token(tokens, i - 2), kind: value.copy()}
         if value == {
             // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
-            // type's body belongs to that type. An impl of a reserved `__` trait is
-            // named by that trait too: its methods are that trait's, outside the surface.
+            // type's body belongs to that type. An impl of a reserved `__` trait, bare
+            // or dotted, is named by that trait too: its methods are that trait's,
+            // outside the surface.
             "impl" -> {
                 owner := token(tokens, i + 1)
                 if scopes.len() > 0 {
                     enclosing: scopes[scopes.len() - 1]
-                    if token(tokens, i + 2) != "." && (enclosing.kind == "struct" || enclosing.kind == "enum") -> owner = enclosing.name.copy()
+                    if token(tokens, i + 2) != "." && (enclosing.kind == "struct" || enclosing.kind == "enum") {
+                        owner = if owner.starts_with("__") -> "{enclosing.name}.{owner}" else -> enclosing.name.copy()
+                    }
                 }
                 if token(tokens, i + 2) == "." && token(tokens, i + 3).starts_with("__") -> owner = "{owner}.{token(tokens, i + 3)}"
                 pending = Owner{name: owner.copy(), kind: "impl"}
@@ -714,10 +728,13 @@ table_of: fn(functions: [Function]) -> Table Never! {
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
 // The aliases a program starts with: `core`, `app`, every prelude function and
-// type (a user names them unqualified) and, for a doctest, the names of its
-// own module.
+// type and every typed-literal kind (a user names them unqualified) and, for a
+// doctest, the names of its own module.
 initial_aliases: fn(table: Table, context: String) -> [String: String] Never! {
     aliases := [String: String]{"core": "core", "app": "app"}
+    loop kind in LITERAL_KINDS {
+        if table.types.has_key(kind) -> aliases[kind.rpartition(".").tail.copy()] = kind.copy()
+    }
     loop index in 0..<table.ids.len() {
         if table.units[index] == "core.prelude" {
             head: first_part(table.names[index])
@@ -856,6 +873,23 @@ call_sites: fn(source_text: String, table: Table, initial: [String: String]) -> 
         candidate: chain(tokens, i)
         if !candidate.found {
             i += 1
+            next
+        }
+        // A typed literal (`Type{…}`) is a value of that type: a method called
+        // on it is that type's.
+        kind: expand(candidate.parts, aliases)
+        if token(tokens, candidate.end) == "{{" && table.types.has_key(kind) {
+            close := candidate.end + 1
+            depth := 1
+            loop close < tokens.len() && depth > 0 {
+                if tokens[close].value == "{{" -> depth += 1
+                if tokens[close].value == "}}" -> depth -= 1
+                close += 1
+            }
+            return_at[close - 1] = return_closes.len()
+            return_closes.push(close - 1)
+            return_types.push(kind.copy())
+            i = candidate.end
             next
         }
         at: after_generics(tokens, candidate.end)
@@ -1131,6 +1165,39 @@ record: fn(functions: &[Function], seen: &[String: Bool], table: Table, program:
     }
 }
 
+// The bare spellings the compiler resolves in every program, by
+// CORE_BARE_SOURCE_MODULES in BARE_SPELLINGS: each bare name and the Core
+// declaration it stands for (`Path` is core.files.Path, `Date` is
+// core.time.LocalDate). A tree without that table (a fixture) has none.
+bare_spellings: fn(root: String) -[FS]> [Alias] Never! {
+    found := [Alias]{}
+    source: files.read("{root}/{BARE_SPELLINGS}") ?? return found
+    inside := false
+    loop line in source.split("\n") {
+        if line.starts_with("CORE_BARE_SOURCE_MODULES:") {
+            inside = true
+            next
+        }
+        if !inside -> next
+        if line.starts_with("}}") -> break
+        pieces := [String]{}
+        loop piece in line.split("\"") -> pieces.push(piece.copy())
+        if pieces.len() < 5 || !pieces[0].contains("name:") -> next
+        declared: if pieces.len() >= 7 && pieces[4].contains("declared:") -> pieces[5] else -> pieces[1]
+        found.push(Alias{name: pieces[1].copy(), target: "{pieces[3]}.{declared}"})
+    }
+    found
+}
+
+// `aliases` with every bare spelling it does not already bind.
+with_bare: fn(aliases: [String: String], bare: [Alias]) -> [String: String] Never! {
+    out := aliases.copy()
+    loop alias in bare {
+        if !out.has_key(alias.name) -> out[alias.name.copy()] = alias.target.copy()
+    }
+    out
+}
+
 census: fn(root: String) -[FS]> Report CoverageError! {
     parts: part_paths(root) ?? return Err(err)
     listed := [String]{}
@@ -1155,14 +1222,15 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     unique := 0
     loop _ in table.by_id -> unique += 1
     if functions.len() == 0 || unique != functions.len() -> return Err(fail("Core census is empty or contains duplicate public function identities"))
+    bare: bare_spellings(root)
     seen := [String: Bool]{}
     loop index in 0..<paths.len() {
         programs: doctest_programs(sources[index])
         if programs.len() == 0 -> next
-        initial: initial_aliases(table, module_name(paths[index]))
+        initial: with_bare(initial_aliases(table, module_name(paths[index])), bare)
         loop at in 0..<programs.len() -> record(functions, seen, table, programs[at], "{paths[index]}#doctest-{at + 1}", DOCTESTS, initial)
     }
-    plain: initial_aliases(table, "")
+    plain: with_bare(initial_aliases(table, ""), bare)
     kinds: [Int]{EXAMPLES, TESTS}
     loop kind in kinds {
         found := [String]{}
@@ -1234,18 +1302,18 @@ ratchet_entries: fn(tree: Dyn) -> [Entry] CoverageError! {
     version: if field(tree, "version") == {
         .Int(number) -> number
         .Number(lexeme) -> Int.parse(lexeme) ?? -1
-        else -> -1
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> -1
     }
     if version != 2 -> return Err(invalid)
     entries := [Entry]{}
     listed: if field(tree, "modules") == {
         .Object(object) -> object.copy()
-        else -> return Err(invalid)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(invalid)
     }
     loop module_entry in listed {
         items: if module_entry.value == {
             .Array(values) -> values.copy()
-            else -> return Err(invalid)
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(invalid)
         }
         loop item in items {
             if {
@@ -1537,6 +1605,7 @@ fixture_rows: fn() -> [Function] Never! {
     rows.extend(public_functions("Core/Text/Text.jet", "trim: fn(x: String) -> String Never! {{ x }}\n    split: fn<T>(x: T) -> String Never! {{ \"\" }}\n    unused: fn() {{}}"))
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
+    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}"))
     rows
 }
 
@@ -1571,9 +1640,9 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 }
 
 #Test("an impl of a reserved trait is named by that trait, outside the surface") {
-    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{}}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
-    assert_eq(function_ids(found), [String]{"core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
-    assert_eq(found.map(row -> outside_surface(row)), [Bool]{false, true, false})
+    found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(&self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
+    assert_eq(function_ids(found), [String]{"core.demo.Reader.__Cursor.next", "core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
+    assert_eq(found.map(row -> outside_surface(row)), [Bool]{true, false, true, false})
 }
 
 #Test("return types preserve builtin, prelude and compound spellings") {
@@ -1596,6 +1665,10 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 
 #Test("qualified types, typed receivers, inferred constructors and chained calls") {
     assert_eq(ids("use crypto: core.crypto\n    use core.crypto.[Hasher]\n    run: fn(h: Hasher) {{\n      h.digest()\n      value: crypto.new()\n      value.digest()\n      Hasher.new().digest()\n      unknown.digest()\n    }}", ""), [String]{"core.crypto.Hasher.digest", "core.crypto.new", "core.crypto.Hasher.digest", "core.crypto.Hasher.new", "core.crypto.Hasher.digest"})
+}
+
+#Test("a typed literal is a value of its type, and a literal kind is named unqualified") {
+    assert_eq(ids("use crypto: core.crypto\n    run: fn() {{\n      Sh{{\"git status\"}}.ok()\n      crypto.Hasher{{}}.digest()\n      unknown{{}}.digest()\n    }}", ""), [String]{"core.process.Sh.ok", "core.crypto.Hasher.digest"})
 }
 
 #Test("embedded host programs isolate alias environments and ignore host comments") {
@@ -1675,6 +1748,25 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     report: census(root) ?? panic(err.message)
     assert_eq(find_function(report, "Place.display").tests, [String]{"tests/place.jet:3"})
     assert_eq(report.total_uncovered, 0)
+    files.remove_all(root) ?? ()
+}
+
+#Test("a compiler bare spelling of a Core type is in scope unqualified, renamed or not") {
+    root: files.mkdtemp("core-coverage-bare") ?? panic("a temporary directory cannot be made: {err}")
+    put(root, "Core/Draw/Draw.jet", "impl Shape.Checked {{ check: fn(text: String) -> Bool Never! {{ text != \"\" }} }}\nLocalDay: struct {{\n    today: fn() -> Int Never! {{ 1 }}\n}}\n")
+    // A same-named type in another module is not what the bare name binds.
+    put(root, "Core/Other/Other.jet", "Shape: struct {{\n    check: fn(text: String) -> Bool Never! {{ true }}\n}}\n")
+    put(root, BARE_SPELLINGS, "CoreBareSourceModule: struct {{}}\nCORE_BARE_SOURCE_MODULES: [CoreBareSourceModule]{{\n    {{name: \"Shape\", module_name: \"core.draw\"}},\n    {{name: \"Day\", module_name: \"core.draw\", declared: \"LocalDay\"}},\n}}\n")
+    put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n")
+    put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
+    put(root, "tests/shape.jet", "run: fn() {{\n    print(Shape.check(\"a\"))\n    print(Day.today())\n}}\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(find_function(report, "Shape.check").tests, [String]{"tests/shape.jet:2"})
+    assert_eq(find_function(report, "LocalDay.today").tests, [String]{"tests/shape.jet:3"})
+    other: report.functions.filter(row -> row.unit == "core.other")
+    assert_eq(other.map(row -> row.id.copy()), [String]{"core.other.Shape.check"})
+    assert_eq(other[0].tests, [String]{})
+    assert_eq(report.total_uncovered, 1)
     files.remove_all(root) ?? ()
 }
 

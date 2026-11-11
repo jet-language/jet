@@ -93,7 +93,7 @@ text_of: fn(d: Dyn, name: String) -> String {
 items: fn(d: Dyn) -> [Dyn] {
     if d == {
         .Array(values) -> values
-        else -> fail("entry.json: expected an array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> fail("entry.json: expected an array")
     }
 }
 
@@ -111,7 +111,7 @@ load: fn(root: String, name: String) -> Entry {
     input := ""
     if member(spec, "fixtureGen") == {
         .Null -> {}
-        else -> {
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             g: member(spec, "fixtureGen")
             gen = "{dir}/{text_of(g, "script")}"
             input = text_of(g, "out")
@@ -159,7 +159,7 @@ run_batch: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
     receipt: spec.run() ?? return Ran{output: "", ns: 0, error: "{opts.jet} could not start: {err}"}
     ns: started.elapsed().ns
     if receipt.timed_out -> return Ran{output: receipt.output.copy(), ns: ns, error: "timed out after {RUN_TIMEOUT_MS / 1000} s"}
-    if !receipt.success -> return Ran{output: receipt.output.copy(), ns: ns, error: "exit {receipt.code}: {last_lines(receipt.errors, 6)}"}
+    if !receipt.success -> return Ran{output: receipt.output.copy(), ns: ns, error: "exit {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
     Ran{output: receipt.output.copy(), ns: ns, error: ""}
 }
 
@@ -206,19 +206,13 @@ run_service: fn(opts: Options, e: Entry, work: String, level: Int, port: Int) ->
     }
     receipt: child.wait() ?? return Ran{output: answers, ns: started.elapsed().ns, error: "the service could not be waited for: {err}"}
     ns: started.elapsed().ns
-    if !receipt.success -> return Ran{output: answers, ns: ns, error: "the service exited {receipt.code}: {last_lines(receipt.errors, 6)}"}
+    if !receipt.success -> return Ran{output: answers, ns: ns, error: "the service exited {receipt.code}: {receipt.errors.trim().last_lines(6).join(" | ")}"}
     Ran{output: answers, ns: ns, error: ""}
 }
 
 run_once: fn(opts: Options, e: Entry, work: String, level: Int, attempt: Int) -> Ran {
     if e.service -> return run_service(opts, e, work, level, PORT_BASE + 2 * level + attempt)
     run_batch(opts, e, work, level)
-}
-
-last_lines: fn(text: String, count: Int) -> String {
-    lines: text.trim().split("\n").to_list()
-    from: if lines.len() > count -> lines.len() - count else -> 0
-    lines.slice(from, lines.len()).join(" | ")
 }
 
 // Seconds with millisecond places, from nanoseconds.

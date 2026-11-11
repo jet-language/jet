@@ -23,7 +23,7 @@ task_bodies: fn(scope: db.DBScope) -[DB.Read]> String TaskError! {
 live_text: fn(binding: Live<String, TaskError>) -> String {
     if application.state(binding) == {
         .Loaded(value) -> value
-        else -> ""
+        .Idle | .Loading | .Failed(_) -> ""
     }
 }
 

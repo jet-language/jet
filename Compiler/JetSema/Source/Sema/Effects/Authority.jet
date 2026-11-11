@@ -129,7 +129,7 @@ sema_authority_expr_escape: fn(expr: Expr, handle: String) -> Span? {
                     None
                 }
                 .Value(value) -> sema_authority_expr_escape(value, handle)
-                else -> None
+                .ByteText(_) | .Empty -> None
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
@@ -158,7 +158,7 @@ sema_authority_expr_escape: fn(expr: Expr, handle: String) -> Span? {
                     if fallback_value == .Val(returned) -> return sema_authority_expr_escape(returned, handle)
                     None
                 }
-                else -> None
+                .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> None
             }
         }
         .Str(parts, _, _) -> {
@@ -188,7 +188,7 @@ sema_authority_expr_escape: fn(expr: Expr, handle: String) -> Span? {
             }
             if sema_ownership_last_use_expr(expr, handle) -> Val(lambda.span) else -> None
         }
-        else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -201,7 +201,7 @@ sema_authority_block_escape: fn(statements: [Stmt], handle: String) -> Span? {
 }
 
 sema_authority_switched_erased: fn(name: String) -> Bool Never! {
-    name == "Off" || name == "DebugOnly"
+    name == "Off"
 }
 
 sema_authority_for_header_escape: fn(kind: ForKind, handle: String) -> Span? {
@@ -289,7 +289,7 @@ sema_authority_stmt_escape: fn(statement: Stmt, handle: String) -> Span? {
             if found != None -> return found
             sema_authority_block_escape(body, handle)
         }
-        else -> None
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .ComptimeBlock(_, _, _) -> None
     }
 }
 
@@ -307,7 +307,7 @@ sema_authority_chain_rooted: fn(expr: Expr, handle: String, aliases: [String]) -
         .Ident(name, _, _) -> name == handle || sema_authority_contains(aliases, name)
         .Paren(inner, _, _) -> sema_authority_chain_rooted(inner, handle, aliases)
         .MethodCall(receiver, method, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -315,7 +315,7 @@ sema_authority_narrowing_chain: fn(expr: Expr, handle: String, aliases: [String]
     if expr == {
         .Paren(inner, _, _) -> sema_authority_narrowing_chain(inner, handle, aliases)
         .MethodCall(receiver, method, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -341,7 +341,7 @@ sema_authority_bound_spec: fn(expr: Expr, handle: String, aliases: [String]) -> 
             if sema_authority_delegation(method, args, handle, aliases) -> return true
             !sema_authority_spec_runs(method) && sema_authority_bound_receiver(receiver, handle, aliases)
         }
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -397,7 +397,7 @@ sema_authority_value_escape: fn(expr: Expr, handle: String, aliases: [String]) -
             }
             None
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -434,7 +434,7 @@ sema_authority_call_argument_escape: fn(expr: Expr, handle: String, aliases: [St
             sema_authority_value_args_escape(args, handle, aliases)
         }
         .Paren(inner, _, _) | .Try(inner, _, _, _, _) -> sema_authority_call_argument_escape(inner, handle, aliases)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -518,7 +518,7 @@ sema_authority_derived_stmt: fn(statement: Stmt, handle: String, aliases: &[Stri
             if found != None -> return found
             sema_authority_derived_block(body, handle, aliases)
         }
-        else -> None
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .ComptimeBlock(_, _, _) -> None
     }
 }
 
@@ -593,7 +593,7 @@ sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: &[SemaEffectF
                 sema_authority_collect_fx_regions(then_body, regions)
                 if else_body == .Val(body) -> sema_authority_collect_fx_regions(body, regions)
             }
-            else -> {}
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
 }
@@ -646,7 +646,7 @@ sema_authority_check_statements: fn(statements: [Stmt], outer: [String]?, diagno
                 sema_authority_check_statements(then_body, outer, diagnostics)
                 if else_body == .Val(body) -> sema_authority_check_statements(body, outer, diagnostics)
             }
-            else -> {}
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
 }
@@ -673,7 +673,7 @@ sema_authority_check_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 if code_module.body == .Val(body) -> sema_authority_check_items(body, diagnostics)
             }
             .GenericModule(generic_module) -> sema_authority_check_items(generic_module.body, diagnostics)
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

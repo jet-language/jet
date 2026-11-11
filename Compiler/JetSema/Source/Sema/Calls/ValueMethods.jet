@@ -52,7 +52,10 @@ sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics:
 
 // Rust `check_builtin_method` infers each argument with its parameter type as
 // the expected type, so `bytes.write([66, 67])` types the literal as [U8].
+// A quoted pattern in a `Regex` slot (`text.has_line(r"^(a|b)")`) is a checked
+// `Regex{…}` literal: the pattern is checked now, never at run time.
 sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expression_is_regex_head(required) && argument.expr == .Str(_, _, _) -> return sema_expression_typed_literal_regex(argument.expr, expr_span(argument.expr), None, environment, program, scopes, state, tail_store, context, diagnostics)
     reported: diagnostics.len()
     checked: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
     sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -86,21 +89,21 @@ sema_value_method_replace_mismatch: fn(argument: Expr, method: String, index: In
 sema_value_method_owner: fn(receiver: Type) -> String Never! {
     if sema_expr_unwrap_tag(receiver) == {
         .Apply(name, _) -> name
-        else -> type_name(sema_expr_unwrap_tag(receiver))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(sema_expr_unwrap_tag(receiver))
     }
 }
 
 sema_value_method_is_float_or_integer: fn(receiver: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(receiver) == {
         .Int | .Float | .IntN(_, _) | .Float32 -> true
-        else -> false
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
 sema_value_method_bit_width: fn(receiver: Type) -> Int Never! {
     if sema_expr_unwrap_tag(receiver) == {
         .IntN(_, bits) -> if bits == 8 || bits == 16 || bits == 32 -> bits else -> 64
-        else -> 64
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> 64
     }
 }
 
@@ -129,17 +132,16 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
         .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
         // sema_call_try_value_method checks these rows as their source call.
-        .RegexSource(member) -> panic("the RegexSource row `{member}` is checked as its core.regex call")
+        .CoreSource(owner, member) -> panic("the CoreSource row `{owner}.{member}` is checked as its source call")
     }
 }
 
-// String's `.matches(pattern)`/`.match(pattern)` call their `core.regex`
-// source helper with the receiver first (one regex
-// engine), typed by the helper's declared result; the loader loads
-// core.regex for either spelling.
-sema_value_method_regex_source: fn(member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    unavailable: sema_error("E0906", span, "the source `core.regex.{member}` declaration is unavailable", "String's pattern methods run the core.regex engine", "restore the `core.regex` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.regex") ?? {
+// A CoreSource row (`text.matches(pattern)`, `text.first_lines(n)`) calls its
+// Core source helper with the receiver first, typed by the helper's declared
+// result; the loader loads the helper's module for the spelling.
+sema_value_method_core_source: fn(owner: String, member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unavailable: sema_error("E0906", span, "the source `{owner}.{member}` declaration is unavailable", "this String method's body is the `{owner}` source helper", "restore the `{owner}` source module")
+    identity: sema_call_core_module_identity(environment, program, owner) ?? {
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -152,7 +154,8 @@ sema_value_method_regex_source: fn(member: String, receiver_value: TExpr, typed:
         diagnostics.push(unavailable)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(typed[0])}
+    args := [TCallArg]{sema_value_method_source_arg(receiver_value)}
+    loop argument in typed -> args.push(sema_value_method_source_arg(argument))
     value: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: args}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
@@ -171,7 +174,7 @@ sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: T
     returned := sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
     success := if returned == {
         .Result(ok, _) | .Option(ok) -> ok
-        else -> returned
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> returned
     }
     updated_args := args
     params := [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(required), variadic: false}}
@@ -228,7 +231,7 @@ sema_value_method_outcome_read: fn(receiver: Expr, method: String, method_span: 
         // copy: `inner` is a payload of read parameter `receiver`, which keeps the original; the pattern test owns this one
         .Place(inner, access, _, _) -> if access == PlaceAccess.Take -> receiver.copy() else -> inner.copy()
         // copy: `receiver` is a read parameter; the pattern test owns this one
-        else -> receiver.copy()
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> receiver.copy()
     }
     probed: sema_expr_probe_type(subject, true, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !(sema_expr_unwrap_tag(probed) == .Result(_, _)) -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -333,7 +336,7 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, effect_row, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if row.lowering == .RegexSource(member) -> return sema_value_method_regex_source(member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
+    if row.lowering == .CoreSource(source_owner, member) -> return sema_value_method_core_source(source_owner, member, receiver_value, typed, span, expected, environment, program, context, diagnostics)
     result := builtin_method_bind(row.result, receiver_value.ty)
     line: sema_source_line_at(environment.source_segments, span) ?? 0
     if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) {

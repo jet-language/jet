@@ -31,7 +31,7 @@ impl NixEvaluator {
                     if self.is_direct_shell(direct) -> return Ok(direct)
                 }
             }
-            else -> {
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Native(_) -> {
                 if self.is_direct_shell(root) -> return Ok(root)
             }
         }
@@ -75,7 +75,7 @@ impl NixEvaluator {
                     }
                 }
             }
-            else -> None
+            .Str(_) | .Interpolated(_) | .Path(_) | .Integer(_) | .Bool(_) | .Null | .Identifier(_) | .AttrSet(_) | .List(_) | .Apply(_, _) | .Select(_, _) | .Let(_, _) | .With(_, _) | .If(_, _, _) | .Merge(_, _) | .Equal(_, _, _) -> None
         }
     }
 
@@ -87,7 +87,7 @@ impl NixEvaluator {
             forced: self.force(binding)
             if forced == {
                 .List(_) -> return Ok(true)
-                else -> {}
+                .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> {}
             }
         }
         Ok(false)
@@ -120,7 +120,7 @@ impl NixEvaluator {
                 raw: forced.package_text()
                 if nixeval_cross_package_name(raw) == {
                     .Val(cross) -> cross_packages.push(cross)
-                    else -> packages.push(nixeval_package_name(raw))
+                    .None -> packages.push(nixeval_package_name(raw))
                 }
             }
         }
@@ -142,10 +142,10 @@ impl NixEvaluator {
                     .Str(value) | .Contextual(value, _) -> {
                         if !nixeval_is_blank(value) -> unsupported.push("shellHook")
                     }
-                    else -> unsupported.push("shellHook")
+                    .Null | .Bool(_) | .Integer(_) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> unsupported.push("shellHook")
                 }
             }
-            else -> {}
+            .None -> {}
         }
         Ok(NixEvalDevShell{
             system: self.system,

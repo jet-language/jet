@@ -331,11 +331,11 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
     // #4602: a number keeps its exact JSON-number lexeme as `Number`.
     if Int.parse(clean) == {
         .Ok(n) -> return Ok(stream.typed_number("{n}"))
-        else -> { _ := 0 }
+        .Err(_) -> { _ := 0 }
     }
     if Float.parse(clean) == {
         .Ok(n) -> return Ok(number_tree(clean.copy(), n))
-        else -> { _ := 0 }
+        .Err(_) -> { _ := 0 }
     }
     Ok(Dyn.Text(unquote(clean)))
 }
@@ -386,7 +386,7 @@ render_yaml: fn(value: Dyn, indent: Int) -> String Never! {
     if value == {
         .Object(_) -> render_yaml_object(value, indent)
         .Array(items) -> render_yaml_array(items, indent)
-        else -> "{spaces(indent)}{yaml_leaf(value)}\n"
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> "{spaces(indent)}{yaml_leaf(value)}\n"
     }
 }
 
@@ -394,7 +394,7 @@ nonempty_collection: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> stream.object_entries(value).len() > 0
         .Array(items) -> items.len() > 0
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> false
     }
 }
 
@@ -422,7 +422,7 @@ render_yaml_object: fn(value: Dyn, indent: Int) -> String Never! {
             out = "{out}{pad}{key}:\n"
             if pair.value == {
                 .Array(items) -> out = "{out}{render_yaml_array(items, indent)}"
-                else -> out = "{out}{render_yaml(pair.value, indent + 2)}"
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> out = "{out}{render_yaml(pair.value, indent + 2)}"
             }
         } else {
             out = "{out}{pad}{key}: {yaml_leaf(pair.value)}\n"

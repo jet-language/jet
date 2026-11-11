@@ -69,6 +69,14 @@ sema_network_handle_u8_list: fn() -> Type Never! {
     Type.List{element: Type.IntN{signed: false, bits: 8}}
 }
 
+// `read_into`'s `&buffer: [U8]`: the read appends to the caller's List in
+// place (#5976).
+sema_network_handle_buffer: fn() -> SemaCallParam Never! {
+    param := sema_network_handle_argument("buffer", sema_network_handle_u8_list())
+    param.convention = AccessConvention.Write
+    param
+}
+
 // Rust `net_method_return` infers a handle method's arguments without an
 // access convention: the readiness interest and the shutdown direction are
 // read, never taken from the caller.
@@ -92,10 +100,12 @@ sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> Se
     }
     if owner == "TCPStream" {
         if method == "read" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamRead, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
-        if method == "read" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
-        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "read" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
+        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "read_text" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadText, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int)}, AccessConvention.Read))
         if method == "read_text" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadTextDeadline, sema_network_handle_net_result(string), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "read_into" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytes{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int)}, AccessConvention.Read))
+        if method == "read_into" && argc == 3 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReadBytesDeadline{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "write" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteBytes, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes)}, AccessConvention.Read))
         if method == "write" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteBytesDeadline, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "write_all" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteAllBytes, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes)}, AccessConvention.Read))
@@ -118,7 +128,8 @@ sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> Se
         if method == "accept" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UnixListenerAcceptDeadline, sema_network_handle_net_result(Type.Named{name: "UnixStream"}), [SemaCallParam]{sema_network_handle_deadline()}, AccessConvention.Read))
     }
     if owner == "UnixStream" {
-        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamReadDeadline, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "read" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamReadDeadline{into: false}, sema_network_handle_net_result(bytes), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "read_into" && argc == 3 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamReadDeadline{into: true}, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_buffer(), sema_network_handle_argument("limit", int), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "write_all" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamWriteAllDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "ready" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
         if method == "close" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UnixStreamClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
@@ -153,10 +164,10 @@ sema_network_handle_spec_for: fn(owner: String, method: String, argc: Int) -> Se
 
 sema_network_handle_known_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TCPListener" -> return method == "accept" || method == "local_addr"
-    if owner == "TCPStream" -> return method == "read" || method == "read_text" || method == "write" || method == "write_all" || method == "write_text" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
+    if owner == "TCPStream" -> return method == "read" || method == "read_text" || method == "read_into" || method == "write" || method == "write_all" || method == "write_text" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
     if owner == "UDPSocket" -> return method == "ready" || method == "close" || method == "receive" || method == "send_to"
     if owner == "UnixListener" -> return method == "accept"
-    if owner == "UnixStream" -> return method == "read" || method == "write_all" || method == "ready" || method == "close" || method == "set_timeout"
+    if owner == "UnixStream" -> return method == "read" || method == "read_into" || method == "write_all" || method == "ready" || method == "close" || method == "set_timeout"
     if owner == "WsConn" -> return method == "send_text" || method == "send_bytes" || method == "recv" || method == "close"
     if owner == "WsMessage" -> return method == "is_text" || method == "is_binary" || method == "is_close" || method == "text" || method == "bytes"
     false
@@ -173,7 +184,7 @@ sema_network_handle_nominal_owner: fn(ty: Type) -> String? {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
         .Tagged(_, inner) -> sema_network_handle_nominal_owner(inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -216,6 +227,7 @@ sema_network_handle_expected_arity: fn(owner: String, method: String) -> String 
     }
     if owner == "TCPStream" {
         if method == "read" || method == "read_text" -> return "0, 1, or 2"
+        if method == "read_into" -> return "2 or 3"
         if method == "write" || method == "write_all" || method == "write_text" -> return "1 or 2"
         if method == "shutdown" -> return "1"
         if method == "ready" -> return "2"
@@ -228,6 +240,7 @@ sema_network_handle_expected_arity: fn(owner: String, method: String) -> String 
     }
     if owner == "UnixListener" -> return "1"
     if owner == "UnixStream" {
+        if method == "read_into" -> return "3"
         if method == "read" || method == "write_all" || method == "ready" -> return "2"
         if method == "set_timeout" -> return "1"
         return "0"
@@ -283,7 +296,13 @@ sema_network_handle_checked_args: fn(method: String, params: [SemaCallParam], ar
         found := false
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
-                values.push(typed.values[index])
+                // A `&` argument keeps its Write borrow of the caller's
+                // place, so the route writes the original, never a copy.
+                if params[slot].convention == AccessConvention.Write {
+                    values.push(sema_tree_node(typed.values[index].ty.copy(), TExprKind.Borrow{place: typed.values[index].copy(), access: AccessConvention.Write}, typed.values[index].span))
+                } else {
+                    values.push(typed.values[index])
+                }
                 found = true
                 break
             }

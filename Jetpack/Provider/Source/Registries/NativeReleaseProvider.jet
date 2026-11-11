@@ -244,7 +244,7 @@ provider_native_release_facts: fn(spec: RefSpec, table: SourceTable, ctx: Provid
     known_source: if spec.source == {
         .Releases -> true
         .Named(name) -> name == NATIVE_SOURCE_NAME
-        else -> false
+        .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary -> false
     }
     if !known_source -> return Err(RegistryError.Reason("native release recipe received unsupported source `{spec.source.label()}`"))
     upstream: table.upstream(NATIVE_SOURCE_NAME) ?? NATIVE_UPSTREAM

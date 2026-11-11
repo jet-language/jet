@@ -27,14 +27,12 @@ relabel: fn(code: Int) -> Int LookupError! {
 Step: enum {
     First
     Second
-}
 
-impl Step {
     // A non-generic enum's `self` has the same type as a named variant.
     normalized: fn(self) -> Step Never! {
         if self == {
             .First -> Step.Second
-            else -> self
+            .Second -> self
         }
     }
 }

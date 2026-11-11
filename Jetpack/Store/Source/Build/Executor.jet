@@ -61,7 +61,7 @@ BuildExecutionError: enum {
     report: fn(self) -> DiagnosticBuildError? Never! {
         if self == {
             .Reported(report) -> Val(report)
-            else -> None
+            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .InvalidGraph(_) | .HandEdited(_, _) -> None
         }
     }
 
@@ -551,6 +551,21 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
         if !result.success -> return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: result.detail})
     }
     Ok(facts)
+}
+
+// Whether a probe in `selected` runs a program, which it does only inside the
+// native sandbox (build_run_probe_sandboxed); finding a program or a folder
+// only reads the host.
+build_probes_run_sandboxed: fn(plan: HermeticBuildPlan, selected: [Int]) -> Bool Never! {
+    loop probe in plan.probes {
+        if !selected.contains(probe.id) -> next
+        runs: if probe.kind == {
+            .FindProgram(_) | .FindFolder(_) -> false
+            .PkgConfig(_, _) | .HeaderCheck(_) | .CompileCheck(_, _, _) -> true
+        }
+        if runs -> return true
+    }
+    false
 }
 
 build_receipt_code: fn(receipt: ProcessReceipt) -> Int Never! {

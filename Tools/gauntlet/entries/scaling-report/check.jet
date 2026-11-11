@@ -1,0 +1,15 @@
+// The job of a scaling-report case, as facts (the harness runs it in the
+// case directory with the file holding the program's output): the printed
+// output, then each report the program wrote with --output.
+use {
+    files: core.files
+    process: core.process
+}
+
+// Each chunk prints without its own trailing newline, as `print` adds one.
+run: fn() {
+    print((files.read(process.args()[0]) ?? panic("no output file: {err}")).remove_suffix("\n"))
+    loop name in ["report.md", "planned.md"] {
+        if files.exists(name) -> print("--- {name}\n{(files.read(name) ?? panic("`{name}` cannot be read: {err}")).remove_suffix("\n")}")
+    }
+}

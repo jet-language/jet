@@ -56,6 +56,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 ## Process
 
 - [EnvOverlay](Process/EnvOverlay.jet)
+- [GitLand](Process/GitLand.jet) — `core.git` runs a script's git blocks as one call each: `w.land(patch, message)` stages a patch and commits exactly its paths, `w.patch_paths(patch)` lists what a patch touches, `w.export(commit, dir)` and `w.drift(dir)` export a commit and compare the tracked files with a tested tree.
 - [OSCPUTime](Process/OSCPUTime.jet) — `core.sys.cpu_time` reads the CPU time of any process; `set_wall_clock` sets the machine's wall clock under `#Unsafe`, which needs privilege.
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
 - [OSIDs](Process/OSIDs.jet) — `core.sys.user_ids` reads the real, effective and saved IDs and `set_user_ids` changes them under `#Unsafe`; `users` and `groups` read /etc/passwd and /etc/group as musl does.
@@ -75,6 +76,8 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessStdinClose](Process/ProcessStdinClose.jet) — A spawned child owns an explicit closeable stdin pipe.
 - [ProcessUsage](Process/ProcessUsage.jet) — A finished child's receipt says what it used, read from the kernel when the child is reaped.
 - [ResourceLimits](Process/ResourceLimits.jet) — This program's resource limits and usage live in core.sys.
+- [ScriptFallbacks](Process/ScriptFallbacks.jet) — `files.read_or(path, "")` and `files.list_dir_or(dir, [])` state a script's fallback in the call; `files.best_effort()` runs file operations past a failure and records it; `process.fail(code, message)` ends the run after the message on stderr.
+- [ShCommand](Process/ShCommand.jet) — `Sh{"…"}` is a whole command line, each `{hole}` one argv item; `status()`, `ok()`, `text()`, `lines()`, `run()` and `spec()` run it in one call.
 - [SysExecutable](Process/SysExecutable.jet) — `os.executable()` names the running program: the script's absolute path under `jet run`, the built binary after `jet build`.
 - [SystemPrivilegedEntry](Process/SystemPrivilegedEntry.jet) — Audited identity/session controls for a disposable user namespace only.
 - [SystemProjection](Process/SystemProjection.jet) — Process directories, timestamps, signals, and child reaping.

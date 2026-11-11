@@ -158,7 +158,7 @@ pkg_ffi_entry_wrapper: fn(entry: ExternEntry, names: [String], record_defs: CRec
 pkg_ffi_callback_payload: fn(ty: Type) -> Type? Never! {
     if ty == {
         .Apply(name, args) -> if name == "FfiCallbackEvent" && args.len() == 1 -> Val(args[0]) else -> None
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -167,7 +167,7 @@ pkg_ffi_managed_native_start: fn(entry: ExternEntry) -> Type? Never! {
     if !entry.generated || !entry.jet_name.starts_with("__jet_native_") || entry.params.len() != 1 -> return None
     if entry.params[0].ty == {
         .Fn(params, ret, _, _, _, _) -> if ret == None && params.len() == 1 -> pkg_ffi_callback_payload(params[0]) else -> None
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -186,7 +186,7 @@ pkg_ffi_c_bridge_type: fn(ty: Type, user_types: [String], record_defs: CRecordDe
             }
             "extern \"C\" fn({rendered.join(", ")}){result}"
         }
-        else -> pkg_ffi_rust_type(ty, user_types)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> pkg_ffi_rust_type(ty, user_types)
     }
 }
 
@@ -194,7 +194,7 @@ pkg_ffi_c_raw_type: fn(ty: Type, user_types: [String], record_defs: CRecordDefin
     if ty == {
         .String -> "*const std::os::raw::c_char"
         .Char -> "u32"
-        else -> pkg_ffi_c_bridge_type(ty, user_types, record_defs)
+        .Int | .Float | .Bool | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> pkg_ffi_c_bridge_type(ty, user_types, record_defs)
     }
 }
 
@@ -223,7 +223,7 @@ pkg_ffi_emit_c_wrapper_fn: fn(entry: ExternEntry, user_types: [String], record_d
             .Char -> {
                 call_args.push("p{index} as u32")
             }
-            else -> {
+            .Int | .Float | .Bool | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 call_args.push("p{index}")
             }
         }
@@ -249,7 +249,7 @@ pkg_ffi_c_wrapper_call: fn(return_type: Type?, raw_call: String) -> String Never
     if ty == {
         .String -> "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
         .Char -> "    char::from_u32({raw_call}).unwrap_or_else(|| ffi_panic())"
-        else -> "    {raw_call}"
+        .Int | .Float | .Bool | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "    {raw_call}"
     }
 }
 
@@ -426,7 +426,7 @@ pkg_ffi_inline_rust_type: fn(ty: Type) -> String Never! {
         .InlineRange(base, _, _) -> pkg_ffi_inline_rust_type(base)
         .Float32 -> "f32"
         .Bool -> "bool"
-        else -> "()"
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "()"
     }
 }
 
@@ -446,7 +446,7 @@ pkg_ffi_inline_c_type: fn(ty: Type, cpp: Bool) -> String Never! {
         .InlineRange(base, _, _) -> pkg_ffi_inline_c_type(base, cpp)
         .Float32 -> "float"
         .Bool -> if cpp -> "bool" else -> "_Bool"
-        else -> "void"
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "void"
     }
 }
 
@@ -524,7 +524,7 @@ pkg_ffi_cabi_scalar_type: fn(ty: Type) -> String? Never! {
         .InlineRange(base, _, _) -> pkg_ffi_cabi_scalar_type(base)
         .Tagged(_, inner) -> pkg_ffi_cabi_scalar_type(inner)
         .Quantity(base, _) -> pkg_ffi_cabi_scalar_type(base)
-        else -> None
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
     }
 }
 
@@ -547,7 +547,7 @@ pkg_ffi_cabi_native_type: fn(ty: Type, convention: AccessConvention, handle_name
         .List(_) -> Val("*mut std::os::raw::c_void")
         .String -> Val("*mut std::os::raw::c_char")
         .Named(name) -> if handle_names.contains(name) -> Val("*mut std::os::raw::c_void") else -> pkg_ffi_mut_pointer(record_defs.rust_type(ty))
-        else -> Val("*mut {pkg_ffi_cabi_scalar_type(ty) ?? "std::os::raw::c_void"}")
+        .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val("*mut {pkg_ffi_cabi_scalar_type(ty) ?? "std::os::raw::c_void"}")
     }
 }
 
@@ -556,7 +556,7 @@ pkg_ffi_cabi_return_native_type: fn(ty: Type, handle_names: [String], record_def
         .List(_) -> Val("*const std::os::raw::c_void")
         .String -> Val("*const std::os::raw::c_char")
         .Named(name) -> if handle_names.contains(name) -> Val("*mut std::os::raw::c_void") else -> record_defs.rust_type(ty)
-        else -> pkg_ffi_cabi_scalar_type(ty)
+        .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> pkg_ffi_cabi_scalar_type(ty)
     }
 }
 
@@ -567,7 +567,7 @@ pkg_ffi_cabi_integer: fn(ty: Type) -> Bool Never! {
         .InlineRange(base, _, _) -> pkg_ffi_cabi_integer(base)
         .Tagged(_, inner) -> pkg_ffi_cabi_integer(inner)
         .Quantity(base, _) -> pkg_ffi_cabi_integer(base)
-        else -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Measure(_) -> false
     }
 }
 
@@ -578,7 +578,7 @@ pkg_ffi_cabi_signed_integer: fn(ty: Type) -> Bool Never! {
         .InlineRange(base, _, _) -> pkg_ffi_cabi_signed_integer(base)
         .Tagged(_, inner) -> pkg_ffi_cabi_signed_integer(inner)
         .Quantity(base, _) -> pkg_ffi_cabi_signed_integer(base)
-        else -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Measure(_) -> false
     }
 }
 
@@ -715,7 +715,7 @@ pkg_ffi_cabi_direct_arg: fn(index: Int, convention: AccessConvention, ty: Type, 
             record_ty: record_defs.rust_type(ty) ?? return None
             Val("unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}")
         }
-        else -> {
+        .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
             if written {
                 setup.push(pkg_ffi_cabi_non_null_pointer(index))
                 return Val("p{index}_ptr as {native_ty}")
@@ -732,7 +732,7 @@ pkg_ffi_cabi_scalar_arg: fn(index: Int, ty: Type, native_ty: String) -> String N
         .Float32 -> "f32::from_bits(args[{index}].value as u32)"
         .Bool -> "args[{index}].value != 0"
         .Char -> "args[{index}].value as u32"
-        else -> "args[{index}].value as {native_ty}"
+        .Int | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "args[{index}].value as {native_ty}"
     }
 }
 
@@ -759,7 +759,7 @@ pkg_ffi_cabi_wrapper_arg: fn(index: Int, convention: AccessConvention, ty: Type,
         .Float32 -> Val("f32::from_bits(args[{index}].value as u32)")
         .Bool -> Val("args[{index}].value != 0")
         .Char -> Val("char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())")
-        else -> Val("args[{index}].value as {expected}")
+        .Int | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val("args[{index}].value as {expected}")
     }
 }
 
@@ -793,7 +793,7 @@ pkg_ffi_cabi_result: fn(entry: ExternEntry, call: String, direct_native: Bool, r
         .InlineRange(_, _, _) -> Val("    out.value = ({call}) as u64;\n")
         .Tagged(_, _) -> Val("    out.value = ({call}) as u64;\n")
         .Quantity(_, _) -> Val("    out.value = ({call}) as u64;\n")
-        else -> None
+        .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
     }
 }
 

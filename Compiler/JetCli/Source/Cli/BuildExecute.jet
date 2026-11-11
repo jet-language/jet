@@ -13,29 +13,22 @@ use {
     core.build.[BuildGraph, BuildGraphAction]
     jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
-    jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
+    jet_foundation.[BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionOutcome, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProbeFact, BuildProvenance, ContentDigest,
         HermeticActionHandle, HermeticBuildContext, HermeticBuildError, HermeticBuildPlan, LinkerIdentity, ProbeHandle,
         ProbeSpec, SDKIdentity, SigningIdentityHandle, SigningIdentitySpec, SysrootIdentity, TargetRef, TargetSpec,
-        ToolchainHandle, ToolchainSpec, build_action_failure_stderr, build_execute_actions, build_execute_probes, build_execution_batches,
+        ToolchainHandle, ToolchainSpec, build_action_failure_stderr, build_execute_actions, build_execute_probes, build_execution_batches, build_probes_run_sandboxed,
     ]
-    jetpack_foundation.[BuildEffect]
+    jetpack_foundation.[BuildEffect, NATIVE_SANDBOX_FIX, foundation_native_sandbox_prepare]
 }
 
 // Whether `source` declares the build entry `build: fn(b: Build)`, as the
 // Driver's build query selects it (jet_driver_query_build_plan); any other
 // top-level `build: fn` is ordinary code.
 jet_cli_declares_build_entry: fn(source: String) -> Bool Never! {
-    lines: source.split("\n").to_list()
-    loop line in jet_cli_top_level_function_lines(source, "build") {
-        if line < 1 || line > lines.len() -> next
-        if lines[line - 1].split_once("build: fn(") == .Val(opened) && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
-            if !typed.before.contains(",") && typed.after.trim() == "Build" -> return true
-        }
-    }
-    false
+    jet_cli_build_entry_lines(source).len() > 0
 }
 
 // Whether the package enclosing `file` declares its build entry in another of
@@ -167,7 +160,18 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     if probe_ids.len() > 0 && !grants.contains(BuildEffect.Exec) {
         return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: "probe {plan.probes[probe_ids[0]].name}", capability: BuildEffect.Exec}, member, color)
     }
+    // Steps and the probes that run a program run only in the native sandbox:
+    // make it usable before the first of them, fetching Jet's pinned
+    // Bubblewrap on first need. A probe that only reads the host (finding a
+    // program or a folder) reports its own failure first.
+    sandboxed_probes: build_probes_run_sandboxed(plan, probe_ids)
+    if sandboxed_probes {
+        if foundation_native_sandbox_prepare() == .Err(error) -> return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+    }
     probes: build_execute_probes(plan, probe_ids) ?? return jet_cli_build_execution_error(err, member, color)
+    if needs.steps.len() > 0 && !sandboxed_probes {
+        if foundation_native_sandbox_prepare() == .Err(error) -> return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+    }
     // A file of a listed package (`b.dependency(name).file(path)`) is copied
     // to its `.jet/deps/<name>/` path, where a step's sandbox reads it; a
     // folder of one is bound there in the sandbox instead.
@@ -384,10 +388,11 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     host_options = jet_cli_build_options_set(host_options, "os", "linux")
     host_options = jet_cli_build_options_set(host_options, "min_os", "")
     if node.kind == .Host -> return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
-    built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, options.copy(), threads, invocation, trace_sink)
+    target_options: jet_cli_build_toolchain_options(graph, row, options)
+    built: jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, target_options.copy(), threads, invocation, trace_sink)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     wants_host: needs.host.contains(target)
-    cross: build_options_value(options, "os") != "linux" || build_options_value(options, "min_os") != ""
+    cross: build_options_value(target_options, "os") != "linux" || build_options_value(target_options, "min_os") != ""
     if !needs.images.contains(target) && (!wants_host || cross) {
         if !wants_host -> return built
         return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
@@ -398,7 +403,7 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     cache := WorkspaceDeclarationCache.new()
     source_root := source_dir.copy()
     if jet_cli_find_package_root_checked(cache, source_dir) == .Ok(found) && found == .Val(package_root) -> source_root = package_root.copy()
-    written: build_options_value(options, "output_dir")
+    written: build_options_value(target_options, "output_dir")
     image_dir: if { written == "" -> "{source_root}/.jet/build" written.starts_with("/") -> written.copy() else -> "{source_root}/{written}" }
     image: cli_files.join(image_dir, row.name)
     if needs.images.contains(target) {
@@ -415,6 +420,18 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     cli_files.copy2(image, tool) ?? return jet_cli_build_failed("couldn't copy `{row.name}`'s image to its host copy `{tool}`: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     cli_files.set_mode(tool, 493) ?? return jet_cli_build_failed("couldn't make the host copy `{tool}` executable: {err}", jet_cli_why("E2105"), "make `{host_dir}` writable", color)
     built
+}
+
+// The options target `row` builds with: a target on its own toolchain
+// (`b.toolchain(name, triple)`) builds for the OS that toolchain's triple
+// names, so its artifact is checked against that machine's row; a target on
+// the host toolchain, or on a triple that names no OS, follows the build.
+jet_cli_build_toolchain_options: fn(graph: BuildPlanExecution, row: BuildSessionTarget, options: BuildOptions) -> BuildOptions Never! {
+    if row.toolchain < 0 || row.toolchain >= graph.toolchains.len() -> return options.copy()
+    toolchain: graph.toolchains[row.toolchain]
+    if toolchain.role != "target" -> return options.copy()
+    os: jet_target_triple_os(toolchain.target_triple) ?? return options.copy()
+    jet_cli_build_options_set(options, "os", target_os_key(os))
 }
 
 // `options` with the resolved value of row `name` replaced by `value`.
@@ -672,7 +689,7 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
             if member == .Val(name) -> return jet_cli_build_execution_failed("E3504", "{subject} of workspace member `{name}` asks for ungranted `{capability.name()}` authority", None, "grant `{capability.name()}` in `{name}`'s package authority or in the workspace's `policy: {{ grants: {{ \"{name}\": #({capability.name()}) }} }}`; `--allow` grants the root build only", color)
             jet_cli_build_execution_failed("E3503", "{subject} needs `{capability.name()}`, which this build does not grant", None, "grant it with `--allow={capability.name()}` or in package or workspace policy; `build: fn` declares the effect and makes the call inside `#Impure(\"reason\")`", color)
         }
-        .SandboxUnavailable(reason) -> jet_cli_build_execution_failed("E3505", "build actions run only in the native sandbox, and none is available here: {reason}", None, "install bubblewrap (`bwrap`) with user namespaces enabled; Jet never runs a build action outside the sandbox", color)
+        .SandboxUnavailable(reason) -> jet_cli_build_refusal("E3505", "build actions run only in the native sandbox, and none is available here: {reason}", JET_CLI_BUILD_SANDBOX_WHY, None, "{NATIVE_SANDBOX_FIX}; Jet never runs a build action outside the sandbox", color)
         .IO(action, detail) -> jet_cli_build_execution_failed("E3505", "build action `{action}` failed: {detail}", None, "fix the action's command, toolchain, or input and output declarations", color)
         .TimedOut(action, limit_ms) -> jet_cli_build_execution_failed("E3505", "build action `{action}` ran past its time limit of {limit_ms}ms and was stopped", None, "raise the limit with `.timeout(10min)` on the step, or the `action_timeout` build option for every step", color)
         .ProbeFailed(probe, detail) -> jet_cli_build_execution_failed("E3505", "build probe `{probe}` failed: {detail}", None, "install what the probe looks for, or declare it on the probe's toolchain", color)
@@ -689,6 +706,10 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
         .HandEdited(action, path) -> jet_cli_build_execution_failed("E3502", "step `{action}` would overwrite `{path}`, which it keeps in git and which holds bytes no build wrote", None, "undo the edit (`git checkout -- {path}`) and change the step's inputs instead; the build rewrites `{path}` from them", color)
     }
 }
+
+// The Why of a missing sandbox: the one order every sandboxed action takes
+// its Bubblewrap in (foundation_linux_bwrap).
+JET_CLI_BUILD_SANDBOX_WHY: "Every build action and probe runs in a bubblewrap sandbox, never outside one. Jet uses the `bwrap` on PATH first, because a host that lets only profiled programs create user namespaces (Ubuntu's AppArmor profile for /usr/bin/bwrap) allows only its own copy; if that is missing or fails its probe, Jet uses its own hash-pinned bubblewrap, fetched into the Hangar on first need. Neither is usable here."
 
 // One build-execution report: `code`'s row Why, the given What and Fix, and
 // `detail` (an action's stderr) printed as written.
@@ -823,4 +844,7 @@ jet_cli_build_add_target: fn(build: &HermeticBuildContext, target: BuildSessionT
 #Test("the build entry is the colon declaration `build: fn(b: Build)`") {
     assert(jet_cli_declares_build_entry("build: fn(b: Build) {{}}\n"))
     assert(!jet_cli_declares_build_entry("build: fn(n: Int) {{}}\n"))
+    assert(jet_cli_declares_build_entry("build: fn(_: Build) {{}}\n"))
+    // A method is no entry, also after a raw string that holds a brace.
+    assert(!jet_cli_declares_build_entry("NOTE: ```}}```\nimpl Shape {{ build: fn(b: Build) {{}} }}\n"))
 }

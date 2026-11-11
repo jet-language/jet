@@ -30,7 +30,9 @@ use {
         Type,
         TypedLitBody,
         LIST_TYPE_OWNER,
+        access_sigil,
         dimension_display_name,
+        expr_source_start,
         expr_span,
         measure_expression,
         pipe_value_is_name,
@@ -116,14 +118,14 @@ jfmt_same_span: fn(left: Span, right: Span) -> Bool Never! {
 jfmt_is_no_else: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .NoElse(_, _) -> true
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
 jfmt_is_if: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .If(_, _, _, _, _, _, _) -> true
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -183,7 +185,7 @@ jfmt_struct_lit_head_is_redundant: fn(f: JetFmt, type_name: String, type_args: [
             }
             true
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -224,7 +226,7 @@ jfmt_payload_binding: fn(pattern: Pattern, want_ok: Bool) -> String? Never! {
     if pattern == {
         .Ok(binding, _, _, _) -> if want_ok -> Val(binding) else -> None
         .Err(binding, _, _, _) -> if want_ok -> None else -> Val(binding)
-        else -> None
+        .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> None
     }
 }
 
@@ -444,7 +446,7 @@ jfmt_expr_start: fn(expr: Expr) -> Int Never! {
         .OrFallback(value, _, _, _, _) -> leftmost = Val(value.copy())
         // copy: `subject` is a payload of read parameter `expr`, which keeps the original; the Val carrier owns this one
         .PatternTest(subject, _, _, _) -> leftmost = Val(subject.copy())
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     if leftmost == .Val(child) {
         child_start: jfmt_expr_start(child)
@@ -455,6 +457,17 @@ jfmt_expr_start: fn(expr: Expr) -> Int Never! {
 
 // Every postfix member spelling is emitted verbatim.
 jfmt_write_postfix_member: fn(f: &JetFmt, member: String) Never! {
+    jfmt_write(f, member)
+}
+
+// A fact read `x.reflect().fact` is the `$fact` member of `x` in the tree,
+// spanned at the plain `fact`; a template's written `$` member stays as is.
+jfmt_write_field_member: fn(f: &JetFmt, member: String, span: Span) Never! {
+    if member.starts_with("$") && !jfmt_src_text(f, span.start, span.end).starts_with("$") {
+        jfmt_write(f, "reflect().")
+        jfmt_write(f, member.slice(1..<member.len()))
+        return
+    }
     jfmt_write(f, member)
 }
 
@@ -518,7 +531,7 @@ jfmt_dispatch_value_head: fn(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never
             if jfmt_bin_op_spell(table_op) == "==" -> return Val(JetFmtDispatchHead{subject: subject, op: table_op})
             JetFmtDispatchHead?{None}
         }
-        else -> JetFmtDispatchHead?{None}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> JetFmtDispatchHead?{None}
     }
 }
 
@@ -809,7 +822,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                 jfmt_fmt_error_contract(f, err)
             }
         }
-        .Fn(params, ret, effect_bound, param_contract, _, return_view_provenance) -> {
+        .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             jfmt_write(f, "fn(")
             // Reprint the declared call contract — labels and
             // the `/` and `*` zone separators.
@@ -841,6 +854,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                         jfmt_write(f, contract[entry.index].label)
                         jfmt_write(f, ": ")
                     }
+                    if call_metadata == .Val(metadata) && entry.index < metadata.conventions.len() -> jfmt_write(f, access_sigil(metadata.conventions[entry.index]))
                     jfmt_fmt_type(f, params[entry.index])
                 }
                 jfmt_comma_after(f, multiline, span.end)
@@ -971,7 +985,7 @@ jfmt_is_unit_type: fn(ty: Type) -> Bool Never! {
 jfmt_fmt_marked_type: fn(f: &JetFmt, ty: Type) {
     grouped: if ty == {
         .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
     }
     if grouped {
         jfmt_write(f, "(")
@@ -1236,7 +1250,7 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
     // keep the paren call form.
     named: if args[0] == {
         .Named(_, _) -> true
-        else -> false
+        .Positional(_) -> false
     }
     delimiter: if named -> JFMT_DELIM_BRACE else -> JFMT_DELIM_PAREN
     jfmt_write(f, if named -> "{{" else -> "(")
@@ -1262,11 +1276,19 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
 }
 
 jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg]) {
-    // `shared expr` is the only spelling that builds this.
+    // `Shared{value}` and a `Shared.new(value)` call print as `Shared{value}`,
+    // with `<T>` when the owner type is written.
     if receiver == .Ident(name, _, _) {
         if name == "Shared" && method == "new" && args.len() == 1 {
-            jfmt_write(f, "shared ")
-            jfmt_fmt_expr(f, args[0].expr, JFMT_PREC_UNARY)
+            jfmt_write(f, "Shared")
+            if owner_type_args.len() == 1 {
+                jfmt_write(f, "<")
+                jfmt_fmt_type(f, owner_type_args[0])
+                jfmt_write(f, ">")
+            }
+            jfmt_write(f, "{{")
+            jfmt_fmt_expr(f, args[0].expr, JFMT_PREC_OR_FALLBACK)
+            jfmt_write(f, "}}")
             return
         }
         if name == jfmt_internal_name("jet.task") && jfmt_fmt_task_surface_method(f, method, args) -> return
@@ -1544,16 +1566,19 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, "~")
             jfmt_fmt_expr(f, inner, JFMT_PREC_UNARY)
         }
-        .Place(inner, access, _, _) -> {
-            // Parsed places are write windows (`&values[2..3]`) or plain
-            // reads; only sema builds a take, spelled `.move()` here.
+        .Place(inner, access, span, id) -> {
+            // Parsed places are write windows (`&values[2..3]`), plain reads,
+            // and marked receivers (`&xs.push(4)`, `&&buf.seal()`), which start
+            // at their mark; a take sema builds is spelled `.move()` here.
+            written_take: access == PlaceAccess.Take && id != AST_NODE_GENERATED && span.start < expr_source_start(inner)
             if access == {
                 .Write -> jfmt_write(f, "&")
-                .Take -> {}
+                .Take -> if written_take -> jfmt_write(f, "&&")
                 .Read -> {}
             }
-            jfmt_fmt_expr(f, inner, if access == PlaceAccess.Take -> JFMT_PREC_POSTFIX else -> JFMT_PREC_UNARY)
-            if access == PlaceAccess.Take -> jfmt_write(f, ".move()")
+            sema_take: access == PlaceAccess.Take && !written_take
+            jfmt_fmt_expr(f, inner, if sema_take -> JFMT_PREC_POSTFIX else -> JFMT_PREC_UNARY)
+            if sema_take -> jfmt_write(f, ".move()")
         }
         .Field(base, field, span, _) -> {
             jfmt_fmt_expr(f, base, JFMT_PREC_POSTFIX)
@@ -1564,11 +1589,11 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                 f.indent += 1
                 jfmt_newline(f)
                 jfmt_write(f, ".")
-                jfmt_write_postfix_member(f, field)
+                jfmt_write_field_member(f, field, span)
                 f.indent -= 1
             } else {
                 jfmt_write(f, ".")
-                jfmt_write_postfix_member(f, field)
+                jfmt_write_field_member(f, field, span)
             }
         }
         .OptField(base, member, _, _, _, _) -> {
@@ -1674,7 +1699,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             // their spelling.
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(f, "(")
             jfmt_fmt_expr(f, callee, JFMT_PREC_POSTFIX)
-            jfmt_fmt_call_args_or_trailing_block(f, args, Val(expr_span(callee).end))
+            jfmt_fmt_call_args_with_template(f, args, Val(expr_span(callee).end))
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(f, ")")
         }
         // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`.
@@ -1738,6 +1763,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
         }
         // The mark is part of the name.
         .ComptimeName(name, _, _, _) -> jfmt_write(f, name)
+        .TypeValue(ty, span, _) -> jfmt_fmt_type_at(f, ty, Val(span))
         // Author-written grouping parens are re-emitted; the generated one
         // around a value table's subject prints the subject as written.
         .Paren(inner, _, node) -> {
@@ -1764,7 +1790,7 @@ jfmt_pipe_step_joins: fn(step: PipeStep, previous: Expr) -> Expr? {
     if step.reads != 1 -> return None
     postfix: if previous == {
         .Ident(_, _, _) | .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) | .Paren(_, _, _) -> true
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     if !postfix -> return None
     if step.value == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
@@ -1807,7 +1833,7 @@ jfmt_fmt_value_loop: fn(f: &JetFmt, body: [Stmt], route_attached: Bool) {
             }
             jfmt_fmt_value_loop_body(f, inner, span)
         }
-        else -> return
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return
     }
     if route_attached && body.len() > 1 {
         route: body[body.len() - 1]
@@ -1824,7 +1850,7 @@ jfmt_fmt_value_loop: fn(f: &JetFmt, body: [Stmt], route_attached: Bool) {
             .Expr(value) -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
             .BreakLabel(name, _) -> jfmt_write(f, if jfmt_is_generated_label(name) -> "break" else -> "break({name})")
             .ContinueLabel(name, _) -> jfmt_write(f, if jfmt_is_generated_label(name) -> "next" else -> "next({name})")
-            else -> {}
+            .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
     }
 }
@@ -1929,7 +1955,7 @@ jfmt_fmt_collecting_loop: fn(f: &JetFmt, lambda: Lambda) {
                 jfmt_fmt_collecting_body(f, body)
                 break
             }
-            else -> break
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> break
         }
     }
 }
@@ -1983,7 +2009,7 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
         if index > 0 -> jfmt_write(f, ", ")
         jfmt_write(f, param.name)
         if param.ty == .Val(ty) {
-            jfmt_write(f, ": ")
+            jfmt_write(f, ": {access_sigil(param.convention)}")
             jfmt_fmt_type(f, ty)
         }
     }
@@ -2056,7 +2082,7 @@ jfmt_fmt_pattern: fn(f: &JetFmt, pattern: Pattern) {
             loop slot in bindings {
                 if slot == {
                     .Named(_, _, _) | .Rest(_) -> named = true
-                    else -> {}
+                    .Wildcard | .Bind(_, _) | .Range(_, _) | .Nested(_) | .Value(_) -> {}
                 }
             }
             if named {
@@ -2331,7 +2357,7 @@ jfmt_str_match_has_computed_hole: fn(f: JetFmt, span: Span) -> Bool Never! {
 jfmt_fmt_call: fn(f: &JetFmt, call: Call) {
     jfmt_write(f, call.name)
     jfmt_fmt_call_type_args(f, call.type_args, call.name_span.end)
-    jfmt_fmt_call_args_or_trailing_block(f, call.args, Val(call.name_span.end))
+    jfmt_fmt_call_args_with_template(f, call.args, Val(call.name_span.end))
 }
 
 // Call-site type arguments `<T, …>`.
@@ -2416,7 +2442,7 @@ jfmt_fmt_task_surface_method: fn(f: &JetFmt, method: String, args: [CallArg]) ->
                 branches.push(field.value)
             }
         }
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
     jfmt_write(f, "task.{selector} {{")
     loop (index, branch) in branches {
@@ -2455,25 +2481,18 @@ jfmt_fmt_view_or_call_args: fn(f: &JetFmt, method: String, args: [CallArg], sour
         jfmt_write(f, ")")
         return
     }
-    jfmt_fmt_call_args_or_trailing_block(f, args, source_start)
+    jfmt_fmt_call_args_with_template(f, args, source_start)
 }
 
-jfmt_fmt_call_args_or_trailing_block: fn(f: &JetFmt, args: [CallArg], source_start: Int?) {
-    // A typed template rides as a hidden final argument;
-    // So does a parser-owned trailing block closure.
+jfmt_fmt_call_args_with_template: fn(f: &JetFmt, args: [CallArg], source_start: Int?) {
+    // A typed template rides as a hidden final argument.
     template := CallArg?{None}
-    trailing := Lambda?{None}
     if args.len() > 0 {
         last: args[args.len() - 1]
-        if last.flags.template_items != None {
-            template = Val(last)
-        } else if last.flags.is_trailing_block {
-            if last.expr == .Lambda(lambda, _) -> trailing = Val(lambda)
-        }
+        if last.flags.template_items != None -> template = Val(last)
     }
-    hidden: template != None || trailing != None
     call_args := args
-    if hidden -> _ := call_args.pop()
+    if template != None -> _ := call_args.pop()
     source := JetFmtSourceList?{None}
     if source_start == .Val(start) -> source = jfmt_source_list_span_after(f, start, JFMT_DELIM_PAREN)
     mark: jfmt_mark(f)
@@ -2502,8 +2521,6 @@ jfmt_fmt_call_args_or_trailing_block: fn(f: &JetFmt, args: [CallArg], source_sta
         jfmt_emit_leading(f, template_arg.span.end)
         if !f.at_line_start -> jfmt_newline(f)
         jfmt_write(f, "}}")
-    } else if trailing == .Val(lambda) {
-        jfmt_fmt_trailing_lambda(f, lambda)
     }
 }
 
@@ -2520,23 +2537,6 @@ jfmt_fmt_call_args_multiline: fn(f: &JetFmt, args: [CallArg], source: JetFmtSour
     if !f.at_line_start -> jfmt_newline(f)
 }
 
-jfmt_fmt_trailing_lambda: fn(f: &JetFmt, lambda: Lambda) {
-    jfmt_write(f, " ")
-    if lambda.body == {
-        .Expr(value) -> {
-            jfmt_write(f, "{{ ")
-            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-            jfmt_write(f, " }}")
-        }
-        .Block(statements) -> {
-            jfmt_write(f, "{{")
-            jfmt_newline(f)
-            jfmt_fmt_limited_block(f, statements, lambda.span.end)
-            jfmt_end_block(f)
-        }
-    }
-}
-
 jfmt_fmt_call_args: fn(f: &JetFmt, args: [CallArg]) {
     loop (index, arg) in args {
         if index > 0 -> jfmt_write(f, ", ")
@@ -2545,7 +2545,8 @@ jfmt_fmt_call_args: fn(f: &JetFmt, args: [CallArg]) {
 }
 
 jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
-    // Calls are plain: a parameter's mark lives in the signature only.
+    // Calls are plain: a parameter's mark lives in the signature. Under
+    // `#Policy(writes: .Explicit)` a written `&`/`&&` stays (CallArg.mark).
     // `f(...xs)` call spread.
     if arg.spread -> jfmt_write(f, "...")
     // S61: the call-site argument label `name:`.
@@ -2553,6 +2554,7 @@ jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
         jfmt_write(f, label.name)
         jfmt_write(f, ": ")
     }
+    if arg.mark == .Val(mark) -> jfmt_write(f, if mark.access == PlaceAccess.Take -> "&&" else -> "&")
     jfmt_fmt_expr(f, arg.expr, JFMT_PREC_OR_FALLBACK)
 }
 

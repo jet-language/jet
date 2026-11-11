@@ -1,4 +1,9 @@
-
+// The Die interval proves `faces[roll.raw() - 1]`
+// is inside the six faces, so the read can't stop and `-[!Panic]>` holds.
+// `jet prove --lens solver` reports that index as one proved obligation.
 Die: distinct Int(1..6)
 pick: fn(faces: [String#6], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
-run: fn() {}
+run: fn() {
+    faces: [String#6]{"one", "two", "three", "four", "five", "six"}
+    print(pick(faces, Die.from_int(3)))
+}

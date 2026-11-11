@@ -50,10 +50,10 @@ impl NixEvaluator {
             .Derivation(fields, request) -> {
                 if request == {
                     .Val(evaluated) -> return Ok(evaluated)
-                    else -> return self.derivation_from_fields(fields)
+                    .None -> return self.derivation_from_fields(fields)
                 }
             }
-            else -> {}
+            .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .List(_) | .AttrSet(_) | .Function(_, _) | .Native(_) -> {}
         }
         Err(NixEvalError.Unsupported("derivation evaluation must return a derivation, got {value.type_name()}"))
     }
@@ -89,7 +89,7 @@ impl NixEvaluator {
                 text: evaluated.env.get(field) ?? return None
                 Val(self.value_thunk(NixEvalValue.Str(text)))
             }
-            else -> self.attr_field(fields, field)
+            .None -> self.attr_field(fields, field)
         }
     }
 
@@ -98,7 +98,7 @@ impl NixEvaluator {
     derivation_attribute: fn(&self, fields: [String: Int], request: NixEvalDerivation?, field: String) -> NixEvalValue NixEvalError! {
         if request == {
             .Val(evaluated) -> Ok(self.request_field(evaluated, field))
-            else -> {
+            .None -> {
                 found: self.field_value(fields, field)
                 value: found ?? return Err(NixEvalError.Missing(field))
                 Ok(value)
@@ -159,10 +159,10 @@ impl NixEvaluator {
                             args.push(text.value)
                         }
                     }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "derivation argument list", actual: value.type_name()})
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> return Err(NixEvalError.TypeMismatch{expected: "derivation argument list", actual: value.type_name()})
                 }
             }
-            else -> {}
+            .None -> {}
         }
 
         outputs_declared: fields.get("outputs") != None
@@ -178,10 +178,10 @@ impl NixEvaluator {
                             output_names.push(nixeval_derivation_string(forced))
                         }
                     }
-                    else -> return Err(NixEvalError.TypeMismatch{expected: "derivation output list", actual: value.type_name()})
+                    .Null | .Bool(_) | .Integer(_) | .Str(_) | .Contextual(_, _) | .Path(_) | .Package(_) | .Packages(_) | .CrossPackages(_) | .BuiltinsNamespace | .LibraryNamespace | .AttrSet(_) | .Derivation(_, _) | .Function(_, _) | .Native(_) -> return Err(NixEvalError.TypeMismatch{expected: "derivation output list", actual: value.type_name()})
                 }
             }
-            else -> {}
+            .None -> {}
         }
         if output_names.len() == 0 || output_names.len() > NIXEVAL_MAX_DERIVATION_OUTPUTS {
             return Err(NixEvalError.ResourceLimit("derivation must declare between one and {NIXEVAL_MAX_DERIVATION_OUTPUTS} outputs"))
@@ -212,7 +212,7 @@ impl NixEvaluator {
                 }
                 hash_hex = nixeval_normalize_hash_hex(hash)
             }
-            else -> {
+            .None -> {
                 if output_hash_algo != None || output_hash_mode != None {
                     return Err(NixEvalError.Invalid("outputHashAlgo/outputHashMode require outputHash"))
                 }

@@ -48,7 +48,7 @@ PRV_DER_MAX_BYTES: 5679
 rsa_failure: fn(e: rsa.RSAError) -> pk.PKError Never! {
     if e == {
         .Asn1(a) -> .Asn1(a)
-        else -> .RSA(e)
+        .BadInput(_) | .InvalidPadding | .KeyGenFailed(_) | .KeyCheckFailed(_) | .PublicFailed(_) | .PrivateFailed(_) | .VerifyFailed | .OutputTooLarge | .RNGFailed | .Mpi(_) -> .RSA(e)
     }
 }
 
@@ -195,7 +195,7 @@ pk_write_key_pem: fn(key: pk.PKContext) -> [U8] pk.PKError! {
     label: if kind == {
         .RSA -> "RSA PRIVATE KEY"
         .ECKey -> if pk.pk_is_rfc8410(key) -> "PRIVATE KEY" else -> "EC PRIVATE KEY"
-        else -> return Err(.FeatureUnavailable)
+        .ECKeyDH | .ECDSA | .RSAAlt | .RSASSAPSS | .Opaque -> return Err(.FeatureUnavailable)
     }
     buf := cipher.zero_bytes(PRV_DER_MAX_BYTES)
     p := buf.len()

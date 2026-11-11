@@ -305,32 +305,33 @@ ListenerKind: enum { Canvas; Application }
 DeadlineStream: struct {
     stream: TcpStream
     deadline: Instant
-}
-impl DeadlineStream {
+
     new: fn(stream: TcpStream, deadline: Instant) -> Self { Self(stream: stream, deadline: deadline) }
     try_clone: fn(self: Self) -> Self Err! { .Ok(Self.new(self.stream.try_clone(), self.deadline)) }
     remaining: fn(self: Self) -> Duration Err! {
         remaining: self.deadline.saturating_duration_since(Instant.now()) // GATE #4494: monotonic clock.
         if remaining.is_zero() { .Err(Error.new(ErrorKind.TimedOut, "devserver request deadline exceeded")) } else { .Ok(remaining) }
     }
-}
-impl DeadlineStream.Read {
-    read: fn(self: Self, buffer: [U8]) -> USize Err! {
-        remaining: self.remaining()
-        self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
-        return self.stream.read(buffer)
+
+    impl Read {
+        read: fn(self: Self, buffer: [U8]) -> USize Err! {
+            remaining: self.remaining()
+            self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
+            return self.stream.read(buffer)
+        }
     }
-}
-impl DeadlineStream.Write {
-    write: fn(self: Self, buffer: [U8]) -> USize Err! {
-        remaining: self.remaining()
-        self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
-        return self.stream.write(buffer)
-    }
-    flush: fn(self: &Self) Err! {
-        remaining: self.remaining()
-        self.stream.set_write_timeout(.Val(remaining))
-        return self.stream.flush()
+
+    impl Write {
+        write: fn(self: Self, buffer: [U8]) -> USize Err! {
+            remaining: self.remaining()
+            self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
+            return self.stream.write(buffer)
+        }
+        flush: fn(self: &Self) Err! {
+            remaining: self.remaining()
+            self.stream.set_write_timeout(.Val(remaining))
+            return self.stream.flush()
+        }
     }
 }
 // One thread per accepted connection, bounded by MAX_CONNECTION_THREADS.

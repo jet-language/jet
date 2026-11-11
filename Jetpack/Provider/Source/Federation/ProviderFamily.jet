@@ -11,7 +11,7 @@ impl ProviderFamily {
     is_local_or_first_party: fn(self) -> Bool Never! {
         if self == {
             .Core | .Nix | .Path | .JetRegistry | .JetPackage -> true
-            else -> false
+            .Github | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist -> false
         }
     }
 
@@ -22,7 +22,7 @@ impl ProviderFamily {
         kind: row.kind ?? return false
         if provider_for(kind) == {
             .Unsupported(_) -> false
-            else -> true
+            .Nix | .Core | .Cran | .LuaRocks | .ScriptRegistry(_) | .Native -> true
         }
     }
 }

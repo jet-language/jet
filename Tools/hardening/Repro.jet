@@ -110,7 +110,7 @@ shape: fn(value: Dyn) -> String Never! {
         .Text(_) -> "text"
         .Array(_) -> "array"
         .Object(_) -> "object"
-        else -> "number"
+        .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> "number"
     }
 }
 
@@ -128,7 +128,7 @@ field_int: fn(tree: Dyn, name: String) -> Int? Never! {
             parsed: Int.parse(lexeme) ?? return None
             return Val(parsed)
         }
-        else -> {}
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
     }
     None
 }

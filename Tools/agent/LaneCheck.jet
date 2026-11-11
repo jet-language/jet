@@ -463,7 +463,7 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
         }
         .Err(error) -> if error == {
             .ResourceLimit(_) -> Ran{code: 125, text: "lane-check: {argv[0]} stopped at its memory cap (JET_CHECK_MEM={memory}): {error}\n"}
-            else -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .AlreadyExists(_) | .Unsupported(_) -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
         }
     }
 }
@@ -1053,7 +1053,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 
 #Test("a Prelude source is routed to its generator check and the prelude mode") {
     assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
-    assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Web/Core/Time.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
+    assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Assets/host.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
     assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")

@@ -7,7 +7,7 @@ run: fn() {
             .Ok(_) -> false
             .Err(error) -> if error == {
                 .InvalidURL -> true
-                else -> false
+                .InvalidHandshake | .Protocol | .Timeout | .Closed | .Cancelled | .UnsupportedTarget | .MessageTooLarge(_) | .IO(_) -> false
             }
         }
         assert(rejected)

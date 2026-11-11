@@ -67,7 +67,7 @@ sema_process_handle_receiver_name: fn(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> name
         .Tagged(_, inner) -> sema_process_handle_receiver_name(inner)
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
 }
 
@@ -221,7 +221,7 @@ sema_process_failure_carrier: fn(result: Type) -> TFailureCarrier Never! {
         .Named(name) -> {
             if name == "Never" -> TFailureCarrier.Diverges{value: result} else -> TFailureCarrier.Infallible
         }
-        else -> TFailureCarrier.Infallible
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
     }
 }
 
@@ -440,7 +440,7 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     }
     params: if target.signature == {
         .Fn(params, _, _, _, _, _) -> params
-        else -> panic("ProcessSpec.keep_open's source body has a function type")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("ProcessSpec.keep_open's source body has a function type")
     }
     handle_type: sema_call_resolved_type(params[1], environment, program)
     slot_type: sema_call_resolved_type(params[2], environment, program)
@@ -584,26 +584,6 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
     }
     sema_process_finish(receiver_value, THandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, scopes, context, diagnostics)
-}
-
-// Projects the public ProcessChild handle fields using the compiler's builtin
-// nominal/field identity, so Places can share the ordinary TField path.
-sema_process_child_field: fn(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_process_handle_receiver_name(base.ty) != "ProcessChild" -> return None
-    field_ty: if member == {
-        "stdin" -> Val(sema_process_named("ProcessStdin"))
-        "stdout" -> Val(sema_process_named("ProcessStdoutStream"))
-        "stderr" -> Val(sema_process_named("ProcessStderrStream"))
-        "terminal" -> Val(Type.Option{inner: sema_process_named("TerminalSession")})
-        else -> None
-    } ?? return None
-    owner := symbol_id(SymbolKind.Type, "", "", "ProcessChild")
-    field_id := symbol_id(SymbolKind.Field, "", owner.key, member)
-    field_symbol := Symbol{id: field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: Val(owner.key), span: span, ty: Val(field_ty), visibility: 2}
-    context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
-    reference := TFieldRef{owner: Val(owner), field: field_id, name: member, ty: field_ty, boxed: false}
-    value := sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
-    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

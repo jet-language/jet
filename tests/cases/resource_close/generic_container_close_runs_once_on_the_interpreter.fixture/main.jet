@@ -1,14 +1,17 @@
 //! #4792: instantiated owned fields and List/Option payloads retain Close.
 //! Each id is closed once; replacing a moved field must not close its empty slot.
 //! String storage makes Secret owned: ^ must consume rather than copy its field.
-Secret: struct { id: Int, token: String }
+Secret: struct {
+    id: Int
+    token: String
 
-impl Secret.Close {
-    close: fn(&&self) {
-        print("close {self.id}")
-        if self.id == 8 {
-            nested: Secret{id: 9, token: "owned"}
-            print("nested {nested.id}")
+    impl Close {
+        close: fn(&&self) {
+            print("close {self.id}")
+            if self.id == 8 {
+                nested: Secret{id: 9, token: "owned"}
+                print("nested {nested.id}")
+            }
         }
     }
 }
@@ -17,13 +20,16 @@ Wrapper: struct<T> { value: T }
 Pair: struct<T> { first: T, second: T }
 ConcretePair: struct { first: Secret, second: Secret }
 PlainPair: struct { first: String, second: String }
-DrainPair: struct { first: Secret, second: Secret }
+DrainPair: struct {
+    first: Secret
+    second: Secret
 
-impl DrainPair.Close {
-    close: fn(&&self) {
-        print("drain")
-        taken: self.first.move()
-        print("drained {taken.id}")
+    impl Close {
+        close: fn(&&self) {
+            print("drain")
+            taken: self.first.move()
+            print("drained {taken.id}")
+        }
     }
 }
 

@@ -42,6 +42,6 @@ use {
     value: tree.field("value") ?? panic("status value")
     if value == {
         .Number(lexeme) -> assert_eq(lexeme, "1.25")
-        else -> panic("status value must stay the JSON number 1.25")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("status value must stay the JSON number 1.25")
     }
 }

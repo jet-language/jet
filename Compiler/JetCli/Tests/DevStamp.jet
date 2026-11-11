@@ -1,6 +1,8 @@
 // `jet dev`'s change stamp on a real filesystem.
 use {
-    jet_cli.[jet_cli_dev_stamp]
+    jet_cli.[jet_cli_dev_inputs_current, jet_cli_dev_inputs_stamp, jet_cli_dev_stamp]
+    jet_driver.[JetDriverComptimeInputRecord]
+    cli_crypto: core.crypto
     cli_sys: core.sys
     cli_files: core.files
     cli_process: core.process
@@ -18,4 +20,24 @@ use {
     cli_files.write("{root}/app.jet", "run: fn() {{ print(2) }}\n") ?? panic("edited source")
     assert(jet_cli_dev_stamp(root, [String]{}) != first)
     cli_files.remove_all(root) ?? panic("dev stamp cleanup")
+}
+
+#Test("jet dev sees an edit to a file a comptime block read") {
+    root: "{cli_sys.temp_dir()}/jet-dev-inputs-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    loop cli_time.unix_ns() % 1000000000 >= 500000000 -> cli_time.sleep(10ms)
+    file: "{root}/data.txt"
+    cli_files.write(file, "first") ?? panic("first input")
+    read: [JetDriverComptimeInputRecord]{JetDriverComptimeInputRecord{path: "data.txt", file: file, sha256: cli_crypto.sha256("first".bytes()).hex()}}
+    assert(jet_cli_dev_inputs_current(read), "the input still holds the bytes the build read")
+    package: jet_cli_dev_stamp(root, [String]{})
+    first: jet_cli_dev_inputs_stamp(read)
+    cli_time.sleep(50ms)
+    cli_files.write(file, "second") ?? panic("edited input")
+    // The package stamp covers .jet sources and `d.watch` paths only; the
+    // comptime input stamp is what sees the asset change.
+    assert_eq(jet_cli_dev_stamp(root, [String]{}), package)
+    assert(jet_cli_dev_inputs_stamp(read) != first, "an edited comptime input moves the stamp")
+    assert(!jet_cli_dev_inputs_current(read), "an edited comptime input no longer holds the bytes the build read")
+    cli_files.remove_all(root) ?? panic("dev inputs cleanup")
 }

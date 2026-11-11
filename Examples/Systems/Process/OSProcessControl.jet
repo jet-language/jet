@@ -1,5 +1,5 @@
 // #1465: POSIX process/session control under `#Unsafe`, gated by build OS
-// target. Beginner `os_facts.jet` stays fact-only.
+// target. Beginner `OSFacts.jet` stays fact-only.
 package: {
     name: "os_process_control"
     authority: { allow: [Env, FS.Write, IO, Mem.Alloc] }
@@ -11,7 +11,7 @@ use {
 }
 
 run: fn() {
-    comptime if $build.os == {
+    comptime if #build.target.os == {
         .Linux -> { posix_control() }
         .MacOS -> { posix_control() }
         else -> {

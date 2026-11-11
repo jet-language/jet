@@ -2,9 +2,8 @@
 // Three encodings evaluate the same two programs,
 //   if 1 + 2 == 3 then 10 + 5 else 0        (an Int program)
 //   if 2 == 2 then 4 == 5 else true         (a Bool program)
-// using only generic types, enums and traits. Jet has no GADTs; see
-// tests/ui/typed_ast_ill_typed.jet for the ill-typed nodes each encoding
-// rejects before the program runs.
+// using only generic types, enums and traits. Jet has no GADTs; each encoding
+// rejects ill-typed nodes before the program runs.
 
 // (a) One enum per result type. A constructor's result type is the enum it
 // belongs to, so an ill-typed node cannot be built and both evaluators are
@@ -79,20 +78,20 @@ eval_node: fn(n: Node) -> Value {
         .Add(a, b) -> if eval_node(a) == {
             .I(x) -> if eval_node(b) == {
                 .I(y) -> Value.I(x + y)
-                else -> Value.Stuck("add rhs")
+                .B(_) | .Stuck(_) -> Value.Stuck("add rhs")
             }
-            else -> Value.Stuck("add lhs")
+            .B(_) | .Stuck(_) -> Value.Stuck("add lhs")
         }
         .Eq(a, b) -> if eval_node(a) == {
             .I(x) -> if eval_node(b) == {
                 .I(y) -> Value.B(x == y)
-                else -> Value.Stuck("eq rhs")
+                .B(_) | .Stuck(_) -> Value.Stuck("eq rhs")
             }
-            else -> Value.Stuck("eq lhs")
+            .B(_) | .Stuck(_) -> Value.Stuck("eq lhs")
         }
         .If(c, t, e) -> if eval_node(c) == {
             .B(k) -> if k -> eval_node(t) else -> eval_node(e)
-            else -> Value.Stuck("if cond")
+            .I(_) | .Stuck(_) -> Value.Stuck("if cond")
         }
     }
 }
@@ -100,14 +99,14 @@ eval_node: fn(n: Node) -> Value {
 run_int: fn(e: Expr<Int>) -> Int {
     if eval_node(e.node) == {
         .I(v) -> v
-        else -> 0 - 1
+        .B(_) | .Stuck(_) -> 0 - 1
     }
 }
 
 run_bool: fn(e: Expr<Bool>) -> Bool {
     if eval_node(e.node) == {
         .B(v) -> v
-        else -> false
+        .I(_) | .Stuck(_) -> false
     }
 }
 

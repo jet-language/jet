@@ -149,92 +149,7 @@ Face: struct {
     priv kern_pairs: [Int: Int]
     priv classes: Ranges
     priv fingerprint: Int
-}
 
-// A table's place in the font.
-TableSpan: struct {
-    offset: Int
-    length: Int
-}
-
-/// Why a font cannot be used: the table and the fault, in words.
-#Error
-FontError: struct {
-    reason: String
-}
-
-/// Reads a TrueType font. A font this reader cannot use, or a damaged one,
-/// is a `FontError`.
-face: fn(bytes: [U8]) -> Face FontError! {
-    if bytes.len() < 12 -> return Err(font_error("a font needs at least 12 bytes, got {bytes.len()}"))
-    version: raw32(bytes, 0)
-    if version == 1330926671 -> return Err(font_error("CFF (PostScript) outlines are not supported; use a TrueType (glyf) build"))
-    if version == 1953784678 -> return Err(font_error("font collections are not supported; pass one font"))
-    if version != 65536 && version != 1953658213 -> return Err(font_error("not a TrueType font (sfnt version {version})"))
-    tables: directory(bytes)
-    head: table(tables, "head") ?? return Err(font_error("the font has no head table"))
-    maxp: table(tables, "maxp") ?? return Err(font_error("the font has no maxp table"))
-    hhea: table(tables, "hhea") ?? return Err(font_error("the font has no hhea table"))
-    hmtx: table(tables, "hmtx") ?? return Err(font_error("the font has no hmtx table"))
-    cmap: table(tables, "cmap") ?? return Err(font_error("the font has no cmap table"))
-    glyf: table(tables, "glyf") ?? return Err(font_error(if table(tables, "CFF ") == .Val(_) -> "CFF (PostScript) outlines are not supported; use a TrueType (glyf) build" else -> "the font has no glyf table"))
-    loca: table(tables, "loca") ?? return Err(font_error("the font has no loca table"))
-    within(head, 54, "head")
-    within(maxp, 6, "maxp")
-    within(hhea, 36, "hhea")
-    units: raw16(bytes, head.offset + 18)
-    if units < 16 || units > 16384 -> return Err(font_error("head: units per em {units} is outside 16..16384"))
-    loca_format: raw16(bytes, head.offset + 50)
-    if loca_format > 1 -> return Err(font_error("head: index-to-loc format {loca_format} is neither 0 nor 1"))
-    glyph_count: raw16(bytes, maxp.offset + 4)
-    if glyph_count == 0 -> return Err(font_error("maxp: the font has no glyphs"))
-    hmetrics: raw16(bytes, hhea.offset + 34)
-    if hmetrics == 0 || hmetrics > glyph_count -> return Err(font_error("hhea: {hmetrics} horizontal metrics for {glyph_count} glyphs"))
-    within(hmtx, hmetrics * 4, "hmtx")
-    loca_width: if loca_format == 1 -> 4 else -> 2
-    within(loca, (glyph_count + 1) * loca_width, "loca")
-    vertical: vertical_metrics(bytes, hhea, table(tables, "OS/2"))
-    picked: pick_cmap(bytes, cmap)
-    out := Face{
-        bytes: bytes.copy(), glyph_count: glyph_count, units: units,
-        ascent: vertical.ascent, descent: vertical.descent, line_gap: vertical.line_gap,
-        long_loca: loca_format == 1, loca: loca.offset, glyf: glyf.offset, glyf_length: glyf.length,
-        hmtx: hmtx.offset, hmetrics: hmetrics,
-        cmap: picked.offset, cmap_format: picked.format, cmap_count: picked.count,
-        lookups: [PairLookup]{}, kern_pairs: [Int: Int]{}, classes: no_ranges(),
-        fingerprint: fingerprint(bytes),
-    }
-    // Every outline is read once now, so later queries cannot fail.
-    loop id in 0..<glyph_count {
-        points := [OutlinePoint]{}
-        ends := [Int]{}
-        glyph_points(out, id, 0, UNSCALED, points, ends)
-    }
-    if table(tables, "GPOS") == .Val(gpos) -> out.lookups = kerning_lookups(bytes, gpos)
-    if out.lookups.len() == 0 && table(tables, "kern") == .Val(kern) -> out.kern_pairs = kern_table(bytes, kern)
-    mask := 0
-    loop lookup in out.lookups -> mask = mask.bit_or(lookup.skip_mask)
-    if mask != 0 && table(tables, "GDEF") == .Val(gdef) -> out.classes = glyph_classes(bytes, gdef)
-    Ok(out)
-}
-
-/// The built-in face, Atkinson Hyperlegible Next Regular.
-regular: fn() -> Face {
-    face(data.FONT_REGULAR) ?? panic("the built-in regular font does not load: {err:Debug}")
-}
-
-/// The built-in face, Atkinson Hyperlegible Next Bold.
-bold: fn() -> Face {
-    face(data.FONT_BOLD) ?? panic("the built-in bold font does not load: {err:Debug}")
-}
-
-/// The license of the built-in faces: the SIL Open Font License 1.1, with
-/// their copyright notice. A program that ships them ships this text.
-license: fn() -> String {
-    data.FONT_LICENSE
-}
-
-impl Face {
     /// How many glyphs the face has. Glyph ids run from 0, the glyph drawn
     /// for a missing character.
     glyph_count: fn(self) -> Int {
@@ -335,6 +250,89 @@ impl Face {
     }
 }
 
+// A table's place in the font.
+TableSpan: struct {
+    offset: Int
+    length: Int
+}
+
+/// Why a font cannot be used: the table and the fault, in words.
+#Error
+FontError: struct {
+    reason: String
+}
+
+/// Reads a TrueType font. A font this reader cannot use, or a damaged one,
+/// is a `FontError`.
+face: fn(bytes: [U8]) -> Face FontError! {
+    if bytes.len() < 12 -> return Err(font_error("a font needs at least 12 bytes, got {bytes.len()}"))
+    version: raw32(bytes, 0)
+    if version == 1330926671 -> return Err(font_error("CFF (PostScript) outlines are not supported; use a TrueType (glyf) build"))
+    if version == 1953784678 -> return Err(font_error("font collections are not supported; pass one font"))
+    if version != 65536 && version != 1953658213 -> return Err(font_error("not a TrueType font (sfnt version {version})"))
+    tables: directory(bytes)
+    head: table(tables, "head") ?? return Err(font_error("the font has no head table"))
+    maxp: table(tables, "maxp") ?? return Err(font_error("the font has no maxp table"))
+    hhea: table(tables, "hhea") ?? return Err(font_error("the font has no hhea table"))
+    hmtx: table(tables, "hmtx") ?? return Err(font_error("the font has no hmtx table"))
+    cmap: table(tables, "cmap") ?? return Err(font_error("the font has no cmap table"))
+    glyf: table(tables, "glyf") ?? return Err(font_error(if table(tables, "CFF ") == .Val(_) -> "CFF (PostScript) outlines are not supported; use a TrueType (glyf) build" else -> "the font has no glyf table"))
+    loca: table(tables, "loca") ?? return Err(font_error("the font has no loca table"))
+    within(head, 54, "head")
+    within(maxp, 6, "maxp")
+    within(hhea, 36, "hhea")
+    units: raw16(bytes, head.offset + 18)
+    if units < 16 || units > 16384 -> return Err(font_error("head: units per em {units} is outside 16..16384"))
+    loca_format: raw16(bytes, head.offset + 50)
+    if loca_format > 1 -> return Err(font_error("head: index-to-loc format {loca_format} is neither 0 nor 1"))
+    glyph_count: raw16(bytes, maxp.offset + 4)
+    if glyph_count == 0 -> return Err(font_error("maxp: the font has no glyphs"))
+    hmetrics: raw16(bytes, hhea.offset + 34)
+    if hmetrics == 0 || hmetrics > glyph_count -> return Err(font_error("hhea: {hmetrics} horizontal metrics for {glyph_count} glyphs"))
+    within(hmtx, hmetrics * 4, "hmtx")
+    loca_width: if loca_format == 1 -> 4 else -> 2
+    within(loca, (glyph_count + 1) * loca_width, "loca")
+    vertical: vertical_metrics(bytes, hhea, table(tables, "OS/2"))
+    picked: pick_cmap(bytes, cmap)
+    out := Face{
+        bytes: bytes.copy(), glyph_count: glyph_count, units: units,
+        ascent: vertical.ascent, descent: vertical.descent, line_gap: vertical.line_gap,
+        long_loca: loca_format == 1, loca: loca.offset, glyf: glyf.offset, glyf_length: glyf.length,
+        hmtx: hmtx.offset, hmetrics: hmetrics,
+        cmap: picked.offset, cmap_format: picked.format, cmap_count: picked.count,
+        lookups: [PairLookup]{}, kern_pairs: [Int: Int]{}, classes: no_ranges(),
+        fingerprint: fingerprint(bytes),
+    }
+    // Every outline is read once now, so later queries cannot fail.
+    loop id in 0..<glyph_count {
+        points := [OutlinePoint]{}
+        ends := [Int]{}
+        glyph_points(out, id, 0, UNSCALED, points, ends)
+    }
+    if table(tables, "GPOS") == .Val(gpos) -> out.lookups = kerning_lookups(bytes, gpos)
+    if out.lookups.len() == 0 && table(tables, "kern") == .Val(kern) -> out.kern_pairs = kern_table(bytes, kern)
+    mask := 0
+    loop lookup in out.lookups -> mask = mask.bit_or(lookup.skip_mask)
+    if mask != 0 && table(tables, "GDEF") == .Val(gdef) -> out.classes = glyph_classes(bytes, gdef)
+    Ok(out)
+}
+
+/// The built-in face, Atkinson Hyperlegible Next Regular.
+regular: fn() -> Face {
+    face(data.FONT_REGULAR) ?? panic("the built-in regular font does not load: {err:Debug}")
+}
+
+/// The built-in face, Atkinson Hyperlegible Next Bold.
+bold: fn() -> Face {
+    face(data.FONT_BOLD) ?? panic("the built-in bold font does not load: {err:Debug}")
+}
+
+/// The license of the built-in faces: the SIL Open Font License 1.1, with
+/// their copyright notice. A program that ships them ships this text.
+license: fn() -> String {
+    data.FONT_LICENSE
+}
+
 // ---- metrics -------------------------------------------------------------
 
 Vertical: struct {
@@ -406,6 +404,13 @@ GlyphCache: struct {
     priv older: [Int: GlyphMask]
     priv recent_bytes: Int
     priv budget: Int
+
+    /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
+    /// pixel, drawn the first time and kept.
+    glyph: fn(&self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
+        quarter: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 4.0) else -> 0
+        cached_mask(self, face, id, size_64(size_px), quarter)
+    }
 }
 
 /// An empty glyph cache with a budget of CACHE_BYTES_MAX bytes.
@@ -418,15 +423,6 @@ cache: fn() -> GlyphCache {
 /// kept, so a tiny budget still answers every query, drawing more often.
 cache_within: fn(budget: Int) -> GlyphCache {
     GlyphCache{faces: [Int]{}, recent: [Int: GlyphMask]{}, older: [Int: GlyphMask]{}, recent_bytes: 0, budget: budget}
-}
-
-impl GlyphCache {
-    /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
-    /// pixel, drawn the first time and kept.
-    glyph: fn(&self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
-        quarter: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 4.0) else -> 0
-        cached_mask(self, face, id, size_64(size_px), quarter)
-    }
 }
 
 // Per-pixel accumulators, `width + 1` cells a row (the last catches what

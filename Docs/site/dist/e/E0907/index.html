@@ -36,23 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `mul: fn(self, rhs: Money) -&gt; Money`, matching the `Mul` declaration exactly, including `self`, types, labels, return type, and effects.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0907</code>: <code>tests/ui/display_bad_receiver.stderr</code>.</p>
-<pre class="diag">Error [jet.TraitMethodMismatch]: `display` doesn&#39;t match the `Display` contract
-  --&gt; tests/ui/display_bad_receiver.jet:3:5
+<p>First UI snapshot mentioning <code>E0907</code>: <code>tests/ui/checked_text_build_contract.stderr</code>.</p>
+<pre class="diag">Error [jet.TraitMethodMismatch]: `type Hole` doesn&#39;t match the `CheckedText` contract
+  --&gt; tests/ui/checked_text_build_contract.jet:11:5
     |
-  3 |     display: fn(&amp;&amp;self) -&gt; String { &quot;label&quot; }
-    |     ^^^^^^^
+ 11 |     Hole: Int
+    |     ^^^^
  Why: A trait implementation must use the trait method&#39;s receiver, parameters, return type, and effects
- Fix: Write `display: fn(self) -&gt; String`, matching the `Display` declaration exactly, including `self`, types, labels, return type, and effects
+ Fix: Write a `build` method that receives the holes, matching the `CheckedText` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 
-Error [jet.TraitMethodMismatch]: `display` doesn&#39;t match the `Display` contract
-  --&gt; tests/ui/display_bad_receiver.jet:9:9
+Error [jet.TraitMethodMismatch]: `build` doesn&#39;t match the `CheckedText` contract
+  --&gt; tests/ui/checked_text_build_contract.jet:29:9
     |
-  9 |         display: fn(&amp;self) -&gt; String { &quot;label&quot; }
-    |         ^^^^^^^
+ 29 |         build: fn(parts: [String], holes: [String]) -[]&gt; String { parts.join(&quot;&quot;) }
+    |         ^^^^^
  Why: A trait implementation must use the trait method&#39;s receiver, parameters, return type, and effects
- Fix: Write `display: fn(self) -&gt; String`, matching the `Display` declaration exactly, including `self`, types, labels, return type, and effects
+ Fix: Write `build: fn(parts: [String], holes: [Int]) -[]&gt; Record`, matching the `CheckedText` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

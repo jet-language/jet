@@ -5,7 +5,7 @@
 /* The Jet struct `Mixed` of main.jet, which has no #Layout, as the compiler
    places it: fields by descending alignment (declaration order among equals),
    then padding to a multiple of 8. main.jet checks every fact below against
-   Mixed.$layout before it passes a Mixed. */
+   Mixed.reflect().layout before it passes a Mixed. */
 typedef struct {
     int64_t b;
     int64_t d;

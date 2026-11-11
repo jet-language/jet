@@ -1,0 +1,41 @@
+Label: trait {
+    label: fn(self) -> String
+}
+
+Shape: struct {
+    side: Int
+}
+
+impl Shape {
+    area: fn(self) -> Int { self.side * self.side }
+}
+
+impl Shape.Display {
+    display: fn(self) -> String { "shape {self.side}" }
+}
+
+Color: enum {
+    Red
+    Blue
+}
+
+impl Color {
+    warm: fn(self) -> Bool {
+        if self == {
+            .Red -> true
+            .Blue -> false
+        }
+    }
+}
+
+#Target(OS.Linux)
+impl Shape.Label {
+    label: fn(self) -> String { "linux shape" }
+}
+
+run: fn() {
+    shape: Shape{side: 3}
+    print(shape.area())
+    print(shape)
+    print(Color.Red.warm())
+}

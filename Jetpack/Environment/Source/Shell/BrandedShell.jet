@@ -299,12 +299,12 @@ ShellScratch: struct {
     empty: fn() -> ShellScratch Never! {
         ShellScratch{scratch_files: [String]{}, scratch_dirs: [String]{}}
     }
-}
 
-impl ShellScratch.Close {
-    close: fn(&&self) -[FS]> {
-        loop path in self.scratch_files -> env_shell_remove_file(path)
-        loop path in self.scratch_dirs -> env_shell_remove_tree(path)
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            loop path in self.scratch_files -> env_shell_remove_file(path)
+            loop path in self.scratch_dirs -> env_shell_remove_tree(path)
+        }
     }
 }
 

@@ -48,8 +48,7 @@ is_application_control_path: fn(path: String) -> Bool {
 // Request ids for web error pages, unique within one host: `werr-1`, `werr-2`, ...
 WebErrorRequestIds: struct {
     next: Int
-}
-impl WebErrorRequestIds {
+
     new: fn() -> WebErrorRequestIds { WebErrorRequestIds{next: 1} }
     issue: fn(&self) -> String {
         id: self.next
@@ -57,7 +56,6 @@ impl WebErrorRequestIds {
         "werr-{id}"
     }
 }
-
 paused_evaluate_error_status: fn(error: PausedEvaluateHostError) -> String {
     if error == {
         .SessionUnavailable -> "409 Conflict"

@@ -222,7 +222,7 @@ store_hook_fact_mismatch: fn(name: String, expected: String, actual: String?) ->
 store_validate_adapter_hook_producer: fn(producer: ProducerRecord, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, require_current_backend: Bool) StoreError! {
     if plan.recipe == {
         .Build(recipe) -> store_validate_build_hook_producer(producer, plan, recipe, table, expectation, require_current_backend)
-        else -> {}
+        .Copy | .Prebuilt(_, _) -> {}
     }
 }
 
@@ -238,7 +238,7 @@ store_validate_build_hook_producer: fn(producer: ProducerRecord, plan: AdapterPl
     loop step in recipe.steps {
         if step == {
             .Exec(_, _) -> executes = true
-            else -> {}
+            .Fetch(_, _) | .Install(_, _) | .InstallTree(_, _) -> {}
         }
     }
     if {
@@ -326,7 +326,7 @@ store_validate_build_hook_producer: fn(producer: ProducerRecord, plan: AdapterPl
 store_validate_cached_adapter_hook: fn(entry: StoreEntry, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation) StoreError! {
     if plan.recipe == {
         .Build(_) -> {}
-        else -> return
+        .Copy | .Prebuilt(_, _) -> return
     }
     if entry.cache_identity != expectation.identity {
         return Err(StoreError.InvalidData("adapter cache identity is not the exact build-hook identity"))
@@ -338,7 +338,7 @@ store_validate_cached_adapter_hook: fn(entry: StoreEntry, plan: AdapterPlan, tab
 store_bind_adapter_hook_identity: fn(realized: &Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) StoreError! {
     if plan.recipe == {
         .Build(_) -> {}
-        else -> return
+        .Copy | .Prebuilt(_, _) -> return
     }
     store_validate_adapter_hook_producer(realized.producer, plan, table, expectation, true)
     subject: realized.producer.facts.get("build.identity") ?? return Err(store_hook_fact_mismatch("build.identity", "exact subject", None))

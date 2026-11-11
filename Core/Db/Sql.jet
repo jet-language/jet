@@ -46,8 +46,7 @@ JetSQLSelectItem: enum {
     Wildcard
     Field(field: String, alias: String?)
     Aggregate(function: JetSQLAggregate, field: String?, alias: String?)
-}
-impl JetSQLSelectItem {
+
     // Rust output_name:45–58.
     output_name: fn(self) -> String Never! {
         if self == {
@@ -72,7 +71,6 @@ impl JetSQLSelectItem {
         }
     }
 }
-
 #Test("SQL projection field access returns owned names without consuming items") {
     field: JetSQLSelectItem.Field{field: "price", alias: Val("display")}
     assert_eq(field.field(), Val("price"))
@@ -324,8 +322,9 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
 // Rust JetSqlValue:108–168. Public SQL scalar carrier, distinct from
 // Core Dyn/DBValue; adapters marshal only at entry.
 #Equatable
-JetSQLValue: enum { Null Bool(Bool) Int(I64) Float(Float) Text(String) }
-impl JetSQLValue {
+JetSQLValue: enum {
+    Null Bool(Bool) Int(I64) Float(Float) Text(String)
+
     literal: fn(token: String) -> JetSQLValue Never! {
         trimmed := sql_text.trim(token) // #4303
         bytes: sql_text.utf8_bytes(trimmed)
@@ -354,7 +353,7 @@ compare_sql_cell: fn(left: String, operator: String, right: String) -> Bool Neve
             if left == "true" -> value = Val(.Bool(true))
             if left == "false" -> value = Val(.Bool(false))
         }
-        else -> {}
+        .Null | .Text(_) -> {}
     }
     sql_compare(value ?? JetSQLValue.Text(left.copy()), operator, literal)
 }
@@ -395,7 +394,7 @@ sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?,
                     all_int = false
                     float_sum += real
                 }
-                else -> {}
+                .Null | .Bool(_) | .Text(_) -> {}
             }
         } else {
             if function != .Min && function != .Max -> next
@@ -546,7 +545,7 @@ priv internal: module {
         if value == {
             .Int(number) -> Val(approx(number))
             .Float(number) -> Val(number)
-            else -> None
+            .Null | .Bool(_) | .Text(_) -> None
         }
     }
     value_key: fn(value: JetSQLValue) -> String Never! {

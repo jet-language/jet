@@ -1,0 +1,26 @@
+# A loop is versioned behind an IntBig guard only when the guard gains
+# something (OptVersion.jet ir_opt_version_function). `squares` sums
+# values bounded by its trip count, so the ranges prove its loop's Ints
+# inline without a guard. Its loop stays one copy and no stepped index of it
+# is guarded. `total` sums list elements no range bounds, so its loop is
+# still guarded before it runs. Every tier prints the same sums.
+fixture: a_loop_its_ranges_prove_keeps_one_copy_without_guards.fixture
+env: NO_COLOR=1
+step: jet inspect decisions --release main.jet
+exit: 0
+stdout: ~ "O2:" # --release runs the O2 passes
+stdout: count "stepped index squares: guarded" = 0 # the ranges prove squares' loop: no copy, no guard
+stdout: ~ "stepped index total: guarded before the Loop" # total's sum needs the guard
+step: jet inspect decisions --optimize=basic main.jet
+exit: 0
+stdout: ~ "O1:" # optimize: basic runs the O1 passes
+stdout: count "stepped index squares: guarded" = 0 # O1 keeps squares' loop plain too
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_loop_its_ranges_prove_keeps_one_copy_without_guards.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_loop_its_ranges_prove_keeps_one_copy_without_guards.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_loop_its_ranges_prove_keeps_one_copy_without_guards.out

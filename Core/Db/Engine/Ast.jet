@@ -1308,18 +1308,18 @@ with_dup: fn(a: &AST, w: Int) -> Int Never! {
 // its window list.
 SQLWindowGatherer: struct {
     sel: Int
-}
 
-impl SQLWindowGatherer.SQLWalker {
-    walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_FUNCTION && has(a, e, EP_WIN_FUNC) -> window_link(a, self.sel, a.exprs[e].y)
-        WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_FUNCTION && has(a, e, EP_WIN_FUNC) -> window_link(a, self.sel, a.exprs[e].y)
+            WRC_CONTINUE
+        }
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! { if s == self.sel -> WRC_CONTINUE else -> WRC_PRUNE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! { if s == self.sel -> WRC_CONTINUE else -> WRC_PRUNE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
 }
 
 gather_select_windows: fn(a: &AST, s: Int) Never! {
@@ -1504,10 +1504,10 @@ SQLVarMatch: trait {
 }
 
 // A NULL Parse: no parameter matches a literal.
-SQLNoParse: struct {}
-
-impl SQLNoParse.SQLVarMatch {
-    var_match: fn(&self, a: &AST, var: Int, e: Int) -> Bool Never! { false }
+SQLNoParse: struct {
+    impl SQLVarMatch {
+        var_match: fn(&self, a: &AST, var: Int, e: Int) -> Bool Never! { false }
+    }
 }
 
 // sqlite3ExprCompare: 0 when two trees are the same, 1 when they differ only
@@ -1727,53 +1727,53 @@ walk_select: fn<W: SQLWalker>(w: &W, a: &AST, s0: Int) -> Int Never! {
 SQLConstWalker: struct {
     code: Int
     cur: Int
-}
 
-impl SQLConstWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
-        if self.code == 2 && has(a, e, EP_OUTER_ON) {
-            self.code = 0
-            return WRC_ABORT
-        }
-        op: a.exprs[e].op
-        if op == tk.TK_FUNCTION {
-            if (self.code >= 4 || has(a, e, EP_CONST_FUNC)) && !has(a, e, EP_WIN_FUNC) {
-                if self.code == 5 -> set_flags(a, e, EP_FROM_DDL)
-                return WRC_CONTINUE
-            }
-            self.code = 0
-            return WRC_ABORT
-        }
-        if op == tk.TK_ID && expr_id_to_true_false(a, e) -> return WRC_PRUNE
-        if op == tk.TK_ID || op == tk.TK_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_AGG_COLUMN {
-            if has(a, e, EP_FIXED_COL) && self.code != 2 -> return WRC_CONTINUE
-            if self.code == 3 && a.exprs[e].itable == self.cur -> return WRC_CONTINUE
-            self.code = 0
-            return WRC_ABORT
-        }
-        if op == tk.TK_IF_NULL_ROW || op == tk.TK_REGISTER || op == tk.TK_DOT {
-            self.code = 0
-            return WRC_ABORT
-        }
-        if op == tk.TK_VARIABLE {
-            if self.code == 5 {
-                a.exprs[e].op = tk.TK_NULL
-            } else if self.code == 4 {
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
+            if self.code == 2 && has(a, e, EP_OUTER_ON) {
                 self.code = 0
                 return WRC_ABORT
             }
+            op: a.exprs[e].op
+            if op == tk.TK_FUNCTION {
+                if (self.code >= 4 || has(a, e, EP_CONST_FUNC)) && !has(a, e, EP_WIN_FUNC) {
+                    if self.code == 5 -> set_flags(a, e, EP_FROM_DDL)
+                    return WRC_CONTINUE
+                }
+                self.code = 0
+                return WRC_ABORT
+            }
+            if op == tk.TK_ID && expr_id_to_true_false(a, e) -> return WRC_PRUNE
+            if op == tk.TK_ID || op == tk.TK_COLUMN || op == tk.TK_AGG_FUNCTION || op == tk.TK_AGG_COLUMN {
+                if has(a, e, EP_FIXED_COL) && self.code != 2 -> return WRC_CONTINUE
+                if self.code == 3 && a.exprs[e].itable == self.cur -> return WRC_CONTINUE
+                self.code = 0
+                return WRC_ABORT
+            }
+            if op == tk.TK_IF_NULL_ROW || op == tk.TK_REGISTER || op == tk.TK_DOT {
+                self.code = 0
+                return WRC_ABORT
+            }
+            if op == tk.TK_VARIABLE {
+                if self.code == 5 {
+                    a.exprs[e].op = tk.TK_NULL
+                } else if self.code == 4 {
+                    self.code = 0
+                    return WRC_ABORT
+                }
+            }
+            WRC_CONTINUE
         }
-        WRC_CONTINUE
+        // sqlite3SelectWalkFail.
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! {
+            self.code = 0
+            WRC_ABORT
+        }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
     }
-    // sqlite3SelectWalkFail.
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! {
-        self.code = 0
-        WRC_ABORT
-    }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
 }
 
 expr_is_const: fn(a: &AST, e: Int, init: Int, cur: Int) -> Int Never! {

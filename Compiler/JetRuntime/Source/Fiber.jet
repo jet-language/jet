@@ -14,12 +14,20 @@
 // mapping32 size40 next48 task56 action64 timerArmed72 deadline80
 // timerKind88 timerTarget96 lotNext104 lotAddress112 lotResult120
 // lotLinked128 timerFiring136 lotSequence144 timerSequence152
-// heapChild160 heapSibling168 heapPrevious176 cpuNs184 sliceStart192, and
-// the fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the fiber is
-// switching out to park), PARKED (its carrier saw the switch complete),
-// NOTIFIED (woken while PARKING: the carrier resumes it at once) and
-// RUNNABLE (queued). next links the root's ready FIFO and its pool of idle
-// fibers.
+// heapChild160 heapSibling168 heapPrevious176 cpuNs184 sliceStart192
+// pool200, and the fiber's TCB at FIBER_TCB. state: RUNNING, PARKING (the
+// fiber is switching out to park), PARKED (its carrier saw the switch
+// complete), NOTIFIED (woken while PARKING: the carrier resumes it at once)
+// and RUNNABLE (queued). next links the root's ready FIFO and its pool of
+// idle fibers of the fiber's stack size.
+//
+// Stack sizes: a fiber's stack is the root's stackBytes184 (the default, the
+// thread stack size), whose idle fibers pool at the root's pool72, or a task
+// group's larger `stack:` request (fiber_stack_class), whose idle fibers pool
+// in that size's SizedPool24 record {next0 bytes8 head16} on the root's
+// sizedPools232 list. The list only grows: a program names few sizes. pool200
+// is the fiber's record, 0 for the default size. FIBER_POOL_CAP bounds the
+// idle fibers of every size together.
 //
 // The switch (Linux.jet os_fiber_switch_i64) moves the alloc thread cache
 // (TCB @320..@447) between the carrier's TCB and the fiber's, so cached
@@ -229,8 +237,9 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         }
         sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
         if (action == FIBER_DONE) {
-            sync_store(wrapping(fiber + I64{48}), sync_load(wrapping(root + I64{72})))
-            sync_store(wrapping(root + I64{72}), fiber)
+            head: fiber_pool_head(root, sync_load(wrapping(fiber + I64{200})))
+            sync_store(wrapping(fiber + I64{48}), sync_load(head))
+            sync_store(head, fiber)
             sync_store(wrapping(root + I64{64}), sync_load(wrapping(root + I64{64})) + I64{1})
         } else {
             sync_store(wrapping(root + I64{56}), sync_load(wrapping(root + I64{56})) - I64{1})
@@ -290,18 +299,86 @@ fiber_clock_settle: fn(fiber: I64) {
     sync_load(wrapping(fiber + I64{24}))
 }
 
-// A pooled fiber, else a fresh one; 0 when no stack can be mapped.
-fiber_take: fn(root: I64) -> I64 {
+// A pooled fiber of a `bytes` stack (0: the default size), else a fresh one;
+// 0 when no stack can be mapped.
+fiber_take: fn(root: I64, bytes: I64) -> I64 {
+    pool: if (bytes == I64{0}) -> I64{0} else -> fiber_sized_pool(root, bytes)
+    head: fiber_pool_head(root, pool)
     sync_thread_lock(root)
-    fiber: sync_load(wrapping(root + I64{72}))
+    fiber: sync_load(head)
     if (fiber != I64{0}) {
-        sync_store(wrapping(root + I64{72}), sync_load(wrapping(fiber + I64{48})))
+        sync_store(head, sync_load(wrapping(fiber + I64{48})))
         sync_store(wrapping(root + I64{64}), sync_load(wrapping(root + I64{64})) - I64{1})
         sync_thread_unlock(root)
         return fiber
     }
     sync_thread_unlock(root)
-    fiber_new(root)
+    fiber_new(root, pool)
+}
+
+// The idle-fiber list of a stack size's SizedPool record (0: the default
+// size's, at the root's pool72).
+fiber_pool_head: fn(root: I64, pool: I64) -> I64 {
+    if (pool == I64{0}) -> wrapping(root + I64{72}) else -> wrapping(pool + I64{16})
+}
+
+// The SizedPool record of a `bytes` stack, made the first time a fiber of
+// that size is taken. It is allocated before the root lock is taken; a
+// carrier that lost the race to insert it frees its copy.
+fiber_sized_pool: fn(root: I64, bytes: I64) -> I64 {
+    found: fiber_sized_pool_find(root, bytes)
+    if (found != I64{0}) -> return found
+    fresh: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(fresh, I64{24})
+    sync_store(wrapping(fresh + I64{8}), bytes)
+    sync_thread_lock(root)
+    pool := I64{0}
+    cursor := sync_load(wrapping(root + I64{232}))
+    loop cursor != (I64{0}) && pool == (I64{0}) {
+        if (sync_load(wrapping(cursor + I64{8})) == bytes) -> pool = cursor
+        cursor = sync_load(cursor)
+    }
+    if (pool == I64{0}) {
+        sync_store(fresh, sync_load(wrapping(root + I64{232})))
+        sync_store(wrapping(root + I64{232}), fresh)
+        pool = fresh
+    }
+    sync_thread_unlock(root)
+    if (pool != fresh) -> jet_rt_free(fresh, I64{24}, I64{8})
+    pool
+}
+
+fiber_sized_pool_find: fn(root: I64, bytes: I64) -> I64 {
+    sync_thread_lock(root)
+    cursor := sync_load(wrapping(root + I64{232}))
+    loop cursor != (I64{0}) && sync_load(wrapping(cursor + I64{8})) != bytes {
+        cursor = sync_load(cursor)
+    }
+    sync_thread_unlock(root)
+    cursor
+}
+
+// The stack size a task group's `stack: bytes` asks its tasks' fibers for:
+// at most THREAD_STACK_MAXIMUM, page-rounded, cut under a finite RLIMIT_AS
+// as the default is (Thread.jet thread_stack_capped); 0, the default size,
+// when that is no more than the default.
+fiber_stack_class: fn(root: I64, bytes: I64) -> I64 {
+    fiber_prepare(root)
+    normal: sync_load(wrapping(root + I64{184}))
+    if (bytes <= normal) -> return I64{0}
+    wanted: if (bytes > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> (bytes + I64{4095}).bit_and(I64{-4096})
+    capped: thread_stack_capped(wanted)
+    if (capped <= normal) -> I64{0} else -> capped
+}
+
+// The stack size the running task asked for (its fiber's size; 0, the
+// default, on the default size or a plain thread): what a group it opens, or
+// a task it starts outside any group, inherits.
+fiber_stack_current: fn() -> I64 {
+    fiber: fiber_current()
+    if (fiber == I64{0}) -> return I64{0}
+    pool: sync_load(wrapping(fiber + I64{200}))
+    if (pool == I64{0}) -> I64{0} else -> sync_load(wrapping(pool + I64{8}))
 }
 
 // The first fiber settles the GS mode, the stack size, the address space
@@ -360,16 +437,17 @@ fiber_space_give: fn(root: I64, bytes: I64) {
 }
 
 // One mapping: guard page, stack, header page. The stack is the thread
-// stack size (thread_stack_bytes), charged to the fiber stacks' space
+// stack size (thread_stack_bytes), or the size of the SizedPool record
+// `pool` (fiber_sized_pool), charged to the fiber stacks' space
 // (fiber_space_take), halved on a failed map down to THREAD_STACK_FLOOR and
 // reserved without commitment. The guard is a
 // page-table guard marker (MADV_GUARD_INSTALL), which leaves the mapping one
 // VMA that merges with its neighbouring fiber stacks, so vm.max_map_count
 // does not bound the live fibers; a kernel without guard markers (before
 // 6.13) gets a PROT_NONE page, two VMAs per fiber.
-fiber_new: fn(root: I64) -> I64 {
+fiber_new: fn(root: I64, pool: I64) -> I64 {
     fiber_prepare(root)
-    want: sync_load(wrapping(root + I64{184}))
+    want: if (pool == I64{0}) -> sync_load(wrapping(root + I64{184})) else -> sync_load(wrapping(pool + I64{8}))
     if !fiber_space_take(root, want) -> return I64{0}
     bytes := want
     mapping := I64{-1}
@@ -405,6 +483,7 @@ fiber_new: fn(root: I64) -> I64 {
     sync_store(wrapping(fiber + I64{24}), tcb)
     sync_store(wrapping(fiber + I64{32}), mapping)
     sync_store(wrapping(fiber + I64{40}), bytes)
+    sync_store(wrapping(fiber + I64{200}), pool)
     // The seed: the entry as the resume address, a zero return address above.
     seed: wrapping(fiber - I64{16})
     sync_store(seed, rt_fiber_entry_address())

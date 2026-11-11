@@ -26,9 +26,7 @@ NATIVE_DEBUG_SETUP: [String]{
 #Error
 NativeDebugError: struct {
     detail: String
-}
 
-impl NativeDebugError {
     // E2203, the registered failure of the native debugger.
     diagnostic: fn(self) -> Diagnostic Never! {
         native_debug_unavailable(self.detail)
@@ -83,9 +81,7 @@ NativeSession: struct {
     output_path: String
     output_read: Int
     finished: Bool
-}
 
-impl NativeSession {
     // Load `binary` (a native image with debug info) under LLDB. The program's
     // output is written to `output_path`; nothing runs until `launch`.
     start: fn(binary: String, output_path: String) -> NativeSession NativeDebugError! {
@@ -226,49 +222,20 @@ impl NativeSession {
             .Err(_) -> {
                 if self.child.kill() == {
                     .Err(_) -> {}
-                    else -> {}
+                    .Ok(_) -> {}
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         self.child.stdin.close()
         loop _ in self.child.stdout.lines() {}
         if self.child.wait() == {
             .Err(_) -> {}
-            else -> {}
+            .Ok(_) -> {}
         }
         self.finished = true
     }
-}
 
-// The command that builds `entry` as the debuggable native image: this `jet`
-// (`jet`), unoptimized, with its DWARF, into `out_dir`.
-native_debug_build_argv: fn(jet: String, entry: String, out_dir: String) -> [String] Never! {
-    [String]{jet, "build", "--optimize=none", "--output-dir={out_dir}", entry}
-}
-
-// The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.
-native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
-    native_files.join(out_dir, native_files.basename(entry).before(".jet"))
-}
-
-// The `(jet)` console over a session: `jet debug` and the Canvas native tier
-// both speak it. Every stop prints the Jet source line with its `<- here`
-// caret and the frame's locals; frames without Jet line information (the
-// runtime) are never shown.
-NATIVE_DEBUG_HELP: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
-
-// The deepest run of runtime frames a step finishes out of before it lets the
-// program continue.
-NATIVE_DEBUG_RUNTIME_DEPTH: 16
-
-// What one console command printed, and where it left the program.
-NativeDebugStep: struct {
-    text: String
-    stop: NativeStop
-}
-
-impl NativeSession {
     // Run the program to the start of its `run`, in the Jet source `file`
     // whose text is `lines`. None when the program has no `run`.
     open: fn(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
@@ -387,6 +354,33 @@ impl NativeSession {
         loop local in locals -> values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
         Ok(Val(DebugSnapshot{function: top.function, line: top.line, locals: values, call_stack: stack}))
     }
+}
+
+// The command that builds `entry` as the debuggable native image: this `jet`
+// (`jet`), unoptimized, with its DWARF, into `out_dir`.
+native_debug_build_argv: fn(jet: String, entry: String, out_dir: String) -> [String] Never! {
+    [String]{jet, "build", "--optimize=none", "--output-dir={out_dir}", entry}
+}
+
+// The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.
+native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
+    native_files.join(out_dir, native_files.basename(entry).before(".jet"))
+}
+
+// The `(jet)` console over a session: `jet debug` and the Canvas native tier
+// both speak it. Every stop prints the Jet source line with its `<- here`
+// caret and the frame's locals; frames without Jet line information (the
+// runtime) are never shown.
+NATIVE_DEBUG_HELP: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+
+// The deepest run of runtime frames a step finishes out of before it lets the
+// program continue.
+NATIVE_DEBUG_RUNTIME_DEPTH: 16
+
+// What one console command printed, and where it left the program.
+NativeDebugStep: struct {
+    text: String
+    stop: NativeStop
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {

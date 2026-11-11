@@ -48,6 +48,7 @@ use jet_foundation.[
     ProtocolDecl,
     RuleSite,
     SerdeWireShape,
+    STATE_ARROW_LABEL,
     Span,
     StateDecl,
     Stmt,
@@ -238,7 +239,7 @@ jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
         .Named(name) -> name.len() == 0
         .Union(members) -> members.len() == 0
         .TraitObject(bounds) -> bounds.len() == 0
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -280,7 +281,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
             loop member in members -> out.push(jfmt_substitute_type(member, params, args))
             Type.Union{members: out}
         }
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -453,7 +454,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                         loop variant in def.variants {
                             if variant.payload == {
                                 .Unit -> shapes.push(SerdeWireShape.Text)
-                                else -> shapes.push(SerdeWireShape.Object)
+                                .Single(_, _) | .Named(_) -> shapes.push(SerdeWireShape.Object)
                             }
                         }
                         return jfmt_finish_shapes(shapes)
@@ -496,7 +497,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                     if jfmt_decode_named_shapes(body, name, args, seen) == .Val(shapes) -> return Val(shapes)
                 }
             }
-            else -> {}
+            .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -534,7 +535,7 @@ jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: &[String]) -> [SerdeWireSh
         .Named(name) -> return jfmt_decode_named_shapes(items, name, [Type]{}, seen)
         .Apply(name, args) -> return jfmt_decode_named_shapes(items, name, args, seen)
         .Tagged(_, inner) -> return jfmt_decode_shapes(items, inner, seen)
-        else -> return None
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return None
     }
     jfmt_finish_shapes(shapes)
 }
@@ -575,7 +576,7 @@ jfmt_has_ambiguous_decode_union: fn(items: [Item], ty: Type) -> Bool {
             }
             false
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -678,18 +679,10 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
             external: if sugar == .Val(at) -> impl_keyword == None || (impl_keyword ?? 0) > at else -> false
             if external {
                 // The AST does not retain the marker ordering for this sugar,
-                // but the formatter still owns the canonical arrow. Restrict
-                // the rewrite to the declaration head; the path string and
-                // any quoted text remain verbatim.
-                split: jfmt_items_find(text_bytes, " = \"".bytes(), 0)
-                head_end: split ?? text_bytes.len()
-                tail: if split == .Val(position) -> jfmt_bytes_text(text_bytes, position + 4, text_bytes.len()) else -> ""
-                head: jfmt_bytes_text(text_bytes, 0, head_end).replace("=[", "-[").replace(":[", "-[").replace("]=>", "]>").replace("=>", "->")
-                jfmt_write(f, head)
-                if tail.len() > 0 {
-                    jfmt_write(f, " = \"")
-                    jfmt_write(f, tail)
-                }
+                // so the declaration is written as the source spelled it. The
+                // parser accepts only the canonical arrows, so there is no
+                // arrow to respell.
+                jfmt_write(f, jfmt_bytes_text(text_bytes, 0, text_bytes.len()))
                 jfmt_newline(f)
                 jfmt_skip_verbatim_comments(f, i.span.end)
             } else {
@@ -770,7 +763,7 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
     }
 }
 
-jfmt_fmt_marker_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
+jfmt_fmt_fact_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
     source: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
     multiline: jfmt_comma_begin(f, params.len(), source)
     loop index in 0..<params.len() {
@@ -778,17 +771,7 @@ jfmt_fmt_marker_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_st
         jfmt_comma_before(f, index, multiline, param.name_span.start)
         jfmt_write(f, param.name)
         jfmt_write(f, ": ")
-        if param.ty == .Val(ty) {
-            if param.variadic -> jfmt_write(f, "...")
-            jfmt_fmt_type(f, ty)
-            if param.value == .Val(default) {
-                jfmt_write(f, "{{")
-                jfmt_fmt_expr(f, default, JFMT_PREC_OR_FALLBACK)
-                jfmt_write(f, "}}")
-            }
-        } else if param.value == .Val(value) {
-            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        }
+        if param.value == .Val(value) -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
         jfmt_comma_after(f, multiline, param.name_span.end)
     }
     jfmt_comma_end(f, multiline, source)
@@ -798,7 +781,7 @@ jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
     jfmt_write(f, "fact ")
     jfmt_write(f, declaration.name)
     jfmt_write(f, "(")
-    jfmt_fmt_marker_decl_params(f, declaration.params, declaration.name_span.end)
+    jfmt_fmt_fact_decl_params(f, declaration.params, declaration.name_span.end)
     jfmt_write(f, ")")
     jfmt_newline(f)
 }
@@ -1501,6 +1484,15 @@ jfmt_fmt_inbody_marker: fn(f: &JetFmt, m: Marker) {
 // The `(args)` of a marker, nothing when it has none. An in-body line's
 // arguments start after its `:`, which the source lookup skips.
 jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
+    // `#State(A -> B)` prints its arrow, not a comma list.
+    if m.args.len() == 2 && m.arg_labels.len() == 2 && m.arg_labels[1] == .Val(arrow) && arrow.name == STATE_ARROW_LABEL {
+        jfmt_write(f, "(")
+        jfmt_fmt_marker_call_arg(f, m.args[0])
+        jfmt_write(f, " -> ")
+        jfmt_fmt_marker_call_arg(f, m.args[1])
+        jfmt_write(f, ")")
+        return
+    }
     if m.args.len() > 0 {
         jfmt_write(f, "(")
         source: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
@@ -1654,9 +1646,17 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
 }
 
 // Rust `Registry::callable_marker_needs_line_break`: the rows that keep the
-// established readable layout on their own line above `fn`.
-jfmt_callable_marker_needs_line_break: fn(name: String) -> Bool Never! {
-    name == "Meta" || name == "Unsafe" || name == "FFI" || name == "Target" || name == "WasmExport"
+// established readable layout on their own line above `fn`, the web bridge
+// `#Export(wasm)` among them (`#Export(c)` stays on the `fn` line).
+jfmt_callable_marker_needs_line_break: fn(marker: Marker) -> Bool Never! {
+    name: marker.name
+    if name == "Export" {
+        if marker.args.len() == 1 && marker.args[0] == .Expr(value) {
+            if value == .Ident(argument, _, _) -> return argument == "wasm"
+        }
+        return false
+    }
+    name == "Meta" || name == "Unsafe" || name == "FFI" || name == "Target"
 }
 
 // Rust `rsplit_once('{')` then `rsplit_once('}')`: does the declared body
@@ -1683,7 +1683,7 @@ jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     if above.len() == 1 {
         jfmt_write(f, "#")
         jfmt_fmt_marker(f, above[0])
-        if jfmt_callable_marker_needs_line_break(above[0].name) {
+        if jfmt_callable_marker_needs_line_break(above[0]) {
             jfmt_newline(f)
         } else {
             jfmt_write(f, " ")
@@ -2432,6 +2432,8 @@ jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
     jfmt_fmt_above_markers(f, i.markers)
     jfmt_write(f, "impl ")
     jfmt_write(f, i.type_name)
+    type_source: jfmt_source_list_span_after(f, i.type_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(f, i.type_params, type_source)
     if i.trait_name == .Val(trait_name) {
         jfmt_write(f, ".")
         jfmt_write(f, trait_name)

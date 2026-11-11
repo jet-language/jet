@@ -1,0 +1,16 @@
+# `jet audit writes`: every plain call that changes or takes a named value, the
+# sites `#Policy(writes: .Explicit)` marks, with nothing written.
+fixture: writes_audit_lists_changing_and_taking_calls.fixture
+step: jet audit writes main.jet
+exit: 0
+stdout: ~ "calls that change or take a named value: 4\n" # the receiver push in grow, grow(xs), xs.push(5), archive(title)
+stdout: ~ "main.jet:2:5  span=30..35  mark=&  access=write\n" # `items.push(4)` changes the parameter
+stdout: ~ "main.jet:15:10  span=202..204  mark=&  access=write\n" # `grow(xs)`
+stdout: ~ "main.jet:16:5  span=210..212  mark=&  access=write\n" # `xs.push(5)`
+stdout: ~ "main.jet:18:16  span=255..260  mark=&&  access=take\n" # `archive(title)`
+stdout: !~ "count" # a read call is not a site
+file: main.jet = writes_audit_lists_changing_and_taking_calls.fixture/main.jet
+step: jet audit writes --json main.jet
+exit: 0
+stdout: ~ "\"action\":\"audit.writes\"" # the status envelope
+stdout: ~ "\"mark\":\"&&\",\"access\":\"take\"" # the take row

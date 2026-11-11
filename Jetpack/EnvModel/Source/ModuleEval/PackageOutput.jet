@@ -92,7 +92,7 @@ envmodel_project_package_outputs: fn(facts: PackageFacts) -> PackageOutputPlan P
 envmodel_output_object: fn(path: String, output: OutputFact) -> [String: OutputPayload] PackageOutputError! {
     if output.payload == {
         .Object(fields) -> Ok(fields)
-        else -> Err(envmodel_output_error(path, "must be an output object"))
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> Err(envmodel_output_error(path, "must be an output object"))
     }
 }
 
@@ -131,7 +131,7 @@ envmodel_project_fleet: fn(path: String, output: OutputFact, systems: [String]) 
     hosts: if fields.get(ENVMODEL_FLEET_FIELD_HOSTS) == {
         .Val(value) -> if value == {
             .Object(entries) -> entries
-            else -> { return Err(envmodel_output_error(hosts_path, "must be an object of host names to systems")) }
+            .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> { return Err(envmodel_output_error(hosts_path, "must be an object of host names to systems")) }
         }
         .None -> { return Err(envmodel_output_error(hosts_path, "is required")) }
     }
@@ -151,7 +151,7 @@ envmodel_project_fleet: fn(path: String, output: OutputFact, systems: [String]) 
 envmodel_project_host: fn(path: String, name: String, value: OutputPayload) -> HostPlan PackageOutputError! {
     fields: if value == {
         .Object(entries) -> entries
-        else -> {
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> {
             system: envmodel_output_text(Val(value), path)
             return Ok(HostPlan{name: name, system: envmodel_normalize_system_name(system), overrides: None, override_source: None})
         }
@@ -187,7 +187,7 @@ envmodel_project_packages: fn(value: OutputPayload?, path: String) -> [Pkg] Pack
     payload: value ?? return Ok(packages)
     items: if payload == {
         .Array(entries) -> entries
-        else -> { return Err(envmodel_output_error(path, "must be an array of package refs")) }
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Object(_) -> { return Err(envmodel_output_error(path, "must be an array of package refs")) }
     }
     loop index in 0..<items.len() {
         item_path: "{path}[{index}]"
@@ -217,18 +217,18 @@ envmodel_project_services: fn(value: OutputPayload?, path: String) -> [ServicePl
     payload: value ?? return Ok(projected)
     services: if payload == {
         .Object(entries) -> entries
-        else -> { return Err(envmodel_output_error(path, "must be an object of services")) }
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> { return Err(envmodel_output_error(path, "must be an object of services")) }
     }
     loop name in envmodel_sorted_payload_keys(services) {
         service_path: "{path}.{name}"
         fields: if services[name] == {
             .Object(entries) -> entries
-            else -> { return Err(envmodel_output_error(service_path, "must be an object with enable: true|false")) }
+            .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> { return Err(envmodel_output_error(service_path, "must be an object with enable: true|false")) }
         }
         enable: if fields.get(SERVICE_FIELD_ENABLE) == {
             .Val(flag) -> if flag == {
                 .Bool(on) -> on
-                else -> { return Err(envmodel_output_error("{service_path}.enable", "must be a boolean")) }
+                .Null | .Number(_) | .String(_) | .Array(_) | .Object(_) -> { return Err(envmodel_output_error("{service_path}.enable", "must be a boolean")) }
             }
             .None -> { return Err(envmodel_output_error("{service_path}.enable", "is required")) }
         }
@@ -246,7 +246,7 @@ envmodel_project_options: fn(value: OutputPayload?, path: String) -> [OptionPlan
     payload: value ?? return Ok(options)
     fields: if payload == {
         .Object(entries) -> entries
-        else -> { return Err(envmodel_output_error(path, "must be an object of option values")) }
+        .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> { return Err(envmodel_output_error(path, "must be an object of option values")) }
     }
     loop field in envmodel_sorted_payload_keys(fields) -> envmodel_flatten_option(field, fields[field], path, options)
     Ok(options)
@@ -258,7 +258,7 @@ envmodel_flatten_option: fn(field: String, value: OutputPayload, path: String, o
             loop nested in envmodel_sorted_payload_keys(fields) -> envmodel_flatten_option("{field}.{nested}", fields[nested], "{path}.{field}", options)
         }
         .Array(_) -> { return Err(envmodel_output_error("{path}.{field}", "must be a scalar or nested object")) }
-        else -> options.push(OptionPlan{key: field, value: envmodel_payload_display(value)})
+        .Null | .Bool(_) | .Number(_) | .String(_) -> options.push(OptionPlan{key: field, value: envmodel_payload_display(value)})
     }
 }
 
@@ -266,7 +266,7 @@ envmodel_output_text: fn(value: OutputPayload?, path: String) -> String PackageO
     payload: value ?? return Err(envmodel_output_error(path, "is required"))
     if payload == {
         .String(text) -> Ok(text)
-        else -> Err(envmodel_output_error(path, "must be a string or dotted name"))
+        .Null | .Bool(_) | .Number(_) | .Array(_) | .Object(_) -> Err(envmodel_output_error(path, "must be a string or dotted name"))
     }
 }
 

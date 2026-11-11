@@ -1,18 +1,25 @@
 // Trait constants: a trait declares `name: Type` (with an optional default,
 // `name: Type{value}`), each implementation supplies `name: value`, and a
 // body reads `Type.name` on a concrete type or `T.name` on a bounded type
-// parameter. A value is a literal, an enum case, a list of them or an
-// optional one, checked against the declared type here and stored on the
-// implementation's checked row, so a read needs no code to run.
-use jet_foundation.[Diagnostic, Expr, ImplConstValue, NodeKind, Span, TComptimeEnumArg, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, UnOp, expr_span, type_name]
+// parameter. A value is a literal, an enum case, a record of them, a list of
+// them or an optional one, checked against the declared type here and stored
+// on the implementation's checked row, so a read needs no code to run.
+use jet_foundation.[Diagnostic, Expr, ExprField, ImplConstValue, NodeKind, Span, StructDef, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, UnOp, expr_span, type_name]
 
 // What checking a trait constant's value found.
 SemaTraitConstantEval: enum {
     Value(value: TComptimeValue)
     // A value of some other type.
     WrongType
-    // Not a literal, an enum case or a list of them.
+    // Not a literal, an enum case, a record or a list of them.
     NotCompileTime
+}
+
+// The declaration of a record constant's type: the struct and the module it
+// is written in, which its field types resolve in.
+SemaTraitConstantRecord: struct {
+    definition: StructDef
+    module_identity: String
 }
 
 // One trait constant a read can name: the trait's short name, the declared
@@ -140,8 +147,9 @@ sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type,
         .List(element) -> return sema_trait_constant_eval_list(graph, expr, ty, element, module_identity, type_module)
         .Named(name) -> {
             if sema_trait_constant_enum_variants(graph, type_module, name) == .Val(variants) -> return sema_trait_constant_eval_enum(graph, expr, name, variants, module_identity)
+            if sema_trait_constant_record(graph, type_module, name) == .Val(record) -> return sema_trait_constant_eval_record(graph, expr, name, record, module_identity)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     literal: sema_trait_constant_literal(expr) ?? return sema_trait_constant_other(expr)
     fitted: sema_trait_constant_fit(literal, ty) ?? return SemaTraitConstantEval.WrongType
@@ -154,8 +162,8 @@ sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type,
 sema_trait_constant_other: fn(expr: Expr) -> SemaTraitConstantEval Never! {
     if sema_trait_constant_literal(expr) != None -> return SemaTraitConstantEval.WrongType
     if expr == {
-        .ListLit(_, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Present(_, _, _) -> SemaTraitConstantEval.WrongType
-        else -> SemaTraitConstantEval.NotCompileTime
+        .ListLit(_, _, _) | .TypedLit(_, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Present(_, _, _) -> SemaTraitConstantEval.WrongType
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> SemaTraitConstantEval.NotCompileTime
     }
 }
 
@@ -186,10 +194,10 @@ sema_trait_constant_literal: fn(expr: Expr) -> TComptimeValue? Never! {
             if operand == {
                 .Int(value, _, _, _, _) -> return Val(TComptimeValue.Int{value: 0 - value})
                 .Float(value, _, is_f32, _, _) -> return Val(TComptimeValue.Float{value: 0.0 - value, bits: if is_f32 -> 32 else -> 64})
-                else -> return None
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
             }
         }
-        else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -203,7 +211,7 @@ sema_trait_constant_fit: fn(literal: TComptimeValue, ty: Type) -> TComptimeValue
                     if sema_trait_constant_int_fits(value, signed, bits) -> return Val(TComptimeValue.Int{value: value})
                     return None
                 }
-                else -> return None
+                .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
             }
         }
         .Float(value, bits) -> {
@@ -214,7 +222,7 @@ sema_trait_constant_fit: fn(literal: TComptimeValue, ty: Type) -> TComptimeValue
         .Bool(value) -> return if ty == .Bool -> Val(TComptimeValue.Bool{value: value}) else -> None
         .Char(value) -> return if ty == .Char -> Val(TComptimeValue.Char{value: value}) else -> None
         .String(value) -> return if ty == .String -> Val(TComptimeValue.String{value: value.copy()}) else -> None
-        else -> None
+        .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> None
     }
 }
 
@@ -240,7 +248,7 @@ sema_trait_constant_eval_option: fn(graph: SemaRegistrationGraph, expr: Expr, ty
                 if args[0] == .Positional(value) -> return sema_trait_constant_present(sema_trait_constant_eval(graph, value, inner, module_identity, type_module))
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     sema_trait_constant_present(sema_trait_constant_eval(graph, expr, inner, module_identity, type_module))
 }
@@ -262,10 +270,10 @@ sema_trait_constant_eval_list: fn(graph: SemaRegistrationGraph, expr: Expr, ty: 
             if body == {
                 .Elements(values) -> return sema_trait_constant_eval_elements(graph, values, element, module_identity, type_module)
                 .Empty -> return SemaTraitConstantEval.Value{value: TComptimeValue.List{values: [TComptimeValue]{}}}
-                else -> return SemaTraitConstantEval.WrongType
+                .Fields(_) | .Entries(_) | .Value(_) | .ByteText(_) -> return SemaTraitConstantEval.WrongType
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     sema_trait_constant_other(expr)
 }
@@ -297,6 +305,80 @@ sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module:
     Val(names)
 }
 
+// The declaration of resolved struct type `name` (resolved in `type_module`);
+// None when it names no struct, or a generic one, whose field types a
+// constant's value alone does not fix.
+sema_trait_constant_record: fn(graph: SemaRegistrationGraph, type_module: String, name: String) -> SemaTraitConstantRecord? Never! {
+    resolved: sema_type_graph_lookup_symbol(graph, type_module, name) ?? return None
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+    item: sema_registration_nominal_source_item(graph.modules[row.module_index].nominals[row.row].source) ?? return None
+    if item == .Struct(definition) {
+        if definition.type_params.len() > 0 -> return None
+        return Val(SemaTraitConstantRecord{definition: definition.copy(), module_identity: graph.modules[row.module_index].module_identity.copy()})
+    }
+    None
+}
+
+// A record constant: `Name{field: value, …}`, or `{field: value, …}` where
+// the type is known. Each stored field is a value of its declared type; a
+// field the value leaves out takes the default its declaration writes.
+sema_trait_constant_eval_record: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, record: SemaTraitConstantRecord, module_identity: String) -> SemaTraitConstantEval Never! {
+    expected_type: Type.Named{name: name.copy()}
+    written := [ExprField]{}
+    if expr == {
+        .StructLit(type_name, type_args, _, _, fields, _, _, _) -> {
+            if type_args.len() > 0 -> return SemaTraitConstantEval.WrongType
+            if type_name != "" && sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+            written = fields.copy()
+        }
+        .TypedLit(head, body, _, _) -> {
+            if head == .Val(head_type) {
+                if sema_checked_qualify_type(graph, head_type, module_identity) != expected_type -> return SemaTraitConstantEval.WrongType
+            }
+            if body == {
+                .Fields(fields) -> written = fields.copy()
+                .Empty -> {}
+                .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) -> return SemaTraitConstantEval.WrongType
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> return sema_trait_constant_other(expr)
+    }
+    loop field in written {
+        known := false
+        loop declared in record.definition.fields {
+            if declared.name == field.name && declared.computed == None {
+                known = true
+                break
+            }
+        }
+        if !known -> return SemaTraitConstantEval.WrongType
+    }
+    values := [TComptimeField]{}
+    loop declared in record.definition.fields {
+        if declared.computed != None -> next
+        field_type: sema_checked_qualify_type(graph, declared.ty, record.module_identity)
+        given := Expr?{None}
+        loop field in written {
+            if field.name == declared.name {
+                given = Val(field.value.copy())
+                break
+            }
+        }
+        result := SemaTraitConstantEval.WrongType
+        if given == .Val(value) {
+            result = sema_trait_constant_eval(graph, value, field_type, module_identity, record.module_identity)
+        } else if declared.default == .Val(default_value) {
+            result = sema_trait_constant_eval(graph, default_value, field_type, record.module_identity, record.module_identity)
+        }
+        if result == .Value(value) {
+            values.push(TComptimeField{name: declared.name.copy(), value: value.copy()})
+        } else {
+            return result
+        }
+    }
+    SemaTraitConstantEval.Value{value: TComptimeValue.Struct{type_name: name.copy(), fields: values}}
+}
+
 // An enum constant: `.Case`, `Enum.Case` or `module.Enum.Case`, naming a
 // case without a payload of enum `name`.
 sema_trait_constant_eval_enum: fn(graph: SemaRegistrationGraph, expr: Expr, name: String, variants: [String], module_identity: String) -> SemaTraitConstantEval Never! {
@@ -309,7 +391,7 @@ sema_trait_constant_eval_enum: fn(graph: SemaRegistrationGraph, expr: Expr, name
             written: sema_trait_constant_type_path(base) ?? return SemaTraitConstantEval.NotCompileTime
             return sema_trait_constant_enum_case(graph, written, member, name, variants, module_identity)
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     sema_trait_constant_other(expr)
 }
@@ -336,7 +418,7 @@ sema_trait_constant_type_path: fn(base: Expr) -> String? Never! {
             if root == .Ident(module_alias, _, _) -> return Val("{module_alias}.{member}")
             None
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -388,7 +470,7 @@ sema_trait_constant_head: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name.copy())
         .Apply(name, _) -> Val(name.copy())
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -409,7 +491,7 @@ sema_trait_constant_collect_impls: fn(graph: SemaRegistrationGraph, owner_row: S
         if source == {
             .Struct(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
             .Enum(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     leaf: sema_trait_constant_leaf(owner)

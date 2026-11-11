@@ -1,9 +1,11 @@
 // Native Task state, one ref per handle/group plus a worker ref:
 // refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
-// env64 invoke72 release80 queueNext88 reserved96 completionPark104
+// env64 invoke72 release80 queueNext88 stack96 completionPark104
 // completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
 // typedDeadline184 ownedWorld192, then the task's Context record (Context.jet)
-// at TASK_CONTEXT. Result initializes only after Propagate == 0.
+// at TASK_CONTEXT. Result initializes only after Propagate == 0. stack is the
+// stack size of the fiber the task runs on (Fiber.jet fiber_stack_class; 0,
+// the default size): its group's, else the starting task's.
 TASK_CONTEXT: I64{200}
 task_state_bytes: fn() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
 // JetTaskFailure: ordinals 0/1/2.
@@ -172,6 +174,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(child + I64{80}), release)
     context_inherit(wrapping(child + TASK_CONTEXT))
     sync_store(wrapping(child + I64{104}), sync_park_new())
+    sync_store(wrapping(child + I64{96}), if (group != I64{0}) -> sync_load(wrapping(group + I64{72})) else -> fiber_stack_current())
     sync_store(wrapping(child + I64{136}), group)
     sync_store(wrapping(child + I64{144}), permit)
     id: jet_rt_observe_task_register(control, site, label)
@@ -464,15 +467,6 @@ scheduler_closure_drop: fn(closure: I64) {
     sync_store(closure, count)
     release: sync_load(wrapping(closure + I64{16}))
     if (count == I64{0} && release != I64{0}) -> coll_call1_unit(release, closure)
-}
-scheduler_task_completion_register: fn(closure: I64) {
-    stack: sync_load(wrapping(thread_base() + I64{80}))
-    if (stack == I64{0} || sync_load(stack) == I64{0}) {
-        scheduler_cleanup_closure_drop(closure)
-        return
-    }
-    frame: sync_load(wrapping(sync_load(wrapping(stack + I64{16})) + (sync_load(stack) - I64{1}) * I64{8}))
-    scheduler_words_push(frame, closure)
 }
 
 scheduler_cleanup_closure_drop: fn(closure: I64) {

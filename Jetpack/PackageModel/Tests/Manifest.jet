@@ -54,7 +54,7 @@ use jet_pkg_model.[
             .Err(error) -> {
                 is_effects: if error == {
                     .BadEffectsBlock(_) -> true
-                    else -> false
+                    .MissingName | .MissingRecord(_) | .MalformedField(_) | .UnknownField(_) | .UnknownOutputKind(_) | .InvalidValue(_, _) | .RetiredRecordHead | .ConfigMembers | .Composition(_) | .NestedMembers(_, _) | .LintPolicyCode(_, _) | .BadTarget(_, _, _) | .BadTargetField(_, _) | .ReservedSection(_) | .RetiredAuthorityField(_, _) | .BadMemoryPolicy(_) | .RetiredPolicyField(_, _) | .BadGuaranteePolicy(_) | .BadPackagePolicy(_) | .BadAllocatorPolicy(_) -> false
                 }
                 assert(is_effects)
             }

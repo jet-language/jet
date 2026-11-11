@@ -309,24 +309,6 @@ vault_record_debug: fn(record: I64) -> I64 {
     rt_text_push_word(target, I64{32032}, I64{2})
     jet_rt_string_builder_finish(target)
 }
-vault_store_debug: fn(store: I64) -> I64 {
-    target: jet_rt_string_builder_new()
-    // "VaultStore { repository_uuid: "
-    jet_rt_string_builder_push(target, rt_static_text("VaultStore {{ repository_uuid: "))
-    vault_debug_bytes(target, wrapping(store + VAULT_STORE_UUID), I64{16})
-    rt_text_push_word(target, I64{7598532953533194284}, I64{8}) // ", revisi"
-    rt_text_push_word(target, I64{540700271}, I64{4}) // "on: "
-    vault_push_u64(target, rt_text_word(wrapping(store + VAULT_STORE_REVISION)))
-    rt_text_push_word(target, I64{7453010373645639724}, I64{8}) // ", string"
-    rt_text_push_word(target, I64{2322296575628370783}, I64{8}) // "_count: "
-    vault_push_u64(target, rt_text_word(wrapping(rt_text_word(wrapping(store + VAULT_STORE_STRINGS)) + DATA_SEQUENCE_LENGTH)))
-    rt_text_push_word(target, I64{7311136020079779884}, I64{8}) // ", key_ve"
-    rt_text_push_word(target, I64{8026363888824578930}, I64{8}) // "rsion_co"
-    rt_text_push_word(target, I64{138419662453}, I64{5}) // "unt: "
-    vault_push_u64(target, rt_text_word(wrapping(rt_text_word(wrapping(store + VAULT_STORE_RECORDS)) + DATA_SEQUENCE_LENGTH)))
-    rt_text_push_word(target, I64{32032}, I64{2})
-    jet_rt_string_builder_finish(target)
-}
 
 vault_put_u16: fn(target: I64, value: I64) {
     rt_text_put(target, value.bit_and(I64{255}))
@@ -1042,9 +1024,6 @@ vault_key_query_at_root: fn(root: I64, name: I64, key_type: I64, versions: Bool,
 vault_current_at_root: fn(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
     vault_key_query_at_root(root, name, key_type, false, out)
 }
-vault_versions_at_root: fn(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
-    vault_key_query_at_root(root, name, key_type, true, out)
-}
 // The Core `KeyRef<T>` a runtime ref crosses as (Core/Crypto/Vault.jet): a
 // 40-byte shell of its declared fields, name String @0, version exact Int @8
 // and the private `identity: [U8]` List header @16 holding the store uuid,
@@ -1440,11 +1419,6 @@ vault_preview_text: fn(plan: I64, key_type: I64, reason: I64) -> I64 {
     jet_rt_string_builder_push(target, reason)
     jet_rt_string_builder_push(target, rt_static_text("; expires_unix_ms: "))
     vault_push_u64(target, rt_text_word(wrapping(plan + VAULT_PLAN_EXPIRES)))
-    jet_rt_string_builder_finish(target)
-}
-vault_write_debug: fn(_write: I64) -> I64 {
-    target: jet_rt_string_builder_new()
-    jet_rt_string_builder_push(target, rt_static_text("VaultWrite(<redacted>)"))
     jet_rt_string_builder_finish(target)
 }
 // Seed2127-2166. Candidate96 is scratch only; allocate the write after grant

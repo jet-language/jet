@@ -102,6 +102,19 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 8. **`scope.guard` already runs arbitrary end-of-block work.** `core.mem.scope.guard` ships (`Examples/features/errors/scope_guard.jet`) beside `defer close(^x)`. D-JAI-DEFER1 option A retires it in favour of general `defer`, keeping one mechanism.
 9. **Five Jai conveniences already had Jet forms.** `..Any` (D-ANY-JAI1), `xx` (D-SHAPE-CONVERT1), bucket arrays (`Pool<T>`/`Id<T>`), custom entry symbols (D-TARGET-SURFACE1) and C++ methods (D-FFI-CPP1) are covered; the first ballot draft re-proposed them.
 
+### Correction, 2026-11-10: C08 is partial, not shipped
+
+Row C08 listed `reflect.of(x)` as shipping Jai's `type_info(T)`. It was partial on 2026-10-16. The value
+that `reflect.of(x)` returned came from a one-level display-text record that lowering built
+(`BuildRoutes.jet:4976-5021`, the range #3520 criterion 26 records). Nested field values were display
+strings, not typed values. #3520 [26] has since removed that record: `reflect.of(x).fields()[i].value()`
+walks a three-level nested value on O0, O1 and O2 (dev ecf04d985a, golden
+`Examples/Metaprogramming/Reflection/ReflectNested`).
+
+The row stays partial. #3520 [14] is its owner and is still open. It requires runtime views that keep
+typed values and identity, with no display-string inference, capture that is complete or refused, and
+retention that is explicit and inspectable. The coverage summary below counts C08 as ratified and owed.
+
 ## A. Compile-time execution
 
 | # | Jai | Jet today | State | Closes it |
@@ -173,7 +186,7 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 | C05 | `#caller_location` | `#Caller()` named in spec only | ballot | D-JAI-SITE1 (`$caller`), #5010 |
 | C06 | `#procedure_name` | none | ballot | D-JAI-SITE1 (`$here.function`) |
 | C07 | `@note` strings | typed markers (`marker` declarations, `#Name`) | shipped, stronger | — |
-| C08 | `type_info(T)`, `Type_Info_*` | `T.reflect()`, `reflect.of(x)`, `T.$fields` (`Examples/features/comptime/reflect.jet`) | shipped | — |
+| C08 | `type_info(T)`, `Type_Info_*` | `T.reflect()`, `reflect.of(x)`, `T.$fields` (`Examples/features/comptime/reflect.jet`) | partial (corrected 2026-11-10) | #3520 [14] |
 | C09 | `Any`, `..Any` | trait-bounded `...T` varargs (D-ANY-JAI1); `reflect.of(x)` handle | shipped | — |
 | C10 | `#type_info_none` and related | none | ballot | D-JAI-BUILDOPT1 (`type_info`); per-type marker not proposed |
 | C11 | `runtime_storageless_type_info` | none | ballot | D-JAI-BUILDOPT1 (`type_info`) |
@@ -330,8 +343,8 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 
 Of 215 rows (E36 counts once and E12-E15 as one):
 
-- **Shipped or equal today:** 70 rows.
-- **Ratified, owed on a named card:** 34 rows.
+- **Shipped or equal today:** 69 rows.
+- **Ratified, owed on a named card:** 35 rows (C08 moved here by the 2026-11-10 correction above).
 - **Decided by one of the twelve open ballots:** 100 rows.
 - **Not proposed, with a stated reason:** 6 rows.
 - **Other cards (#5000, #5008, #5030):** 5 rows.

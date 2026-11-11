@@ -27,7 +27,7 @@ store_broker_connect: fn(socket: String) -> UnixStream? StoreError! {
 store_broker_connect_absent: fn(failure: NetError) -> Bool Never! {
     if failure == {
         .ConnectionRefused(_) -> true
-        else -> (net.error_os_code(failure) ?? 0) == 2
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> (net.error_os_code(failure) ?? 0) == 2
     }
 }
 
@@ -164,14 +164,14 @@ store_broker_promote_staged_archive: fn(verification: &StoreVerification, shared
 store_broker_admission_failure: fn(verification: &StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) -> StoreError? Never! {
     if store_broker_admit_and_promote(verification, shared, staged, key, archive, binding) == {
         .Err(error) -> Val(error)
-        else -> None
+        .Ok(_) -> None
     }
 }
 
 store_broker_cleanup_failure: fn(stage: String) -> StoreError? Never! {
     if store_broker_remove_incoming_entry(stage) == {
         .Err(error) -> Val(error)
-        else -> None
+        .Ok(_) -> None
     }
 }
 

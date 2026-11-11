@@ -5,7 +5,7 @@
 use plugin: core.plugin
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:repo"])
+    policy: Authority.from_rights(["FS.Read(\"repo\")"])
     library: plugin.load("build/library.wasm", policy)
     tick: library.on_tick(41) ?? panic("on_tick failed")
     enabled: library.is_enabled(true) ?? panic("is_enabled failed")

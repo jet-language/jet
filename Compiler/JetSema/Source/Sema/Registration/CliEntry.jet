@@ -286,9 +286,9 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
         flag: sema_checked_field_shape_names(definition, field).args
         name: sema_cli_entry_text(flag)
         help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}"
-        short: sema_cli_entry_marker_text(field.serde_markers, "Short") ?? ""
-        env: sema_cli_entry_marker_text(field.serde_markers, "Env") ?? ""
-        flag_only: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        short: sema_registration_cli_arg_text(field.serde_markers, "short") ?? ""
+        env: sema_registration_cli_arg_text(field.serde_markers, "env") ?? ""
+        flag_only: sema_registration_cli_arg_flag_only(field.serde_markers)
         slot: root.len()
         source: if direct -> "__v{slot}" else -> "__jet_cli_args.__cli_value(__parsed, {name})"
         explicit: if direct -> "__x{slot}" else -> "__jet_cli_args.__cli_explicit(__parsed, {name})"
@@ -355,7 +355,7 @@ sema_cli_entry_spec_line: fn(help: String, root: [SemaCLIInput], commands: [Sema
         table = "{table}c{sema_cli_entry_field(command.name)}{sema_cli_entry_field(sema_cli_entry_command_help(command, root))}"
         loop input in command.inputs -> table = "{table}{sema_cli_entry_record(input)}"
     }
-    version: if standard -> "$package.version" else -> "\"\""
+    version: if standard -> "#package.version" else -> "\"\""
     "    __spec: __jet_cli_args.__cli_spec({sema_cli_entry_text(table)}, {sema_cli_entry_text(help)}, {version}, {standard}, [String?]{{{envs.join(", ")}}})"
 }
 
@@ -674,7 +674,7 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
     lines.push("    }}")
     if spec.standard {
         lines.push("    if __version {{")
-        lines.push("    print($package.version)")
+        lines.push("    print(#package.version)")
         lines.push("    {help_end}")
         lines.push("    }}")
     }
@@ -913,7 +913,7 @@ sema_cli_entry_kind: fn(ty: Type) -> Int Never! {
         .Int | .InlineRange(_, _, _) -> 1
         .Float -> 2
         .Bool -> 4
-        else -> 0
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> 0
     }
 }
 
@@ -928,7 +928,7 @@ sema_cli_entry_value: fn(ty: Type, source: String) -> String? {
         .Named(type_name) -> {
             if type_name == "Path" -> return Val("Path.from(__jet_cli_args.__cli_text_of({source}))")
         }
-        else -> {}
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -944,7 +944,7 @@ sema_cli_entry_optional: fn(ty: Type, source: String) -> String? {
         .Named(type_name) -> {
             if type_name == "Path" -> return Val("if {source} != None -> Path?{{Val(Path.from(__jet_cli_args.__cli_text_of({source})))}} else -> Path?{{None}}")
         }
-        else -> {}
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -959,7 +959,7 @@ sema_cli_entry_default: fn(expr: Expr) -> String? {
         .Str(parts, _, _) -> {
             if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     None
 }

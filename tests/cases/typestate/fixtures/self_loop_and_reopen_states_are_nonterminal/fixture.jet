@@ -2,12 +2,10 @@
 Gate: struct {
     state { Closed, Reopened }
     w: Int
-}
 
-impl Gate {
-    #Transition(_, Closed) new: fn(w: Int) -[]> Gate { return Gate{ w: w } }
-    #Transition(Closed, Closed) hold: fn(self: &&Gate) -[]> Gate { return self }
-    #Transition(Closed, Reopened) reopen: fn(self: &&Gate) -[]> Gate { return self }
+    #State(_ -> Closed) new: fn(w: Int) -[]> Gate { return Gate{ w: w } }
+    #State(Closed -> Closed) hold: fn(self: &&Gate) -[]> Gate { return self }
+    #State(Closed -> Reopened) reopen: fn(self: &&Gate) -[]> Gate { return self }
 }
 
 run: fn() {

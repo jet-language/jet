@@ -1,37 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
-  EXPECTED_OUTPUT,
-  EXPECTED_SUM,
-  INPUT_RANGE,
-  ITERATIONS,
+  COMPOUND_PAIR,
   METRIC,
-  PAIR_ID,
-  PLAIN_LABEL,
-  PLAIN_PROGRAM,
-  PLAIN_SOURCE,
   PERFORMANCE_SURFACE_SCHEMA,
-  SURFACE_LABEL,
-  SURFACE_PROGRAM,
-  SURFACE_SOURCE,
   TARGET,
+  TIER,
   TRIALS,
   WARMUPS,
   computeStatistics,
+  measurePair,
+  pairDefinition,
   performanceSurfaceInternals,
   validatePerformanceSurfaceReceipt,
 } from "./performance-surface.mjs";
 
-const outputBytes = Buffer.from(EXPECTED_OUTPUT, "utf8").toString("base64");
 const artifactSha = "a".repeat(64);
 const revision = "b".repeat(40);
 const toolchain = { rustc: "rustc 1.0.0", node: "v22.0.0" };
 const host = { hostname: "fixture", cpu_affinity: "0" };
-const surfaceDigest = createHash("sha256").update(SURFACE_SOURCE).digest("hex");
-const plainDigest = createHash("sha256").update(PLAIN_SOURCE).digest("hex");
+const manifest = JSON.parse(readFileSync(new URL("../measurement-manifest.json", import.meta.url), "utf8"));
+const manifestPair = (id) => manifest.performance_surface_pairs.pairs.find((pair) => pair.id === id);
 
-function sample(label, wallTimeMs, source, context) {
+function sample(label, wallTimeMs, source, context, pair = COMPOUND_PAIR) {
+  const outputBytes = Buffer.from(pair.expected_output, "utf8").toString("base64");
   return {
     label,
     source_file: "main.jet",
@@ -49,26 +45,26 @@ function sample(label, wallTimeMs, source, context) {
     signal: null,
     timed_out: false,
     error_code: null,
-    stdout: EXPECTED_OUTPUT,
+    stdout: pair.expected_output,
     stderr: "",
     stdout_bytes_base64: outputBytes,
     stderr_bytes_base64: "",
     output_verified: true,
     output_matches: true,
     contaminated: false,
-    directory_entries: ["main.jet"],
+    directory_entries: [],
   };
 }
 
-function validFixture() {
+function validFixture(pair = COMPOUND_PAIR) {
   const surface = Array.from({ length: TRIALS }, (_value, index) => 10 + (index % 3));
   const plain = Array.from({ length: TRIALS }, (_value, index) => 20 + (index % 3));
   const trialOrders = Array.from({ length: TRIALS }, (_value, index) => index < TRIALS / 2 ? "surface_first" : "plain_first");
   const warmupOrders = Array.from({ length: WARMUPS }, (_value, index) => index < WARMUPS / 2 ? "surface_first" : "plain_first");
   const environment = { revision, toolchain, host };
   const contextBase = {
-    inputs: { iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM },
-    tier: "interpreter",
+    inputs: { ...pair.inputs },
+    tier: TIER,
     target: TARGET,
     metric: METRIC,
     artifact_sha256: artifactSha,
@@ -82,9 +78,10 @@ function validFixture() {
       warmup_orders: warmupOrders,
       trial_orders: trialOrders,
       fresh_process_per_arm: true,
-      fresh_source_file_per_arm: true,
+      one_build_per_arm: true,
+      fresh_directory_per_sample: true,
     },
-    output_validation: { encoding: "utf8", exact: true, oracle: EXPECTED_OUTPUT },
+    output_validation: { encoding: "utf8", exact: true, oracle: pair.expected_output },
   };
   const context = { ...contextBase, context_sha256: performanceSurfaceInternals.measurementContextDigest(contextBase) };
   const stats = computeStatistics(surface, plain);
@@ -92,8 +89,8 @@ function validFixture() {
     index,
     order,
     paired: true,
-    surface: sample(`trial-${index}-surface`, surface[index], SURFACE_SOURCE, context),
-    plain: sample(`trial-${index}-plain`, plain[index], PLAIN_SOURCE, context),
+    surface: sample(`trial-${index}-surface`, surface[index], pair.surface_source, context, pair),
+    plain: sample(`trial-${index}-plain`, plain[index], pair.plain_source, context, pair),
     surface_wall_time_ms: surface[index],
     plain_wall_time_ms: plain[index],
     ratio: surface[index] / plain[index],
@@ -102,23 +99,23 @@ function validFixture() {
   const warmups = warmupOrders.map((order, index) => ({
     index,
     order,
-    surface: sample(`warmup-${index}-surface`, 10, SURFACE_SOURCE, context),
-    plain: sample(`warmup-${index}-plain`, 20, PLAIN_SOURCE, context),
+    surface: sample(`warmup-${index}-surface`, 10, pair.surface_source, context, pair),
+    plain: sample(`warmup-${index}-plain`, 20, pair.plain_source, context, pair),
   }));
   const row = {
-    id: PAIR_ID,
-    canonical: SURFACE_LABEL,
-    alternate: PLAIN_LABEL,
-    surface: SURFACE_LABEL,
-    plain: PLAIN_LABEL,
-    workload: "100000-element integer reduction with identical final stdout",
-    surface_program: SURFACE_PROGRAM,
-    plain_program: PLAIN_PROGRAM,
-    expected_output: EXPECTED_OUTPUT,
-    surface_source: SURFACE_SOURCE,
-    plain_source: PLAIN_SOURCE,
-    surface_source_sha256: surfaceDigest,
-    plain_source_sha256: plainDigest,
+    id: pair.id,
+    canonical: pair.surface,
+    alternate: pair.plain,
+    surface: pair.surface,
+    plain: pair.plain,
+    workload: pair.workload,
+    surface_program: pair.surface_program,
+    plain_program: pair.plain_program,
+    expected_output: pair.expected_output,
+    surface_source: pair.surface_source,
+    plain_source: pair.plain_source,
+    surface_source_sha256: createHash("sha256").update(pair.surface_source).digest("hex"),
+    plain_source_sha256: createHash("sha256").update(pair.plain_source).digest("hex"),
     artifact_sha256: artifactSha,
     revision,
     measurement_context: context,
@@ -151,7 +148,7 @@ function validFixture() {
     version: 1,
     protocol: "paired-surface-v2",
     target: TARGET,
-    tier: "interpreter",
+    tier: TIER,
     metric: METRIC,
     artifact: "Compiler/JetCli/.jet/build/jet",
     artifact_sha256: artifactSha,
@@ -161,10 +158,10 @@ function validFixture() {
     host,
     environment_sha256: context.environment_sha256,
     measurement_context: context,
-    input: { iterations: ITERATIONS, range: INPUT_RANGE, expected_sum: EXPECTED_SUM },
+    input: { ...pair.inputs },
     warmups: WARMUPS,
     trials: TRIALS,
-    output_oracle: EXPECTED_OUTPUT,
+    output_oracle: pair.expected_output,
     pairs: [row],
   };
 }
@@ -257,4 +254,82 @@ test("rejects a preflight-contaminated measurement even when point ratio wins", 
   const receipt = validFixture();
   receipt.preflight_issues = ["compiler artifact changed during measurement"];
   assert.ok(validatePerformanceSurfaceReceipt(receipt).findings.some((finding) => finding.kind === "unavailable"));
+});
+
+for (const id of ["list_fill_vs_index_loop", "list_fill_repeat_vs_index_loop"]) {
+  test(`a ${id} receipt holds to its own manifest row`, () => {
+    const spec = manifestPair(id);
+    const pair = pairDefinition(spec);
+    const receipt = validFixture(pair);
+    assert.deepEqual(validatePerformanceSurfaceReceipt(receipt, { pairSpec: spec }).findings, []);
+    assert.ok(validatePerformanceSurfaceReceipt(receipt).findings.some((finding) => finding.kind === "stale-identity"));
+    const swapped = validFixture(pair);
+    swapped.pairs[0].surface_source = pair.plain_source;
+    assert.ok(validatePerformanceSurfaceReceipt(swapped, { pairSpec: spec }).findings.some((finding) => finding.kind === "stale-identity"));
+    const wrongTotal = validFixture(pair);
+    wrongTotal.output_oracle = `${pair.expected_output}0`;
+    assert.ok(validatePerformanceSurfaceReceipt(wrongTotal, { pairSpec: spec }).findings.some((finding) => finding.kind === "wrong-output"));
+  });
+}
+
+test("measures a manifest pair with its own sources, inputs and oracle", () => {
+  const spec = manifestPair("list_fill_vs_index_loop");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "performance-surface-pair-"));
+  try {
+    const artifact = path.join(dir, "jet");
+    writeFileSync(artifact, "fixture");
+    const identity = {
+      artifact: { path: artifact, sha256: createHash("sha256").update("fixture").digest("hex") },
+      revision,
+      toolchain,
+      host,
+    };
+    const built = [];
+    const buildArm = ({ binary, source, label }) => {
+      assert.equal(binary, artifact);
+      built.push(label);
+      return { root: null, executable: path.join(dir, `${label}-main`), executable_sha256: "b".repeat(64), source_sha256: createHash("sha256").update(source).digest("hex"), status: 0, signal: null, error_code: null, stderr: "" };
+    };
+    let calls = 0;
+    const runArm = ({ executable, source, expectedOutput, label, context }) => {
+      calls += 1;
+      assert.equal(expectedOutput, spec.expected_output);
+      assert.equal(executable, path.join(dir, source === spec.surface_source ? "surface-main" : "plain-main"));
+      const base = source === spec.surface_source ? 10 : 20;
+      return sample(label, base + (calls % 3), source, context, pairDefinition(spec));
+    };
+    const { receipt, validation } = measurePair({ pair: spec, identity, artifactPath: artifact, scratchRoot: dir, buildArm, runArm });
+    assert.deepEqual(built, ["surface", "plain"]);
+    assert.equal(calls, 2 * (WARMUPS + TRIALS));
+    assert.equal(receipt.builds.surface.status, 0);
+    assert.equal(receipt.pairs[0].id, spec.id);
+    assert.deepEqual(receipt.input, spec.inputs);
+    assert.equal(receipt.output_oracle, spec.expected_output);
+    assert.deepEqual(validation.findings, []);
+    assert.equal(validation.verdict, "win");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a pair whose arm does not build is never timed", () => {
+  const spec = manifestPair("list_fill_repeat_vs_index_loop");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "performance-surface-pair-"));
+  try {
+    const artifact = path.join(dir, "jet");
+    writeFileSync(artifact, "fixture");
+    const identity = {
+      artifact: { path: artifact, sha256: createHash("sha256").update("fixture").digest("hex") },
+      revision,
+      toolchain,
+      host,
+    };
+    const buildArm = ({ source, label }) => ({ root: null, executable: label === "plain" ? null : path.join(dir, "main"), executable_sha256: null, source_sha256: createHash("sha256").update(source).digest("hex"), status: label === "plain" ? 1 : 0, signal: null, error_code: null, stderr: label === "plain" ? "Error [E0001]: fixture\n" : "" });
+    const runArm = () => assert.fail("an arm ran although a build failed");
+    const { receipt } = measurePair({ pair: spec, identity, artifactPath: artifact, scratchRoot: dir, buildArm, runArm });
+    assert.ok(receipt.preflight_issues.includes("plain arm did not build: Error [E0001]: fixture"));
+    assert.equal(receipt.status, "fail");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

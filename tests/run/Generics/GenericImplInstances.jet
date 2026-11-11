@@ -1,9 +1,9 @@
 // One generic struct used at several instances: each instance of its impl
 // keeps its own identity, so the methods of `Slot<Int>`, `Slot<String>` and
 // `Slot<Slot<Int>>` never share a body.
-Slot: struct<T> { value: T }
+Slot: struct<T> {
+    value: T
 
-impl Slot {
     get: fn(self) -> T { self.value }
     put: fn(self, value: T) -> Slot<T> { Slot<T>{value: value} }
 }

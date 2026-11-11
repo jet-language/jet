@@ -231,7 +231,7 @@ ir_ssa_reads: fn(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
             loop index in f.b[at]..<(f.b[at] + f.c[at]) -> s.use_args[index] = ir_ssa_read(s, current, f.args[index])
         }
         .Return -> { if a >= 0 -> s.use_a[at] = ir_ssa_read(s, current, a) }
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Unreachable -> {}
     }
 }
 
@@ -338,7 +338,7 @@ ir_ssa_build: fn(f: IRFunction) -> IRSsa Never! {
                 if live -> ir_ssa_reads(s, f, at, current)
                 live = false
             }
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Sqrt | .IntBig | .StreamStore -> {
                 if !live -> next
                 ir_ssa_reads(s, f, at, current)
                 written: ir_x64_write(f, at)

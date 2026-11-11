@@ -10,9 +10,12 @@ use {
     scope: core.mem.scope
 }
 
-Resource: struct { name: String }
-impl Resource.Close {
-    close: fn(&&self) { print("close {self.name}") }
+Resource: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
 }
 exit_case: fn() {
     first := Resource{name: "first"}

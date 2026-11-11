@@ -1,0 +1,9 @@
+// An index that nothing proves keeps its runtime check, so it
+// can stop and `-[!Panic]>` refuses it: a plain Int index into a list or a
+// fixed list, a Die interval that does not fit five faces, and a map lookup.
+Die: distinct Int(1..6)
+first: fn(items: [Int], position: Int) -[!Panic]> Int { items[position] }
+pick: fn(faces: [String#6], position: Int) -[!Panic]> String { faces[position].copy() }
+short: fn(faces: [String#5], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
+lookup: fn(ports: [String:Int], name: String) -[!Panic]> Int { ports[name] }
+run: fn() {}

@@ -1,0 +1,18 @@
+# A `timing: .Fixed` value passed to an untagged parameter keeps its meaning:
+# `plain` branches on it and divides by it, so the call in `forward` is E0737
+# before any inlining, and every tier refuses the program the same way
+# instead of running it at none and stopping in IR Lint at basic and full.
+fixture: fixed_timing_untagged_callee_is_refused_at_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: nonzero
+stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # E0737 at the call, before inlining
+stdout: !~ "ran" # the program never runs
+step: jet run --optimize=basic main.jet
+exit: nonzero
+stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # the same E0737, not an IR Lint stop
+stdout: !~ "ran" # the program never runs
+step: jet run --optimize=full main.jet
+exit: nonzero
+stderr: ~ "[jet.FixedTimingSteer]: A `Key` value decides how `plain` runs" # the same E0737, not an IR Lint stop
+stdout: !~ "ran" # the program never runs

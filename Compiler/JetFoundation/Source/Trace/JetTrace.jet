@@ -52,7 +52,7 @@ verify_jettrace: fn(bytes: [U8]) -> CanonicalJSON JetTraceError! {
             supported: "{TRACE_VERSION}"
             if number != supported -> return Err(jettrace_error("jettrace version {number} needs a newer jet toolchain (this reader supports {TRACE_VERSION})"))
         }
-        else -> return Err(jettrace_error("jettrace version is not an integer"))
+        .Null | .Bool(_) | .String(_) | .Array(_) | .Object(_) -> return Err(jettrace_error("jettrace version is not an integer"))
     }
     content: fields[jettrace_get(fields, "content")].value
     jettrace_validate_content(content)

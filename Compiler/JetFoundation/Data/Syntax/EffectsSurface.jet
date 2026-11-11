@@ -61,31 +61,23 @@ KW_SCRUB: "Scrub"
 /// flags, and may be used anywhere a declared tag may be used.
 BUILTIN_TAGS: [String]{"Input", "PII", "Secret", "Credential"}
 
-/// (ratified 2026-06-22, option A): the typestate **require-state** fn
-/// modifier — `#State(Confirmed) check_in: fn(self, …)`. Declares the method valid
-/// only when its receiver is currently in state `Confirmed`. Calling it on a value
-/// in any other state is E0150. The state is an ordinary `tag` the
-/// current state of a value is a compile-time fact threaded by forward dataflow,
-/// erased in codegen (I3 — zero runtime cost). A paren-arg fn marker, parallel to
-/// `#Layout(c)` / `#UnitFamily(Currency)`. The exact spelling is the implemented
-/// default queued for owner confirmation as.
+/// (ratified 2026-06-22, option A): the one typestate fn
+/// marker. `#State(Confirmed) check_in: fn(self, …)` declares the method valid
+/// only when its receiver is currently in state `Confirmed`; calling it on a
+/// value in any other state is E0150. `#State(Pending -> Confirmed) confirm:
+/// fn(self) -> Reservation` consumes a value in state `Pending` and yields one in
+/// state `Confirmed`; the from-state may be `_` for an **entry** transition (a
+/// constructor that produces the initial state from nothing). The argument is
+/// exactly a state name, or a state name or `_`, then `->`, then a state name:
+/// no chains, no expressions, no `_` on the right. The current state of a value
+/// is a compile-time fact threaded by forward dataflow, erased in codegen (I3 —
+/// zero runtime cost). `#Transition` is retired (E0927).
 KW_STATE: "State"
-
-/// (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending, Confirmed) confirm: fn(self) -> Reservation`.
-/// Declares a function that consumes a value in state `Pending` and yields one in
-/// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
-/// returns the next"). The from-state may be `_` for an **entry** transition (a
-/// constructor that produces the initial state from nothing). Wrong from-state at a
-/// call site is E0150; the call advances the receiver/result to the to-state. The
-/// `->` inside reuses the callable arrow. Tags erase (I3). Implemented default queued
-/// for owner confirmation as.
-KW_TRANSITION: "Transition"
 
 /// (amends): the typestate **state-set section**
 /// contextual keyword — `TypeName: struct { state { Pending, Confirmed, CheckedIn } }`.
 /// The bounded set is owned by the named struct, erases at runtime, and is checked
-/// against its markers. A state referenced in `#State(X)` or `#Transition(A, B)`
+/// against its markers. A state referenced in `#State(X)` or `#State(A -> B)`
 /// that is not in the set is E0151. Contextual: `state` stays an ordinary identifier
 /// outside a struct-body section.
 KW_STATE_DECL: "state"
@@ -108,11 +100,11 @@ PROTO_SERVER: "server"
 KW_MARKER: "marker"
 
 /// The one non-code fact declaration word —
-/// `fact Name($holds: …, $safe: …, …)`. Its settings are `$` parameters;
+/// `fact Name(holds: …, safe: …, …)`. Its settings are `$` parameters;
 /// the registry reads its rows from `Prelude/Facts.jet`.
 KW_FACT: "fact"
 
-/// The entry-transition placeholder — `#Transition(_, Pending)` means
+/// The entry-transition placeholder — `#State(_ -> Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 STATE_ENTRY: "_"
 

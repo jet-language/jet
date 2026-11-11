@@ -17,13 +17,12 @@ use {
         ConstDef,
         DeclID,
         DeclTable,
+        MARKER_ARG,
         MARKER_CLI,
         MARKER_DEPRECATED,
         MARKER_DOC,
-        MARKER_ENV,
         MARKER_FLATTEN,
-        MARKER_RENAME_ALL,
-        MARKER_SHORT,
+        MARKER_RENAME,
         MARKER_SKIP,
         decl_id_index,
         decl_table_add,
@@ -100,6 +99,8 @@ use {
         core_source_owns_type,
         diagnostic_registry_row,
         expr_span,
+        core_bare_source_module,
+        ir_runtime_handle_row,
         builtin_codec_trait_ref,
         name_count,
         name_find_bytes,
@@ -206,12 +207,12 @@ sema_registration_unit_type_name: fn(name: String) -> String Never! {
 sema_registration_unit_leaf_name: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_registration_unit_leaf_name(inner)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     name: if ty == {
         .Named(value) -> Val(value)
         .Apply(value, _) -> Val(value)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
     name_value: name ?? return None
     parts: name_value.split("::").to_list()
@@ -286,7 +287,7 @@ sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrat
         loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
             if graph.modules[module_row_index].program.items[item_index] == {
                 .UnitFamily(definition) -> sema_registration_unit_family_facts(definition, facts)
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -326,7 +327,7 @@ sema_registration_unit_type_package: fn(graph: SemaRegistrationGraph, ty: Type) 
     spelled := ""
     if ty == {
         .Named(value) | .Apply(value, _) -> spelled = value.copy()
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
@@ -370,7 +371,7 @@ sema_registration_unit_type_is_qualified: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> sema_registration_unit_type_is_qualified(inner)
         .Named(value) | .Apply(value, _) -> value.contains("::")
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -382,6 +383,8 @@ SemaRegistrationGenericParam: struct {
     identity_key: String
     // The declaring module, where the bounds' trait names resolve.
     module_identity: String
+    // A `<comptime N: Int>` number parameter (TGenericParam.number).
+    number: Bool{false}
 }
 
 SemaRegistrationParameter: struct {
@@ -437,6 +440,9 @@ SemaRegistrationFunction: struct {
     abi: SemaRegistrationCallableABI
     // The declared return stays raw for a protocol ABI trait-impl method.
     raw_protocol_return: Bool
+    // A method of a conditional impl (`impl Pair<T: Priced>.Describe`): the
+    // owner's parameters with the bounds the impl applies under.
+    impl_conditions: [TypeParam]{[TypeParam]{}}
 }
 
 SemaRegistrationField: struct {
@@ -695,8 +701,8 @@ SemaRegistrationHostHooks: struct {
 }
 
 // The folded build snapshot the driver
-// seeds before checking (Rust `BuildFactSnapshot`). Sema folds `$package.*`
-// and `$build.*` reads from these values and never probes the host.
+// seeds before checking (Rust `BuildFactSnapshot`). Sema folds `#package.*`
+// and `build.*` reads from these values and never probes the host.
 SemaBuildFacts: struct {
     package_name: String
     package_version: String
@@ -709,7 +715,7 @@ SemaBuildFacts: struct {
     // This compile produces a shipped artifact (`jet build`).
     artifact_build: Bool{false}
     // The package's declared settings with this build's values
-    // (`$build.settings.*`, sema_fact_build_setting).
+    // (`#build.settings.*`, sema_fact_build_setting).
     settings: [SemaBuildSetting]{[SemaBuildSetting]{}}
     // The host's compiler identity ("" when the host names none); a history
     // artifact's `tool` names it (#6410).
@@ -803,11 +809,25 @@ SemaRegistrationGraph: struct {
     // they read one name's rows instead of every impl of the graph.
     impl_trait_name_slots: [String:Int]{[String:Int]{}}
     impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
+    // The impl rows that implement core.prelude's CheckedText
+    // (sema_type_graph_is_checked_text_impl), in module/row order, built with
+    // the trait index above. A typed literal or static call looks its head's
+    // checked-text impl up among these rows instead of every impl of the graph
+    // (sema_expression_checked_text_target).
+    checked_text_impl_rows: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
     // Opaque impl type name -> the Core source modules that own its impls
     // (`sema_registration_source_owns_impl`), in module order. Built once with
     // the graph, so method lookup reads only the owning modules instead of
     // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
     source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}}
+    // The inferred never-return set: the symbol keys of the functions that never return to
+    // their caller, one fixed point once every declaration is registered
+    // (sema_divergence_solve).
+    diverging_functions: [String:Bool]{[String:Bool]{}}
+    // #3708: the bundle failure solve has settled every unannotated
+    // callable's contract, so a body checked again (the recheck pass) reads
+    // a still-defaulted callee as one the solve left fallible.
+    failure_solved: Bool{false}
     // JET_KEEP_GOING, the compiler-internal diagnostic mode the driver sets
     // (its output is never shipped): a function whose body check fails is
     // kept as a typed trap of its declared signature instead of being left
@@ -1073,9 +1093,10 @@ sema_registration_generic_identity: fn(owner_key: String, params: [SemaRegistrat
 sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String, module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // A `<comptime N: Int>` number parameter is rejected by the casing
-        // walk (E0390) and is never registered as a type parameter.
-        if parameter.prep != None -> next
+        // A `<comptime N: Int>` number parameter is a generic parameter whose
+        // arguments are numbers; one of another value type is E0390 in the
+        // casing walk and is never registered.
+        if parameter.prep == .Val(prep) && prep.value_type != "Int" -> next
         duplicate: loop previous in params {
             if previous.name == parameter.name -> break true
         } ?? false
@@ -1090,6 +1111,7 @@ sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String
             span: parameter.name_span,
             identity_key: "{owner_key}<{index}:{parameter.name}[{bound_key}]>",
             module_identity: module_identity,
+            number: parameter.prep != None,
         })
     }
     params
@@ -1098,7 +1120,7 @@ sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String
 sema_registration_type_is_fn: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1111,7 +1133,7 @@ sema_registration_callback_boundary_param: fn(abi: SemaRegistrationCallableABI, 
         .Tagged(marker, inner) -> {
             if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) && sema_registration_type_is_fn(inner) -> return true
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     abi.is_c_abi && sema_registration_type_is_fn(effective_type)
 }
@@ -1229,7 +1251,7 @@ sema_registration_function_signature: fn(func: Func, raw_protocol_return: Bool, 
     if func.declared_effects == None -> return projected
     if projected == {
         .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: func.declared_effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
-        else -> projected
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> projected
     }
 }
 
@@ -1237,7 +1259,7 @@ sema_registration_parameter_label: fn(parameter: Param) -> String? {
     if parameter.public_label == .Val(public_label) -> return Val(public_label.name)
     if parameter.zone == {
         .PositionalOnly | .Either -> None
-        else -> Val(parameter.name)
+        .LabelOnly -> Val(parameter.name)
     }
 }
 
@@ -1245,7 +1267,7 @@ sema_registration_signature_metadata: fn(signature: Type) -> FunctionCallMetadat
     if signature == {
         // copy: `metadata` is a payload of read parameter `signature`, which keeps the original; the returned value owns this one
         .Fn(_, _, _, _, metadata, _) -> metadata.copy()
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1580,7 +1602,8 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
 
 // Buckets every impl under the trait it implements (Rust's keyed trait
 // registry), in module/row order. An inherent impl or an unresolved trait
-// name matches no bound, so it has no bucket.
+// name matches no bound, so it has no bucket. The CheckedText impls are
+// listed once more on their own (`checked_text_impl_rows`).
 sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
     graph.impl_trait_slots = [String:Int]{}
     graph.impl_trait_buckets = [[SemaRegistrationRowRef]]{}
@@ -1612,6 +1635,13 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
             }
         }
     }
+    checked_text := [SemaRegistrationRowRef]{}
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].impls.len() {
+            if sema_type_graph_is_checked_text_impl(graph, graph.modules[module_index].impls[row]) -> checked_text.push(SemaRegistrationRowRef{module_index: module_index, row: row})
+        }
+    }
+    graph.checked_text_impl_rows = checked_text.move()
     graph.impl_traits_indexed = true
 }
 
@@ -1794,12 +1824,23 @@ sema_registration_operator_owner: fn(owner: SymbolID, module_identity: String, l
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
 
+// Whether the struct or enum `item` writes an `impl` block of `trait_name`
+// in its body; the blocks are read in place, not copied.
+sema_registration_item_has_trait_block: fn(item: Item, trait_name: String) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
+        .Enum(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+    false
+}
+
 // The `impl Trait { … }` blocks a struct or enum writes in its body.
 sema_registration_item_trait_blocks: fn(item: Item) -> [TraitImplBlock] Never! {
     if item == {
         .Struct(definition) -> return definition.trait_impls
         .Enum(definition) -> return definition.trait_impls
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     [TraitImplBlock]{}
 }
@@ -1866,7 +1907,7 @@ sema_registration_nominal: fn(item: Item, module_identity: String, fallback_sour
             symbol: sema_registration_named_symbol(module_identity, definition.family, definition.family_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.UnitFamily, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
-        else -> None
+        .Func(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -1978,10 +2019,6 @@ sema_registration_compiler_owned_codec_trait: fn(module_identity: String, refere
     }
 }
 
-sema_registration_is_compiler_owned: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
-    nominal.compiler_owned
-}
-
 // Compiler-owned enum rows keep their bare canonical identity across modules.
 // Runtime enums (`Ordering`, `RemoveBy`, `TaskFailure`) and artifact-declared
 // reflection enums share this checked nominal path; runtime ownership is
@@ -2089,7 +2126,7 @@ sema_registration_root_name: fn(item: Item) -> String Never! {
         .CodeModule(value) -> value.name
         .GenericModule(value) -> value.name
         .ModuleAlias(value) -> value.name
-        else -> ""
+        .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
 }
 
@@ -2108,7 +2145,7 @@ sema_registration_root_span: fn(item: Item) -> Span Never! {
         .CodeModule(value) -> value.name_span
         .GenericModule(value) -> value.name_span
         .ModuleAlias(value) -> value.name_span
-        else -> Span{start: 0, end: 0}
+        .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> Span{start: 0, end: 0}
     }
 }
 
@@ -2127,7 +2164,7 @@ sema_registration_root_symbol: fn(item: Item, module_identity: String, source_fi
         .CodeModule(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
         .GenericModule(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
         .ModuleAlias(value) -> Val(sema_registration_named_symbol(module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
-        else -> None
+        .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -2242,7 +2279,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, item: Item, 
             sema_registration_push_declaration(module_row, item)
             return true
         }
-        else -> {}
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .Module(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     name: sema_registration_root_name(item)
     if name == "" -> return true
@@ -2255,7 +2292,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, item: Item, 
     if !sema_registration_value_type_rules(module_row, item, diagnostics) -> return false
     function: if item == {
         .Func(value) -> Val(sema_registration_function(value, false, module_row.module_identity, None, source_file, source_origin, source_segments, diagnostics))
-        else -> None
+        .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
     symbol: if function == {
         // copy: the symbol table and the function row each own the symbol.
@@ -2286,7 +2323,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, item: Item, 
                 _ := sema_registration_add_root(module_row, Item.Distinct{value: definition}, source_file, source_origin, source_segments, diagnostics)
             }
         }
-        else -> {}
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     true
 }
@@ -2308,7 +2345,7 @@ sema_registration_reserved_type_rule: fn(module_row: SemaRegistrationModule, ite
         .Enum(_) -> "enum"
         .Distinct(_) -> "distinct type"
         .TypeAlias(_) -> "type alias"
-        else -> ""
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
     if kind == "" || !sema_reserved_type_name(name) -> return true
     // `item` is the loaded declaration; canonical identity supplies the exact
@@ -2350,7 +2387,7 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
                 return false
             }
         }
-        else -> {}
+        .Func(_) | .Struct(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     true
 }
@@ -2431,7 +2468,18 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, definition: ImplD
         SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
     hook_owner: sema_registration_operator_owner(owner_id, module_row.module_identity, target_type, definition.trait_name, definition.operator_rhs)
-    methods: loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
+    methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
+    // A conditional impl's methods carry its bounds. A list that does not
+    // name a resolved type's parameters is E0003 and the impl applies as an
+    // unconditional one. The type another package member declares resolves
+    // when the impl is attached to it (sema_registration_attach_namespace_impls).
+    if definition.type_params.len() > 0 {
+        valid: if nominal_index >= 0 -> sema_registration_impl_conditions_valid(definition, owner_row.nominals[nominal_index].generic_params, diagnostics) else if sema_registration_builtin_scalar(definition.type_name) != None -> sema_registration_impl_conditions_valid(definition, [SemaRegistrationGenericParam]{}, diagnostics) else -> true
+        if valid {
+            // copy: each method keeps the conditions; the declaration keeps its own.
+            loop index in 0..<methods.len() -> methods[index].impl_conditions = definition.type_params.copy()
+        }
+    }
     SemaRegistrationImpl{
         symbol: symbol,
         declaration: definition,
@@ -2458,6 +2506,29 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, definition: ImplD
     }
 }
 
+// A conditional impl lists its type's parameters in their declared order,
+// each with the bounds the impl applies under: `impl Pair<T: Priced>.Describe`
+// for `Pair: struct<T>`. Any other list is E0003 at the list.
+sema_registration_impl_conditions_valid: fn(definition: ImplDef, declared: [SemaRegistrationGenericParam], diagnostics: &[Diagnostic]) -> Bool {
+    matches := declared.len() == definition.type_params.len()
+    if matches {
+        loop index in 0..<declared.len() {
+            if declared[index].name != definition.type_params[index].name {
+                matches = false
+                break
+            }
+        }
+    }
+    if matches -> return true
+    names: loop param in declared -> param.name
+    written: loop param in definition.type_params -> param.name
+    span: Span{start: definition.type_params[0].name_span.start, end: definition.type_params[definition.type_params.len() - 1].name_span.end}
+    have: if names.len() == 0 -> "`{definition.type_name}` has no type parameters" else -> "`{definition.type_name}` declares `<{names.join(", ")}>`"
+    fix: if names.len() == 0 -> "remove `<{written.join(", ")}>` from the impl head" else -> "write `impl {definition.type_name}<{names.join(", ")}>` with each bound on its parameter"
+    diagnostics.push(sema_error("E0003", span, "the conditional impl of `{definition.type_name}` names `<{written.join(", ")}>`", "{have}; a conditional impl lists them in order, each with the bounds it applies under", fix))
+    false
+}
+
 // `rows` indexes `module_row`'s nominals (sema_registration_impl_rows),
 // which no impl registration changes. `items` are the module's program items,
 // moved out of `module_row` while it is written.
@@ -2468,7 +2539,7 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
             // In a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
-            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
+            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_builtin_impl_allowed(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
             if definition.trait_name == None && rows.nominals.get(definition.type_name) == .Val(nominal_index) && module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait {
@@ -2482,7 +2553,7 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
                 }
             }
         }
-        else -> {}
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -2516,16 +2587,26 @@ sema_registration_impl_on_trait: fn(definition: ImplDef) -> Diagnostic {
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
+// A runtime handle the module owns takes its Core impls the way a declared
+// nominal does; any other opaque type is named in the row's `impl_types`.
 sema_registration_source_owns_impl: fn(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
     if !module_row.module_identity.starts_with("<corelib>/") -> return false
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
+        if sema_registration_core_handle_owner(row.module_name, name) -> return true
         if !sema_reserved_type_name(name) && !core_module_has_type(row.module_name, name) -> next
         loop owner in row.impl_types {
             if owner == name -> return true
         }
     }
     false
+}
+
+// A runtime handle belongs to the Core module that exports it or, for a bare
+// prelude spelling (`Path`), to the module that declares that spelling.
+sema_registration_core_handle_owner: fn(module_name: String, name: String) -> Bool Never! {
+    if ir_runtime_handle_row(name) == None -> return false
+    core_module_has_type(module_name, name) || core_bare_source_module(name) == Val((module_name))
 }
 
 // The `sema_registration_source_owns_impl` relation for every module and impl
@@ -2538,8 +2619,12 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
         if !module_row.module_identity.starts_with("<corelib>/") -> next
         loop row in CORE_SOURCE_OWNED_ROWS {
             if row.module_name != module_row.module_name || row.alias != module_row.core_source_alias || module_row.source_file != "<corelib>/{row.path}" -> next
-            loop owner in row.impl_types {
-                if !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) -> next
+            row_owners := row.impl_types.copy()
+            loop implementation in module_row.impls {
+                if sema_registration_core_handle_owner(row.module_name, implementation.target_type_name) && !row_owners.contains(implementation.target_type_name) -> row_owners.push(implementation.target_type_name.copy())
+            }
+            loop owner in row_owners {
+                if !sema_registration_core_handle_owner(row.module_name, owner) && !sema_reserved_type_name(owner) && !core_module_has_type(row.module_name, owner) -> next
                 modules := owners.get(owner) ?? [Int]{}
                 if modules.contains(module_index) -> next
                 modules.push(module_index)
@@ -2548,6 +2633,24 @@ sema_registration_index_source_impls: fn(graph: &SemaRegistrationGraph) Never! {
         }
     }
     graph.source_impl_owner_modules = owners.move()
+}
+
+// Whether a built-in target is this module's to extend: an operator hook
+// whose other operand it declares (sema_registration_opmix_builtin_impl), or
+// a trait it declares itself (`Named: trait` then `impl Int.Named`), since the
+// orphan rule lets the owner of either the trait or the type write the impl.
+// `items` are the module's program items.
+sema_registration_builtin_impl_allowed: fn(items: [Item], definition: ImplDef) -> Bool {
+    if sema_registration_opmix_builtin_impl(items, definition) -> return true
+    if definition.type_name.contains(".") -> return false
+    if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) -> return false
+    trait_name: definition.trait_name ?? return false
+    loop item_index in 0..<items.len() {
+        if items[item_index] == .Trait(declared) {
+            if declared.name == trait_name -> return true
+        }
+    }
+    false
 }
 
 // (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
@@ -2577,7 +2680,7 @@ sema_registration_builtin_scalar: fn(name: String) -> Type? {
     scalar: sema_marker_rules_builtin_type(name) ?? return None
     if scalar == {
         .Named(_) -> None
-        else -> Val(scalar)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(scalar)
     }
 }
 
@@ -2588,7 +2691,7 @@ sema_registration_declared_type_name: fn(item: Item) -> String Never! {
         .Enum(declared) -> declared.name
         .Distinct(declared) -> declared.name
         .TypeAlias(declared) -> declared.name
-        else -> ""
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
 }
 
@@ -2612,7 +2715,7 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
                 }
             }
             if owner_index < 0 {
-                if !sema_registration_opmix_builtin_impl(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
+                if !sema_registration_builtin_impl_allowed(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_unknown_impl_target(definition))
                 next
             }
             owner_nominal: sema_registration_impl_nominal_index(graph.modules[owner_index], definition.type_name)
@@ -2623,6 +2726,12 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
             row: sema_registration_impl(graph.modules[module_index], definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
+            // Only the attached registration knows the owner's parameters.
+            if definition.type_params.len() > 0 {
+                refused := [Diagnostic]{}
+                _: sema_registration_impl_conditions_valid(definition, graph.modules[owner_index].nominals[owner_nominal].generic_params, refused)
+                loop diagnostic in refused -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
+            }
             graph.modules[module_index].impls[impl_index] = row
             loop method in row.methods -> graph.modules[owner_index].nominals[owner_nominal].methods.push(method)
         }
@@ -2641,7 +2750,7 @@ sema_registration_item_has_foreign_name: fn(item: Item, name: String) -> Bool Ne
                 if function.name == name -> return true
             }
         }
-        else -> {}
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .Module(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     false
 }
@@ -2914,7 +3023,7 @@ sema_registration_expand_fallible_aliases: fn(items: &[Item]) Never! {
                 }
                 if changed -> replacement = Val(Item.Struct{value: updated})
             }
-            else -> {}
+            .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if replacement == .Val(item) -> items[index] = item
     }
@@ -2931,7 +3040,7 @@ sema_registration_expand_impl_self: fn(items: &[Item]) {
         if item == {
             .Struct(definition) -> type_params[definition.name] = definition.type_params
             .Enum(definition) -> type_params[definition.name] = definition.type_params
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop index in 0..<items.len() {
@@ -2959,7 +3068,7 @@ sema_registration_expand_impl_self: fn(items: &[Item]) {
                 }
                 if changed -> replacement = Val(Item.Enum{value: updated})
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if replacement == .Val(item) -> items[index] = item
     }
@@ -3017,7 +3126,7 @@ sema_registration_fallible_alias_return: fn(aliases: [TypeAliasDef], return_type
             name = head
             args = applied
         }
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
     loop alias in aliases {
         if alias.name != name || alias.type_params.len() != args.len() -> next
@@ -3086,7 +3195,7 @@ sema_registration_prepare_rows: fn(jobs: &&[SemaRegistrationPrepareJob], threads
     positions := [Int]{}
     loop rank in 0..<heaviest.len() -> positions.push(heaviest[heaviest.len() - 1 - rank])
     compiler_apply_order<SemaRegistrationPrepareJob>(owned, positions)
-    shared_state: shared SemaRegistrationPrepareShared{jobs: [SemaRegistrationPrepareJob]{}, positions: positions.move()}
+    shared_state: Shared{SemaRegistrationPrepareShared{jobs: [SemaRegistrationPrepareJob]{}, positions: positions.move()}}
     sema_registration_prepare_fill(shared_state, owned)
     slots := [SemaRegistrationPreparedRow?]{}
     loop _ in 0..<weights.len() -> slots.push(None)
@@ -3168,10 +3277,11 @@ SemaRegistrationCLIFieldKind: enum {
 
 // Rust `validate_cli_items`: every `#CLI` program struct of the module, in item
 // order. A struct that is not `#CLI` may carry neither a callable member
-// (E1345) nor `#Short`/`#Env` (E1319). A `#CLI` struct's fields each map to one
-// flag (E1305), keep `#Flag` meaningful (E1309), derive distinct flags beside
-// the reserved `--help`/`--allow`/`--deny` (E1306), use one-letter distinct
-// short names (E1318), and keep `#Env` off presence flags (E1319). Its methods
+// (E1345) nor `#Arg` (E1319). A `#CLI` struct's fields each map to one flag
+// (E1305), keep `#Arg(flag_only: true)` meaningful (E1309), derive distinct
+// flags beside the reserved `--help`/`--allow`/`--deny` (E1306), use
+// one-letter distinct `short:` names (E1318), and keep `env:` off presence
+// flags (E1319). Its methods
 // and bound members are commands with one namespace (E1344), read-only
 // receivers (E1347), and callable shapes (E1345), and are not allowed on a
 // Codable struct (E1346).
@@ -3186,7 +3296,7 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 loop binding in definition.cli_bindings -> diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member is only valid inside a `#CLI` program struct"))
                 loop field in definition.fields {
                     loop marker in field.serde_markers {
-                        if marker.name == MARKER_SHORT || marker.name == MARKER_ENV -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
+                        if marker.name == MARKER_ARG -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Arg` describes a generated command input, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
                     }
                 }
                 next
@@ -3203,9 +3313,9 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                     diagnostics.push(sema_error("E1305", field.name_span, "field `{field.name}` has no CLI flag mapping ({type_name(field.ty)})", "a `#[CLI]` field becomes one `--flag` (and a positional when required); only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested `#[CLI]` structs and other collection/closure types don't).", "change the field to a supported type, or drop it from the `#[CLI]` struct"))
                     next
                 }
-                flag_marker: sema_registration_cli_marker(field.serde_markers, "Flag")
-                if flag_marker == .Val(marker) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
-                    diagnostics.push(sema_error("E1309", marker.name_span, "`#[Flag]` on `{field.name}` has nothing to opt out of", "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `#[Flag]`, or make the field a required scalar without a `{{expr}}` default"))
+                flag_only: sema_registration_cli_arg_option(field.serde_markers, "flag_only")
+                if flag_only == .Val(value) && sema_registration_cli_true(value) && kind != SemaRegistrationCLIFieldKind.RequiredOption {
+                    diagnostics.push(sema_error("E1309", expr_span(value), "`#Arg(flag_only: true)` on `{field.name}` has nothing to opt out of", "`flag_only: true` keeps a required value field off bare positional input. Bool fields, optional fields (`T?`), and fields with a `{{expr}}` default already stay flag-only.", "remove `flag_only: true`, or make the field a required scalar without a `{{expr}}` default"))
                 }
                 flag: sema_checked_field_shape_names(definition, field).args
                 if seen_flags.get(flag) != None {
@@ -3214,9 +3324,9 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 seen_flags[flag] = true
                 sema_registration_cli_short_name(field, seen_shorts, diagnostics)
                 if kind == SemaRegistrationCLIFieldKind.Flag {
-                    env_marker: sema_registration_cli_marker(field.serde_markers, "Env")
-                    if env_marker == .Val(marker) && sema_registration_cli_marker_string(marker) != None {
-                        diagnostics.push(sema_registration_e1319(MARKER_ENV, field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
+                    env_option: sema_registration_cli_arg_option(field.serde_markers, "env")
+                    if env_option == .Val(value) && sema_registration_cli_literal(value) != None {
+                        diagnostics.push(sema_registration_e1319("Arg(env:)", field.name, "a `Bool` command field is a presence flag, while `env:` lowers to a value option.", "remove `env:`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", expr_span(value)))
                     }
                 }
             }
@@ -3268,16 +3378,12 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-// E1318: the field's first `#Short` marker, when its argument is one literal
-// string, is one ASCII letter that no earlier field (or the standard pack)
-// already selects.
+// E1318: the field's `#Arg(short:)`, when it is one literal string, is one
+// ASCII letter that no earlier field (or the standard pack) already selects.
 sema_registration_cli_short_name: fn(field: Field, seen: &[String:String], diagnostics: &[Diagnostic]) {
-    marker_value: sema_registration_cli_marker(field.serde_markers, "Short")
-    if marker_value == None -> return
-    marker: marker_value
-    short_value: sema_registration_cli_marker_string(marker)
-    if short_value == None -> return
-    short: short_value
+    value: sema_registration_cli_arg_option(field.serde_markers, "short") ?? return
+    short: sema_registration_cli_literal(value) ?? return
+    span: expr_span(value)
     bytes: short.bytes()
     letter := false
     if bytes.len() == 1 {
@@ -3285,12 +3391,12 @@ sema_registration_cli_short_name: fn(field: Field, seen: &[String:String], diagn
         letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
     }
     if !letter {
-        diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Short(\"p\")`"))
+        diagnostics.push(sema_error("E1318", span, "`#Arg(short: \"{short}\")` is not a one-letter option", "the shared command parser treats a short option as one ASCII letter.", "use one letter, such as `#Arg(short: \"p\")`"))
         return
     }
     previous: seen.get(short)
     seen[short] = field.name
-    if previous == .Val(first) -> diagnostics.push(sema_error("E1318", marker.name_span, "`#Short(\"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `#Short` value"))
+    if previous == .Val(first) -> diagnostics.push(sema_error("E1318", span, "`#Arg(short: \"{short}\")` is used by both `{first}` and `{field.name}`", "each short option must select only one `#CLI` field.", "give `{first}` or `{field.name}` a different `short:` value"))
 }
 
 // E1344: a command word may name neither a root flag nor another command. A
@@ -3345,7 +3451,7 @@ sema_registration_cli_literal_default: fn(expr: Expr) -> Bool Never! {
     current: sema_registration_cli_without_parens(expr)
     if current == {
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) -> true
-        else -> false
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3388,6 +3494,46 @@ sema_registration_cli_marker: fn(markers: [Marker], name: String) -> Marker? {
         if marker.name == name -> return Val(marker)
     }
     None
+}
+
+// The written option of a field's `#Arg(flag_only:, short:,
+// env:)` bound to `name`, by label or by position.
+sema_registration_cli_arg_option: fn(markers: [Marker], name: String) -> Expr? {
+    marker: sema_registration_cli_marker(markers, MARKER_ARG) ?? return None
+    parameters: [String]{"flag_only", "short", "env"}
+    loop index in 0..<marker.args.len() {
+        bound := if index < parameters.len() -> parameters[index] else -> ""
+        if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(label) -> bound = label.name
+        if bound != name -> next
+        if marker.args[index] == .Expr(value) -> return Val(value)
+        return None
+    }
+    None
+}
+
+// An `#Arg` option's one literal string.
+sema_registration_cli_literal: fn(value: Expr) -> String? {
+    if value == .Str(parts, _, _) && parts.len() == 1 {
+        if parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}
+
+sema_registration_cli_true: fn(value: Expr) -> Bool Never! {
+    if value == .Bool(written, _, _) -> return written
+    false
+}
+
+// Whether the field's `#Arg` says `flag_only: true`.
+sema_registration_cli_arg_flag_only: fn(markers: [Marker]) -> Bool Never! {
+    value: sema_registration_cli_arg_option(markers, "flag_only") ?? return false
+    sema_registration_cli_true(value)
+}
+
+// The `#Arg` option's text (`short:` or `env:`), when it is one literal string.
+sema_registration_cli_arg_text: fn(markers: [Marker], name: String) -> String? {
+    value: sema_registration_cli_arg_option(markers, name) ?? return None
+    sema_registration_cli_literal(value)
 }
 
 // Rust `classify_cli_field`: `Bool` is a flag; `T?` of a CLI scalar is an
@@ -3437,7 +3583,7 @@ sema_registration_cli_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .InlineRange(_, _, _) | .Float | .Bool | .String -> true
         .Named(name) -> name == "Path"
-        else -> false
+        .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3451,7 +3597,7 @@ sema_registration_cli_marker_string: fn(marker: Marker) -> String? {
 }
 
 // (Rust `validate_serde_items`): on every type that derives a codec
-// explicitly, a container `#RenameAll(style)` names one of the closed casing
+// explicitly, a container `#Rename(.Case)` names one of the closed casing
 // styles (E2409), `#Flatten` needs a struct-typed field (E2408), every
 // encoded or decoded field or payload needs a wire form (E2411), and every
 // decoded anonymous union needs one distinct outer wire shape per member
@@ -3506,17 +3652,30 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-// E2409 (Rust `validate_serde_items`): the container casing menu. A style
-// that is not a name or text is the marker signature's problem (E0930).
+// E2409 (Rust `validate_serde_items`): the container casing menu
+// on a type. `#Rename` there takes a NamingCase word; an unknown
+// word, a plain name or a string there is refused. An argument that is
+// neither a name nor text is the marker signature's problem (E0930).
 sema_registration_serde_rename_all: fn(markers: [Marker], diagnostics: &[Diagnostic]) {
     loop marker in markers {
-        if marker.name != MARKER_RENAME_ALL -> next
-        style: sema_checked_marker_text(marker) ?? next
-        if sema_checked_wire_style_valid(Val(style)) -> next
-        span := marker.span
-        if marker.args.len() > 0 && marker.args[0] == .Expr(argument) -> span = expr_span(argument)
-        row: diagnostic_registry_row("E2409") ?? panic("E2409 has no registry row")
-        diagnostics.push(sema_error("E2409", span, row.what.replace("{{style}}", style), row.why.replace("{{style}}", style), row.fix.replace("{{style}}", style)))
+        if marker.name != MARKER_RENAME || marker.negated || marker.args.len() == 0 -> next
+        if marker.args[0] == .Expr(argument) {
+            written := ""
+            if argument == {
+                .EnumLit(_, name, _, _, _, _, _) -> {
+                    if sema_checked_wire_style_valid(sema_checked_rename_case_word(marker)) -> next
+                    written = ".{name}"
+                }
+                .Ident(name, _, _) -> written = name.copy()
+                .Str(_, _, _) -> {
+                    text: sema_checked_marker_text(marker) ?? next
+                    written = "\"{text}\""
+                }
+                .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> next
+            }
+            row: diagnostic_registry_row("E2409") ?? panic("E2409 has no registry row")
+            diagnostics.push(sema_error("E2409", expr_span(argument), row.what.replace("{{style}}", written), row.why.replace("{{style}}", written), row.fix.replace("{{style}}", written)))
+        }
     }
 }
 
@@ -3531,7 +3690,7 @@ sema_registration_serde_any_explicit: fn(items: [Item]) -> Bool Never! {
             .Enum(definition) -> {
                 if sema_registration_serde_derives_codec(definition.derives) -> return true
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -3574,7 +3733,7 @@ sema_registration_deprecated_visibility: fn(items: [Item], diagnostics: &[Diagno
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) -> sema_registration_deprecated_visibility(body, diagnostics)
             }
-            else -> {}
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -3637,7 +3796,7 @@ sema_registration_serde_union_shapes: fn(items: [Item], ty: Type, span: Span, di
             loop param in params -> sema_registration_serde_union_shapes(items, param, span, diagnostics)
             if ret == .Val(value) -> sema_registration_serde_union_shapes(items, value, span, diagnostics)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -3729,7 +3888,10 @@ sema_registration_serde_shape_name: fn(shape: SerdeWireShape) -> String Never! {
 }
 
 sema_registration_import_is_unqualified: fn(declaration: ImportDecl) -> Bool Never! {
-    if declaration.kind == {.Unqualified(_, _, _, _, _) -> true else -> false}
+    if declaration.kind == {
+        .Unqualified(_, _, _, _, _) -> true
+        .File(_, _) | .Module(_, _) -> false
+    }
 }
 
 // `by_identity`: module identity -> row.
@@ -3839,7 +4001,7 @@ sema_registration_module_declares_child: fn(module_row: SemaRegistrationModule, 
             .File(_, _) | .Module(_, _) -> {
                 if import.declaration.alias == name -> return true
             }
-            else -> {}
+            .Unqualified(_, _, _, _, _) -> {}
         }
     }
     false
@@ -4128,7 +4290,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                 }
             }
             // A file whose same-named item this module takes binds no name.
-            else -> if !sema_registration_file_import_taken_over(graph.modules[module_index], graph.modules[module_index].imports[import_index]) {
+            .File(_, _) | .Module(_, _) -> if !sema_registration_file_import_taken_over(graph.modules[module_index], graph.modules[module_index].imports[import_index]) {
                 duplicate: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias)
                 if {
                     duplicate -> sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
@@ -4353,7 +4515,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     if package_identity == "" || entry_module_identity == "" {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
     sema_serde_index_codec_methods(graph)
@@ -4374,7 +4536,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
             loop item in graph.modules[effect_module_index].program.items {
                 if item == {
                     .EffectDecl(_) -> effect_declaration_count += 1
-                    else -> {}
+                    .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             if effect_declaration_count == 0 {
@@ -4577,13 +4739,14 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
         graph.complete = false
     }
     sema_registration_index_canonical_nominals(graph)
+    sema_divergence_solve(graph)
     graph
 }
 
 sema_registration_item_is_expanded_template: fn(item: Item) -> Bool Never! {
     if item == {
         .GenericModule(_) | .ModuleAlias(_) -> true
-        else -> false
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 

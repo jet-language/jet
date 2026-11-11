@@ -71,6 +71,24 @@ text_size: fn<T>(value: T) -> Int {
     -1
 }
 
+// An arm can name a list type; the body reads `T` as that list.
+count_items: fn<T: Printable>(value: T) -> String {
+    if T == {
+        [U8] -> "{value.len()} bytes"
+        [Int] -> "{value.len()} ints"
+        else -> "not a list: {value}"
+    }
+}
+
+// A type with a Display impl is Printable, and so is a list of it.
+Money: struct {
+    cents: Int
+
+    impl Display {
+        display: fn(self) -> String { "{self.cents} cents" }
+    }
+}
+
 run: fn() {
     print(describe(41))
     print(describe("hello"))
@@ -90,4 +108,9 @@ run: fn() {
     print(double_ints("no"))
     print(text_size("four"))
     print(text_size(4))
+    print(count_items([U8]{1, 2, 3}))
+    print(count_items([Int]{4, 5}))
+    print(count_items("abc"))
+    print(describe(Money{cents: 1250}))
+    print(describe([Money]{Money{cents: 500}}))
 }

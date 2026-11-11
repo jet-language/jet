@@ -40,9 +40,13 @@ pub use {
     file_exists: core.files.exists
 }
 
-// Checked text is an ordinary nominal String-backed type
-// with one ordinary CheckedText implementation. The trait has one associated
-// check error, one pure complete-text checker, and one pure generic hole encoder.
+// Checked text is an ordinary nominal type with one ordinary CheckedText
+// implementation. The trait has one associated check error, one pure
+// complete-text checker, and one pure generic hole encoder. A String-backed
+// `distinct` type needs nothing more: its literal is the joined text. A type
+// whose holes stay values also binds `Hole: T`, the encoder's result, and
+// declares `build: fn(parts: [String], holes: [Hole]) -[]> Owner`; its literal
+// is `Owner.build(parts, holes)` after `check` accepts the parts joined by `{}`.
 // A user trait can declare the same shape (Examples/Types/Traits/UserCheckedTextShape.jet).
 CheckedText: trait {
     Error: type

@@ -30,7 +30,7 @@ ir_closure_receiver_kind: fn(receiver: Type) -> String? {
             if name == "Tally" -> return Val("bag")
             return None
         }
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
 }
 
@@ -122,7 +122,7 @@ ir_collection_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClos
         .BagAny -> {
             if kind == "bag" -> return ir_closure_route_row("core.bag", "any", "jet_bag_any", 2, [Bool]{true, false}, None)
         }
-        else -> {}
+        .EditDisjoint | .EachMap | .MapAny | .MapAll | .MapFilter | .MapMap | .MapFold | .MapFlatMap | .ListBinarySearchBy | .ListMinMaxBy | .CountWhere | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .Fold | .UpdateFirst | .Partition | .DedupBy | .IsSortedBy | .ChunkWhile | .ParaMap | .ParaFilter | .ParaPartition | .ParaFold | .ViewFold | .ViewMap -> {}
     }
     panic("checked closure operation has no canonical Prelude route for its receiver")
 }
@@ -158,6 +158,5 @@ ir_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute Ne
         .UpdateFirst -> return ir_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem))
         .Partition -> return ir_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None)
         .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return ir_collection_closure_route(operation, receiver)
-        else -> panic("checked TClosureOp has no canonical Prelude route")
     }
 }

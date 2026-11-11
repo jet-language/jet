@@ -8,6 +8,9 @@ package: {
         regex: .Library{ entry: regex }
     }
 }
+use {
+    prefilter.[needle_absent]
+}
 
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
@@ -93,23 +96,10 @@ Regex: struct {
     priv groups: Int
     priv names: [String]
     priv needle: [U8]
+    priv needle_text: String
     priv prefix: [U8]
     priv dfa: Dfa
-}
 
-/// `start` and `end` are character (Unicode scalar) positions in the text.
-/// `groups` holds each capture group's text, `""` for a group that took no
-/// part; `group`, `group_start` and `group_end` tell the two apart.
-Match: struct {
-    start: Int
-    end: Int
-    text: String
-    groups: [String]
-    priv spans: [Int]
-    priv names: [String]
-}
-
-impl Regex {
     is_match: fn(self, text: String) -> Bool Never! { is_match(self, text) }
     full_match: fn(self, text: String) -> Bool Never! { full_match(self, text) }
     match: fn(self, text: String) -> Match? Never! { match(self, text) }
@@ -145,7 +135,17 @@ impl Regex {
     }
 }
 
-impl Match {
+/// `start` and `end` are character (Unicode scalar) positions in the text.
+/// `groups` holds each capture group's text, `""` for a group that took no
+/// part; `group`, `group_start` and `group_end` tell the two apart.
+Match: struct {
+    start: Int
+    end: Int
+    text: String
+    groups: [String]
+    priv spans: [Int]
+    priv names: [String]
+
     /// Group `n`'s text: 0 is the whole match; None when the pattern has no
     /// group `n` or the group took no part in this match.
     group: fn(self, n: Int) -> String? Never! {
@@ -254,6 +254,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     groups: p.groups,
     names: p.names,
     needle: scalars_utf8(facts.best),
+    needle_text: String.from_bytes(scalars_utf8(facts.best)) ?? "",
     prefix: scalars_utf8(facts.prefix),
     dfa: no_dfa(),
     }
@@ -264,10 +265,28 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
 is_match: fn(pattern: Regex, text: String) -> Bool Never! {
     word: literal_text(pattern)
     if word != "" -> return text.contains(word)
+    if needle_absent(pattern, text) -> return false
     exists(pattern, text.bytes(), false, false)
 }
 
-full_match: fn(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), true, true) }
+full_match: fn(pattern: Regex, text: String) -> Bool Never! {
+    if needle_absent(pattern, text) -> return false
+    exists(pattern, text.bytes(), true, true)
+}
+
+// The needle prefilter behind every String entry point, not part of the
+// regex surface.
+priv prefilter: module {
+    /// Whether the literal every match contains (`needle`, empty when there
+    /// is none) is missing from `text`, so nothing matches. String's
+    /// `contains` runs the runtime's substring search over the text in place,
+    /// before any entry point copies the text into bytes or runs the DFA over
+    /// it. A pattern with a literal (`status=5\d\d`) rejects most lines of a
+    /// log at that speed.
+    needle_absent: fn(re: Regex, text: String) -> Bool Never! {
+        re.needle_text != "" && !text.contains(re.needle_text)
+    }
+}
 
 /// Whether any match exists: the DFA answers when it can, else the scan.
 exists: fn(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Bool Never! {
@@ -288,6 +307,7 @@ purge: fn() RegexError! {
 find: fn(pattern: Regex, text: String) -> String? Never! {
     word: literal_text(pattern)
     if word != "" -> return if text.contains(word) -> Val(word) else -> None
+    if needle_absent(pattern, text) -> return None
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, false, false, 1)
     if runs.len() == 0 -> return None
@@ -308,6 +328,25 @@ __string_match: fn(text: String, pattern: String) -> String? RegexError! {
     find(compiled, text)
 }
 
+// `text.has_line(pattern)`: whether some line of `text` (the `lines()` rule)
+// matches `pattern`, so `^` and `$` anchor at each line. A quoted pattern at
+// the call is a checked `Regex` literal.
+__string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
+    loop line in text.lines() {
+        if is_match(pattern, line) -> return true
+    }
+    false
+}
+
+#Test("has_line matches each line on its own") {
+    pattern: compile("^(a|b)") ?? panic("the test pattern compiles")
+    assert(__string_has_line("x\nbeta\n", pattern))
+    assert(!__string_has_line("x a\ny b\n", pattern))
+    assert(!__string_has_line("", pattern))
+    ends: compile("z$") ?? panic("the test pattern compiles")
+    assert(__string_has_line("az\nq", ends))
+}
+
 find_all: fn(pattern: Regex, text: String) -> [String] Never! {
     out := [String]{}
     word: literal_text(pattern)
@@ -315,6 +354,7 @@ find_all: fn(pattern: Regex, text: String) -> [String] Never! {
         loop _ in 0..<text.count(word) -> out.push(word.copy())
         return out
     }
+    if needle_absent(pattern, text) -> return out
     raw: text.bytes()
     loop run in scan(pattern, raw, false, false, false, false, -1) -> out.push(slice(raw, run.start, run.end))
     out
@@ -330,8 +370,9 @@ literal_text: fn(re: Regex) -> String Never! {
 }
 
 matches: fn(pattern: Regex, text: String) -> [Match] Never! {
-    raw: text.bytes()
     out := [Match]{}
+    if needle_absent(pattern, text) -> return out
+    raw: text.bytes()
     chars := CharCursor{byte: 0, count: 0}
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, -1) {
         m: make_match(pattern, raw, run, chars)
@@ -343,8 +384,8 @@ matches: fn(pattern: Regex, text: String) -> [Match] Never! {
 split: fn(pattern: Regex, text: String) -> [String] Never! { split_limit(pattern, text, 0) }
 
 split_limit: fn(pattern: Regex, text: String, n: Int) -> [String] Never! {
+    if n == 1 || needle_absent(pattern, text) -> return [String]{text}
     raw: text.bytes()
-    if n == 1 -> return [String]{text}
     limit := -1
     if n > 1 -> limit = n - 1
     out := [String]{}
@@ -423,6 +464,7 @@ group_by_reference: fn(m: Match, raw: [U8], from: Int, to: Int) -> String Never!
 replace_first: fn(pattern: Regex, text: String, replacement: String) -> String Never! { replace_n(pattern, text, replacement, true) }
 
 replace_n: fn(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String Never! {
+    if needle_absent(pattern, text) -> return text.copy()
     raw: text.bytes()
     limit := -1
     if first_only -> limit = 1
@@ -521,12 +563,7 @@ PatternParser: struct {
     his: [Int]
     groups: Int
     names: [String]
-}
 
-/// A syntax error at character `at` of the pattern.
-fail: fn(at: Int, reason: String) -> RegexError Never! { RegexError{offset: at, reason: reason} }
-
-impl PatternParser {
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
     parse_alt: fn(&self, open: Int) -> Int RegexError! {
@@ -893,6 +930,9 @@ impl PatternParser {
     }
 }
 
+/// A syntax error at character `at` of the pattern.
+fail: fn(at: Int, reason: String) -> RegexError Never! { RegexError{offset: at, reason: reason} }
+
 hex_value: fn(c: Int) -> Int Never! {
     if c >= 48 && c <= 57 -> return c - 48
     if c >= 97 && c <= 102 -> return c - 87
@@ -936,9 +976,7 @@ Compiler: struct {
     xs: [Int]
     ys: [Int]
     too_big: Bool
-}
 
-impl Compiler {
     push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
         self.ops.push(op)
@@ -1246,9 +1284,7 @@ DfaBuilder: struct {
     work: Int
     budget: Int
     too_big: Bool
-}
 
-impl DfaBuilder {
     /// Walks epsilon edges from `stack`, appending consuming pcs to `out`
     /// and the targets of `$` to `ends` (only `at_end`, which walks them
     /// too); returns whether a Match was reached.
@@ -1510,43 +1546,7 @@ VM: struct {
     aslot: [Int]
     apos: [Int]
     aprev: [Int]
-}
 
-Run: struct {
-    start: Int
-    end: Int
-    caps: [Int]
-}
-
-new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
-    seen: filled(size, -1)
-    // Every pc is entered once per epoch and pushes at most two edges, and
-    // the current and next thread sets hold at most one thread per pc, so
-    // these rows never grow during the scan.
-    rows: 2 * size + 2
-    VM{
-    seen: seen,
-    epoch: 0,
-    hi: hi,
-    full: full,
-    sp: 0,
-    spc: filled(rows, 0),
-    sstart: filled(rows, 0),
-    scaps: filled(rows, 0),
-    nt: 0,
-    tpc: filled(rows, 0),
-    tstart: filled(rows, 0),
-    tcaps: filled(rows, 0),
-    m_pc: -1,
-    m_start: -1,
-    m_caps: -1,
-    aslot: [Int]{},
-    apos: [Int]{},
-    aprev: [Int]{},
-    }
-}
-
-impl VM {
     /// Drop every thread and capture record; the scan restarts afresh.
     reset: fn(&self) Never! {
         self.nt = 0
@@ -1658,6 +1658,40 @@ impl VM {
         out[0] = start
         out[1] = end
         out
+    }
+}
+
+Run: struct {
+    start: Int
+    end: Int
+    caps: [Int]
+}
+
+new_vm: fn(size: Int, hi: Int, full: Bool) -> VM Never! {
+    seen: filled(size, -1)
+    // Every pc is entered once per epoch and pushes at most two edges, and
+    // the current and next thread sets hold at most one thread per pc, so
+    // these rows never grow during the scan.
+    rows: 2 * size + 2
+    VM{
+    seen: seen,
+    epoch: 0,
+    hi: hi,
+    full: full,
+    sp: 0,
+    spc: filled(rows, 0),
+    sstart: filled(rows, 0),
+    scaps: filled(rows, 0),
+    nt: 0,
+    tpc: filled(rows, 0),
+    tstart: filled(rows, 0),
+    tcaps: filled(rows, 0),
+    m_pc: -1,
+    m_start: -1,
+    m_caps: -1,
+    aslot: [Int]{},
+    apos: [Int]{},
+    aprev: [Int]{},
     }
 }
 
@@ -2058,9 +2092,7 @@ decode_all: fn(raw: [U8]) -> [Int] Never! {
 CharCursor: struct {
     byte: Int
     count: Int
-}
 
-impl CharCursor {
     at: fn(&self, raw: [U8], byte: Int) -> Int Never! {
         if byte < self.byte {
             self.byte = 0
@@ -2076,6 +2108,7 @@ impl CharCursor {
 }
 
 find_match: fn(pattern: Regex, text: String) -> Match? Never! {
+    if needle_absent(pattern, text) -> return None
     raw: text.bytes()
     runs: scan(pattern, raw, false, false, pattern.groups > 0, false, 1)
     if runs.len() == 0 -> return None

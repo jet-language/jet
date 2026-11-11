@@ -1,0 +1,47 @@
+// The job of a tower-spec-apply case, as facts (PortBars.jet runs it in the
+// case directory with the file holding the program's output): per card, the
+// changes the preview names (criterion and kind, in byte order) and whether
+// it closes; each failure and the verdict; then every Tower write the writer
+// recorded, a patch as canonical JSON and blanks as single spaces.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+// `line` with every run of blanks (a byte-order mark too) one space.
+spaced: fn(line: String) -> String { line.replace("﻿", " ").words().join(" ") }
+
+// Prints a card's change lines in byte order.
+flush: fn(changes: [String]) {
+    sorted := changes.copy()
+    sorted.sort()
+    loop line in sorted {
+        print(line)
+    }
+}
+
+run: fn() {
+    changes := [String]{}
+    loop line in files.read(process.args()[0]).lines() {
+        if {
+            line.starts_with("#### #") -> {
+                flush(changes)
+                changes = []
+                print("card {line.removeprefix("#### #").partition(" ").head}")
+            }
+            line.starts_with("  c") && line.words().len() > 1 && ["REWRITE", "REPLACE", "ADD", "REMOVE"].contains(line.words()[1]) -> changes.push("  {line.words()[0]} {line.words()[1]}")
+            line.starts_with("  TITLE ") || line.starts_with("  BODY changed") || line.starts_with("  PLAN changed") -> changes.push("  {line.words()[0]}")
+            line.starts_with("  CLOSE: ") -> changes.push("  CLOSE {line.removeprefix("  CLOSE: ")}")
+            line.starts_with("!!!! ") || line == "ALL OK" || line.starts_with("FAILED ") -> {
+                flush(changes)
+                changes = []
+                print(line)
+            }
+        }
+    }
+    flush(changes)
+    loop line in (files.read("writes.log") ?? "").lines() {
+        print(if line.starts_with("{{") -> json.canonical(json.parse(line)) else -> spaced(line))
+    }
+}

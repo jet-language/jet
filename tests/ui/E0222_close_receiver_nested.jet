@@ -1,12 +1,20 @@
-ClosePair: struct { first: String, second: String }
-impl ClosePair.Close {
-    close: fn(&&self) { print(self.second) }
+ClosePair: struct {
+    first: String
+    second: String
+
+    impl Close {
+        close: fn(&&self) { print(self.second) }
+    }
 }
-Holder: struct { value: ClosePair, spare: String }
-impl Holder.Close {
-    close: fn(&&self) {
-        taken: self.value.first.move()
-        print(taken)
+Holder: struct {
+    value: ClosePair
+    spare: String
+
+    impl Close {
+        close: fn(&&self) {
+            taken: self.value.first.move()
+            print(taken)
+        }
     }
 }
 run: fn() {

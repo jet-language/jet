@@ -14,7 +14,7 @@ run: fn() {
     targets: json.pointer(root, "/output_digests") ?? panic("digests")
     values: if targets == {
         .Array(values) -> values
-        else -> panic("digests must be array")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("digests must be array")
     }
     loop value in values -> _: value.text() ?? panic("target must be string")
     result: Dyn.Array([Dyn]{Dyn.Object([String:Dyn]{"kind": Dyn.Text("external-consumer"), "id": Dyn.Text(args[1]), "producer": Dyn.Text("jetos-generation"), "witness": witness, "targets": targets, "phase": Dyn.Text("committed")})})

@@ -1,0 +1,26 @@
+# A `policy.harden` package that holds `timing: .Fixed` values starts only on
+# a host core.sys.timing_host() confirms, at every optimization level: on a
+# confirmed host it runs, and on any other host its entry refuses to start
+# with the reason, so it never prints that it started on an unconfirmed host.
+fixture: fixed_timing_harden_admits_only_a_confirmed_host.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: any # 0 on a confirmed host, 1 where the entry refuses to start
+stdout+stderr: ~any "started on a confirmed host: pick 7" "refuses to start on a host that is not confirmed to run them in fixed time" # which one depends on the host's processor
+stdout: !~ "an unconfirmed host" # the refusal comes before `run`
+step: jet run --optimize=basic main.jet
+exit: any # 0 on a confirmed host, 1 where the entry refuses to start
+stdout+stderr: ~any "started on a confirmed host: pick 7" "refuses to start on a host that is not confirmed to run them in fixed time" # which one depends on the host's processor
+stdout: !~ "an unconfirmed host" # the refusal comes before `run`
+step: jet run --optimize=full main.jet
+exit: any # 0 on a confirmed host, 1 where the entry refuses to start
+stdout+stderr: ~any "started on a confirmed host: pick 7" "refuses to start on a host that is not confirmed to run them in fixed time" # which one depends on the host's processor
+stdout: !~ "an unconfirmed host" # the refusal comes before `run`
+
+step: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "timing host: policy.harden refuses an unconfirmed host at start" # the rest of the report is the optimizer's
+
+step: jet build --target web main.jet
+exit: 1
+stderr: ~ "E0744" # the web build is refused before any code is selected

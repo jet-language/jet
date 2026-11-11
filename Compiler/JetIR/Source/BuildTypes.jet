@@ -150,7 +150,7 @@ ir_type_row: fn(m: &IRModule, ty: Type) -> Int? Never! {
             if fields.len() != 0 { return None }
             ir_layout(IRTypeKind.Unit, ty, 0, 1, IRClass.Integer, false, 0, "")
         }
-        else -> { return None }
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> { return None }
     }
     interned: ir_intern_type(m, type_carrier_identity(ty), row)
     if code >= 0 {
@@ -173,7 +173,7 @@ ir_scalar_code: fn(ty: Type) -> Int Never! {
         .Named(name) -> if name == "Unit" -> 6 else if name == "()" -> 7 else if name == "Never" -> 8 else -> -1
         .Tuple(fields) -> if fields.len() == 0 -> 9 else -> -1
         .IntN(signed, bits) -> if bits >= 1 && bits <= 64 -> 10 + (if signed -> 64 else -> 0) + bits - 1 else -> -1
-        else -> -1
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> -1
     }
 }
 
@@ -408,7 +408,7 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         .Struct(_, _) -> { return ir_struct_row(m, p, ty, row, args, identity, laying) }
         .Distinct(base, _) -> { return ir_value_type_in(m, p, sema_type_def_instance_type(p.types[row], args, base), laying) }
         .Alias(target) -> { return ir_value_type_in(m, p, sema_type_def_instance_type(p.types[row], args, target), laying) }
-        else -> { return None }
+        .UnitFamily(_, _) -> { return None }
     }
 }
 
@@ -432,7 +432,7 @@ ir_atomic_lane: fn(scalar: Type) -> String? Never! {
         .Named(name) -> {
             if name == "Bool" -> return Val("bool")
         }
-        else -> {}
+        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Measure(_) -> {}
     }
     None
 }
@@ -631,7 +631,7 @@ ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
                 if ir_host_value_held(p, field.ty) -> return true
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -920,14 +920,14 @@ ir_record_member_crosses: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never
         if ir_record_runtime(m, p, inner) != None -> return true
         return if ir_untag(inner) == {
             .String | .Int -> true
-            else -> false
+            .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     if ir_untag(ty) == .List(item) -> return ir_record_byte_list(m, p, row) || ir_record_runtime(m, p, item) != None
     if ir_is_handle(m, row) -> return false
     if m.types[row].kind == {
         .Bool | .Int | .Word | .Float | .String -> true
-        else -> false
+        .Unit | .Float32 | .Char | .Pointer | .Aggregate -> false
     }
 }
 
@@ -1140,7 +1140,7 @@ ir_word_record_display: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         loop variant in variants {
             if variant.payload == {
                 .Unit -> {}
-                else -> return -1
+                .Single(_) | .Named(_) -> return -1
             }
         }
         atom: runtime_abi_atom(handle.runtime)
@@ -1456,7 +1456,7 @@ ir_option_int_payload: fn(m: &IRModule, p: IRProgram, written: Type, laying: [St
     if ty == {
         .Int -> return true
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
-        else -> return false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) -> return false
     }
     row: ir_option_payload_row(m, p, ty, laying) ?? return false
     m.types[row].kind == .Int
@@ -1474,14 +1474,14 @@ ir_option_scalar_payload: fn(m: &IRModule, p: IRProgram, written: Type, laying: 
         .Bool | .Char -> return true
         .IntN(signed, bits) -> return !signed && bits <= 62
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
-        else -> return false
+        .Int | .Float | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) -> return false
     }
     row: ir_option_payload_row(m, p, ty, laying) ?? return false
     if m.types[row].drop != "" -> return false
     if m.types[row].kind == {
         .Bool | .Char -> true
         .Word -> (!m.types[row].signed && m.types[row].bits <= 62) || ir_enum_def(m, p, row) != None
-        else -> false
+        .Unit | .Int | .Float | .Float32 | .String | .Pointer | .Aggregate -> false
     }
 }
 
@@ -1504,7 +1504,7 @@ ir_enum_def: fn(m: IRModule, p: IRProgram, ty: Int) -> Int? Never! {
     name: if m.types[ty].ty == {
         .Named(name) -> name
         .Apply(name, _) -> name
-        else -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
     row: ir_type_def(p, name) ?? return None
     if p.types[row].kind == .Enum(_, _) -> return Val(row)
@@ -1550,7 +1550,7 @@ ir_unit_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit" || name == "()"
         .Tuple(fields) -> fields.len() == 0
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1620,7 +1620,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         .Float -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
         // F32 renders like Float: Display keeps the `.0` (Debug form).
         .Float32 -> "jet_rt_float32_debug"
-        else -> { return ir_fail_slot(b, span, "display of {ir_type_name(ty)}") }
+        .Unit | .String | .Pointer | .Aggregate -> { return ir_fail_slot(b, span, "display of {ir_type_name(ty)}") }
     }
     if kind == .Float32 {
         // The F32 display exports read the binary32 bits zero-extended in an
@@ -1971,7 +1971,7 @@ ir_nominal_name: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -2093,7 +2093,7 @@ ir_binary_op: fn(op: TBinaryOp) -> IROp? Never! {
         .Le -> Val(IROp.Le)
         .Gt -> Val(IROp.Gt)
         .Ge -> Val(IROp.Ge)
-        else -> None
+        .Pow | .Compare | .And | .Or -> None
     }
 }
 
@@ -2113,14 +2113,14 @@ ir_route_member: fn(op: TBinaryOp) -> String Never! {
         .Add -> "add"
         .Sub -> "sub"
         .Mul -> "mul"
-        else -> ""
+        .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> ""
     }
 }
 
 // Whether compound assignment `place op= value` checks overflow: as its
 // binary form does (sema_expr_check_binary), for + - * / ** << >>; only a
 // fixed-width integer reads it (plain arithmetic traps). An
-// `op=` under an `#Arithmetic` policy never reaches here: sema lowers it to
+// `op=` under a `#Policy(arithmetic:)` mode never reaches here: sema lowers it to
 // `place = OverflowOpt(...)` (Statements.jet sema_stmt_policy_compound).
 ir_assign_overflow: fn(op: TBinaryOp) -> Bool Never! {
     op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Pow || op == .Shl || op == .Shr
@@ -2276,7 +2276,7 @@ ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, l
         .Sub -> "Sub"
         .Mul -> "Mul"
         .Div -> "Div"
-        else -> { return -1 }
+        .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> { return -1 }
     }
     if p.render_impls.len() == 0 -> return -1
     index: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows, p.types, right_ty)}") ?? return -1
@@ -2955,7 +2955,7 @@ ir_add_union_types: fn(types: &[TTypeDef], functions: [FnBody]) Never! {
                     .Named(fields) -> loop field in fields -> ir_collect_unions(field.ty, found)
                 }
             }
-            else -> {}
+            .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> {}
         }
     }
     if found.len() == 0 -> return
@@ -3032,7 +3032,7 @@ ir_collect_unions: fn(ty: Type, found: &[Type]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> ir_collect_unions(field.ty, found)
         .Apply(_, args) -> loop arg in args -> ir_collect_unions(arg, found)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -3233,7 +3233,7 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
                 .DefaultErr -> true
                 .Typed(_, _, target) -> ir_default_err(p, target)
                 .NoConversion -> ir_default_err(p, source)
-                else -> false
+                .Never | .WidenUnion(_, _) | .RewidenUnion(_) -> false
             }
         }
     }
@@ -3314,7 +3314,7 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
             if ir_failed(b) -> return -1
             b.fresh[converted] = true
         }
-        else -> return ir_fail_slot(b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
+        .Never -> return ir_fail_slot(b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
     }
     if site == .Val(at) {
         converted = ir_journey_hop(m, p, b, at, converted, framed, span)
@@ -3469,7 +3469,7 @@ ir_compiler_owned_def: fn(module_identity: String, name: String, kind: &&TTypeDe
 ir_carrier_type: fn(ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
         .Option(_) | .Result(_, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3744,7 +3744,7 @@ ir_list_operand: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: 
 ir_sequence_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == {
         .List(element) | .FixedList(element, _) -> Val(element.copy())
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -3894,7 +3894,7 @@ ir_text_pattern_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TTex
                         a = ir_word_const(m, b, lo)
                         c = ir_word_const(m, b, hi)
                     }
-                    else -> return ir_fail_slot(b, span, "text pattern hole of {ir_type_name(ty)}")
+                    .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "text pattern hole of {ir_type_name(ty)}")
                 }
                 if name == "" || name == "_" {
                     storage = 5
@@ -4020,7 +4020,7 @@ ir_numeric_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         }
         .Predicate(method) -> return ir_float_predicate(m, b, value, method, receiver_ty, span)
         .BitCount(method, width) -> return ir_bit_count(m, b, value, method, width, target, span)
-        else -> return ir_fail_slot(b, span, "numeric method {ir_numeric_op_name(operation)}")
+        .EuclideanDiv | .EuclideanRem -> return ir_fail_slot(b, span, "numeric method {ir_numeric_op_name(operation)}")
     }
 }
 
@@ -4287,7 +4287,7 @@ ir_fixed_narrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: T
             ir_emit(b.f, IROp.Copy, result, high_bound, -1, -1, b.line)
             ir_end(b.f, b.line)
         }
-        else -> {
+        .Stop | .Absent -> {
             args := ir_location(m, b, line)
             loop arg in ir_static_text(m, b, "Value doesn't fit in destination type") -> args.push(arg)
             _: ir_runtime(m, b, "jet_rt_numeric_stop", args, -1)
@@ -4457,7 +4457,7 @@ ir_int_literal: fn(p: IRProgram, b: IRBuilder, expression: Int) -> Int? Never! {
                 return Val(0 - number)
             }
         }
-        else -> {}
+        .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     None
 }

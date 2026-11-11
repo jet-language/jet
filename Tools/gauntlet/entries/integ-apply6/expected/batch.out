@@ -17,10 +17,10 @@ NOAPPLY R-1 (empty)
 NOAPPLY S-1
 POST subs/post-ok.patch
 POST-FAIL subs/post-bad.patch
-REGEN Tools/agent/CoreSourceRows.jet  rc=0
+REGEN Tools/agent/CoreSourceRows.jet rc=0
 REGEN Tools/agent/DiagnosticRows.jet --write rc=0
 REGEN-SKIP Tools/agent/GoneRows.jet (missing)
-REGEN Tools/agent/RuntimeGenerators.jet  rc=242
+REGEN Tools/agent/RuntimeGenerators.jet rc=242
 REGEN Tools/agent/UnsafeRatchet.jet --update rc=0
 REGEN-SKIP Tools/gen-tables.mjs (not a Jet generator)
 --applied--
@@ -35,3 +35,188 @@ subs/F-1
 subs/K-1
 subs/M-1
 subs/N-1
+A-1.apply:
+  Applied patch to 'src/a.txt' cleanly.
+A-1.files:
+  src/a.txt
+A-1.rebased 3acff0d194d2
+A-2.apply:
+  Falling back to direct application...
+A-2.files:
+  src/a2.txt
+A-2.rebased 18d2f94e6db1
+B-1.apply:
+  Applied patch to 'AGENTS.md' cleanly.
+  Applied patch to 'docs/plain.md' cleanly.
+B-1.files:
+  AGENTS.md
+  Compiler/Rows.jet
+  docs/plain.md
+B-1.rebased 5e12001b9164
+C-1.apply:
+  Applied patch to 'Compiler/rows.tsv' cleanly.
+  Applied patch to 'docs/plain.md' cleanly.
+  Applied patch to 'docs/regions.md' cleanly.
+C-1.files:
+  Compiler/rows.tsv
+  docs/plain.md
+  docs/regions.md
+C-1.rebased 19140e22feff
+D-1.apply:
+  Falling back to direct application...
+D-1.files:
+  docs/old.md
+D-1.rebased bb31a2ff5e9c
+E-1.apply:
+  Applied patch to 'Compiler/rows.tsv' with conflicts.
+  Applied patch to 'docs/plain.md' with conflicts.
+  Applied patch to 'docs/regions.md' with conflicts.
+  U Compiler/rows.tsv
+  U docs/plain.md
+  U docs/regions.md
+  resolved Compiler/rows.tsv (union)
+  resolved docs/plain.md (union)
+  resolved docs/regions.md (ours)
+E-1.files:
+  Compiler/rows.tsv
+  docs/plain.md
+  docs/regions.md
+E-1.rebased a1a57c907a3b
+F-1.apply:
+  Applied patch to 'src/lines.txt' with conflicts.
+  U src/lines.txt
+  resolved src/lines.txt (lines)
+F-1.files:
+  src/lines.txt
+F-1.rebased 8790940a33eb
+G-1.apply:
+  Applied patch to 'src/lines.txt' cleanly.
+G-1.files:
+  src/lines.txt
+G-1.rebased be2f5df656f8
+H-1.apply:
+  Applied patch to 'src/lines.txt' with conflicts.
+  U src/lines.txt
+  unresolvable conflict outside a generated region: src/lines.txt
+H-1.files:
+  src/lines.txt
+H-1.status:
+  NOAPPLY
+H-2.apply:
+  stack dependency H-1 did not apply
+H-2.files:
+  src/h2.txt
+H-2.status:
+  NOAPPLY
+K-1.apply:
+  Falling back to direct application...
+K-1.dropped:
+  dropped edit of docs/old.md: deleted by D-1
+K-1.files:
+  docs/old.md
+  src/k.txt
+K-1.rebased 00acad1f317b
+L-1.apply:
+  Applied patch to 'src/a.txt' cleanly.
+  already in the tree: every change of this patch is carried by an earlier SUB
+L-1.files:
+  src/a.txt
+L-1.status:
+  NOAPPLY
+M-1.apply:
+  Falling back to direct application...
+M-1.files:
+  Docs/spec/safety.md
+  docs/m.txt
+M-1.rebased 41e21194ba32
+N-1.apply:
+  Falling back to direct application...
+N-1.files:
+  docs/diag.txt
+  docs/gone.txt
+  docs/n.txt
+  docs/tables.txt
+N-1.rebased fee1cddf2d42
+P-1.apply:
+  error: src/nowhere.txt: does not exist in index
+P-1.files:
+  src/nowhere.txt
+P-1.status:
+  NOAPPLY
+R-1.apply:
+  already in the tree: every change of this patch is carried by an earlier SUB
+R-1.files:
+  Compiler/Rows.jet
+R-1.status:
+  NOAPPLY
+S-1.apply:
+  stack dependency P-1 did not apply
+S-1.files:
+  src/s.txt
+S-1.status:
+  NOAPPLY
+failed:
+  H-1
+  H-2
+  L-1
+  P-1
+  R-1
+  S-1
+generators:
+  Tools/agent/CoreSourceRows.jet	Compiler/Rows.jet
+  Tools/agent/CoreSourceRows.jet	docs/regions.md
+  Tools/agent/UnsafeRatchet.jet	Docs/spec/safety.md
+  Tools/agent/DiagnosticRows.jet	docs/diag.txt
+  Tools/agent/GoneRows.jet	docs/gone.txt
+  Tools/gen-tables.mjs	docs/tables.txt
+  Tools/agent/CoreSourceRows.jet	Compiler/Rows.jet
+  Tools/agent/RuntimeGenerators.jet	all
+linemerge.tmp:
+order:
+  subs/A-1
+  subs/A-2
+  subs/B-1
+  subs/C-1
+  subs/D-1
+  subs/E-1
+  subs/G-1
+  subs/F-1
+  subs/H-1
+  subs/H-2
+  subs/K-1
+  subs/L-1
+  subs/M-1
+  subs/N-1
+  subs/P-1
+  subs/R-1
+  subs/S-1
+regen.CoreSourceRows.jet.out:
+  stand-in jet Tools/agent/CoreSourceRows.jet  identity=jet@a0.0.43#fixture root=tree
+regen.DiagnosticRows.jet.out:
+  stand-in jet Tools/agent/DiagnosticRows.jet --write identity=jet@a0.0.43#fixture root=tree
+regen.RuntimeGenerators.jet.out:
+  stand-in jet Tools/agent/RuntimeGenerators.jet  identity=jet@a0.0.43#fixture root=tree
+regen.UnsafeRatchet.jet.out:
+  stand-in jet Tools/agent/UnsafeRatchet.jet --update identity=jet@a0.0.43#fixture root=tree
+regen.patch aa9eb4d13403
+tree/AGENTS.md b9cd8e4cfcbe
+tree/Compiler/Rows.jet d482c53e360a
+tree/Compiler/rows.tsv 71ec54806092
+tree/Docs/spec/safety.md 24da4c69c23f
+tree/Tools/agent/CoreSourceRows.jet ac914c49ac86
+tree/Tools/agent/DiagnosticRows.jet ac914c49ac86
+tree/Tools/agent/RuntimeGenerators.jet ac914c49ac86
+tree/Tools/agent/UnsafeRatchet.jet ac914c49ac86
+tree/docs/diag.txt dc8f8dce0e6e
+tree/docs/gone.txt 1519dbf50d5a
+tree/docs/m.txt 01a60e35df88
+tree/docs/n.txt a4fb621495a0
+tree/docs/plain.md 62116059259a
+tree/docs/post.txt d79d54671cae
+tree/docs/regions.md 7337f6c9d8eb
+tree/docs/tables.txt ffb07f23407d
+tree/src/a.txt fc087649b305
+tree/src/a2.txt 1be89e77717b
+tree/src/k.txt 19732980d68f
+tree/src/lines.txt 14a34fb975d1
+tree/subs (link)

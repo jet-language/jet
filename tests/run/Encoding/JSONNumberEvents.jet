@@ -47,7 +47,7 @@ run: fn() (DataError | EncodingError | IOError)! {
         loop event in json.events(tree) {
             if event == {
                 .Number(text) -> print(text)
-                else -> panic("exact numeric lexeme lost")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> panic("exact numeric lexeme lost")
             }
         }
     }

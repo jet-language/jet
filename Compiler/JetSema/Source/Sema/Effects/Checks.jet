@@ -36,6 +36,13 @@ use jet_foundation.[
     diagnostic_registry_row,
     Effect,
     EffectRowEntry,
+    effect_scope_argument_valid,
+    effect_scope_covers,
+    effect_scope_is_scoped,
+    effect_scope_name,
+    effect_scope_of_argument,
+    effect_scope_published_effect,
+    effect_scope_split,
     FnBody,
     Func,
     SharedLifetime,
@@ -201,7 +208,7 @@ SemaMemoryArena: struct {
 sema_effect_is_fixed_list: fn(ty: Type) -> Bool Never! {
     if ty == {
         .FixedList(_, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -352,6 +359,20 @@ SemaEffectNode: struct {
     // effects it lists (E0756), and those its row denies (E0749).
     library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
     library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}}
+    // Calls to a Core scope publisher with a constant argument
+    // (effect_scope_published_effect): the callee's bare effect reaches this
+    // body as the scoped one. A publisher it also calls with a run-time
+    // argument is in `bare_scope_callees`, and reaches it bare as well.
+    scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}}
+    bare_scope_callees: [String]{[String]{}}
+    // Whether the first parameter is `path`, as a Core scope publisher's is.
+    path_first: Bool{false}
+}
+
+SemaEffectScopedCall: struct {
+    callee: String
+    published: String
+    scoped: String
 }
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -427,7 +448,7 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
                 sema_effect_collect_statement_spans(then_body, assume_det, spans)
                 if else_body == .Val(body) -> sema_effect_collect_statement_spans(body, assume_det, spans)
             }
-            else -> {}
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
         }
     }
 }
@@ -550,21 +571,27 @@ sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, diagnostics: &[
 
 // The call a compile-time value's refused host effect is named by (E3410,
 // E3411): the first of its call sites `facts` whose callee's effect row
-// carries an effect. A Core function is its whole path (`core.files.read()`),
-// any other callee its bare name; None when no call carries one.
+// carries an effect (sema_effect_comptime_callee_name); None when no call
+// carries one.
 sema_effect_comptime_call_name: fn(facts: [SemaCallSiteFact]) -> String? Never! {
     loop fact in facts {
         callee: fact.callee ?? next
         row: fact.facts.effect_bound ?? next
         loop entry in row {
             if entry.name.starts_with("!") -> next
-            leaf: sema_effect_symbol_leaf(callee.key)
-            owner: sema_effect_symbol_module(callee.key) ?? return Val("{leaf}()")
-            if !owner.starts_with("<corelib>/") -> return Val("{leaf}()")
-            return Val("{owner.slice(10..<owner.len())}.{leaf}()")
+            return Val(sema_effect_comptime_callee_name(callee.key))
         }
     }
     None
+}
+
+// How compile-time reports name the callee `key`: a Core function by its whole
+// path (`core.files.read()`), any other callee by its bare name.
+sema_effect_comptime_callee_name: fn(key: String) -> String Never! {
+    leaf: sema_effect_symbol_leaf(key)
+    owner: sema_effect_symbol_module(key) ?? return "{leaf}()"
+    if !owner.starts_with("<corelib>/") -> return "{leaf}()"
+    "{owner.slice(10..<owner.len())}.{leaf}()"
 }
 
 // Rust `memory_control_multiplier`: one execution, or None inside a loop.
@@ -659,7 +686,13 @@ sema_effect_set_union: fn(target: &[String], values: [String]) -> Bool Never! {
 sema_effect_parse_name: fn(name: String) -> String? {
     if name == "" || name.starts_with("..") -> return None
     base := name
-    if base.contains("(") {
+    scoped: effect_scope_split(name)
+    if scoped.scope == .Val(scope) {
+        // A scope argument names a folder, a host or a device; the deny-only
+        // `Mem` and `Panic` roots name none.
+        if !effect_scope_argument_valid(scope) || authority_is_deny_only(scoped.base) -> return None
+        base = scoped.base
+    } else if base.contains("(") {
         parts: base.split("(").to_list()
         if parts.len() != 2 -> return None
         closing: parts[1].split(")").to_list()
@@ -726,22 +759,6 @@ sema_effect_covered: fn(inferred: [String], prohibited: [String]) -> [String] Ne
         }
     }
     result
-}
-
-// The effect names a policy's deny list prohibits, as a ranked set.
-sema_effect_authority_prohibited: fn(denies: [String]) -> [String] Never! {
-    prohibited := [String]{}
-    loop raw in denies {
-        effect_name := raw
-        if raw.starts_with("!") {
-            pieces: raw.split("!").to_list()
-            if pieces.len() <= 1 -> next
-            effect_name = pieces[1]
-        }
-        parsed: sema_effect_parse_name(effect_name)
-        if parsed == .Val(value) -> sema_effect_set_add(prohibited, value)
-    }
-    prohibited
 }
 
 sema_effect_show: fn(values: [String]) -> String Never! {
@@ -837,7 +854,7 @@ sema_effect_call_api: fn(program: SemaProgramTables, value: TExpr) -> String Nev
         .AllocNew(_, _) -> "intrinsic allocation"
         .SharedGuardWait(_, _, _) -> "shared guard wait"
         .CoreClosureCall(_) -> "core closure intrinsic"
-        else -> "call"
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> "call"
     }
 }
 
@@ -853,7 +870,7 @@ sema_effect_node_call_api: fn(decls: DeclTable, kind: NodeKind) -> String Never!
         .AllocNew(_, _) -> "intrinsic allocation"
         .SharedGuardWait(_, _, _) -> "shared guard wait"
         .CoreClosureCall(_) -> "core closure intrinsic"
-        else -> "call"
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> "call"
     }
 }
 
@@ -954,19 +971,32 @@ sema_effect_apply_via: fn(nodes: &[SemaEffectNode], node_index: Int, function: F
                 nodes[node_index].maximal_span = Val(via.span)
             }
         }
-        else -> diagnostics.push(sema_effect_via_not_callback(function, via.name, callback_type, via.span))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> diagnostics.push(sema_effect_via_not_callback(function, via.name, callback_type, via.span))
     }
 }
 
-// `e0740`: the span is the row's first entry.
+// `e0740`: the span is the row's first entry. A scoped need that a bare
+// need in the same list covers is not named twice.
 sema_effect_bound_diagnostic: fn(node: SemaEffectNode, over: [String]) -> Diagnostic {
-    sorted := over.copy()
+    sorted := [String]{}
+    loop name in over {
+        if !sema_effect_bare_covered(over, name) -> sorted.push(name.copy())
+    }
     sorted.sort()
     over_list: sema_effect_show(sorted)
     declared: if node.declared.len() == 0 -> "no effects" else -> "`-[{sema_effect_show(node.declared)}]>`"
     span: node.row_span ?? node.name_span
     diagnostic: sema_error("E0740", span, "`{node.name}` uses the effect `{over_list}`, which its signature doesn't allow", "the signature declares {declared}, so the body may only use those; `{over_list}` is outside that set", "add `{over_list}` to the effect list, or stop using it in `{node.name}`")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
+}
+
+// True when `name` is scoped and a bare name in `names` covers it.
+sema_effect_bare_covered: fn(names: [String], name: String) -> Bool Never! {
+    if !effect_scope_is_scoped(name) -> return false
+    loop other in names {
+        if !effect_scope_is_scoped(other) && effect_scope_covers(other, name) -> return true
+    }
+    false
 }
 
 // `e0749` / `e0749_panic`: a reached Panic names the reachable function where
@@ -1256,7 +1286,7 @@ sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
             .Trait(definition) -> {
                 if definition.cap == .Val(cap) -> sema_effect_cap_entry_names(cap, diagnostics)
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -1322,7 +1352,7 @@ sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Neve
         if item == {
             .Struct(definition) -> return definition.cap
             .Enum(definition) -> return definition.cap
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -1422,13 +1452,13 @@ sema_effect_chain_name: fn(function: FnBody) -> String Never! {
     owner: if function.kind == {
         .Method(_, owner_type) -> owner_type
         .TraitMethod(_, _, owner_type, _, _) -> owner_type
-        else -> {
+        .TopLevel -> {
             return function.name
         }
     }
     if owner == {
         .Named(name) | .Apply(name, _) -> "{sema_effect_symbol_leaf(name)}::{function.name}"
-        else -> function.name
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> function.name
     }
 }
 
@@ -1583,6 +1613,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.type_params = node.owner_params.copy()
     loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)
     if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> node.trait_key = sema_effect_trait_cap_key(trait_symbol.key)
+    node.path_first = function.params.len() > 0 && function.params[0].name == "path"
     at: source_position ?? {
         sema_effect_check_tfunc_unsafe(function, diagnostics)
         return node
@@ -1815,6 +1846,10 @@ SemaEffectCallIndex: struct {
     // without reading that node: a collecting thread holds only its own
     // node's row (sema_effect_collect_claimed).
     node_keys: [String]{[String]{}}
+    // The effect each Core scope publisher publishes, by key
+    // (effect_scope_published_effect), read off its node before the walks:
+    // a collecting thread holds only its own node's row.
+    published_effects: [String:String]{[String:String]{}}
 }
 
 // The effect node of the declaration `callee`, -1 when it has no body here.
@@ -1968,7 +2003,7 @@ sema_effect_is_call: fn(kind: NodeKind) -> Bool Never! {
         | .NumericBinaryMethod(_, _, _)
         | .SharedGuardWait(_, _, _)
         | .CoreClosureCall(_) -> true
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
 }
 
@@ -1987,7 +2022,7 @@ sema_effect_is_compiler_intrinsic: fn(kind: NodeKind) -> Bool Never! {
     if kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
         .Close(_) | .Drop(_) | .CoreClosureCall(_) | .AllocNew(_, _) -> true
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .Print(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
 }
 
@@ -2014,7 +2049,7 @@ sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffe
     callee_key: if expression.kind == {
         .MethodCall(_, method, _, _) -> method.symbol.key
         .StaticCall(_, _, method, _, _) -> method.symbol.key
-        else -> ""
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> ""
     }
     if {
         callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None -> sema_effect_node_add_edge(nodes, node_index, callee_key)
@@ -2173,7 +2208,7 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
             trait_owner: method.trait_owner ?? return
             if body_type(tree, receiver) == {
                 .TraitObject(_) -> {}
-                else -> return
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return
             }
             trait_key: sema_effect_trait_cap_key(trait_owner.key)
             if facts.trait_caps.get(trait_key) == .Val(found) {
@@ -2190,7 +2225,7 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
             }
             loop impl_key in impls -> sema_effect_node_add_edge(nodes, node_index, impl_key)
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -2222,7 +2257,7 @@ sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
                 }
             }
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -2256,7 +2291,7 @@ sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffe
             sema_effect_add_dispatch_union(nodes, facts, node_index, impls_key, fact.span)
             true
         }
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
 }
 
@@ -2309,7 +2344,7 @@ sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, 
             type_args = args
         }
         .Call(_, args, _) -> type_args = args
-        else -> return
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return
     }
     if owner_args.len() == 0 && type_args.len() == 0 -> return
     label := owner_label
@@ -2478,6 +2513,48 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
     }
 }
 
+// A call to a Core scope publisher narrows the effect the callee declares to
+// the scope its constant first argument names: `files.read("assets/a.png")`
+// needs `FS.Read("assets/a.png")`. A run-time argument names no scope, so
+// that call needs the bare effect (EffectScope.jet).
+sema_effect_record_scope: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
+    callee_key: fact.callee.map((callee) -> callee.key) ?? return
+    // A publisher with no body here, such as `core.http.get`, publishes by key.
+    published: facts.published_effects.get(callee_key) ?? {
+        effect_scope_published_effect(callee_key, false, [String]{}) ?? return
+    }
+    if sema_effect_call_scope(tree, node, published) == .Val(scope) {
+        scoped: effect_scope_name(published, scope)
+        loop call in nodes[node_index].scoped_calls {
+            if call.callee == callee_key && call.scoped == scoped -> return
+        }
+        nodes[node_index].scoped_calls.push(SemaEffectScopedCall{callee: callee_key, published: published, scoped: scoped})
+    } else if !nodes[node_index].bare_scope_callees.contains(callee_key) {
+        nodes[node_index].bare_scope_callees.push(callee_key)
+    }
+}
+
+// The scope a publisher call's first argument names for `effect`, when that
+// argument is a string literal whose constant text names one.
+sema_effect_call_scope: fn(tree: BodyTree, node: BodyNode, published: String) -> String? Never! {
+    if node.kind == .Call(_, _, args) {
+        if args.len() == 0 -> return None
+        argument: body_node(tree, args[0].value)
+        if argument.kind == .StrLit(parts) {
+            text := ""
+            loop part in parts {
+                if part == .Literal(piece) {
+                    text = "{text}{piece}"
+                } else {
+                    return effect_scope_of_argument(published, text, false)
+                }
+            }
+            return effect_scope_of_argument(published, text, true)
+        }
+    }
+    None
+}
+
 // `close(value)`: an edge to the value type's own `close` method, the
 // function codegen calls for it. Methods are indexed by their owner type's
 // name, so a same-named type in another module adds its method too: the row
@@ -2485,7 +2562,7 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
 sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, value_type: Type) Never! {
     owner: if sema_expr_unwrap_tag(value_type) == {
         .Named(name) | .Apply(name, _) -> sema_effect_symbol_leaf(name)
-        else -> {
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
             return
         }
     }
@@ -2502,8 +2579,8 @@ sema_effect_record_close: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallInde
 sema_effect_record_iterable_loop: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, iter_type: String, iter_symbol: String, next_symbol: String, span: Span) Never! {
     node_index: if walk == {
         .Collect(index) | .LambdaBody(index) -> index
+        .Unsafe(_) | .PreludeDemands(_) -> return
         .Region(index, region) -> if sema_effect_span_contains(region, span) -> index else -> return
-        else -> return
     }
     sema_effect_node_add_edge(nodes, node_index, iter_symbol)
     sema_effect_node_add_edge(nodes, node_index, next_symbol)
@@ -2547,6 +2624,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
+                            sema_effect_record_scope(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_instantiation(nodes, node_index, tree, node, value)
                         }
@@ -2608,7 +2686,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             allocator: if ctor == {
                 .Arena -> "Arena"
                 .Bump -> "Bump"
-                else -> ""
+                .Pool | .Fixed(_) | .FixedOver -> ""
             }
             if allocator != "" {
                 bound := Int?{None}
@@ -2626,15 +2704,15 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             ty: body_type(tree, expression)
             if ty == .Shared(_) -> sema_effect_push_memory_event(nodes, node_index, node.span, "implicit copy of `{type_name(ty)}` retains a shared reference", "rc", None)
         }
-        // `shared x` (Rust `Shared.new`): new shared storage that every
+        // `Shared{x}` (Rust `Shared.new`): new shared storage that every
         // handle copy retains.
         .StaticCall(owner, _, method, _, _) -> {
             if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`shared` allocates shared storage", "alloc", None)
-                sema_effect_push_memory_event(nodes, node_index, node.span, "`shared` introduces reference-counted ownership", "rc", None)
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
+                sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
             }
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     true
 }
@@ -2681,7 +2759,7 @@ sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
             }
             return false
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     true
 }
@@ -2726,7 +2804,7 @@ sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: Se
                     .Expr(place_value) -> {
                         sema_effect_check_unsafe_expr(nodes, facts, caller, tree, place_value, audited, diagnostics)
                     }
-                    else -> {}
+                    .Local(_) -> {}
                 }
                 sema_effect_check_unsafe_expr(nodes, facts, caller, tree, value, audited, diagnostics)
             }
@@ -2750,8 +2828,9 @@ sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: Se
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
             .ExprStmt(value, _) | .DeferClose(value, _, _) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, value, audited, diagnostics)
-            .TaskGroup(_, limit, body, _) -> {
-                if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, limit_value, audited, diagnostics)
+            .TaskGroup(_, args, body, _) -> {
+                if args.limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, limit_value, audited, diagnostics)
+                if args.stack == .Val(stack_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, stack_value, audited, diagnostics)
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
             .If(condition, then_body, else_body, _, _) -> {
@@ -2829,7 +2908,7 @@ sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: Se
                 if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, index_value, audited, diagnostics)
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, [Int]{nested}, audited, diagnostics)
             }
-            else -> {
+            .Return(_, _) | .Break(_, _) | .Continue(_, _) -> {
                 sema_effect_walk_stmt_children(SemaEffectWalk.Unsafe{audited: audited}, nodes, facts, diagnostics, caller, tree, tree.stmts[statement])
             }
         }
@@ -2850,39 +2929,6 @@ sema_effect_scope_diagnostic: fn(marker: String, over: [String], bounds: [String
 SemaEffectScopeBounds: struct {
     bounds: [String]
     unknown: [String]
-}
-
-sema_effect_scope_bounds: fn(caps: [String]) -> SemaEffectScopeBounds {
-    parsed := SemaEffectScopeBounds{bounds: [String]{}, unknown: [String]{}}
-    loop raw in caps {
-        if raw.starts_with("..") -> next
-        prohibited: raw.starts_with("!")
-        name := raw
-        if prohibited {
-            pieces: raw.split("!").to_list()
-            if pieces.len() > 1 -> name = pieces[1]
-        }
-        effect_name: sema_effect_parse_name(name) ?? {
-            parsed.unknown.push(name)
-            next
-        }
-        if prohibited -> next
-        sema_effect_set_add(parsed.bounds, effect_name)
-    }
-    parsed
-}
-
-// Checks `inferred` against caps parsed by sema_effect_scope_bounds: one
-// unknown-effect report per rejected cap at `span`, then the scope report.
-sema_effect_check_scope_bounds: fn(marker: String, parsed: SemaEffectScopeBounds, inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    valid := parsed.unknown.len() == 0
-    loop name in parsed.unknown -> diagnostics.push(sema_effect_unknown(name, span))
-    over: sema_effect_uncovered(inferred, parsed.bounds)
-    if over.len() > 0 {
-        diagnostics.push(sema_effect_scope_diagnostic(marker, over, parsed.bounds, span))
-        valid = false
-    }
-    valid
 }
 
 // `e0747` for a denial: the callback reaches an effect its parameter's row
@@ -2986,10 +3032,29 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
         incoming: pending[cursor]
         cursor += 1
         loop caller in callers[incoming.node] {
-            if sema_effect_set_add(solved[caller], incoming.name) -> pending.push(SemaEffectPending{node: caller, name: incoming.name})
+            if nodes[caller].scoped_calls.len() > 0 {
+                sema_effect_solve_scoped(solved, pending, nodes[caller], caller, nodes[incoming.node].key, incoming.name)
+            } else if sema_effect_set_add(solved[caller], incoming.name) {
+                pending.push(SemaEffectPending{node: caller, name: incoming.name})
+            }
         }
     }
     solved
+}
+
+// One effect reaching `caller` from the callee `callee_key` when the caller
+// calls scope publishers: a publisher's bare effect arrives as each scope the
+// caller's constant arguments name, and bare too only when it also calls that
+// publisher with a run-time argument.
+sema_effect_solve_scoped: fn(solved: &[[String]], pending: &[SemaEffectPending], node: SemaEffectNode, caller: Int, callee_key: String, name: String) Never! {
+    renamed := false
+    loop call in node.scoped_calls {
+        if call.callee != callee_key || call.published != name -> next
+        renamed = true
+        if sema_effect_set_add(solved[caller], call.scoped) -> pending.push(SemaEffectPending{node: caller, name: call.scoped})
+    }
+    if renamed && !node.bare_scope_callees.contains(callee_key) -> return
+    if sema_effect_set_add(solved[caller], name) -> pending.push(SemaEffectPending{node: caller, name: name})
 }
 
 // Rust `solve_reachability` "secret" row: only a direct `Secret` read seeds
@@ -3103,7 +3168,7 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
         owner_type: if function.kind == {
             .Method(_, owner) -> owner
             .TraitMethod(_, _, owner, _, _) -> owner
-            else -> {
+            .TopLevel -> {
                 next
             }
         }
@@ -3566,12 +3631,14 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         close_methods[split.after] = rows
     }
     unsafe_names := [String:String]{}
+    published_effects := [String:String]{}
     loop (key_index, key) in node_by_key.texts {
         node_index: node_by_key.rows[key_index]
         if nodes[node_index].is_unsafe -> unsafe_names[key] = nodes[node_index].name
+        if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
-    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move()}
+    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), published_effects: published_effects.move()}
     unsafe_node: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
@@ -3590,9 +3657,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             lifetime: fact.shared_lifetime ?? next
             initializer: fact.callee ?? panic("Core publication obligation has no initializer")
             target: sema_effect_node_index(calls.node_by_key, initializer.key) ?? panic("Core publication initializer has no solved effect row")
+            // `Panic` is the deny-only stop row, not an effect
+            // the published value can carry, so it does not make it impure.
             impure := false
             loop effect_name in solved[target] {
-                if effect_name != "Mem" {
+                if effect_name != "Mem" && sema_effect_root(effect_name) != "Panic" {
                     impure = true
                     break
                 }
@@ -3863,7 +3932,7 @@ sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModul
                 owner_type
             }
             .Method(_, owner_type) -> owner_type
-            else -> next
+            .TopLevel -> next
         }
         if trait_key == "" -> next
         owner: sema_effect_symbol_leaf(type_name(owner_type))
@@ -3984,9 +4053,9 @@ sema_effect_collect_threads: fn(modules: &[SemaGraphModuleResult], inputs: [Sema
     if count > unit_first.len() -> count = unit_first.len()
     bounds: compiler_threads_partition(unit_weights, count)
     module_rows := loop module_row in inputs -> module_row.module_index
-    shared_state: shared SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}
+    shared_state: Shared{SemaEffectCollectShared{modules: [SemaGraphModuleResult]{}, calls: [SemaEffectCallIndex]{}, nodes: [SemaEffectNode]{}, module_rows: module_rows.move(), job_input: job_input.move(), job_function: job_function.move(), job_next: job_next.move(), unit_first: unit_first.move(), unit_nodes: unit_nodes.move(), any_unsafe: any_unsafe}}
     sema_effect_collect_fill(shared_state, modules, nodes, index)
-    queue: shared SemaEffectCollectQueue{next: 0}
+    queue: Shared{SemaEffectCollectQueue{next: 0}}
     parts := [[SemaEffectCollected]]{}
     loop _ in 0..<count -> parts.push([SemaEffectCollected]{})
     sema_effect_collect_claimers(shared_state, bounds, queue, 0, workers, parts)
@@ -4161,68 +4230,6 @@ sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: Sema
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, discarded)
 }
 
-sema_effect_check_unsafe_statements: fn(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
-    valid := true
-    loop statement in statements {
-        if statement == {
-            .Unsafe(audit, audit_expr, body, span) -> {
-                if !sema_effect_check_unsafe_region(audit, audit_expr != None, span, diagnostics) -> valid = false
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .While(_, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .For(_, _, _, _, body, _, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .Switch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    if !sema_effect_check_unsafe_statements(arm.body, diagnostics) -> valid = false
-                }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .Loop(body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .CountedLoop(_, _, _, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .Impure(_, _, body, _)
-            | .Reactive(body, _)
-            | .Shield(body, _)
-            | .Switched(_, body, _)
-            | .Region(_, _, body, _)
-            | .Policy(_, body, _)
-            | .TaskGroup(_, _, _, body, _)
-            | .Layout(_, _, body, _)
-            | .Live(body, _)
-            | .Transact(_, _, body, _, _)
-            | .ComptimeBlock(body, _, _)
-            | .ContextBlock(_, body, _)
-            | .AssumeDet(_, _, body, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .AuthorityScope(_, _, _, body, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                if !sema_effect_check_unsafe_statements(then_body, diagnostics) -> valid = false
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .ComptimeSwitch(_, arms, else_body, _) -> {
-                loop arm in arms {
-                    if !sema_effect_check_unsafe_statements(arm.body, diagnostics) -> valid = false
-                }
-                if else_body != None && !sema_effect_check_unsafe_statements(else_body, diagnostics) -> valid = false
-            }
-            .ScopeMember(_, _, _, _, body, _, _, _) -> {
-                if !sema_effect_check_unsafe_statements(body, diagnostics) -> valid = false
-            }
-            else -> {}
-        }
-    }
-    valid
-}
 
 // The walkers over a checked flat body: the one a child visit continues
 // with, and its own arguments (sema_effect_walk_expr,
@@ -4265,7 +4272,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             if node.kind == {
                 .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
                 .Lambda(value) -> sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)
-                else -> {}
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
             }
             Val(walk)
         }
@@ -4273,14 +4280,22 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
 }
 
 // A stop (`panic`, `assert`, a `Never` value, `value ?? panic(message)`)
-// puts `Panic` in the row of the node it is charged to.
+// puts `Panic` in the row of the node it is charged to. So does an index the
+// checker did not prove: a list or map read, a range index or
+// a slice keeps its runtime bounds or key check, which stops on a miss. A
+// fixed-list index proved by its interval (FixedListProof) can't stop, and a
+// user `Index` impl's own row arrives through its call.
 sema_effect_record_stop: fn(nodes: &[SemaEffectNode], node_index: Int, node: BodyNode) Never! {
     if node.kind == {
         .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         .OrFallback(_, fallback, _) -> {
             if fallback == .Panic(_, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
         }
-        else -> {}
+        .Index(_, _, kind, _, _, _) -> {
+            if kind == .List || kind == .Range || kind == .Map -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
+        }
+        .Slice(_, _, _, _, _) -> sema_effect_node_add_edge(nodes, node_index, "__jet_panic__")
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -4327,7 +4342,7 @@ sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], fact
 // which the generic visitors cannot do.
 sema_effect_walk_expr_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
     if node.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
@@ -4541,8 +4556,9 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
             if value == .Val(returned) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, returned)
         }
         .ExprStmt(value, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
-        .TaskGroup(_, limit, body, _) -> {
-            if limit == .Val(limit_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, limit_value)
+        .TaskGroup(_, args, body, _) -> {
+            if args.limit == .Val(limit_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, limit_value)
+            if args.stack == .Val(stack_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, stack_value)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         }
         .DeferClose(close, _, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, close)
@@ -4668,7 +4684,7 @@ sema_effect_walk_pattern_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectN
             if slot == {
                 .Value(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
                 .Nested(inner) -> sema_effect_walk_pattern_children(walk, nodes, facts, diagnostics, caller, tree, inner.shape)
-                else -> {}
+                .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
             }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
@@ -4679,7 +4695,7 @@ sema_effect_walk_pattern_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectN
             if entry.slot == {
                 .Value(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
                 .Nested(inner) -> sema_effect_walk_pattern_children(walk, nodes, facts, diagnostics, caller, tree, inner.shape)
-                else -> {}
+                .Wildcard | .Bind(_, _) | .Range(_, _) -> {}
             }
         }
         .Absent(_) | .Range(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
@@ -4743,7 +4759,8 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
         .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, inner)
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
-        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
+        .ComptimeInput(_, path) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, path)
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }
 

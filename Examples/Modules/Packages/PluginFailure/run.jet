@@ -8,7 +8,7 @@
 use plugin: core.plugin
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:."])
+    policy: Authority.from_rights(["FS.Read(\".\")"])
     guest: plugin.load("failure_guest.wat", policy)
     if guest.trap() == {
         .Err(.Guest(fault)) -> {
@@ -20,7 +20,7 @@ run: fn() {
             assert(frame.offset > 0)
             print("trap:Guest export={fault.export} function={frame.function} component={frame.component} located={frame.offset > 0}")
         }
-        else -> assert(false)
+        .Ok(_) | .Err(.Denied(_)) | .Err(.Budget(_, _)) | .Err(.Defect(_)) -> assert(false)
     }
     reader: plugin.load("failure_guest.wat", policy)
     if reader.read() == {
@@ -29,7 +29,7 @@ run: fn() {
             assert(fault.frames.len() == 0)
             print("read:Denied export={fault.export} frames={fault.frames.len()}")
         }
-        else -> assert(false)
+        .Ok(_) | .Err(.Guest(_)) | .Err(.Budget(_, _)) | .Err(.Defect(_)) -> assert(false)
     }
     spinner: plugin.load("failure_guest.wat", policy)
     if spinner.spin() == {
@@ -38,7 +38,7 @@ run: fn() {
             assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
             print("spin:Budget Fuel export={fault.export}")
         }
-        else -> assert(false)
+        .Ok(_) | .Err(.Guest(_)) | .Err(.Denied(_)) | .Err(.Budget(.Memory, _)) | .Err(.Budget(.Table, _)) | .Err(.Budget(.Time, _)) | .Err(.Budget(.Wire, _)) | .Err(.Defect(_)) -> assert(false)
     }
     normal: plugin.load("failure_guest.wat", policy)
     value: normal.normal()
@@ -51,7 +51,7 @@ run: fn() {
             assert(fault.frames.len() == 0)
             print("malformed:Guest export={fault.export} frames={fault.frames.len()}")
         }
-        else -> assert(false)
+        .Ok(_) | .Err(.Denied(_)) | .Err(.Budget(_, _)) | .Err(.Defect(_)) -> assert(false)
     }
     print("host:still-running")
 }

@@ -1,11 +1,9 @@
 
 Door: struct {
     state { Closed, Open }
-}
 
-impl Door {
-    #Transition(_, Door.State.Closed) new: fn() -[]> Door { return Door{} }
-    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: &&Door) -[]> Door {
+    #State(_ -> Door.State.Closed) new: fn() -[]> Door { return Door{} }
+    #State(Door.State.Closed -> Door.State.Open) open: fn(self: &&Door) -[]> Door {
         return self
     }
     #State(Door.State.Closed) inspect: fn(self: &&Door) -[]> String {

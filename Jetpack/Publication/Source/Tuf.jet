@@ -146,7 +146,7 @@ publication_tuf_all_index_entries: fn(repo: String) -[FS]> [String: [Publication
     info: files.stat(root) ?? {
         if err == {
             .NotFound(_) -> return Ok([String: [PublicationIndexEntry]]{})
-            else -> return Err(err)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
         }
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_tuf_invalid("registry index root is not a real directory"))
@@ -255,7 +255,7 @@ publication_tuf_read_log: fn(repo: String) -[FS, Env]> [PublicationLogRecord] IO
     text: publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_LOG_BYTES, "registry transparency log is too large") ?? {
         if err == {
             .NotFound(_) -> return Ok([PublicationLogRecord]{})
-            else -> return Err(err)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
         }
     }
     publication_tuf_parse_log(text)
@@ -429,7 +429,7 @@ publication_tuf_with_checkpoint_lock: fn(state: String, action: fn() IOError! -[
         writer: authority.create_exclusive(lock_name, 384) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(err)
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(err)
             }
             if files.stat(lock_path) == .Ok(metadata) {
                 if !metadata.is_symlink && metadata.is_file && time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
@@ -510,7 +510,7 @@ publication_tuf_snapshot_file: fn(repo: String, path: String) -[FS, Env]> Public
     metadata: files.stat(path) ?? {
         if err == {
             .NotFound(_) -> return Ok(PublicationMetadataFileSnapshot{path: path, bytes: None})
-            else -> return Err(err)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata path is not a regular file"))
@@ -534,7 +534,7 @@ publication_tuf_restore_snapshot: fn(repo: String, snapshot: PublicationMetadata
             metadata: files.stat(snapshot.path) ?? {
                 if err == {
                     .NotFound(_) -> return
-                    else -> return Err(err)
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
                 }
             }
             if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata rollback destination is not a regular file"))

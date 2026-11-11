@@ -1,0 +1,60 @@
+// `core.git` runs the git blocks scripts repeat as one call each, in a work
+// tree with the caller's GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE unset:
+// `w.patch_paths(patch)` lists every path a patch touches (a renamed file's
+// new path, then its old one), `w.land(patch, message)` stages the patch and
+// commits exactly the paths it staged, `w.commit(paths, message)` commits
+// paths as they are,
+// `w.export(commit, dir)` writes a commit's tree into a directory, and
+// `w.drift(dir)` compares the tracked files with such a tree.
+package: {
+    name: "git_land"
+    authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time] }
+}
+
+use {
+    files: core.files
+    git: core.git
+}
+
+PATCH: "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\ndiff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n"
+
+run: fn() {
+    root: files.mktemp("git-land")
+    work: files.join(root, "work")
+    files.create_dir_all(work)
+    w: git.repo(work)
+    loop line in [Sh{"git init -q"}, Sh{"git config user.name lander"}, Sh{"git config user.email lander@example.com"}] {
+        if !w.spec(line).run().success -> return print("git is not available")
+    }
+    files.write(files.join(work, "a.txt"), "one\n")
+    files.write(files.join(work, "old.txt"), "keep\n")
+    first: w.commit(["a.txt", "old.txt"], "first\n") ?? return print("first commit failed")
+    print("first: {first == w.head()}, clean {w.clean()}")
+    patch: files.join(root, "change.patch")
+    files.write(patch, PATCH)
+    print("touches: {w.patch_paths(patch).join(" ")}")
+    landed: w.land(patch, "second\n") ?? return print("land failed")
+    print("landed: {landed.paths.join(" ")}; head {landed.sha == w.head()}")
+    if w.land(patch, "again\n") == .Err(.NoApply) -> print("again: does not apply")
+    tested: files.join(root, "tested")
+    w.export("HEAD", tested)
+    print("drift: {w.drift(tested).len()}")
+    files.write(files.join(tested, "a.txt"), "three\n")
+    files.remove(files.join(tested, "new.txt"))
+    files.create_dir_all(files.join(tested, ".jet"))
+    files.write(files.join(tested, ".jet/cache"), "")
+    files.write(files.join(tested, "extra.txt"), "")
+    loop change in w.drift(tested, skip: [".jet"]) {
+        side: if {
+            !change.tested -> "missing"
+            !change.tracked -> "extra"
+            else -> "differs"
+        }
+        print("{side} {change.path}")
+    }
+    files.write(files.join(work, "a.txt"), "four\n")
+    print("dirty: clean {w.clean()}")
+    third: w.commit(["a.txt"], "third\n") ?? return print("third commit failed")
+    print("third: {third == w.head()}, clean {w.clean()}")
+    files.remove_all(root)
+}

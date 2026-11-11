@@ -1,0 +1,58 @@
+prefix '': is false full false find none match none
+    all [] matches 0 split [] replace '' first ''
+prefix 'status=200 ms=4': is false full false find none match none
+    all [] matches 0 split [status=200 ms=4] replace 'status=200 ms=4' first 'status=200 ms=4'
+prefix 'status=503 ms=17': is true full true find [status=503 ms=17] match 0..16 groups [17]
+    all [status=503 ms=17] matches 1 split [, ] replace '<status=503 ms=17>' first '#'
+prefix 'a status=500 ms=1 status=599 ms=22': is true full false find [status=500 ms=1] match 2..17 groups [1]
+    all [status=500 ms=1, status=599 ms=22] matches 2 split [a ,  , ] replace 'a <status=500 ms=1> <status=599 ms=22>' first 'a # status=599 ms=22'
+prefix 'status=5': is false full false find none match none
+    all [] matches 0 split [status=5] replace 'status=5' first 'status=5'
+prefix 'status=5xx ms=3': is false full false find none match none
+    all [] matches 0 split [status=5xx ms=3] replace 'status=5xx ms=3' first 'status=5xx ms=3'
+inner '12kg': is true full true find [12kg] match 0..4 groups []
+    all [12kg] matches 1 split [, ] replace '<12kg>' first '#'
+inner '12 kg': is false full false find none match none
+    all [] matches 0 split [12 kg] replace '12 kg' first '12 kg'
+inner 'kg': is false full false find none match none
+    all [] matches 0 split [kg] replace 'kg' first 'kg'
+inner '3kg and 40kg': is true full false find [3kg] match 0..3 groups []
+    all [3kg, 40kg] matches 2 split [,  and , ] replace '<3kg> and <40kg>' first '# and 40kg'
+inner '5kgs': is false full false find none match none
+    all [] matches 0 split [5kgs] replace '5kgs' first '5kgs'
+alt 'foobar1': is true full true find [foobar1] match 0..7 groups [foobar]
+    all [foobar1] matches 1 split [, ] replace '<foobar1>' first '#'
+alt 'foobaz2 foobar3': is true full false find [foobaz2] match 0..7 groups [foobaz]
+    all [foobaz2, foobar3] matches 2 split [,  , ] replace '<foobaz2> <foobar3>' first '# foobar3'
+alt 'fooba': is false full false find none match none
+    all [] matches 0 split [fooba] replace 'fooba' first 'fooba'
+alt 'foo bar1': is false full false find none match none
+    all [] matches 0 split [foo bar1] replace 'foo bar1' first 'foo bar1'
+utf8 'café': is false full false find none match none
+    all [] matches 0 split [café] replace 'café' first 'café'
+utf8 'éé9': is true full true find [éé9] match 0..3 groups [9]
+    all [éé9] matches 1 split [, ] replace '<éé9>' first '#'
+utf8 'e9': is false full false find none match none
+    all [] matches 0 split [e9] replace 'e9' first 'e9'
+utf8 'naïve ééx': is true full false find [ééx] match 6..9 groups [x]
+    all [ééx] matches 1 split [naïve , ] replace 'naïve <ééx>' first 'naïve #'
+anchored 'id=42': is true full true find [id=42] match 0..5 groups [42]
+    all [id=42] matches 1 split [, ] replace '<id=42>' first '#'
+anchored 'xid=42': is false full false find none match none
+    all [] matches 0 split [xid=42] replace 'xid=42' first 'xid=42'
+anchored 'id=': is false full false find none match none
+    all [] matches 0 split [id=] replace 'id=' first 'id='
+anchored 'id=7 ': is false full false find none match none
+    all [] matches 0 split [id=7 ] replace 'id=7 ' first 'id=7 '
+none 'ab1': is true full true find [ab1] match 0..3 groups []
+    all [ab1] matches 1 split [, ] replace '<ab1>' first '#'
+none 'zz9': is false full false find none match none
+    all [] matches 0 split [zz9] replace 'zz9' first 'zz9'
+none '': is false full false find none match none
+    all [] matches 0 split [] replace '' first ''
+split 'a, b,c': is true full false find [, ] match 1..3 groups []
+    all [, , ,] matches 2 split [a, b, c] replace 'a<, >b<,>c' first 'a#b,c'
+split 'abc': is false full false find none match none
+    all [] matches 0 split [abc] replace 'abc' first 'abc'
+split '': is false full false find none match none
+    all [] matches 0 split [] replace '' first ''

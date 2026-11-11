@@ -47,11 +47,11 @@ EnvironmentError: enum {
             .IO(error) -> {
                 if error == {
                     .NotFound(context) -> true
-                    else -> false
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
                 }
             }
             .NotFound(text) -> true
-            else -> false
+            .InvalidData(_) | .InvalidInput(_) | .Unsupported(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) | .Gate(_) -> false
         }
     }
 }

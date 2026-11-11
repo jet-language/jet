@@ -39,8 +39,10 @@ Reference: struct { raw: String, name: String, resolved: String? }
 ParsedParts: struct { parts: [Part], normalized: String? }
 RawAttribute: struct { key: String, value: String, source_base: Int, quote: String, raw: String }
 DeclaredNamespace: struct { prefix: String?, uri: String, quote: String, raw: String }
-NamespaceScope: struct { default_uri: String?, named: [String:String] }
-impl NamespaceScope {
+NamespaceScope: struct {
+    default_uri: String?
+    named: [String:String]
+
     new: fn() -> NamespaceScope Never! {
         NamespaceScope{default_uri: None, named: [String:String]{}}
     }
@@ -64,8 +66,10 @@ impl NamespaceScope {
         prefixes.move()
     }
 }
-NamespaceSet: struct { default_present: Bool, named: [String:Bool] }
-impl NamespaceSet {
+NamespaceSet: struct {
+    default_present: Bool
+    named: [String:Bool]
+
     new: fn() -> NamespaceSet Never! {
         NamespaceSet{default_present: false, named: [String:Bool]{}}
     }
@@ -84,8 +88,10 @@ impl NamespaceSet {
         prior
     }
 }
-ExpandedNames: struct { no_namespace: [String:Bool], namespaced: [String:[String:Bool]] }
-impl ExpandedNames {
+ExpandedNames: struct {
+    no_namespace: [String:Bool]
+    namespaced: [String:[String:Bool]]
+
     new: fn() -> ExpandedNames Never! {
         ExpandedNames{no_namespace: [String:Bool]{}, namespaced: [String:[String:Bool]]{}}
     }
@@ -239,7 +245,7 @@ strip_lexical: fn(value: Dyn) -> Dyn Never! {
             }
             object(out)
         }
-        else -> value.copy()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> value.copy()
     }
 }
 has_exact_xml_keys: fn(entries: View<(key: String, value: Dyn)>, keys: [String]) -> Bool Never! {
@@ -259,14 +265,14 @@ text_value: fn(value: Dyn?) -> String? Never! {
     item: value ?? return None
     if item == {
         .Text(body) -> Val(body.copy())
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 array_value: fn(value: Dyn?) -> [Dyn]? Never! {
     item: value ?? return None
     if item == {
         .Array(items) -> Val(items.copy())
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> None
     }
 }
 field_kind: fn(value: Dyn?) -> String Never! {
@@ -277,7 +283,7 @@ field_kind: fn(value: Dyn?) -> String Never! {
         .Array(_) -> "array"
         .Object(_) -> "object"
         .Bool(_) -> "bool"
-        else -> "other"
+        .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> "other"
     }
 }
 xml_schema_order: fn(entries: View<(key: String, value: Dyn)>) -> [String]? Never! {
@@ -408,7 +414,7 @@ has_canonical_xml_shape: fn(value: Dyn) -> Bool Never! {
             loop entry in stream.object_entries(value) { if !has_canonical_xml_shape(entry.value) -> return false }
             true
         }
-        else -> true
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> true
     }
 }
 lexical_evidence_matches: fn(lexical: Dyn, expected: Dyn) -> Bool Never! {
@@ -493,7 +499,7 @@ clean: fn(value: Dyn) -> Dyn Never! {
             }
             object(out)
         }
-        else -> value.copy()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> value.copy()
     }
 }
 leaf: fn(kind: String, fields: &&[(key: String, value: Dyn)], raw: String) -> Dyn Never! {
@@ -847,7 +853,7 @@ required_text: fn(value: Dyn, key: String) -> String XMLFault! {
     item: field(value, key) ?? return Err(XMLFault.shape("XML {key} must be text"))
     if item == {
         .Text(s) -> s.copy()
-        else -> Err(XMLFault.shape("XML {key} must be text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(XMLFault.shape("XML {key} must be text"))
     }
 }
 optional_text_field: fn(value: Dyn, key: String) -> String? XMLFault! {
@@ -855,7 +861,7 @@ optional_text_field: fn(value: Dyn, key: String) -> String? XMLFault! {
     if item == {
         .Text(s) -> Val(s.copy())
         .Null -> String?{None}
-        else -> { return Err(XMLFault.shape("XML {key} must be text or null")) }
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(XMLFault.shape("XML {key} must be text or null")) }
     }
 }
 escape_text: fn(value: String) -> String Never! { value.replace("&", "&amp;").replace("<", "&lt;") }
@@ -879,7 +885,7 @@ deterministic_leaf: fn(value: Dyn, kind: String) -> String XMLFault! {
             if standalone == {
                 .Bool(yes) -> output += if yes -> " standalone=\"yes\"" else -> " standalone=\"no\""
                 .Null -> {}
-                else -> return Err(XMLFault.shape("XML standalone must be bool or null"))
+                .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(XMLFault.shape("XML standalone must be bool or null"))
             }
             output += "?>"
             output.move()
@@ -1036,8 +1042,7 @@ LexicalPolicy: enum { PreserveValid Deterministic }
     source_matches: Bool
     stack: [Name]
     namespaces: [NamespaceScope]
-}
-impl StreamWriter {
+
      new: fn(encoding: RenderEncoding, lexical: LexicalPolicy) -> StreamWriter Never! {
         StreamWriter{encoding: encoding, lexical: lexical, started: false,
             declaration: false, doctype: false, root_seen: false, root_closed: false,
@@ -1084,7 +1089,7 @@ impl StreamWriter {
                 standalone: if standalone_field == {
                     .Null -> None
                     .Bool(value) -> Val(value)
-                    else -> { return Err(XMLFault.shape("declaration standalone must be Bool or Null")) }
+                    .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(XMLFault.shape("declaration standalone must be Bool or Null")) }
                 }
                 self.declaration = true
                 deterministic = "<?xml version=\"{version}\""
@@ -1159,7 +1164,6 @@ impl StreamWriter {
         encode_text(deterministic, self.encoding)
     }
 }
-
 render_document_bytes: fn(value: Dyn, encoding: RenderEncoding, lexical: LexicalPolicy) -> [U8] XMLFault! {
     events: unfold_events(value) ?? return Err(err)
     writer := StreamWriter.new(encoding, lexical)
@@ -1191,13 +1195,13 @@ exact_leaf_keys: fn(value: Dyn, kind: String) XMLFault! {
 byte_array: fn(value: Dyn) -> [U8] XMLFault! {
     values: if value == {
         .Array(items) -> items
-        else -> { return Err(XMLFault.shape("XML byte value must be an Array<Int>")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(XMLFault.shape("XML byte value must be an Array<Int>")) }
     }
     bytes := [U8]{}
     loop item in values {
         byte: if item == {
             .Int(number) -> number
-            else -> { return Err(XMLFault.shape("XML byte value must contain only Int")) }
+            .Null | .Bool(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(XMLFault.shape("XML byte value must contain only Int")) }
         }
         if byte < 0 || byte > 255 -> return Err(XMLFault.shape("XML byte is outside 0..255"))
         bytes.push(U8{byte})
@@ -1595,7 +1599,7 @@ document_root: fn(document: Dyn) -> Dyn XMLFault! {
     content: field(document, "children") ?? return Err(projection_err("$", "XML document children missing"))
     children: if content == {
         .Array(items) -> items
-        else -> { return Err(projection_err("$", "XML document children must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(projection_err("$", "XML document children must be an array")) }
     }
     root := Dyn?{None}
     loop child in children {
@@ -1621,7 +1625,7 @@ lookup_attribute: fn(element: Dyn, name: String) -> String? XMLFault! {
     content: field(element, "attributes") ?? return Err(projection_err("$", "XML element attributes missing"))
     attributes: if content == {
         .Array(items) -> items
-        else -> { return Err(projection_err("$", "XML element attributes must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(projection_err("$", "XML element attributes must be an array")) }
     }
     loop attribute in attributes {
         if xml_tag_of(attribute) != Val("attribute") -> return Err(projection_err("$", "XML attributes array must contain attribute nodes"))
@@ -1643,7 +1647,7 @@ element_content: fn(element: Dyn) -> [Dyn] XMLFault! {
     content: field(element, "children") ?? return Err(projection_err("$", "XML element children missing"))
     if content == {
         .Array(children) -> children.move()
-        else -> { return Err(projection_err("$", "XML element children must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(projection_err("$", "XML element children must be an array")) }
     }
 }
 project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
@@ -1651,12 +1655,12 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
     attr_value: field(element, "attributes") ?? return Err(projection_err(path, "XML element attributes missing"))
     attributes: if attr_value == {
         .Array(items) -> items
-        else -> { return Err(projection_err(path, "XML element attributes must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(projection_err(path, "XML element attributes must be an array")) }
     }
     child_value: field(element, "children") ?? return Err(projection_err(path, "XML element children missing"))
     children: if child_value == {
         .Array(items) -> items
-        else -> { return Err(projection_err(path, "XML element children must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(projection_err(path, "XML element children must be an array")) }
     }
     entries := [(key: String, value: Dyn)]{}
     loop attribute in attributes {
@@ -1709,7 +1713,7 @@ project_element_value: fn(element: Dyn, path: String) -> Dyn XMLFault! {
                     values.push(projected)
                     Dyn.Array(values)
                 }
-                else -> { Dyn.Array([Dyn]{prior.move(), projected}) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { Dyn.Array([Dyn]{prior.move(), projected}) }
             }
             child_keys.push((key: entry_key, value: combined))
             child_keys.__swap(index, last)
@@ -1736,12 +1740,10 @@ XMLFault: struct {
     column: Int?
     path: String
     reason: String
-}
-impl XMLFault {
+
     shape: fn(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, reason) }
     state: fn(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, "[state] {reason}") }
-}
-impl XMLFault {
+
     at: fn(offset: Int, reason: String) -> XMLFault Never! { XMLFault.at_kind(offset, Reason.Malformed, reason) }
     at_kind: fn(offset: Int, kind: Reason, reason: String) -> XMLFault Never! {
         XMLFault{kind: kind, offset: offset, line: None, column: None, path: "$", reason: reason.copy()}
@@ -1778,8 +1780,7 @@ Limits: struct {
     max_entity_declarations: Int
     max_entity_depth: Int
     max_entity_replacement_bytes: Int
-}
-impl Limits {
+
      safe: fn() -> Limits Never! {
         Limits{max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024, max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024, max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608}
     }
@@ -1799,8 +1800,10 @@ impl Limits {
     }
 }
 EntityPolicy: enum { Preserve Reject Resolve([String:String]) }
-ParseOptions: struct { entities: EntityPolicy, limits: Limits }
-impl ParseOptions {
+ParseOptions: struct {
+    entities: EntityPolicy
+    limits: Limits
+
      safe: fn() -> ParseOptions Never! { ParseOptions{entities: EntityPolicy.Preserve, limits: Limits.safe()} }
 }
  WireEncoding: enum { UTF8 UTF16Le UTF16Be }
@@ -1819,8 +1822,7 @@ ByteLexer: struct {
     wire_offset: Int
     eof: Bool
     terminal: XMLFault?
-}
-impl ByteLexer {
+
      new: fn(max_item_bytes: Int) -> ByteLexer Never! {
         ByteLexer{encoding: None, bom: [], undecided: [], pending: [], units: [], retained_bytes: 0, max_item_bytes: max_item_bytes, wire_offset: 0, eof: false, terminal: None}
     }
@@ -2022,8 +2024,7 @@ StreamScanner: struct {
     line: Int
     column: Int
     terminal: XMLFault?
-}
-impl StreamScanner {
+
     new: fn(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
         options.limits.validate() ?? return Err(err)
         StreamScanner{lexer: ByteLexer.new(max_item_bytes), options: options.copy(), started: false, ended: false, root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false, declared_entities: [String:DeclaredEntityKind]{}, stack: [], nodes: 0, text_bytes: 0, entity_replacement_bytes: 0, wire_consumed: 0, line: 1, column: 1, terminal: None}
@@ -2127,379 +2128,7 @@ Scanner: struct {
     nodes: Int
     text_bytes: Int
     entity_replacement_bytes: Int
-}
-name_start: fn(n: Int) -> Bool Never! {
-    n == 58 || (n >= 65 && n <= 90) || n == 95 || (n >= 97 && n <= 122) ||
-    (n >= 0xC0 && n <= 0xD6) || (n >= 0xD8 && n <= 0xF6) || (n >= 0xF8 && n <= 0x2FF) ||
-    (n >= 0x370 && n <= 0x37D) || (n >= 0x37F && n <= 0x1FFF) || (n >= 0x200C && n <= 0x200D) ||
-    (n >= 0x2070 && n <= 0x218F) || (n >= 0x2C00 && n <= 0x2FEF) || (n >= 0x3001 && n <= 0xD7FF) ||
-    (n >= 0xF900 && n <= 0xFDCF) || (n >= 0xFDF0 && n <= 0xFFFD) || (n >= 0x10000 && n <= 0xEFFFF)
-}
-name_char: fn(n: Int) -> Bool Never! {
-    name_start(n) || n == 45 || n == 46 || (n >= 48 && n <= 57) || n == 0xB7 || (n >= 0x0300 && n <= 0x036F) || (n >= 0x203F && n <= 0x2040)
-}
-valid_name: fn(s: String) -> Bool Never! {
-    first := true
-    colons := 0
-    bytes: s.bytes()
-    offset := 0
-    loop offset < bytes.len() {
-        scalar: utf8_scalar(bytes[0..<bytes.len()], offset)
-        character: scalar.value
-        offset += scalar.width
-        if first {
-            if !name_start(character) -> return false
-            first = false
-        } else if !name_char(character) -> return false
-        if character == 58 {
-            colons += 1
-            if colons > 1 -> return false
-        }
-    }
-    !first
-}
-valid_xml_char: fn(n: Int) -> Bool Never! {
-    n == 0x9 || n == 0xA || n == 0xD || (n >= 0x20 && n <= 0xD7FF) || (n >= 0xE000 && n <= 0xFFFD) || (n >= 0x10000 && n <= 0x10FFFF)
-}
 
-normalize_attribute_text: fn(raw: String) -> String Never! {
-    bytes := raw.bytes()
-    read := 0
-    write := 0
-    loop read < bytes.len() {
-        byte := bytes[read]
-        read += 1
-        if byte == (U8{13}) {
-            if read < bytes.len() && bytes[read] == (U8{10}) -> read += 1
-            byte = U8{32}
-        } else if byte == (U8{10}) || byte == (U8{9}) -> byte = U8{32}
-        bytes[write] = byte
-        write += 1
-    }
-    loop bytes.len() > write -> _: bytes.pop()
-    #Unsafe("attribute whitespace compaction preserves the already validated UTF-8 byte sequence") {
-        encoding.__bytes_into_text(bytes)
-    }
-}
-split_name: fn(raw: String) -> SplitName Never! {
-    if raw.split_once(":") == {
-        .Val(parts) -> SplitName{prefix: Val(parts.before.copy()), local: parts.after.copy()}
-        .None -> SplitName{prefix: None, local: raw.copy()}
-    }
-}
-predefined: fn(name: String) -> String? Never! {
-    if name == {
-        "lt" -> Val("<")
-        "gt" -> Val(">")
-        "amp" -> Val("&")
-        "apos" -> Val("'")
-        "quot" -> Val("\"")
-        else -> {
-            bytes: name.bytes()
-            radix: if name.starts_with("#x") -> 16 else -> 10
-            index := if radix == 16 -> 2 else -> 1
-            if !name.starts_with("#") || index >= bytes.len() -> return None
-            if bytes[index] == (U8{43}) -> index += 1
-            if index >= bytes.len() -> return None
-            number := 0
-            loop index < bytes.len() {
-                byte: Int{bytes[index]}
-                digit: if byte >= 48 && byte <= 57 -> byte - 48 else if byte >= 65 && byte <= 70 -> byte - 55 else if byte >= 97 && byte <= 102 -> byte - 87 else -> { return None }
-                if digit >= radix -> return None
-                number = number * radix + digit
-                if number > 0xffffffff -> return None
-                index += 1
-            }
-            if number > 0x10ffff || (number >= 0xd800 && number <= 0xdfff) -> return None
-            if !valid_xml_char(number) -> return None
-            if unicode.encode_cp(number) == {
-                .Ok(text) -> Val(text)
-                .Err(_) -> panic("validated XML character must be a Unicode scalar")
-            }
-        }
-    }
-}
-ascii_space: fn(byte: U8) -> Bool Never! { byte == U8{32} || (byte >= U8{9} && byte <= U8{13}) }
-scalar_space: fn(code: Int) -> Bool Never! {
-    (code >= 9 && code <= 13) || code == 32 || code == 0x85 || code == 0xa0 || code == 0x1680 ||
-        (code >= 0x2000 && code <= 0x200a) || code == 0x2028 || code == 0x2029 || code == 0x202f || code == 0x205f || code == 0x3000
-}
-skip_ascii_space: fn(bytes: View<U8>, cursor: &Int) Never! {
-    loop cursor < bytes.len() && ascii_space(bytes[cursor]) -> cursor += 1
-}
-whitespace_offset: fn(bytes: View<U8>, start: Int) -> Int Never! {
-    cursor := start
-    loop cursor < bytes.len() {
-        scalar: utf8_scalar(bytes, cursor)
-        if scalar_space(scalar.value) -> return cursor
-        cursor += scalar.width
-    }
-    cursor
-}
-skip_scalar_space: fn(bytes: View<U8>, cursor: &Int) Never! {
-    loop cursor < bytes.len() {
-        scalar: utf8_scalar(bytes, cursor)
-        if !scalar_space(scalar.value) -> break
-        cursor += scalar.width
-    }
-}
-trim_byte_end: fn(bytes: View<U8>, start: Int, end: Int) -> Int Never! {
-    cursor := end
-    loop cursor > start {
-        previous := cursor - 1
-        loop previous > start && (Int{bytes[previous]}.bit_and(0xc0)) == 0x80 -> previous -= 1
-        if !scalar_space(utf8_scalar(bytes, previous).value) -> break
-        cursor = previous
-    }
-    cursor
-}
-scalar_hex: fn(character: Int) -> String Never! {
-    value := character
-    digits: "0123456789ABCDEF"
-    result := ""
-    loop {
-        digit: digits.slice(value % 16, value % 16 + 1)
-        result = "{digit}{result}"
-        value = value /% 16
-        if value == 0 -> break
-    }
-    loop result.len() < 4 -> result = "0{result}"
-    result.move()
-}
-take_doctype_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
-    skip_ascii_space(source, cursor)
-    if cursor >= source.len() -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier lacks quoted value"))
-    quote: source[cursor]
-    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier must be quoted"))
-    cursor += 1
-    start: cursor
-    loop cursor < source.len() && source[cursor] != quote -> cursor += 1
-    if cursor == source.len() -> return Err(XMLFault.at(start, "unterminated DOCTYPE external identifier"))
-    value: byte_text(source, start, cursor)
-    cursor += 1
-    value.move()
-}
-doctype_fields: fn(inside: String) -> DoctypeFields XMLFault! {
-    bytes: inside.bytes()
-    subset_start := Int?{None}
-    quote := Int?{None}
-    offset := 0
-    loop offset < bytes.len() {
-        scalar: utf8_scalar(bytes[0..<bytes.len()], offset)
-        character: scalar.value
-        if quote == .Val(expected) {
-            if character == expected -> quote = None
-        } else if character == 39 || character == 34 {
-            quote = Val(character)
-        } else if character == 91 {
-            subset_start = Val(offset)
-            break
-        }
-        offset += scalar.width
-    }
-    header := ""
-    internal_subset := String?{None}
-    if subset_start == .Val(start) {
-        tail: byte_text(bytes[0..<bytes.len()], start + 1, bytes.len()).trim_end()
-        if !tail.ends_with("]") -> return Err(XMLFault.at(start, "DOCTYPE internal subset lacks ]"))
-        header = byte_text(bytes[0..<bytes.len()], 0, start).trim()
-        internal_subset = Val(tail.slice(0, tail.len() - 1))
-    } else { header = inside.trim() }
-    header_bytes: header.bytes()
-    name_end: whitespace_offset(header_bytes[0..<header_bytes.len()], 0)
-    name: byte_text(header_bytes[0..<header_bytes.len()], 0, name_end)
-    if !valid_name(name) -> return Err(XMLFault.at(0, "invalid DOCTYPE name"))
-    external: byte_text(header_bytes[0..<header_bytes.len()], name_end, header_bytes.len()).trim()
-    if external.is_empty() -> return DoctypeFields{name: name.move(), public_id: None, system_id: None, internal_subset: internal_subset.move()}
-    cursor := 0
-    if external.starts_with("SYSTEM") -> cursor = 6
-    else if external.starts_with("PUBLIC") -> cursor = 6
-    else { return Err(XMLFault.at(name_end, "invalid DOCTYPE external identifier")) }
-    external_bytes: external.bytes()
-    public_id := String?{None}
-    if external.starts_with("PUBLIC") {
-        public: take_doctype_literal(external_bytes[0..<external_bytes.len()], cursor) ?? return Err(err)
-        public_id = Val(public)
-    }
-    system: take_doctype_literal(external_bytes[0..<external_bytes.len()], cursor) ?? return Err(err)
-    if !byte_text(external_bytes[0..<external_bytes.len()], cursor, external_bytes.len()).trim().is_empty() -> return Err(XMLFault.at(cursor, "unexpected data after DOCTYPE identifier"))
-    DoctypeFields{name: name.move(), public_id: public_id, system_id: Val(system), internal_subset: internal_subset.move()}
-}
-DeclaredEntityKind: enum { Internal External }
-take_entity_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
-    skip_ascii_space(source, cursor)
-    if cursor >= source.len() -> return Err(XMLFault.at(cursor, "ENTITY declaration lacks quoted value"))
-    quote: source[cursor]
-    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "ENTITY declaration value must be quoted"))
-    cursor += 1
-    start: cursor
-    loop cursor < source.len() && source[cursor] != quote -> cursor += 1
-    if cursor == source.len() -> return Err(XMLFault.at(start, "unterminated ENTITY declaration value"))
-    value: byte_text(source, start, cursor)
-    cursor += 1
-    value.move()
-}
-reject_parameter_entity_markup: fn(subset: View<U8>, base: Int) XMLFault! {
-    index := 0
-    loop index < subset.len() {
-        if subset[index] == (U8{37}) {
-            name_begin: index + 1
-            name_end := name_begin
-            loop name_end < subset.len() {
-                scalar: utf8_scalar(subset, name_end)
-                if name_end == name_begin {
-                    if !name_start(scalar.value) -> break
-                } else if !name_char(scalar.value) -> break
-                name_end += scalar.width
-            }
-            if name_end > name_begin && name_end < subset.len() && subset[name_end] == (U8{59}) -> return Err(XMLFault.at_kind(base + index, Reason.Unsupported, "parameter entity references are unsupported"))
-        }
-        index += utf8_scalar(subset, index).width
-    }
-}
-general_entity_refs: fn(value: String) -> [String] Never! {
-    bytes: value.bytes()
-    refs := [String]{}
-    at := 0
-    loop at < bytes.len() {
-        rel: byte_find_text(bytes[0..<bytes.len()], at, "&") ?? break
-        start: at + rel
-        end: byte_find_text(bytes[0..<bytes.len()], start, ";") ?? break
-        name: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
-        if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> refs.push(name.copy())
-        at = start + end + 1
-    }
-    refs.move()
-}
-Color: enum { White Gray Black }
-visit: fn(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {
-    color[node.copy()] = Color.Gray
-    if edges.get(node) == .Val(targets) {
-        loop target in targets {
-            state: color.get(target) ?? Color.White
-            if state == {
-                .Gray -> return true
-                .White -> { if visit(target, edges, color) -> return true }
-                .Black -> {}
-            }
-        }
-    }
-    color[node.copy()] = Color.Black
-    false
-}
-entity_reference_graph_has_cycle: fn(edges: &[String:[String]]) -> Bool Never! {
-    color := [String:Color]{}
-    names := edges.keys().collect()
-    names.sort()
-    loop name in names -> color[name.copy()] = Color.White
-    loop name in names {
-        if (color.get(name) ?? Color.White) == Color.White && visit(name, edges, color) -> return true
-    }
-    false
-}
-declared_entity_table: fn(subset: String?) -> DeclaredEntityTable XMLFault! {
-    names := [String:DeclaredEntityKind]{}
-    replacements := [String:String]{}
-    count := 0
-    source: subset ?? return DeclaredEntityTable{names: names.move(), count: count}
-    bytes: source.bytes()
-    reject_parameter_entity_markup(bytes[0..<bytes.len()], 0) ?? return Err(err)
-    search_from := 0
-    loop {
-        rel: byte_find_text(bytes[0..<bytes.len()], search_from, "<!ENTITY") ?? break
-        start: search_from + rel
-        count += 1
-        cursor := start + 8
-        skip_ascii_space(bytes[0..<bytes.len()], cursor)
-        if cursor < bytes.len() && bytes[cursor] == (U8{37}) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "parameter entity declarations are unsupported"))
-        name_begin: cursor
-        loop cursor < bytes.len() {
-            scalar: utf8_scalar(bytes[0..<bytes.len()], cursor)
-            if cursor == name_begin {
-                if !name_start(scalar.value) -> break
-            } else if !name_char(scalar.value) -> break
-            cursor += scalar.width
-        }
-        if cursor == name_begin -> return Err(XMLFault.at(start, "ENTITY declaration lacks name"))
-        name: byte_text(bytes[0..<bytes.len()], name_begin, cursor)
-        if !valid_name(name) -> return Err(XMLFault.at(start, "invalid ENTITY declaration name"))
-        skip_ascii_space(bytes[0..<bytes.len()], cursor)
-        kind := DeclaredEntityKind.Internal
-        if byte_prefix_text(bytes[0..<bytes.len()], cursor, "SYSTEM") || byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
-            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
-                cursor += 6
-                _: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
-            } else { cursor += 6 }
-            _: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
-            skip_ascii_space(bytes[0..<bytes.len()], cursor)
-            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "NDATA") -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
-            kind = DeclaredEntityKind.External
-        } else if cursor < bytes.len() && (bytes[cursor] == (U8{39}) || bytes[cursor] == (U8{34})) {
-            value: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
-            replacements[name.copy()] = value.move()
-        } else { return Err(XMLFault.at(start, "ENTITY declaration lacks value")) }
-        if names.get(name) != None -> return Err(XMLFault.at(start, "duplicate ENTITY declaration"))
-        names[name.copy()] = kind
-        search_from = start + 8
-    }
-    edges := [String:[String]]{}
-    ordered := replacements.keys().collect()
-    ordered.sort()
-    loop name in ordered {
-        targets := [String]{}
-        loop target in general_entity_refs(replacements[name]) {
-            if replacements.get(target) != None -> targets.push(target)
-        }
-        edges[name.copy()] = targets.move()
-    }
-    if entity_reference_graph_has_cycle(edges) -> return Err(XMLFault.at_kind(0, Reason.EntityCycle, "XML entity declarations form a replacement cycle"))
-    DeclaredEntityTable{names: names.move(), count: count}
-}
-declaration_fields: fn(data: String) -> DeclarationFields XMLFault! {
-    bytes: data.bytes()
-    cursor := 0
-    fields := [StringField]{}
-    loop cursor < bytes.len() {
-        skip_ascii_space(bytes[0..<bytes.len()], cursor)
-        if cursor == bytes.len() -> break
-        key_start: cursor
-        loop cursor < bytes.len() && !ascii_space(bytes[cursor]) && bytes[cursor] != (U8{61}) -> cursor += 1
-        key: byte_text(bytes[0..<bytes.len()], key_start, cursor)
-        skip_ascii_space(bytes[0..<bytes.len()], cursor)
-        if cursor >= bytes.len() || bytes[cursor] != (U8{61}) -> return Err(XMLFault.at(cursor, "XML declaration field needs ="))
-        cursor += 1
-        value: take_doctype_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
-        fields.push(StringField{key: key.copy(), value: value.move()})
-    }
-    if fields.is_empty() || fields[0].key != "version" -> return Err(XMLFault.at(0, "XML declaration must start with version"))
-    version: fields[0].value.copy()
-    if version != "1.0" -> return Err(XMLFault.at(0, "only XML version 1.0 is supported"))
-    encoding := String?{None}
-    standalone := Bool?{None}
-    loop index in 1..<fields.len() {
-        key: fields[index].key
-        value: fields[index].value
-        if key == "encoding" && encoding == None && standalone == None {
-            if !ascii_equal(value, "UTF-8") && !ascii_equal(value, "UTF-16") && !ascii_equal(value, "UTF-16LE") && !ascii_equal(value, "UTF-16BE") -> return Err(XMLFault.at_kind(0, Reason.InvalidEncoding, "unsupported XML declaration encoding"))
-            encoding = Val(value.copy())
-        } else if key == "standalone" && standalone == None {
-            if value == {
-                "yes" -> standalone = Val(true)
-                "no" -> standalone = Val(false)
-                else -> return Err(XMLFault.at(0, "standalone must be yes or no"))
-            }
-        } else { return Err(XMLFault.at(0, "invalid or duplicate XML declaration field")) }
-    }
-    DeclarationFields{version: version.move(), encoding: encoding, standalone: standalone}
-}
-declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Never! {
-    input: encoding ?? WireEncoding.UTF8
-    if input == {
-        .UTF8 -> ascii_equal(name, "UTF-8")
-        .UTF16Le | .UTF16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
-    }
-}
-impl Scanner {
      new: fn(source: [U8]) -> Scanner Never! {
         Scanner{source: source, wire_encoding: None, offset: 0, started: false, ended: false,
             root_seen: false, root_closed: false, declaration_seen: false, doctype_seen: false,
@@ -2996,7 +2625,377 @@ impl Scanner {
         Val(value)
     }
 }
+name_start: fn(n: Int) -> Bool Never! {
+    n == 58 || (n >= 65 && n <= 90) || n == 95 || (n >= 97 && n <= 122) ||
+    (n >= 0xC0 && n <= 0xD6) || (n >= 0xD8 && n <= 0xF6) || (n >= 0xF8 && n <= 0x2FF) ||
+    (n >= 0x370 && n <= 0x37D) || (n >= 0x37F && n <= 0x1FFF) || (n >= 0x200C && n <= 0x200D) ||
+    (n >= 0x2070 && n <= 0x218F) || (n >= 0x2C00 && n <= 0x2FEF) || (n >= 0x3001 && n <= 0xD7FF) ||
+    (n >= 0xF900 && n <= 0xFDCF) || (n >= 0xFDF0 && n <= 0xFFFD) || (n >= 0x10000 && n <= 0xEFFFF)
+}
+name_char: fn(n: Int) -> Bool Never! {
+    name_start(n) || n == 45 || n == 46 || (n >= 48 && n <= 57) || n == 0xB7 || (n >= 0x0300 && n <= 0x036F) || (n >= 0x203F && n <= 0x2040)
+}
+valid_name: fn(s: String) -> Bool Never! {
+    first := true
+    colons := 0
+    bytes: s.bytes()
+    offset := 0
+    loop offset < bytes.len() {
+        scalar: utf8_scalar(bytes[0..<bytes.len()], offset)
+        character: scalar.value
+        offset += scalar.width
+        if first {
+            if !name_start(character) -> return false
+            first = false
+        } else if !name_char(character) -> return false
+        if character == 58 {
+            colons += 1
+            if colons > 1 -> return false
+        }
+    }
+    !first
+}
+valid_xml_char: fn(n: Int) -> Bool Never! {
+    n == 0x9 || n == 0xA || n == 0xD || (n >= 0x20 && n <= 0xD7FF) || (n >= 0xE000 && n <= 0xFFFD) || (n >= 0x10000 && n <= 0x10FFFF)
+}
 
+normalize_attribute_text: fn(raw: String) -> String Never! {
+    bytes := raw.bytes()
+    read := 0
+    write := 0
+    loop read < bytes.len() {
+        byte := bytes[read]
+        read += 1
+        if byte == (U8{13}) {
+            if read < bytes.len() && bytes[read] == (U8{10}) -> read += 1
+            byte = U8{32}
+        } else if byte == (U8{10}) || byte == (U8{9}) -> byte = U8{32}
+        bytes[write] = byte
+        write += 1
+    }
+    loop bytes.len() > write -> _: bytes.pop()
+    #Unsafe("attribute whitespace compaction preserves the already validated UTF-8 byte sequence") {
+        encoding.__bytes_into_text(bytes)
+    }
+}
+split_name: fn(raw: String) -> SplitName Never! {
+    if raw.split_once(":") == {
+        .Val(parts) -> SplitName{prefix: Val(parts.before.copy()), local: parts.after.copy()}
+        .None -> SplitName{prefix: None, local: raw.copy()}
+    }
+}
+predefined: fn(name: String) -> String? Never! {
+    if name == {
+        "lt" -> Val("<")
+        "gt" -> Val(">")
+        "amp" -> Val("&")
+        "apos" -> Val("'")
+        "quot" -> Val("\"")
+        else -> {
+            bytes: name.bytes()
+            radix: if name.starts_with("#x") -> 16 else -> 10
+            index := if radix == 16 -> 2 else -> 1
+            if !name.starts_with("#") || index >= bytes.len() -> return None
+            if bytes[index] == (U8{43}) -> index += 1
+            if index >= bytes.len() -> return None
+            number := 0
+            loop index < bytes.len() {
+                byte: Int{bytes[index]}
+                digit: if byte >= 48 && byte <= 57 -> byte - 48 else if byte >= 65 && byte <= 70 -> byte - 55 else if byte >= 97 && byte <= 102 -> byte - 87 else -> { return None }
+                if digit >= radix -> return None
+                number = number * radix + digit
+                if number > 0xffffffff -> return None
+                index += 1
+            }
+            if number > 0x10ffff || (number >= 0xd800 && number <= 0xdfff) -> return None
+            if !valid_xml_char(number) -> return None
+            if unicode.encode_cp(number) == {
+                .Ok(text) -> Val(text)
+                .Err(_) -> panic("validated XML character must be a Unicode scalar")
+            }
+        }
+    }
+}
+ascii_space: fn(byte: U8) -> Bool Never! { byte == U8{32} || (byte >= U8{9} && byte <= U8{13}) }
+scalar_space: fn(code: Int) -> Bool Never! {
+    (code >= 9 && code <= 13) || code == 32 || code == 0x85 || code == 0xa0 || code == 0x1680 ||
+        (code >= 0x2000 && code <= 0x200a) || code == 0x2028 || code == 0x2029 || code == 0x202f || code == 0x205f || code == 0x3000
+}
+skip_ascii_space: fn(bytes: View<U8>, cursor: &Int) Never! {
+    loop cursor < bytes.len() && ascii_space(bytes[cursor]) -> cursor += 1
+}
+whitespace_offset: fn(bytes: View<U8>, start: Int) -> Int Never! {
+    cursor := start
+    loop cursor < bytes.len() {
+        scalar: utf8_scalar(bytes, cursor)
+        if scalar_space(scalar.value) -> return cursor
+        cursor += scalar.width
+    }
+    cursor
+}
+skip_scalar_space: fn(bytes: View<U8>, cursor: &Int) Never! {
+    loop cursor < bytes.len() {
+        scalar: utf8_scalar(bytes, cursor)
+        if !scalar_space(scalar.value) -> break
+        cursor += scalar.width
+    }
+}
+trim_byte_end: fn(bytes: View<U8>, start: Int, end: Int) -> Int Never! {
+    cursor := end
+    loop cursor > start {
+        previous := cursor - 1
+        loop previous > start && (Int{bytes[previous]}.bit_and(0xc0)) == 0x80 -> previous -= 1
+        if !scalar_space(utf8_scalar(bytes, previous).value) -> break
+        cursor = previous
+    }
+    cursor
+}
+scalar_hex: fn(character: Int) -> String Never! {
+    value := character
+    digits: "0123456789ABCDEF"
+    result := ""
+    loop {
+        digit: digits.slice(value % 16, value % 16 + 1)
+        result = "{digit}{result}"
+        value = value /% 16
+        if value == 0 -> break
+    }
+    loop result.len() < 4 -> result = "0{result}"
+    result.move()
+}
+take_doctype_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
+    skip_ascii_space(source, cursor)
+    if cursor >= source.len() -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier lacks quoted value"))
+    quote: source[cursor]
+    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "DOCTYPE external identifier must be quoted"))
+    cursor += 1
+    start: cursor
+    loop cursor < source.len() && source[cursor] != quote -> cursor += 1
+    if cursor == source.len() -> return Err(XMLFault.at(start, "unterminated DOCTYPE external identifier"))
+    value: byte_text(source, start, cursor)
+    cursor += 1
+    value.move()
+}
+doctype_fields: fn(inside: String) -> DoctypeFields XMLFault! {
+    bytes: inside.bytes()
+    subset_start := Int?{None}
+    quote := Int?{None}
+    offset := 0
+    loop offset < bytes.len() {
+        scalar: utf8_scalar(bytes[0..<bytes.len()], offset)
+        character: scalar.value
+        if quote == .Val(expected) {
+            if character == expected -> quote = None
+        } else if character == 39 || character == 34 {
+            quote = Val(character)
+        } else if character == 91 {
+            subset_start = Val(offset)
+            break
+        }
+        offset += scalar.width
+    }
+    header := ""
+    internal_subset := String?{None}
+    if subset_start == .Val(start) {
+        tail: byte_text(bytes[0..<bytes.len()], start + 1, bytes.len()).trim_end()
+        if !tail.ends_with("]") -> return Err(XMLFault.at(start, "DOCTYPE internal subset lacks ]"))
+        header = byte_text(bytes[0..<bytes.len()], 0, start).trim()
+        internal_subset = Val(tail.slice(0, tail.len() - 1))
+    } else { header = inside.trim() }
+    header_bytes: header.bytes()
+    name_end: whitespace_offset(header_bytes[0..<header_bytes.len()], 0)
+    name: byte_text(header_bytes[0..<header_bytes.len()], 0, name_end)
+    if !valid_name(name) -> return Err(XMLFault.at(0, "invalid DOCTYPE name"))
+    external: byte_text(header_bytes[0..<header_bytes.len()], name_end, header_bytes.len()).trim()
+    if external.is_empty() -> return DoctypeFields{name: name.move(), public_id: None, system_id: None, internal_subset: internal_subset.move()}
+    cursor := 0
+    if external.starts_with("SYSTEM") -> cursor = 6
+    else if external.starts_with("PUBLIC") -> cursor = 6
+    else { return Err(XMLFault.at(name_end, "invalid DOCTYPE external identifier")) }
+    external_bytes: external.bytes()
+    public_id := String?{None}
+    if external.starts_with("PUBLIC") {
+        public: take_doctype_literal(external_bytes[0..<external_bytes.len()], cursor) ?? return Err(err)
+        public_id = Val(public)
+    }
+    system: take_doctype_literal(external_bytes[0..<external_bytes.len()], cursor) ?? return Err(err)
+    if !byte_text(external_bytes[0..<external_bytes.len()], cursor, external_bytes.len()).trim().is_empty() -> return Err(XMLFault.at(cursor, "unexpected data after DOCTYPE identifier"))
+    DoctypeFields{name: name.move(), public_id: public_id, system_id: Val(system), internal_subset: internal_subset.move()}
+}
+DeclaredEntityKind: enum { Internal External }
+take_entity_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
+    skip_ascii_space(source, cursor)
+    if cursor >= source.len() -> return Err(XMLFault.at(cursor, "ENTITY declaration lacks quoted value"))
+    quote: source[cursor]
+    if quote != (U8{39}) && quote != (U8{34}) -> return Err(XMLFault.at(cursor, "ENTITY declaration value must be quoted"))
+    cursor += 1
+    start: cursor
+    loop cursor < source.len() && source[cursor] != quote -> cursor += 1
+    if cursor == source.len() -> return Err(XMLFault.at(start, "unterminated ENTITY declaration value"))
+    value: byte_text(source, start, cursor)
+    cursor += 1
+    value.move()
+}
+reject_parameter_entity_markup: fn(subset: View<U8>, base: Int) XMLFault! {
+    index := 0
+    loop index < subset.len() {
+        if subset[index] == (U8{37}) {
+            name_begin: index + 1
+            name_end := name_begin
+            loop name_end < subset.len() {
+                scalar: utf8_scalar(subset, name_end)
+                if name_end == name_begin {
+                    if !name_start(scalar.value) -> break
+                } else if !name_char(scalar.value) -> break
+                name_end += scalar.width
+            }
+            if name_end > name_begin && name_end < subset.len() && subset[name_end] == (U8{59}) -> return Err(XMLFault.at_kind(base + index, Reason.Unsupported, "parameter entity references are unsupported"))
+        }
+        index += utf8_scalar(subset, index).width
+    }
+}
+general_entity_refs: fn(value: String) -> [String] Never! {
+    bytes: value.bytes()
+    refs := [String]{}
+    at := 0
+    loop at < bytes.len() {
+        rel: byte_find_text(bytes[0..<bytes.len()], at, "&") ?? break
+        start: at + rel
+        end: byte_find_text(bytes[0..<bytes.len()], start, ";") ?? break
+        name: byte_text(bytes[0..<bytes.len()], start + 1, start + end)
+        if !name.is_empty() && !name.starts_with("#") && predefined(name) == None && valid_name(name) -> refs.push(name.copy())
+        at = start + end + 1
+    }
+    refs.move()
+}
+Color: enum { White Gray Black }
+visit: fn(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {
+    color[node.copy()] = Color.Gray
+    if edges.get(node) == .Val(targets) {
+        loop target in targets {
+            state: color.get(target) ?? Color.White
+            if state == {
+                .Gray -> return true
+                .White -> { if visit(target, edges, color) -> return true }
+                .Black -> {}
+            }
+        }
+    }
+    color[node.copy()] = Color.Black
+    false
+}
+entity_reference_graph_has_cycle: fn(edges: &[String:[String]]) -> Bool Never! {
+    color := [String:Color]{}
+    names := edges.keys().collect()
+    names.sort()
+    loop name in names -> color[name.copy()] = Color.White
+    loop name in names {
+        if (color.get(name) ?? Color.White) == Color.White && visit(name, edges, color) -> return true
+    }
+    false
+}
+declared_entity_table: fn(subset: String?) -> DeclaredEntityTable XMLFault! {
+    names := [String:DeclaredEntityKind]{}
+    replacements := [String:String]{}
+    count := 0
+    source: subset ?? return DeclaredEntityTable{names: names.move(), count: count}
+    bytes: source.bytes()
+    reject_parameter_entity_markup(bytes[0..<bytes.len()], 0) ?? return Err(err)
+    search_from := 0
+    loop {
+        rel: byte_find_text(bytes[0..<bytes.len()], search_from, "<!ENTITY") ?? break
+        start: search_from + rel
+        count += 1
+        cursor := start + 8
+        skip_ascii_space(bytes[0..<bytes.len()], cursor)
+        if cursor < bytes.len() && bytes[cursor] == (U8{37}) -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "parameter entity declarations are unsupported"))
+        name_begin: cursor
+        loop cursor < bytes.len() {
+            scalar: utf8_scalar(bytes[0..<bytes.len()], cursor)
+            if cursor == name_begin {
+                if !name_start(scalar.value) -> break
+            } else if !name_char(scalar.value) -> break
+            cursor += scalar.width
+        }
+        if cursor == name_begin -> return Err(XMLFault.at(start, "ENTITY declaration lacks name"))
+        name: byte_text(bytes[0..<bytes.len()], name_begin, cursor)
+        if !valid_name(name) -> return Err(XMLFault.at(start, "invalid ENTITY declaration name"))
+        skip_ascii_space(bytes[0..<bytes.len()], cursor)
+        kind := DeclaredEntityKind.Internal
+        if byte_prefix_text(bytes[0..<bytes.len()], cursor, "SYSTEM") || byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
+            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "PUBLIC") {
+                cursor += 6
+                _: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
+            } else { cursor += 6 }
+            _: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
+            skip_ascii_space(bytes[0..<bytes.len()], cursor)
+            if byte_prefix_text(bytes[0..<bytes.len()], cursor, "NDATA") -> return Err(XMLFault.at_kind(start, Reason.Unsupported, "unparsed external entities are unsupported"))
+            kind = DeclaredEntityKind.External
+        } else if cursor < bytes.len() && (bytes[cursor] == (U8{39}) || bytes[cursor] == (U8{34})) {
+            value: take_entity_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
+            replacements[name.copy()] = value.move()
+        } else { return Err(XMLFault.at(start, "ENTITY declaration lacks value")) }
+        if names.get(name) != None -> return Err(XMLFault.at(start, "duplicate ENTITY declaration"))
+        names[name.copy()] = kind
+        search_from = start + 8
+    }
+    edges := [String:[String]]{}
+    ordered := replacements.keys().collect()
+    ordered.sort()
+    loop name in ordered {
+        targets := [String]{}
+        loop target in general_entity_refs(replacements[name]) {
+            if replacements.get(target) != None -> targets.push(target)
+        }
+        edges[name.copy()] = targets.move()
+    }
+    if entity_reference_graph_has_cycle(edges) -> return Err(XMLFault.at_kind(0, Reason.EntityCycle, "XML entity declarations form a replacement cycle"))
+    DeclaredEntityTable{names: names.move(), count: count}
+}
+declaration_fields: fn(data: String) -> DeclarationFields XMLFault! {
+    bytes: data.bytes()
+    cursor := 0
+    fields := [StringField]{}
+    loop cursor < bytes.len() {
+        skip_ascii_space(bytes[0..<bytes.len()], cursor)
+        if cursor == bytes.len() -> break
+        key_start: cursor
+        loop cursor < bytes.len() && !ascii_space(bytes[cursor]) && bytes[cursor] != (U8{61}) -> cursor += 1
+        key: byte_text(bytes[0..<bytes.len()], key_start, cursor)
+        skip_ascii_space(bytes[0..<bytes.len()], cursor)
+        if cursor >= bytes.len() || bytes[cursor] != (U8{61}) -> return Err(XMLFault.at(cursor, "XML declaration field needs ="))
+        cursor += 1
+        value: take_doctype_literal(bytes[0..<bytes.len()], cursor) ?? return Err(err)
+        fields.push(StringField{key: key.copy(), value: value.move()})
+    }
+    if fields.is_empty() || fields[0].key != "version" -> return Err(XMLFault.at(0, "XML declaration must start with version"))
+    version: fields[0].value.copy()
+    if version != "1.0" -> return Err(XMLFault.at(0, "only XML version 1.0 is supported"))
+    encoding := String?{None}
+    standalone := Bool?{None}
+    loop index in 1..<fields.len() {
+        key: fields[index].key
+        value: fields[index].value
+        if key == "encoding" && encoding == None && standalone == None {
+            if !ascii_equal(value, "UTF-8") && !ascii_equal(value, "UTF-16") && !ascii_equal(value, "UTF-16LE") && !ascii_equal(value, "UTF-16BE") -> return Err(XMLFault.at_kind(0, Reason.InvalidEncoding, "unsupported XML declaration encoding"))
+            encoding = Val(value.copy())
+        } else if key == "standalone" && standalone == None {
+            if value == {
+                "yes" -> standalone = Val(true)
+                "no" -> standalone = Val(false)
+                else -> return Err(XMLFault.at(0, "standalone must be yes or no"))
+            }
+        } else { return Err(XMLFault.at(0, "invalid or duplicate XML declaration field")) }
+    }
+    DeclarationFields{version: version.move(), encoding: encoding, standalone: standalone}
+}
+declaration_matches_input: fn(name: String, encoding: WireEncoding?) -> Bool Never! {
+    input: encoding ?? WireEncoding.UTF8
+    if input == {
+        .UTF8 -> ascii_equal(name, "UTF-8")
+        .UTF16Le | .UTF16Be -> ascii_equal(name, "UTF-16") || ascii_equal(name, "UTF-16LE") || ascii_equal(name, "UTF-16BE")
+    }
+}
 #Test("XML namespace scope preserves default empty and named prefix ordering") {
     scope := NamespaceScope.new()
     scope.insert(Val("z"), "named")
@@ -3052,18 +3051,18 @@ impl Scanner {
             assert_eq(error.kind, Reason.Shape)
             assert_eq(error.reason, "XML encoding must be text or null")
         }
-        else -> panic("invalid optional text was accepted")
+        .Val(_) | .None -> panic("invalid optional text was accepted")
     }
 }
 
 #Test("XML text and byte document folds retain scanner failures") {
     if parse_document("<r>") == {
         .Err(_) -> {}
-        else -> panic("unterminated text document was accepted")
+        .Ok(_) -> panic("unterminated text document was accepted")
     }
     if parse_document_bytes("<r>".bytes()) == {
         .Err(_) -> {}
-        else -> panic("unterminated byte document was accepted")
+        .Ok(_) -> panic("unterminated byte document was accepted")
     }
 }
 
@@ -3076,7 +3075,7 @@ impl Scanner {
         (key: "encoding", value: Dyn.Bool(true)), (key: "standalone", value: Dyn.Null)])
     if deterministic_leaf(invalid, "declaration") == {
         .Err(error) -> { assert_eq(error.kind, Reason.Shape) }
-        else -> panic("invalid encoding was accepted")
+        .Ok(_) -> panic("invalid encoding was accepted")
     }
 }
 
@@ -3127,7 +3126,7 @@ impl Scanner {
     loop index in 0..<values.len() {
         if values[index] == {
             .Text(value) -> assert_eq(value, expected[index])
-            else -> panic("projected child must remain text")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("projected child must remain text")
         }
     }
     assert_eq(text_value(field(projected, "y")), Val("other"))
@@ -3138,7 +3137,7 @@ impl Scanner {
     projected: optional_text(source)
     if projected == {
         .Text(value) -> assert_eq(value, "present")
-        else -> panic("present optional text must project to Dyn.Text")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("present optional text must project to Dyn.Text")
     }
     assert_eq(source, String?{Val("present")})
     assert(optional_text(String?{None}) == .Null)

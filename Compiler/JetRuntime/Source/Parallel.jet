@@ -4,12 +4,13 @@
 // pool fiber, so a worker whose item waits parks and frees its carrier: the
 // carriers bound how many items run at once, and a para_map's `limit` bounds
 // how many are in flight.
-// Worker136: job0 (PARALLEL_JOB) len8 chunks16 workers24 index32 env40
+// Worker144: job0 (PARALLEL_JOB) len8 chunks16 workers24 index32 env40
 // invoke48 stop56 start64 join72 (the walk's count of unfinished workers)
 // size80 (items per chunk) queue88 (the scheduler FIFO link) save96 (points
-// into the 32-byte control scope at 104).
+// into the 32-byte control scope at 104) stack136 (the walking task's stack
+// size, which the worker's fiber takes: Fiber.jet fiber_stack_class).
 PARALLEL_JOB: I64{-1}
-PARALLEL_WORKER_BYTES: I64{136}
+PARALLEL_WORKER_BYTES: I64{144}
 // BuildParallel's PARA_EVERY_WORKER: a para_map without `limit`, more
 // workers than any host has, so it gets the available ones.
 PARALLEL_EVERY_WORKER: U64{1073741824}
@@ -131,6 +132,7 @@ parallel_raise: fn(record: I64) {
     thread_zero(block, bytes)
     workers: wrapping(block + I64{8})
     sync_store(block, count)
+    stack: fiber_stack_current()
     at := I64{0}
     loop at < count {
         worker: workers + at * PARALLEL_WORKER_BYTES
@@ -144,6 +146,7 @@ parallel_raise: fn(record: I64) {
         sync_store(wrapping(worker + I64{72}), block)
         sync_store(wrapping(worker + I64{80}), size)
         sync_store(wrapping(worker + I64{96}), worker + I64{104})
+        sync_store(wrapping(worker + I64{136}), stack)
         at += I64{1}
     }
     if (count == I64{1}) { parallel_worker_run(workers) } else {

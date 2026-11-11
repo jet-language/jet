@@ -11,7 +11,7 @@ trace_game_project_into: fn(bodies: [JetDevtoolsEventBody], frames: &[TraceGameF
             .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, id, start_ns, cpu_ns, gpu_ns, responsible) -> {
                 function: if responsible == {
                     .Val(value) -> Val(trace_game_function(value))
-                    else -> None
+                    .None -> None
                 }
                 frames.push(TraceGameFrame{sequence: sequence, frame_id: frame_id, scene: scene.copy(), frame_index: frame_index,
                     build: build.copy(), revision: revision.copy(), trace_id: id.copy(), start_ns: start_ns, cpu_ns: cpu_ns,
@@ -23,7 +23,7 @@ trace_game_project_into: fn(bodies: [JetDevtoolsEventBody], frames: &[TraceGameF
                     function: trace_game_function(function), phase: phase.copy(), domain: domain.copy(), start_ns: start_ns,
                     duration_ns: duration_ns, object_id: object_id.copy(), resource_id: resource_id.copy()})
             }
-            else -> {}
+            .Build(_, _, _, _, _) | .Route(_, _, _, _) | .Query(_, _, _) | .Mutation(_, _, _) | .Form(_, _, _, _) | .Table(_, _, _, _) | .Store(_, _, _, _) | .Trace(_, _, _, _, _) | .Cost(_, _, _, _) | .Gate(_, _, _) | .Structure(_, _, _) | .Test(_, _, _, _) | .Job(_, _, _, _) | .Frame(_, _, _) | .GameLaunchProfile(_, _, _, _) | .GameSwap(_, _, _, _, _, _, _, _) | .Request(_, _, _, _) | .Response(_, _, _) -> {}
         }
     }
 }

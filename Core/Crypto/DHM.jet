@@ -155,7 +155,7 @@ private_value: fn<R: RNG>(p: bn.Mpi, x_size: Int, rng: &R) -> bn.Mpi DHMError! {
     }
     x: random_below(p, rng) ?? return Err(if err == {
         .NotAcceptable -> DHMError.MakeParamsFailed(None)
-        else -> DHMError.Mpi(err)
+        .BadInput | .InvalidCharacter | .BufferTooSmall | .NegativeValue | .DivisionByZero | .AllocFailed | .Random | .FileIO -> DHMError.Mpi(err)
     })
     Ok(x)
 }
@@ -216,7 +216,7 @@ dhm_make_public: fn<R: RNG>(ctx: &DHMContext, x_size: Int, olen: Int, rng: &R) -
         return Err(if e == {
             .MakeParamsFailed(_) -> DHMError.MakePublicFailed(None)
             .Mpi(m) -> DHMError.MakePublicFailed(Val(m))
-            else -> e.copy()
+            .BadInput | .ReadParamsFailed(_) | .ReadPublicFailed(_) | .MakePublicFailed(_) | .CalcSecretFailed(_) | .InvalidFormat(_) | .SetGroupFailed(_) | .PEM(_) -> e.copy()
         })
     }
     out: bn.write_binary(ctx.gx, olen) ?? return Err(.MakePublicFailed(Val(err)))

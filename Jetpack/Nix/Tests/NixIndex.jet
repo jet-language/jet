@@ -123,14 +123,14 @@ nix_test_install_local_index: fn(root: String, channel: String, revision: String
 nix_test_is_invalid: fn(error: NixIndexError) -> Bool {
     if error == {
         .Invalid(_) -> true
-        else -> false
+        .NotIndexed(_, _, _, _, _) | .Offline(_) | .Transport(_) -> false
     }
 }
 
 nix_test_invalid_detail: fn(error: NixIndexError) -> String {
     if error == {
         .Invalid(detail) -> detail
-        else -> ""
+        .NotIndexed(_, _, _, _, _) | .Offline(_) | .Transport(_) -> ""
     }
 }
 
@@ -158,7 +158,7 @@ nix_test_roots_error: fn(roots: HangarRoots) -[FS, Env, Net]> NixIndexError {
 nix_test_document_rejected: fn(document: NixIndexDocument) -> Bool {
     if document.validate() == {
         .Ok(_) -> false
-        else -> true
+        .Err(_) -> true
     }
 }
 
@@ -166,7 +166,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     manifest: NixIndexChannelManifest{schema: NIX_INDEX_SCHEMA, channel: "nixpkgs-unstable", generation, issued_unix: issued, expires_unix: issued + 604800, targets: [NixIndexManifestTarget]{}}
     if client.check_generation("nixpkgs-unstable", manifest, bytes.bytes()) == {
         .Ok(_) -> false
-        else -> true
+        .Err(_) -> true
     }
 }
 
@@ -330,7 +330,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     forged[position] = U8{(Int.from_u8(forged[position])).bit_xor(1)}
     if nix_index_verify_index_signature(public_key, "test-key", signature, forged) == {
         .Ok(_) -> panic("mutated bytes must not verify")
-        else -> {}
+        .Err(_) -> {}
     }
 }
 
@@ -350,7 +350,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
 #Test("nix index rejects forged stale cross system duplicate and ambiguous input") {
     if NixIndexDocument.parse(`{"schema":1,"schema":1}`.bytes()) == {
         .Ok(_) -> panic("duplicate keys must be rejected")
-        else -> {}
+        .Err(_) -> {}
     }
     ripgrep: NixIndexRecordWire.from_record(nix_test_ripgrep_record())
     duplicate_records := nix_test_document_for(ripgrep)
@@ -376,7 +376,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     assert(nix_test_document_rejected(nix_test_document_for(no_primary)))
     if nix_index_validate_store_path("/nix/store/not-a-store-path", false) == {
         .Ok(_) -> panic("a malformed store path must be rejected")
-        else -> {}
+        .Err(_) -> {}
     }
 
     fixture: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
@@ -401,7 +401,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     public_key: signer.public_key()
     if nix_index_verify_manifest_signature(public_key, "test-key", drifted.canonical_bytes(), bytes) == {
         .Ok(_) -> panic("a drifted signature schema must be rejected")
-        else -> {}
+        .Err(_) -> {}
     }
 }
 
@@ -427,7 +427,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     assert_eq(error.code(), 1276)
     if error == {
         .Offline(_) -> {}
-        else -> panic("an expired cached manifest is an offline refusal")
+        .Invalid(_) | .NotIndexed(_, _, _, _, _) | .Transport(_) -> panic("an expired cached manifest is an offline refusal")
     }
     files.remove_all(fixture.root) ?? panic("scratch cleanup")
 }

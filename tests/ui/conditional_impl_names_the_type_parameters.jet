@@ -1,0 +1,22 @@
+// #6281 c159: a conditional impl lists its type's parameters in order, each
+// with its bounds. `U` is not `Pair`'s parameter `T`: E0003 at the list.
+Priced: trait {
+    price: fn(self) -> Int
+}
+
+Describe: trait {
+    describe: fn(self) -> String
+}
+
+Pair: struct<T> {
+    left: T
+    right: T
+}
+
+impl Pair<U: Priced>.Describe {
+    describe: fn(self) -> String { "a pair" }
+}
+
+run: fn() {
+    print("unreachable")
+}

@@ -629,7 +629,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     assert(error_name(missing) == expected_name)
     if missing == {
         .DNS(.NotFound(name)) -> assert(name == "example.test")
-        else -> panic("DNS NotFound")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS NotFound")
     }
     cancelled: dns_error("example.test", "network operation cancelled: timeout")
     if cancelled == {
@@ -640,7 +640,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
             assert(detail.os_code == None)
             assert(detail.message == "network operation cancelled: timeout")
         }
-        else -> panic("DNS cancellation")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS cancellation")
     }
     protocol: dns_error("example.test", "network protocol error: timeout")
     if protocol == .Protocol(_) {
@@ -652,7 +652,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     failure: dns_error("example.test", "DNS lookup worker failed")
     if failure == {
         .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed")
-        else -> panic("DNS failure")
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("DNS failure")
     }
     assert(error_name(failure) == None)
 }
@@ -955,12 +955,12 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
             assert(detail.name == None && detail.os_code == expected_os_code)
             assert(detail.message == "resolve socket address failed: denied")
         }
-        else -> assert(false)
+        .InvalidInput(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> assert(false)
     }
     empty: resolve_error("[::1]:0", __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"})
     if empty == {
         .Other(detail) -> assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
-        else -> assert(false)
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> assert(false)
     }
 }
 
@@ -978,7 +978,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
             assert(detail.address == expected_address)
             assert(detail.message == "resolve socket address failed: no address")
         }
-        else -> assert(false)
+        .Ok(_) | .Err(_) -> assert(false)
     }
 }
 

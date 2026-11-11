@@ -1,0 +1,33 @@
+// `Hole` and `build` are a pair: a `Hole` without `build` is E0907, as is a
+// `build` whose holes are not `[Hole]` or whose result is not the owner.
+
+#Error
+TextError: enum { Empty }
+
+Loose: distinct String
+
+impl Loose.CheckedText {
+    Error: TextError
+    Hole: Int
+
+    check: fn(text: String) TextError! -[]> { return Ok() }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> Int { 0 }
+}
+
+Record: struct {
+    text: String
+
+    impl CheckedText {
+        Error: TextError
+        Hole: Int
+
+        check: fn(text: String) TextError! -[]> { return Ok() }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> Int { 0 }
+
+        build: fn(parts: [String], holes: [String]) -[]> String { parts.join("") }
+    }
+}
+
+run: fn() {}

@@ -22,7 +22,10 @@ use {
     source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
     override_plan: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
     first: override_plan.fields[0].value
-    assert(if first == { .Value(value) -> value == CtValue.Int{value: 42} else -> false })
+    assert(if first == {
+        .Value(value) -> value == CtValue.Int{value: 42}
+        .Platform(_) | .Packages(_) | .Services(_) | .Options(_) -> false
+    })
     found := false
     loop region in override_plan.provenance {
         if region.field == "region" {
@@ -40,7 +43,10 @@ use {
     source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ options: [network.hostName: laptop, filesystem.timeZone: \"UTC\", tuning.retries: base + 1], base: 4 }}\n    }}\n}}\n"
     override_plan: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
     first: override_plan.fields[0].value
-    options: if first == { .Options(options) -> options else -> panic("expected options override") }
+    options: if first == {
+        .Options(options) -> options
+        .Platform(_) | .Packages(_) | .Services(_) | .Value(_) -> panic("expected options override")
+    }
     assert_eq(options.len(), 3)
     assert_eq(options[0].key, "network.hostName")
     assert_eq(options[0].value, "laptop")

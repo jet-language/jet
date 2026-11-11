@@ -12,33 +12,33 @@ use {
     jet_semindex.[SemSymbol, semindex_build_symbols]
 }
 
-JetCLILSPChecker: struct {}
-
-impl JetCLILSPChecker.LSPChecker {
-    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
-        alone: jet_cli_lsp_unsaved_loose(entry)
-        entry_path: jet_cli_overlay_path(entry)
-        given := [JetCLIOverlay]{}
-        loop overlay in overlays {
-            if !alone || jet_cli_overlay_path(overlay.path) == entry_path -> given.push(JetCLIOverlay{path: overlay.path.copy(), source: overlay.source.copy()})
-        }
-        if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
-            // A refusal (no toolchain, an unreadable manifest) has no span in
-            // the document; the client's log shows it.
-            .Refused(output) -> {
-                lsp_write_log(output.stderr).drop("standard error is the log; a failed log write has nowhere to go")
-                return jet_cli_lsp_unchecked()
+JetCLILSPChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+            alone: jet_cli_lsp_unsaved_loose(entry)
+            entry_path: jet_cli_overlay_path(entry)
+            given := [JetCLIOverlay]{}
+            loop overlay in overlays {
+                if !alone || jet_cli_overlay_path(overlay.path) == entry_path -> given.push(JetCLIOverlay{path: overlay.path.copy(), source: overlay.source.copy()})
             }
-            .Prepared(request, snapshot) -> {
-                demanded := request.move()
-                demanded.doc_core_on_demand = true
-                result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}})
-                if result.internal_problem == .Val(problem) -> lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
-                diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-                if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
-                index: jet_cli_checked_semindex(result)
-                symbols: semindex_build_symbols(index, result.doc_modules)
-                return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols}
+            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
+                // A refusal (no toolchain, an unreadable manifest) has no span in
+                // the document; the client's log shows it.
+                .Refused(output) -> {
+                    lsp_write_log(output.stderr).drop("standard error is the log; a failed log write has nowhere to go")
+                    return jet_cli_lsp_unchecked()
+                }
+                .Prepared(request, snapshot) -> {
+                    demanded := request.move()
+                    demanded.doc_core_on_demand = true
+                    result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}})
+                    if result.internal_problem == .Val(problem) -> lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
+                    diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+                    if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+                    index: jet_cli_checked_semindex(result)
+                    symbols: semindex_build_symbols(index, result.doc_modules)
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols}
+                }
             }
         }
     }

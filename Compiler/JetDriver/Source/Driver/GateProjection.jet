@@ -34,7 +34,7 @@ jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraph
     }
     storage: docs[0].name_ledger ?? panic("checked documentation row lost its NameLedger")
     permit: storage.guard_read()
-    ledger: shared sema_gate_ledger_collect(modules, permit.value, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(graph.programs))
+    ledger: Shared{sema_gate_ledger_collect(modules, permit.value, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(graph.programs))}
     loop index in 0..<docs.len() -> docs[index].gate_ledger = Val(ledger)
 }
 

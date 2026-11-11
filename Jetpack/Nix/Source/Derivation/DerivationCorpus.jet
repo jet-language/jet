@@ -74,14 +74,14 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
                 report.divergences.push(error)
                 next
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         if nix_verify_drv_path(store_dir, path, aterm.bytes(), derivation) == {
             .Err(error) -> {
                 report.divergences.push(error)
                 next
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         if nix_verify_corpus_outputs(store, store_dir, path, derivation) == {
             .Err(error) -> {
@@ -92,7 +92,7 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
                 }
                 next
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         report.checked += 1
     }
@@ -114,6 +114,6 @@ nix_assert_corpus_clean: fn(store_dir: String, limit: Int) -[FS]> Int NixError! 
 nix_is_unsupported: fn(error: NixError) -> Bool Never! {
     if error == {
         .DrvUnsupported(_) -> true
-        else -> false
+        .DrvParse(_) | .DrvPath(_) | .Divergence(_, _, _) | .DrvIO(_) | .ImportPath | .ImportNotRegularFile | .ImportTooLarge | .ImportSymlink | .ImportIO(_) | .FallbackFieldConflict(_) | .FallbackFieldMissing(_) | .FallbackNotObject | .FallbackNonFinite | .Fallback(_) -> false
     }
 }

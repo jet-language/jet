@@ -173,7 +173,7 @@ provider_classify_canonical_dep: fn(name: String, source: DepSource, member_dir:
             if all_dirs.contains(resolved) -> return InRepoDep.OutsideWorkspace(resolved)
             InRepoDep.External
         }
-        else -> InRepoDep.External
+        .Version(_) | .Git(_, _) | .CLib(_) | .Foreign(_, _) -> InRepoDep.External
     }
 }
 

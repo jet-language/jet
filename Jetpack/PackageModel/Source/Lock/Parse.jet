@@ -49,7 +49,7 @@ LockParseSection: enum {
     owns_version_key: fn(self) -> Bool Never! {
         if self == {
             .Package | .Toolchain | .Browser | .WorkspaceOverlayPackage | .Root | .Semantic -> true
-            else -> false
+            .Preamble | .BuildStamp | .ComptimeInput | .WorkspaceMember | .SourceChannel | .BuildContribution | .WorkspaceOverlay | .WorkspaceBuildGrant -> false
         }
     }
 
@@ -57,7 +57,7 @@ LockParseSection: enum {
     shadows_workspace_keys: fn(self) -> Bool Never! {
         if self == {
             .Package | .Root | .Semantic -> true
-            else -> false
+            .Preamble | .BuildStamp | .ComptimeInput | .WorkspaceMember | .Toolchain | .Browser | .SourceChannel | .BuildContribution | .WorkspaceOverlay | .WorkspaceOverlayPackage | .WorkspaceBuildGrant -> false
         }
     }
 }
@@ -87,7 +87,7 @@ pkg_lock_parse_with_path: fn(raw: String, lock_path: String) -> LockFile LockErr
         .Ok(lock) -> Ok(lock)
         .Err(error) -> if error == {
             .UnsupportedVersion(version) -> Err(LockError.Reported(pkg_lock_e1214_lock_unsupported(lock_path, version, "{PKG_LOCK_VERSION}")))
-            else -> Err(LockError.Reported(pkg_lock_e1205_lock_corrupt(lock_path)))
+            .Invalid(_) | .IO(_) | .Incomplete(_) | .Reported(_) -> Err(LockError.Reported(pkg_lock_e1205_lock_corrupt(lock_path)))
         }
     }
 }
@@ -738,7 +738,7 @@ pkg_lock_validate_package_nix: fn(source: LockSource, nix_closure: NixClosureRec
             closure: nix_closure ?? return Err(LockError.Invalid("Nix package is missing its portable closure record"))
             if closure.output != output -> return Err(LockError.Invalid("Nix source output disagrees with its closure record"))
         }
-        else -> {
+        .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> {
             if nix_closure != None -> return Err(LockError.Invalid("portable Nix closure record attached to a non-Nix package"))
         }
     }

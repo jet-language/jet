@@ -52,7 +52,7 @@ run: fn() {
             .Err(error) -> {
                 if error == {
                     .Timeout(_) -> { if time.instant() >= end -> break }
-                    else -> panic("proxy accept failed")
+                    .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> panic("proxy accept failed")
                 }
             }
         }

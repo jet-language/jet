@@ -1,7 +1,7 @@
 // Focused layout facts and full reflection share one typed model; a struct
 // without `#Layout` reports the bytes the compiler chose for it.
 derive T.LayoutFacts {
-    info: T.$layout
+    info: T.reflect().layout
     reflected: T.reflect().layout
     selected: info[.count]
     kind: info.kind
@@ -12,7 +12,7 @@ derive T.LayoutFacts {
     reflected_offset: reflected.fields[0].offset
     reflected_kind: reflected.kind
     field_name: selected.name
-    layout_facts: fn(self) -> String { "{$kind}:{$target}:{$size}:{$reflected_size}:{$selected_offset}:{$reflected_offset}:{$reflected_kind}:{$field_name}" }
+    layout_facts: fn(self) -> String { "{kind}:{target}:{size}:{reflected_size}:{selected_offset}:{reflected_offset}:{reflected_kind}:{field_name}" }
 }
 
 #LayoutFacts

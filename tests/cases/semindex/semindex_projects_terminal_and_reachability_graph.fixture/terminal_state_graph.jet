@@ -1,10 +1,9 @@
 
 Door: struct {
     state { Closed, Open, Orphan }
-}
-impl Door {
-    #Transition(_, Closed) close: fn() -> Door { Door{} }
-    #Transition(Closed, Open) open: fn(self: &&Door) -> Door { self }
-    #Transition(Closed, Closed) hold: fn(self: &&Door) -> Door { self }
+
+    #State(_ -> Closed) close: fn() -> Door { Door{} }
+    #State(Closed -> Open) open: fn(self: &&Door) -> Door { self }
+    #State(Closed -> Closed) hold: fn(self: &&Door) -> Door { self }
 }
 run: fn() {}

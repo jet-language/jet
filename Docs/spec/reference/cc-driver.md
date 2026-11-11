@@ -44,6 +44,12 @@ when network access is denied, a missing pack is one error that names both
 fixes: `jet env fetch-toolchain`, or the combined archive. A missing or corrupt
 object is an error, not an invitation to use the host compiler.
 
+Every compile and link runs in the native sandbox that `jet build` actions use,
+chosen by the same one resolver: the `bwrap` on PATH, else Jet's hash-pinned
+static bubblewrap from the Hangar, which `jet cc` fetches on first need (from
+beside jet, `JET_BWRAP_URL`, or the release) like the pack. With neither usable
+it is E1275, never an unsandboxed compile.
+
 The per-target libc is built lazily into its own Hangar entry: a glibc target
 copies the pack's headers and link stubs, and a musl target compiles `libc.a`
 with the pack's own clang the first time it is used (`building musl for
@@ -78,6 +84,14 @@ symlinks and paths that escape either scope are rejected. Response files use
 bounded whitespace, single-quote, double-quote, and backslash parsing. They do
 not perform shell expansion. Nested response files, cycles, file size, and byte
 count each have fixed limits.
+
+Every regular file under the project root is a declared input of the compile,
+except `.git`, `.jet`, `target`, `build`, `CMakeFiles`, an explicit build root,
+and the declared outputs. The project root is `--project-root` when it is given
+and the current directory otherwise. The input set holds at most 100000 files
+and 512 MiB. A larger set stops the run with E2118 before any toolchain is
+fetched; the report names the project root, the size found and the cap. Pass
+`--project-root` naming the source directory to narrow it.
 
 The driver forwards selected compiler flags, dependency targets, and the
 virtual sysroot into the action. Target-changing flags, linker injection,

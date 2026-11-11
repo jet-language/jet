@@ -19,7 +19,7 @@ use {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .InvalidKey(detail) -> detail == "test public trust key `jet-test-index-v1` cannot be published"
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     }
     assert(rejected)
@@ -52,7 +52,7 @@ use {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .SignatureStripped(_) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     rotated := root
@@ -74,7 +74,7 @@ use {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .DelegationDenied(_, _) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     t_canon: trust_canonical_targets(targets)
@@ -99,7 +99,7 @@ use {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .IdentityKindMismatch(_, _) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
 }
@@ -123,7 +123,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .ThresholdUnmet(role, have, need) -> role == MetadataRole.Root && have == 1 && need == 2
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     replacement := root
@@ -133,7 +133,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .BootstrapPinMismatch(_, _) -> true
-            else -> false
+            .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     hashes := [String: String]{}
@@ -154,7 +154,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .Rollback(role, _, _) -> role == MetadataRole.Targets
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     frozen := targets
@@ -165,7 +165,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .Expired(role, _, _) -> role == MetadataRole.Targets
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     changed_custom := signed_targets
@@ -179,7 +179,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .ConsistentSnapshotMismatch(_, _) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     chain := pkg_integration_trust_boot(fixture, signed_root, pin, now)
@@ -200,7 +200,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .ConsistentSnapshotMismatch(_, _) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     cache_key: TrustKey.generate("cache-receipt")
@@ -218,7 +218,7 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .CacheReceiptInvalid(_) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     tampered_receipt := receipt
@@ -227,14 +227,14 @@ pkg_integration_trust_boot: fn(fixture: TrustFixtureRoot, signed_root: SignedMet
         .Ok(_) -> false
         .Err(error) -> if error == {
             .CacheReceiptInvalid(_) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptExpired(_, _) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
     assert(if receipt.verify(cache_key, TrustedClock.Fixed(now + 60)) == {
         .Ok(_) -> false
         .Err(error) -> if error == {
             .CacheReceiptExpired(_, _) -> true
-            else -> false
+            .BootstrapPinMismatch(_, _) | .BootstrapMissing | .SignatureStripped(_) | .SignatureInvalid(_, _) | .ThresholdUnmet(_, _, _) | .Rollback(_, _, _) | .Expired(_, _, _) | .BadClock(_, _) | .MetadataTooLarge(_, _, _) | .ConsistentSnapshotMismatch(_, _) | .DelegationDenied(_, _) | .UnknownKey(_) | .InvalidKey(_) | .InvalidThreshold(_) | .InvalidPublisher(_) | .IdentityKindMismatch(_, _) | .RotationRejected(_) | .CacheReceiptInvalid(_) | .CacheKeyChanged(_, _, _) | .CacheKeyMissing(_) | .CacheBuilderRevoked(_) | .IO(_) -> false
         }
     })
 }

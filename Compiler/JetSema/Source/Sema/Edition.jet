@@ -24,7 +24,7 @@ sema_lifecycle_marker_string: fn(marker: Marker, label: String, positional: Int)
             loop part in parts {
                 if part == {
                     .Lit(literal) -> text = "{text}{literal}"
-                    else -> return None
+                    .Interp(_, _) | .Byte(_) -> return None
                 }
             }
             return Val(text)
@@ -196,7 +196,7 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
                     .Struct(value) -> markers = value.type_markers
                     .Enum(value) -> markers = value.type_markers
                     .Distinct(value) -> markers = value.type_markers
-                    else -> {}
+                    .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             payload: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next

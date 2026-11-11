@@ -9,7 +9,7 @@ check: fn(token: String, key: [U8], label: String, skew: Duration) {
                 .TokenExpired -> { print("{label}-expired") }
                 .MalformedToken(_) -> { print("{label}-malformed") }
                 .InvalidSignature -> { print("{label}-invalid") }
-                else -> { print("{label}-wrong-error") }
+                .UnsupportedToken(_) | .WeakKey | .MissingClaim(_) | .WrongAudience(_, _) | .WrongIssuer(_, _) | .DecodeError(_) | .TokenNotYetValid -> { print("{label}-wrong-error") }
             }
         }
     }

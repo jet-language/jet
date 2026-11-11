@@ -182,11 +182,11 @@ reject such a take inside a checked region.
 
 The recommended first scope is memory rollback plus explicit typed rollback
 contracts. `FS`, `DB`, `Net`, and `Exec` effects are not made reversible by a
-transaction marker. A function effect ceiling such as `=[FS]=>` limits the
+transaction marker. A function effect ceiling such as `-[FS]>` limits the
 allowed effect set; it does not prove that a filesystem action can be undone.
 
 The region should not add a new effect root. The normal inferred effect row
-continues to describe ambient effects, and an existing `=[...]=>` function
+continues to describe ambient effects, and an existing `-[...]>` function
 ceiling or `#Caps(...)` block ceiling remains available when an author wants a
 local limit. Rollback safety is a separate sema fact checked at each call.
 
@@ -321,9 +321,9 @@ transaction mechanism.
 ### D-TXN-EFFECT1 — effect-model fit
 
 - **A:** keep rollback safety as a sema fact; use existing inferred rows,
-  `=[...]=>`, and `#Caps(...)` for effect ceilings.
+  `-[...]>`, and `#Caps(...)` for effect ceilings.
 - **B:** add a `Rollback` effect root to the effect row.
-- **C:** require an explicit `=[...]=>` ceiling on every transaction region.
+- **C:** require an explicit `-[...]>` ceiling on every transaction region.
 
 **Recommendation:** A. A ceiling limits ambient power but does not prove an
 inverse. The rollback proof belongs beside, not inside, the effect row.

@@ -1,0 +1,21 @@
+# Claim: a loop body that moves an outer variable (`out.push(path)`) and then
+# leaves the loop leaves it moved on that exit only. Where the loop's exits
+# meet, the variable owns its value only on the paths that kept it, so its
+# scope end never drops text another owner holds (#6724 c4; seed-t21 printed
+# freed text for `break`). Forms: a plain `break`, a `next` before the
+# move, `next(outer)`, `break(outer)`, `?? return`, `?? break` and a match
+# whose arms all break.
+# Hand-derived: items are c, b, a; pick refuses "b". break(outer) stops the
+# walk at b after pushing it; `?? return` returns at b after pushing it; a
+# `next` before the move skips b, whose path its scope end drops.
+fixture: loop_exit_moves_keep_the_moved_value_alive.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0 # o0
+stdout: = loop_exit_moves_keep_the_moved_value_alive.out # o0
+step: jet run --optimize=basic main.jet
+exit: 0 # o1
+stdout: = loop_exit_moves_keep_the_moved_value_alive.out # o1
+step: jet run --optimize=full main.jet
+exit: 0 # o2
+stdout: = loop_exit_moves_keep_the_moved_value_alive.out # o2

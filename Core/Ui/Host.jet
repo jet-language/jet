@@ -109,6 +109,14 @@ UIShortcutModifiers: struct {
 UIShortcut: struct {
     key: String
     modifiers: UIShortcutModifiers
+
+    /// `UIShortcut.cmd("s")` binds a key to the logical
+    /// platform-command modifier (Control on Unix/Windows, Meta on macOS).
+    cmd: fn(key: String) -> UIShortcut Never! {
+        normalized: core.text.lower(core.text.trim(key))
+        if normalized.len() == 0 -> panic("UIShortcut.cmd needs a non-empty key")
+        UIShortcut{key: normalized, modifiers: UIShortcutModifiers{bits: 16}}
+    }
 }
 UITextRange: struct {
     start: Int
@@ -321,16 +329,6 @@ shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHo
     normalized: core.text.lower(core.text.trim(key))
     if normalized.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
     Ok(UIShortcut{key: normalized, modifiers: modifiers})
-}
-
-impl UIShortcut {
-    /// `UIShortcut.cmd("s")` binds a key to the logical
-    /// platform-command modifier (Control on Unix/Windows, Meta on macOS).
-    cmd: fn(key: String) -> UIShortcut Never! {
-        normalized: core.text.lower(core.text.trim(key))
-        if normalized.len() == 0 -> panic("UIShortcut.cmd needs a non-empty key")
-        UIShortcut{key: normalized, modifiers: UIShortcutModifiers{bits: 16}}
-    }
 }
 
 /// The existing two-string API always names the node; an empty description

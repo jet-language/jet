@@ -98,13 +98,6 @@ evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, 
     evidence_append_frame(path, frame)
 }
 
-// Generated test and contract code calls this producer: no report path, no
-// record; a failed write is dropped, as in Rust.
-evidence_record_write: fn(kind: Int, state: Int, name: String, message: String, file: String, line: U32, context: EvidenceCaptureContext) Never! -[FS, Env]> {
-    path: evidence_sys.get(EVIDENCE_REPORT_ENV) ?? return
-    evidence_write_record_from_codes(path, kind, state, name, message, file, line, context).drop("evidence is best effort; the test outcome stands without it")
-}
-
 // `append_frame`: one frame appended under the report's exclusive lock, writing
 // the header into an empty report and refusing a report whose header is another
 // schema. Rust serializes the appends of one process with a mutex; the

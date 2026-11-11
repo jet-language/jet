@@ -99,9 +99,7 @@ Parser: struct {
     items: Int
     live: Int
     options: CBOROptions
-}
 
-impl Parser {
     charge: fn(&self, size: Int, offset: Int, path: String, what: String) CBORError! {
         if size > self.options.max_bytes - self.live -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         self.live += size
@@ -223,7 +221,7 @@ impl Parser {
                     }
                     return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))
                 }
-                else -> {}
+                .Null | .Bool(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
             }
         }
         Err(failure(.Unsupported, start, path, "invalid CBOR date-time tag payload"))
@@ -293,7 +291,7 @@ impl Parser {
             key := ""
             if key_value == {
                 .Text(text) -> key = text
-                else -> return Err(failure(.Unsupported, key_start, path, "CBOR map key must be text"))
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(failure(.Unsupported, key_start, path, "CBOR map key must be text"))
             }
             key_end: self.cursor
             if self.options.require_canonical && prior_start >= 0 && !bytewise_before(input, prior_start, prior_end, key_start, key_end) {

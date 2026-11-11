@@ -87,7 +87,7 @@ sema_comptime_body_values_freeze: fn(values: &&[SemaComptimeBodyValue], work: Sh
     // caller's context both count work in the same cell.
     if length == 0 -> return SemaComptimeBodyValues{work: work.copy()}
     SemaComptimeBodyValues{
-        facts: Val(shared SemaComptimeBodyFacts{values: values.move(), modules: modules.move(), first_rows: first_rows.move(), second_rows: second_rows.move(), indexed_rows: indexed_rows}),
+        facts: Val(Shared{SemaComptimeBodyFacts{values: values.move(), modules: modules.move(), first_rows: first_rows.move(), second_rows: second_rows.move(), indexed_rows: indexed_rows}}),
         length: length,
         // copy: a handle copy (a Shared work cell, refcount bump): the frozen publication and the
         // caller's context both count work in the same cell.
@@ -118,7 +118,7 @@ sema_comptime_body_values_append_items: fn(publication: &SemaComptimeBodyValues,
     new_generation: if publication.facts == .Val(_) -> false else -> true
     if new_generation {
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
-        publication.facts = Val(shared SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0})
+        publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0}})
     }
     // copy: a handle copy (Shared facts, refcount bump): the append runs through `facts` while the
     // write-borrowed publication still owns its handle.
@@ -157,7 +157,7 @@ sema_comptime_body_values_prefix: fn(values: SemaComptimeBodyValues, length: Int
 // distinct from immutable facts and is not a global/cache/semantic mechanism.
 sema_comptime_body_work_new: fn(trace_sink: CompilerTraceSink?) -> Shared<SemaComptimeBodyWork>? {
     if trace_sink == .Val(sink) {
-        if sink.functions() -> return Val(shared SemaComptimeBodyWork{})
+        if sink.functions() -> return Val(Shared{SemaComptimeBodyWork{}})
     }
     None
 }

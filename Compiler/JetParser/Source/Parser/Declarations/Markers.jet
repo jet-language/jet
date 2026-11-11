@@ -13,8 +13,10 @@ use {
         ItemTemplateLoop,
         Marker,
         MarkerCallArg,
+        MARKER_STATE,
         MarkerDecl,
         MarkerDeclParam,
+        STATE_ARROW_LABEL,
         Span,
         StructDef,
         TextEdit,
@@ -49,6 +51,7 @@ use {
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
         TOKEN_RPAREN,
+        TOKEN_UNIFIED_ARROW,
         TOKEN_SEMI,
         Token,
     ]
@@ -66,13 +69,19 @@ ParsedMarkerGroup: struct {
 
 parser_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
-    if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
+    if marker.args[index] == {
+        .Expr(value) -> Val(value)
+        .EffectRow(_, _) -> None
+    }
 }
 
 parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
     if index < 0 || index >= marker.arg_labels.len() -> return ""
     label: marker.arg_labels[index]
-    if label == { .Val(value) -> value.name else -> "" }
+    if label == {
+        .Val(value) -> value.name
+        .None -> ""
+    }
 }
 
 parser_fact_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
@@ -214,60 +223,32 @@ parser_finish_marker_struct: fn(state: &JetParserState, value: &StructDef) {
 parser_parse_fact_decl: fn(state: &JetParserState) -> Item {
     start: parser_bump(state)
     name: parser_expect_name(state, "the fact name in `fact Name(params…)`")
-    params: parser_marker_decl_params(state)
+    params: parser_fact_decl_params(state)
     end := parser_lookahead(state, -1).span
     if parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
     Item.FactDecl{value: FactDecl{name: parser_value(state, name), name_span: name.span, params: params, span: parser_cover(start.span, end)}}
 }
 
-// Rule arguments read `name: Type{default}`;
-// a fixed fact about the rule reads `$name: value`. A parameter may be named
-// by any written word, including a keyword.
-parser_marker_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
-    parser_expect(state, TOKEN_LPAREN, "`(` to open the marker's parameter list")
+// A fact's metadata reads `name: value`, the same named form as marker
+// settings. A name may be any written word, including a keyword.
+parser_fact_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
+    parser_expect(state, TOKEN_LPAREN, "`(` to open the fact's parameter list")
     params := [MarkerDeclParam]{}
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop !parser_aborting(state) {
             token: parser_current(state)
-            marked: token.kind == TOKEN_IDENT && parser_value(state, token).starts_with("$")
             keyword_name: token.kind != TOKEN_IDENT && parser_is_keyword_token(state, token)
-            name_token: if {
-                keyword_name -> parser_bump(state)
-                marked -> parser_expect_name(state, "a marker fact name")
-                else -> parser_expect_name(state, "a marker parameter name")
-            }
+            name_token: if keyword_name -> parser_bump(state) else -> parser_expect_name(state, "a fact parameter name")
             name: if token.kind == TOKEN_IDENT -> parser_value(state, name_token) else -> parser_text(state, name_token)
-            parser_expect(state, TOKEN_COLON, "`:` between the parameter name and its type or value")
-            if {
-                marked -> {
-                    value: parser_parse_expression_no_struct_lit(state, 1)
-                    params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
-                }
-                else -> {
-                    variadic := false
-                    if parser_current_kind(state) == TOKEN_DOT_DOT_DOT {
-                        parser_bump(state)
-                        variadic = true
-                    }
-                    parsed: parser_parse_type(state, 0)
-                    default := Expr?{None}
-                    if {
-                        parser_current_kind(state) == TOKEN_LBRACE -> {
-                            parser_bump(state)
-                            default = Val(parser_parse_expression_no_struct_lit(state, 1).expr)
-                            parser_expect(state, TOKEN_RBRACE, "`}}` after a marker parameter default")
-                        }
-                        else -> {}
-                    }
-                    params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: Val(parsed.ty), value: default.move(), variadic: variadic})
-                }
-            }
+            parser_expect(state, TOKEN_COLON, "`:` between the parameter name and its value")
+            value: parser_parse_expression_no_struct_lit(state, 1)
+            params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
             if parser_current_kind(state) == TOKEN_RPAREN -> break
-            parser_expect(state, TOKEN_COMMA, "`,` between marker parameters")
+            parser_expect(state, TOKEN_COMMA, "`,` between fact parameters")
             if parser_current_kind(state) == TOKEN_RPAREN -> break
         }
     }
-    parser_expect(state, TOKEN_RPAREN, "`)` to close the marker's parameter list")
+    parser_expect(state, TOKEN_RPAREN, "`)` to close the fact's parameter list")
     params
 }
 
@@ -332,7 +313,7 @@ parser_parse_template_loop: fn(state: &JetParserState) -> ItemTemplateLoop {
     parser_expect(state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
     variable: parser_expect_name(state, "for a declaration loop binding")
     parser_expect(state, TOKEN_KW_IN, "between a declaration loop binding and source")
-    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
+    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.reflect().fields {` opens
     // the loop body instead of a struct literal.
     source: parser_parse_expression_no_struct_lit(state, 0)
     body: parser_marker_body(state)
@@ -367,7 +348,8 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
         args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
         if parser_current_kind(state) == TOKEN_LPAREN {
-            args = parser_parse_marker_args(state)
+            arrow: parser_value(state, name) == MARKER_STATE
+            args = parser_parse_marker_args(state, arrow)
             if state.position > 0 -> end = parser_lookahead(state, -1).span
         }
         markers.push(Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(start, end), ct: None})
@@ -401,8 +383,10 @@ parser_check_signed_marker: fn(state: &JetParserState, bang_start: Int, name: To
 
 // Rust `marker_call_arg`: a marker argument is an ordinary (optionally
 // labeled) call argument or an effect row `-[Effects]>`, which keeps its own
-// carrier until sema checks the rule's effect slot.
-parser_parse_marker_args: fn(state: &JetParserState) -> ParsedMarkerArgs {
+// carrier until sema checks the rule's effect slot. With `arrow` (`#State`),
+// `A -> B` is two arguments: B carries STATE_ARROW_LABEL,
+// which no written label can spell.
+parser_parse_marker_args: fn(state: &JetParserState, arrow: Bool) -> ParsedMarkerArgs {
     parser_expect(state, TOKEN_LPAREN, "`(` before marker arguments")
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
@@ -426,9 +410,21 @@ parser_parse_marker_args: fn(state: &JetParserState) -> ParsedMarkerArgs {
                 close: parser_expect(state, TOKEN_GT, "`>` after the effect row")
                 args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
             } else {
-                // A marker value is read, never written or taken.
-                argument: parser_parse_expression(state, 1, 2)
+                // A marker value is read, never written or taken. A `#State`
+                // name is never a struct literal or a bare `name -> body` lambda.
+                argument: if arrow -> parser_parse_expression_no_struct_lit(state, 2) else -> parser_parse_expression(state, 1, 2)
                 args.push(MarkerCallArg.Expr{value: argument.expr})
+                // A chain `A -> B -> C` keeps every step; the `#State`
+                // applicator refuses any shape but one step (E0930).
+                if arrow && label == None {
+                    loop parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
+                        arrow_token: parser_bump(state)
+                        labels.push(label)
+                        to: parser_parse_expression_no_struct_lit(state, 2)
+                        args.push(MarkerCallArg.Expr{value: to.expr})
+                        label = Val(CallLabel{name: STATE_ARROW_LABEL, span: arrow_token.span})
+                    }
+                }
             }
             labels.push(label)
             if parser_current_kind(state) == TOKEN_RPAREN -> break

@@ -2,6 +2,22 @@
 Vec2: struct {
     x: Int
     y: Int
+
+    impl Add {
+        add: fn(self, rhs: Vec2) -> Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
+    }
+
+    impl Equatable {
+        equal: fn(self, rhs: Vec2) -> Bool { self.x == rhs.x && self.y == rhs.y }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Vec2) -> Ordering {
+            if self.x < rhs.x -> return Ordering.Less
+            if self.x > rhs.x -> return Ordering.Greater
+            return Ordering.Equal
+        }
+    }
 }
 
 Holder: struct {
@@ -10,35 +26,19 @@ Holder: struct {
 
 Probe: struct {
     value: Int
-}
 
-impl Vec2.Add {
-    add: fn(self, rhs: Vec2) -> Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
-}
-
-impl Vec2.Equatable {
-    equal: fn(self, rhs: Vec2) -> Bool { self.x == rhs.x && self.y == rhs.y }
-}
-
-impl Vec2.Comparable {
-    compare: fn(self, rhs: Vec2) -> Ordering {
-        if self.x < rhs.x -> return Ordering.Less
-        if self.x > rhs.x -> return Ordering.Greater
-        return Ordering.Equal
-    }
-}
-
-impl Probe.Comparable {
-    compare: fn(self, rhs: Probe) -> Ordering {
-        if rhs.value == 99 {
-            zero: rhs.value - 99
-            // `/%` is the whole-number division, so this still traps on a zero
-            // divisor. `/` would answer a Float infinity.
-            _boom: 1 /% zero
+    impl Comparable {
+        compare: fn(self, rhs: Probe) -> Ordering {
+            if rhs.value == 99 {
+                zero: rhs.value - 99
+                // `/%` is the whole-number division, so this still traps on a zero
+                // divisor. `/` would answer a Float infinity.
+                _boom: 1 /% zero
+            }
+            if self.value < rhs.value -> return Ordering.Less
+            if self.value > rhs.value -> return Ordering.Greater
+            return Ordering.Equal
         }
-        if self.value < rhs.value -> return Ordering.Less
-        if self.value > rhs.value -> return Ordering.Greater
-        return Ordering.Equal
     }
 }
 

@@ -1,0 +1,23 @@
+// #4284 c15: arithmetic is a `#Policy` setting on a function, a method and a block.
+#Policy(arithmetic: .Wrapping)
+wrapped: fn(left: U8, right: U8) -> U8 {
+    return left + right
+}
+
+Gauge: struct {
+    value: U8
+
+    #Policy(arithmetic: .Saturating)
+    raise: fn(self, by: U8) -> U8 {
+        return self.value + by
+    }
+}
+run: fn() {
+    left: U8{250}
+    right: U8{10}
+    print(wrapped(left, right))
+    print(Gauge{value: left}.raise(right))
+    #Policy(arithmetic: .Wrapping) {
+        print(left * U8{2})
+    }
+}

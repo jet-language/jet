@@ -26,7 +26,12 @@
 //     Br depth reaches an open construct, every construct is closed;
 //   - return: a Return's value against the function's result (a Return
 //     with no value is a stop edge's or the fall-through end's, and the
-//     caller reads no result from it).
+//     caller reads no result from it);
+//   - fixed: the slots the builder marked fixed (IRFunction.slot_fixed) and
+//     every value a data instruction computes from one are fixed, and no
+//     fixed value decides a branch, is a divisor or dividend, a shift
+//     amount, an address or an indirect call target, or meets a word Add,
+//     Sub or Mul that traps on overflow (ir_lint_fixed).
 // Per module it checks each type row's kind and layout against its checked
 // Type. ir_lint_core_routes checks each Core call registry row with a
 // runtime route against the route's arity (the lint tests);
@@ -99,6 +104,8 @@ IR_LINT_ROW_OBJECT: 2
 IR_LINT_ROW_BAD: 3
 
 // The rules. Every row names one.
+// A fixed value where its timing would show (ir_lint_fixed).
+IR_LINT_FIXED: "timing.fixed"
 IR_LINT_ARENA: "arena"
 IR_LINT_SLOT: "operand.slot"
 IR_LINT_REF: "operand.ref"
@@ -379,13 +386,13 @@ ir_lint_module: fn(m: &IRModule, pass: String, threads: CompilerThreads) -> [IRL
             rows.push(row)
         }
         rows.reverse()
-        slots.push(shared IRLintPart{functions: rows.move(), found: [IRLintFinding]{}})
+        slots.push(Shared{IRLintPart{functions: rows.move(), found: [IRLintFinding]{}}})
         part -= 1
     }
     slots.reverse()
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
-    reads: shared IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}
+    reads: Shared{IRLintReads{views: [IRModule]{view.move()}, context: context.move(), pass: pass.copy()}}
     _: ir_lint_threads(slots, reads, 0) ?? panic("the IR Lint threads failed")
     loop slot in slots {
         held := slot.guard_edit()
@@ -592,7 +599,7 @@ ir_lint_slot_mode: fn(role: IRLintRole) -> Int Never! {
         .Unused | .Immediate | .Count -> 0
         .Slot -> 1
         .SlotOrNone -> 2
-        else -> -1
+        .Name | .Data | .Function | .Args | .Index | .IndexOrNone | .Depth -> -1
     }
 }
 
@@ -638,7 +645,7 @@ ir_lint_type_kinds: fn(ty: Type) -> Int Never! {
         .Result(_, _) | .Union(_) | .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) -> IR_LINT_POINTER
         .List(_) | .FixedList(_, _) -> IR_LINT_AGGREGATE
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_WORD + IR_LINT_POINTER + IR_LINT_AGGREGATE
-        else -> IR_LINT_ANY
+        .Quantity(_, _) | .Measure(_) -> IR_LINT_ANY
     }
 }
 
@@ -675,7 +682,7 @@ ir_lint_untag: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> ir_lint_untag(inner)
         .InlineRange(base, _, _) -> ir_lint_untag(base)
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -691,6 +698,7 @@ ir_lint_function: fn(m: IRModule, context: IRLintContext, f: IRFunction, pass: S
             if f.op.len() > 0 -> out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "an asm leaf with {f.op.len()} instructions"))
         } else {
             ir_lint_instructions(m, context, f, pass, out)
+            if out.len() == before -> ir_lint_fixed(m, f, pass, out)
         }
     }
     if out.len() - before > IR_LINT_FUNCTION_LIMIT {
@@ -705,8 +713,8 @@ ir_lint_function: fn(m: IRModule, context: IRLintContext, f: IRFunction, pass: S
 ir_lint_arena: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) -> Bool Never! {
     slots: f.slot_type.len()
     code: f.op.len()
-    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots {
-        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()} and {f.slot_line.len()} rows"))
+    if f.slot_kind.len() != slots || f.slot_name.len() != slots || f.slot_line.len() != slots || f.slot_fixed.len() != slots {
+        out.push(ir_lint_finding(f, pass, IR_LINT_ARENA, "slot columns of {slots}, {f.slot_kind.len()}, {f.slot_name.len()}, {f.slot_line.len()} and {f.slot_fixed.len()} rows"))
         return false
     }
     if f.dst.len() != code || f.a.len() != code || f.b.len() != code || f.c.len() != code || f.code_line.len() != code {
@@ -741,6 +749,32 @@ ir_lint_at: fn(f: IRFunction, at: Int, pass: String, rule: String, message: Stri
 
 ir_lint_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
     m.types[f.slot_type[slot]].kind
+}
+
+// The fixed rule. The fixed slots are Timing.jet's (ir_timing_fixed): the
+// marked ones (IRFunction.slot_fixed) and each one a data instruction writes
+// from one. No fixed slot may be an If's or BrIf's test, a Div's, Rem's,
+// FloorDiv's or Mod's operand, a Shl's or Shr's amount, the address of a
+// Load, Store, StreamStore, Offset or CopyBytes, a CallIndirect's callee, or
+// the operand of a word Add, Sub or Mul that does not wrap.
+ir_lint_fixed: fn(m: IRModule, f: IRFunction, pass: String, out: &[IRLintFinding]) Never! {
+    if !ir_timing_marked(f) -> return
+    fixed: ir_timing_fixed(f)
+    loop at in 0..<f.op.len() {
+        a: ir_timing_at(fixed, f.a[at])
+        b: ir_timing_at(fixed, f.b[at])
+        what: if f.op[at] == {
+            .If | .BrIf -> if a -> "decides a branch" else -> ""
+            .Div | .Rem | .FloorDiv | .Mod -> if a || b -> "divides" else -> ""
+            .Shl | .Shr -> if b -> "is a shift amount" else -> ""
+            .Add | .Sub | .Mul -> if (a || b) && ir_lint_kind(m, f, f.dst[at]) == .Word && f.c[at] != IR_OVERFLOW_WRAP -> "meets arithmetic that traps" else -> ""
+            .Load | .Store | .StreamStore | .Offset -> if a -> "is an address" else -> ""
+            .CopyBytes -> if a || b -> "is an address" else -> ""
+            .CallIndirect -> if a -> "is a call target" else -> ""
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Return | .Unreachable | .Sqrt | .IntBig -> ""
+        }
+        if what != "" -> out.push(ir_lint_at(f, at, pass, IR_LINT_FIXED, "a fixed value {what}"))
+    }
 }
 
 // Every instruction's fields against the row of its opcode (roles and
@@ -854,7 +888,7 @@ ir_lint_role_rule: fn(role: IRLintRole) -> String Never! {
         .Slot | .SlotOrNone | .Args -> IR_LINT_SLOT
         .Depth -> IR_LINT_DEPTH
         .Index | .IndexOrNone -> IR_LINT_CONTROL
-        else -> IR_LINT_REF
+        .Unused | .Name | .Data | .Function | .Count | .Immediate -> IR_LINT_REF
     }
 }
 
@@ -867,7 +901,7 @@ ir_lint_role_problem: fn(context: IRLintContext, f: IRFunction, at: Int, role: I
         .Args -> "args window {value}+{f.c[at]} of {f.args.len()} naming slots of {f.slot_type.len()}"
         .Index | .IndexOrNone -> "instruction index {value}"
         .Depth -> "depth {value}"
-        else -> "{value}"
+        .Unused | .Count | .Immediate -> "{value}"
     }
 }
 
@@ -889,7 +923,7 @@ ir_lint_class: fn(kind: IRTypeKind) -> Int Never! {
         .Float -> 1
         .Float32 -> 2
         .Unit -> 3
-        else -> 0
+        .Bool | .Int | .Word | .Char | .String | .Pointer | .Aggregate -> 0
     }
 }
 
@@ -977,10 +1011,12 @@ ir_lint_typing: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, 
                 out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a}, s{b} of {ir_lint_row_text(m, td)}, {ir_lint_row_text(m, ta)} and {ir_lint_row_text(m, tb)}"))
             }
             // Only an exact Int Add, Sub or Mul has proven inline operands
-            // (both, or the left or right one alone).
+            // (both, or the left or right one alone), and only an exact Int
+            // Div or Rem a proven nonnegative dividend.
             proven: c == IR_OVERFLOW_OPERANDS || c == IR_OVERFLOW_LEFT || c == IR_OVERFLOW_RIGHT
             operands: proven && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Add || f.op[at] == .Sub || f.op[at] == .Mul)
-            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP && !operands -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
+            nonneg: c == IR_OVERFLOW_NONNEG && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Div || f.op[at] == .Rem)
+            if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP && !operands && !nonneg -> out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
         }
         .Shift -> {
             ta: f.slot_type[a]
@@ -1133,7 +1169,7 @@ ir_lint_signature_kinds: fn(ty: Type) -> Int Never! {
     if ir_lint_untag(ty) == {
         .Named(name) -> if name == "Unit" || name == "()" || name == "Never" -> IR_LINT_UNIT else -> IR_LINT_ANY
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_ANY
-        else -> ir_lint_type_kinds(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ir_lint_type_kinds(ty)
     }
 }
 
@@ -1177,7 +1213,7 @@ ir_lint_width: fn(ty: IRType) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> ty.size
-        else -> 8
+        .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 
@@ -1210,7 +1246,7 @@ ir_lint_param_words: fn(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == {
         .Unit -> 0
         .List(_) -> 2
-        else -> 1
+        .Word | .Flag | .Float | .Text | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> 1
     }
 }
 
@@ -1225,7 +1261,7 @@ ir_lint_out_words: fn(carrier: IRRouteCarrier) -> Int Never! {
             loop item in items -> words += ir_lint_out_words(item)
             words
         }
-        else -> 1
+        .Word | .Flag | .Float | .Text | .Unit | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Tag(_, _) -> 1
     }
 }
 
@@ -1258,7 +1294,7 @@ ir_lint_carrier_kinds: fn(carrier: IRRouteCarrier) -> Int Never! {
         .Float -> IR_LINT_FLOAT
         .Text -> IR_LINT_STRING
         .Tag(_, _) -> IR_LINT_WORD
-        else -> 0
+        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Option(_) | .Tuple(_) -> 0
     }
 }
 

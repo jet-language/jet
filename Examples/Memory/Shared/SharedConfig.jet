@@ -5,7 +5,7 @@ package: {
 }
 
 // `Shared<T>` is a
-// lock-guarded shared value — "a copyable door". `shared x` builds the cell
+// lock-guarded shared value — "a copyable door". `Shared{x}` builds the cell
 // (`T` inferred from `x`). A field read is one locked read and a field write is
 // one locked write, so each statement is one atomic step; several statements
 // commit together under `#Transact`. Cloning `Shared<T>` is always a cheap
@@ -22,7 +22,7 @@ handle: fn(id: Int, config: Shared<AppConfig>) -> String {
 }
 
 run: fn() {
-    config: shared AppConfig{name: "jet-server", hits: 0}
+    config: Shared{AppConfig{name: "jet-server", hits: 0}}
     // Every spawned task captures `config` with no `^` — a `Shared<T>` is
     // meant to be handed to as many concurrent tasks as needed.
     t1: task handle(1, config)

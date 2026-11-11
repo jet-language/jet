@@ -178,16 +178,16 @@ PublicationRegistryNet: trait {
     fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never!
 }
 
-PublicationRegistryNetwork: struct {}
+PublicationRegistryNetwork: struct {
+    impl PublicationRegistryNet {
+        resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
+            answers: publication_dns.jet_http_build_resolve(host, port) ?? return Err(PublicationRegistryAuthorityError{detail: "{err}"})
+            Ok(answers)
+        }
 
-impl PublicationRegistryNetwork.PublicationRegistryNet {
-    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
-        answers: publication_dns.jet_http_build_resolve(host, port) ?? return Err(PublicationRegistryAuthorityError{detail: "{err}"})
-        Ok(answers)
-    }
-
-    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
-        transport.remote(url)
+        fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
+            transport.remote(url)
+        }
     }
 }
 

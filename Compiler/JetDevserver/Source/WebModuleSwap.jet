@@ -5,34 +5,29 @@ use jet_foundation.[HotSwapDecision, StateRetentionFact]
 WebModuleSwapIdentity: struct {
     module_ref: String
     page: String
-}
-impl WebModuleSwapIdentity {
+
     new: fn(module_ref: String, page: String) -> WebModuleSwapIdentity { WebModuleSwapIdentity{module_ref, page} }
     is_valid: fn(self) -> Bool { self.module_ref.len() > 0 && self.page.len() > 0 }
     matches: fn(self, other: WebModuleSwapIdentity) -> Bool { self.module_ref == other.module_ref && self.page == other.page }
 }
-
 WebPageFact: struct {
     identity: String
     artifact: String
-}
-impl WebPageFact {
+
     new: fn(identity: String, artifact: String) -> WebPageFact { WebPageFact{identity, artifact} }
 }
-
 WebModuleFact: struct {
     identity: String
     interface_fingerprint: String
     body_fingerprint: String
-}
-impl WebModuleFact {
+
     new: fn(identity: String, interface_fingerprint: String, body_fingerprint: String) -> WebModuleFact {
         WebModuleFact{identity, interface_fingerprint, body_fingerprint}
     }
 }
+WebStateValue: enum {
+    Text(String) Integer(I64) Unsigned(U64) Boolean(Bool) Bytes([U8])
 
-WebStateValue: enum { Text(String) Integer(I64) Unsigned(U64) Boolean(Bool) Bytes([U8]) }
-impl WebStateValue {
     kind: fn(self) -> String {
         if self == {
             .Text(_) -> "text"
@@ -43,7 +38,6 @@ impl WebStateValue {
         }
     }
 }
-
 // WebStateKind's row order in Vocabulary.tsv is the canonical state order.
 impl WebStateKind {
     as_str: fn(self) -> String {
@@ -74,48 +68,42 @@ WebSignalFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebSignalFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebSignalFact { WebSignalFact{key, type_fingerprint, value} }
 }
 WebStoreFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebStoreFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebStoreFact { WebStoreFact{key, type_fingerprint, value} }
 }
 WebQueryCacheFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebQueryCacheFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebQueryCacheFact { WebQueryCacheFact{key, type_fingerprint, value} }
 }
 WebFormDraftFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebFormDraftFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFormDraftFact { WebFormDraftFact{key, type_fingerprint, value} }
 }
 WebScrollFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebScrollFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebScrollFact { WebScrollFact{key, type_fingerprint, value} }
 }
 WebFocusFact: struct {
     key: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebFocusFact {
+
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFocusFact { WebFocusFact{key, type_fingerprint, value} }
 }
 WebIslandFact: struct {
@@ -123,16 +111,13 @@ WebIslandFact: struct {
     identity: String
     type_fingerprint: String
     value: WebStateValue
-}
-impl WebIslandFact {
+
     new: fn(key: String, identity: String, type_fingerprint: String, value: WebStateValue) -> WebIslandFact { WebIslandFact{key, identity, type_fingerprint, value} }
 }
-
 WebModuleSwapStateFact: enum {
     Signal(WebSignalFact) Store(WebStoreFact) QueryCache(WebQueryCacheFact) FormDraft(WebFormDraftFact)
     Scroll(WebScrollFact) Focus(WebFocusFact) Island(WebIslandFact)
-}
-impl WebModuleSwapStateFact {
+
     kind: fn(self) -> WebStateKind {
         if self == {
             .Signal(_) -> WebStateKind.Signal
@@ -197,7 +182,6 @@ impl WebModuleSwapStateFact {
     }
     same_slot: fn(self, other: WebModuleSwapStateFact) -> Bool { self.kind() == other.kind() && self.key() == other.key() }
 }
-
 WebModuleSwapSnapshot: struct {
     identity: WebModuleSwapIdentity
     source_revision: String
@@ -205,8 +189,7 @@ WebModuleSwapSnapshot: struct {
     page: WebPageFact
     modules: [WebModuleFact]
     state: [WebModuleSwapStateFact]
-}
-impl WebModuleSwapSnapshot {
+
     new: fn(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> WebModuleSwapSnapshot WebModuleSwapError! {
         snapshot := WebModuleSwapSnapshot{identity, source_revision, build_revision, page, modules, state}
         snapshot.normalize()
@@ -247,7 +230,6 @@ impl WebModuleSwapSnapshot {
         None
     }
 }
-
 impl WebModuleSwapReasonCode {
     as_str: fn(self) -> String {
         if self == {
@@ -280,8 +262,9 @@ impl WebModuleSwapReasonCode {
 }
 impl WebModuleSwapReasonCode.Display { display: fn(&&self) -> String { self.as_str() } }
 
-WebModuleSwapCompatibility: enum { Compatible Incompatible(reason_codes: [WebModuleSwapReasonCode]) }
-impl WebModuleSwapCompatibility {
+WebModuleSwapCompatibility: enum {
+    Compatible Incompatible(reason_codes: [WebModuleSwapReasonCode])
+
     is_compatible: fn(self) -> Bool {
         if self == {
             .Compatible -> true
@@ -295,7 +278,6 @@ impl WebModuleSwapCompatibility {
         }
     }
 }
-
 WebModuleSwapResetFact: struct {
     state: WebModuleSwapStateFact
     prior_identity: String?
@@ -312,8 +294,7 @@ WebModuleSwapPlan: struct {
     preserved: [WebModuleSwapStateFact]
     reset: [WebModuleSwapResetFact]
     reason_codes: [WebModuleSwapReasonCode]
-}
-impl WebModuleSwapPlan {
+
     from_hot_swap_decision: fn(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, decision: HotSwapDecision) -> WebModuleSwapPlan WebModuleSwapError! {
         checked_base := base
         checked_candidate := candidate
@@ -401,7 +382,6 @@ impl WebModuleSwapPlan {
         snapshot
     }
 }
-
 impl WebModuleSwapOperation {
     as_str: fn(self) -> String {
         if self == {
@@ -452,8 +432,7 @@ WebModuleSwapReceipt: struct {
     reset: [WebModuleSwapResetFact]
     committed_page: WebPageFact
     active_page: WebPageFact
-}
-impl WebModuleSwapReceipt {
+
     changed_module_set: fn(self) -> [String] { self.changed_modules }
     preserved_facts: fn(self) -> [WebModuleSwapStateFact] { self.preserved }
     audit: fn(self) -> String {
@@ -470,7 +449,6 @@ impl WebModuleSwapReceipt {
         "operation={self.operation.as_str()} status={self.status.as_str()} phase={self.phase.as_str()} identity={self.identity.module_ref}/{self.identity.page} candidate={self.candidate_identity.module_ref}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
     }
 }
-
 #Error
 WebModuleSwapError: enum {
     InvalidSnapshot(detail: String)
@@ -483,33 +461,32 @@ WebModuleSwapError: enum {
     Incompatible(reason_codes: [WebModuleSwapReasonCode])
     InvalidTransition(operation: WebModuleSwapOperation, phase: WebModuleSwapPhase)
     NoPendingPlan NoAppliedPlan NoCommittedPage
-}
-impl WebModuleSwapError.Display {
-    display: fn(&&self) -> String {
-        if self == {
-            .InvalidSnapshot(detail) -> "invalid web swap snapshot: {detail}"
-            .IdentityMismatch(expected, found) -> "web swap identity mismatch: expected {expected.module_ref}/{expected.page} but found {found.module_ref}/{found.page}"
-            .DecisionModuleMismatch(expected, found) -> "web swap decision module mismatch: expected `{expected}` but found `{found}`"
-            .MissingRetentionFact(kind, key) -> "web swap has no canonical retention fact for {kind.as_str()} `{key}`"
-            .DuplicateRetentionKey(key) -> "web swap retention key `{key}` is not unique"
-            .UnusedRetentionFact(key) -> "web swap retention fact `{key}` has no typed state"
-            .StalePlan(expected_source, found_source, expected_build, found_build) -> "stale web swap plan: expected source/build {expected_source}/{expected_build} but state is {found_source}/{found_build}"
-            .Incompatible(codes) -> "web module swap is incompatible: {web_swap_reason_list(codes)}"
-            .InvalidTransition(operation, phase) -> "web swap cannot {operation.as_str()} while phase is {phase.as_str()}"
-            .NoPendingPlan -> "web swap has no pending plan"
-            .NoAppliedPlan -> "web swap has no applied plan"
-            .NoCommittedPage -> "web swap has no committed page"
+
+    impl Display {
+        display: fn(&&self) -> String {
+            if self == {
+                .InvalidSnapshot(detail) -> "invalid web swap snapshot: {detail}"
+                .IdentityMismatch(expected, found) -> "web swap identity mismatch: expected {expected.module_ref}/{expected.page} but found {found.module_ref}/{found.page}"
+                .DecisionModuleMismatch(expected, found) -> "web swap decision module mismatch: expected `{expected}` but found `{found}`"
+                .MissingRetentionFact(kind, key) -> "web swap has no canonical retention fact for {kind.as_str()} `{key}`"
+                .DuplicateRetentionKey(key) -> "web swap retention key `{key}` is not unique"
+                .UnusedRetentionFact(key) -> "web swap retention fact `{key}` has no typed state"
+                .StalePlan(expected_source, found_source, expected_build, found_build) -> "stale web swap plan: expected source/build {expected_source}/{expected_build} but state is {found_source}/{found_build}"
+                .Incompatible(codes) -> "web module swap is incompatible: {web_swap_reason_list(codes)}"
+                .InvalidTransition(operation, phase) -> "web swap cannot {operation.as_str()} while phase is {phase.as_str()}"
+                .NoPendingPlan -> "web swap has no pending plan"
+                .NoAppliedPlan -> "web swap has no applied plan"
+                .NoCommittedPage -> "web swap has no committed page"
+            }
         }
     }
 }
-
 WebModuleSwapState: struct {
     committed_snapshot: WebModuleSwapSnapshot
     pending_plan: WebModuleSwapPlan?
     active_snapshot: WebModuleSwapSnapshot
     current_phase: WebModuleSwapPhase
-}
-impl WebModuleSwapState {
+
     new: fn(snapshot: WebModuleSwapSnapshot) -> WebModuleSwapState WebModuleSwapError! {
         checked := snapshot
         checked.normalize()
@@ -598,7 +575,6 @@ impl WebModuleSwapState {
             committed_page: self.committed_snapshot.page, active_page: self.active_snapshot.page}
     }
 }
-
 web_swap_sort_state: fn(facts: &[WebModuleSwapStateFact]) {
     facts.sort_by((left, right) -> (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()))
 }

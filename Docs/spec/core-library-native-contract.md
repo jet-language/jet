@@ -542,9 +542,18 @@ Native tasks run to completion on fibers: each task gets a stack and TCB of
 its own, and the pool's carrier threads multiplex them. A cooperative wait
 parks the fiber, not the carrier, and a wake makes the fiber runnable on any
 carrier; the main thread and other non-pool threads wait on futexes as
-before. A fiber stack is one mapping of the thread stack size, committed only
+before. A fiber stack is one mapping of its task's stack size, committed only
 where touched, under a guard page; its header and TCB share the top page, so
 a task parked in a shallow wait holds about one page beside its task record.
+The thread stack size, which runtime threads and default fibers take, is the
+soft `RLIMIT_STACK` (the main thread's), at least 8 MiB and at most 8 GiB;
+nothing writes the rlimit, so child processes inherit the user's. A
+`task.group g(stack: bytes)` request larger than that gives the group's tasks,
+and the groups, tasks and parallel walks they open, fibers of that size
+(capped at 8 GiB), and the runtime pools idle fibers per stack size. The
+compiler asks for 192 MiB on the group its compile runs in, so its stages
+recurse as deep as before while the programs it builds and runs keep the
+8 MiB-or-more default (D-THREAD-STACK1=A).
 Each stack is two kernel mappings, so `vm.max_map_count` (65530 by default)
 bounds live fibers near 32000; a task that finds no stack runs on its carrier
 and its waits block that thread. Under a finite address-space limit
@@ -882,7 +891,8 @@ low-byte normalization, independent clones and exact-sized shell deallocation.
 `core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
 connection, scope, pool and lease carriers are Jet structs over the Jet
 SQLite engine (`Core/Db/Engine`), `RowPolicy` and `SQL` are source values, and
-typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
+a typed `SQL{…}` literal is `SQL`'s own `CheckedText` impl: each hole becomes
+one bound `DBValue` and `build` assembles the `?` template.
 
 `core.service` trees, endpoints, workflows, upgrade receipts, deliveries and
 delivery events are plain Core source: `Core/Service/Service.jet` declares

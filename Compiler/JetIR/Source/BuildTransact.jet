@@ -22,7 +22,9 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, Bod
 // an early exit restores the terminal mode it replaced. An `#Unsafe` scope
 // is a frame with only `sentry`, the save area of the sentry gate it
 // replaced, and a function taking raw addresses one with only
-// `sentry_frame`, its sentry stack frame (BuildSentry.jet): an early exit
+// `sentry_frame`, its sentry stack frame (BuildSentry.jet). A function with
+// an effect-scope descriptor (FnBody.effect_scope) is a frame with only
+// `effect_scope`, the effect-scope frame its entry replaced: an early exit
 // leaves them.
 IRTxFrame: struct {
     handle: Int
@@ -34,6 +36,7 @@ IRTxFrame: struct {
     sentry: Int{-1}
     sentry_frame: Int{-1}
     terminal: Bool{false}
+    effect_scope: Int{-1}
 }
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
@@ -379,7 +382,7 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
 
 // The runtime scopes an early exit out of `frame` leaves: the session
 // Shield, the replaced deadline, the replaced sentry gate, the sentry
-// stack frame and the replaced terminal mode.
+// stack frame, the replaced terminal mode and the replaced effect scope.
 ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.shield {
         _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
@@ -396,11 +399,28 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.terminal {
         _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
     }
+    if frame.effect_scope >= 0 {
+        _: ir_runtime(m, b, "jet_rt_effect_scope_leave", [Int]{frame.effect_scope}, -1)
+    }
+}
+
+// On entry to a function with an effect-scope descriptor: the runtime
+// frame its scoped row (or a Core scope publisher's marker) puts in force,
+// left by every return and stop edge (IRTxFrame.effect_scope). The
+// runtime checks each file and host reached against the frames in force
+// (JetRuntime Authority.jet "Effect-scope frames").
+ir_effect_scope_frame: fn(m: &IRModule, b: &IRBuilder, descriptor: String) Never! {
+    if descriptor == "" -> return
+    text: ir_static_text(m, b, descriptor)
+    word_row: ir_word_row(m)
+    previous: ir_runtime(m, b, "jet_rt_effect_scope_enter", [Int]{text[0], text[1]}, word_row)
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, effect_scope: previous})
 }
 
 // Whether a frame opened at or above `base` holds state a caught stop
 // cannot leave in place (a handle, an Stm, snapshots or a Shield); deadline,
-// sentry and terminal frames only need leaving (ir_tx_leave_sentries).
+// sentry, terminal and effect-scope frames only need leaving
+// (ir_tx_leave_sentries).
 ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     loop index in base..<frames.len() {
         frame: frames[index]
@@ -409,8 +429,8 @@ ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     false
 }
 
-// A caught stop leaving the deadline, sentry and terminal frames opened at
-// or above `base`, innermost first.
+// A caught stop leaving the deadline, sentry, terminal and effect-scope
+// frames opened at or above `base`, innermost first.
 ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
     frames: b.transactions
     index := frames.len() - 1

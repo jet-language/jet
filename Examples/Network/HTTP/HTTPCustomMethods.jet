@@ -1,0 +1,65 @@
+// GET and PURGE on one path, by a mux and by a mounted struct's marks.
+// A custom method keeps its exact case, and a route path may be a Path.
+package: {
+    name: "http_custom_methods"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    client: core.http.client
+    server: core.http.server
+    net: core.net
+    web: core.web
+}
+
+CacheRoutes: struct {
+    #Server.Get("/marked/:key")
+    read: fn(self, key: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "marked {key}"))
+    }
+
+    #Server.Custom("PURGE", "/marked/:key")
+    purge: fn(self, key: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "marked purged {key}"))
+    }
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    mux: server.mux()
+    mux.get("/cache/:key", (key: String) -> Ok(server.response(200, "cached {key}")))
+    mux.custom("PURGE", "/cache/:key", (key: String) -> Ok(server.response(200, "purged {key}")))
+    // `get` is a custom method of its own, not GET.
+    mux.custom("get", "/cache/:key", (key: String) -> Ok(server.response(200, "lowercase get {key}")))
+    // A method known only when the program runs is checked as it registers.
+    methods: ["BAN"]
+    mux.custom(methods[0], "/cache/:key", (key: String) -> Ok(server.response(200, "banned {key}")))
+    // A Path literal: without holes it is a static pattern; a hole is one segment.
+    mux.custom("PURGE", Path{"/files/:name"}, (name: String) -> Ok(server.response(200, "purged file {name}")))
+    region: "eu"
+    mux.custom("PURGE", Path{"/region/{region}/:key"}, (key: String) -> Ok(server.response(200, "purged {key} in {region}")))
+    mux.mount(CacheRoutes{})
+    print(web.openapi(mux))
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    sends: [(method: String, path: String)]{
+        (method: "GET", path: "/cache/a"),
+        (method: "PURGE", path: "/cache/a"),
+        (method: "get", path: "/cache/a"),
+        (method: "Purge", path: "/cache/a"),
+        (method: "BAN", path: "/cache/a"),
+        (method: "PURGE", path: "/files/b"),
+        (method: "PURGE", path: "/region/eu/c"),
+        (method: "GET", path: "/marked/d"),
+        (method: "PURGE", path: "/marked/d"),
+    }
+    serving: task {
+        loop _ in 0..<9 {
+            server.serve_once_listener(listener, mux)
+        }
+    }
+    loop send in sends {
+        reply: client.request(send.method, "http://{addr}{send.path}").send()
+        print("{send.method} {send.path}: {reply.status()} {reply.body().text(1024) ?? return} allow={reply.header("allow") ?? "-"}")
+    }
+    serving.join()
+}

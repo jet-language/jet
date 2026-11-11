@@ -51,9 +51,7 @@ URL: struct {
             self.fragment_text == rhs.fragment_text && self.raw == rhs.raw
         }
     }
-}
 
-impl URL {
     scheme: fn(self) -> String Never! { self.scheme_text.copy() }
     path: fn(self) -> String Never! { self.path_text.copy() }
     query: fn(self) -> String Never! { self.query_text.copy() }
@@ -162,6 +160,23 @@ impl URL {
         rows.push([String]{key, value})
         with_query(self, rows)
     }
+
+    // A checked `URL{"…{host}…"}` literal: `check` validates the skeleton before
+    // the program runs; holes stay opaque, so their slashes and dot segments never
+    // become URL grammar.
+    impl CheckedText {
+        Error: URLLiteralError
+        Hole: String
+
+        check: fn(text: String) URLLiteralError! -[]> {
+            if __url_literal_reason(text) == .Val(reason) -> return Err(URLLiteralError{reason: reason})
+            return Ok()
+        }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+        build: fn(parts: [String], holes: [String]) -[]> URL { literal(parts, holes) }
+    }
 }
 
 with_query: fn(url: URL, rows: [[String]]) -> URL Never! {
@@ -187,10 +202,13 @@ userinfo_text: fn(url: URL) -> String Never! {
 }
 
 
-// The compiler validates the skeleton before lowering. Holes remain opaque:
-// their slashes and dot segments never become URL grammar.
-literal: fn(literals: [String], holes: [String]) -> URL Never! {
-    if literals.len() != holes.len() + 1 -> panic("typed URL literal and hole counts do not match")
+// Why a checked URL literal was rejected.
+#Error
+URLLiteralError: struct { reason: String }
+
+// A marker that occurs in none of `literals`, standing for each hole while the
+// skeleton parses.
+__url_hole_marker: fn(literals: [String]) -> String Never! {
     nonce := 0
     marker := ""
     loop {
@@ -202,6 +220,71 @@ literal: fn(literals: [String], holes: [String]) -> URL Never! {
         if !collision -> break
         nonce += 1
     }
+    marker
+}
+
+// Why the checked skeleton `text` (a `{}` at each hole) is no URL, or None.
+// Scheme, port and data-URL MIME holes are found structurally; the rest
+// parses with the URL grammar `literal` uses.
+__url_literal_reason: fn(text: String) -> String? {
+    raw: text.bytes()
+    literals := [String]{}
+    start := 0
+    loop {
+        next_hole: find_text(text, "{{}}", start)
+        if next_hole < 0 -> break
+        literals.push(slice(raw, start, next_hole))
+        start = next_hole + 2
+    }
+    literals.push(slice(raw, start, raw.len()))
+    marker: __url_hole_marker(literals)
+    skeleton: unicode.trim(literals.join(marker))
+    bytes: skeleton.bytes()
+    colon: index_of(bytes, 58)
+    if colon >= 0 {
+        scheme: slice(bytes, 0, colon)
+        if find_text(scheme, marker, 0) >= 0 -> return Val("URL scheme cannot contain interpolation")
+        rest: slice(bytes, colon + 1, bytes.len())
+        if ascii_lower(scheme) == "data" {
+            data_body := rest
+            data_stops: [Int]{63, 35}
+            loop stop in data_stops {
+                end: index_of(data_body.bytes(), stop)
+                if end >= 0 -> data_body = slice(data_body.bytes(), 0, end)
+            }
+            comma: index_of(data_body.bytes(), 44)
+            if comma >= 0 && find_text(slice(data_body.bytes(), 0, comma), marker, 0) >= 0 -> return Val("data URL MIME metadata cannot contain interpolation")
+            if comma < 0 && find_text(data_body, marker, 0) >= 0 -> return Val("data URL payload needs a MIME separator")
+        }
+        if starts(rest, "//") {
+            authority := slice(rest.bytes(), 2, rest.bytes().len())
+            authority_stops: [Int]{47, 63, 35}
+            loop stop in authority_stops {
+                end: index_of(authority.bytes(), stop)
+                if end >= 0 -> authority = slice(authority.bytes(), 0, end)
+            }
+            at: last_index(authority.bytes(), 64)
+            host_port: if at >= 0 -> slice(authority.bytes(), at + 1, authority.bytes().len()) else -> authority
+            host_end: host_port.bytes().len()
+            bracket: index_of(host_port.bytes(), 93)
+            port := ""
+            if bracket >= 0 {
+                suffix: slice(host_port.bytes(), bracket + 1, host_end)
+                if starts(suffix, ":") -> port = suffix
+            } else {
+                port_colon: last_index(host_port.bytes(), 58)
+                if port_colon >= 0 -> port = slice(host_port.bytes(), port_colon + 1, host_end)
+            }
+            if find_text(port, marker, 0) >= 0 -> return Val("URL port cannot contain interpolation")
+        }
+    }
+    _: parse_recipe(skeleton, false) ?? return Val("the text is not a valid URL ({err})")
+    None
+}
+
+literal: fn(literals: [String], holes: [String]) -> URL Never! {
+    if literals.len() != holes.len() + 1 -> panic("typed URL literal and hole counts do not match")
+    marker: __url_hole_marker(literals)
     skeleton := literals[0]
     loop i in 0..<holes.len() -> skeleton = "{skeleton}{marker}{literals[i + 1]}"
     // Match the validator's Unicode-whitespace skeleton boundary, without

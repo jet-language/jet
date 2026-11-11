@@ -9,10 +9,10 @@ package: {
 Res: struct {
     id: Int
     name: String
-}
 
-impl Res.Close {
-    close: fn(&&self) { print("close shared {self.id} {self.name}") }
+    impl Close {
+        close: fn(&&self) { print("close shared {self.id} {self.name}") }
+    }
 }
 
 label: fn(state: Shared<Res>) -> String {
@@ -20,7 +20,7 @@ label: fn(state: Shared<Res>) -> String {
 }
 
 scoped: fn() {
-    state: shared Res{id: 7, name: "seven"}
+    state: Shared{Res{id: 7, name: "seven"}}
     print("made {state.id}")
     print("label {label(state)}")
     print("leaving scope")

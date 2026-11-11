@@ -38,7 +38,7 @@ pkg_data_json_kind: fn(value: Dyn) -> JSONBindKind Never! {
         .Text(_) -> JSONBindKind.Text
         .Array(_) -> JSONBindKind.Array
         .Object(_) -> JSONBindKind.Object
-        else -> if pkg_data_json_number_lexeme(value) == .Val(_) -> JSONBindKind.Number else -> JSONBindKind.Other
+        .Number(_) | .Bytes(_) | .DateTime(_) -> if pkg_data_json_number_lexeme(value) == .Val(_) -> JSONBindKind.Number else -> JSONBindKind.Other
     }
 }
 
@@ -75,7 +75,7 @@ pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: Stri
         .Bool -> BoundType.Scalar("Bool")
         .Text -> BoundType.Scalar("String")
         .Number -> pkg_data_json_number_type(nonnull)
-        else -> BoundType.Dynamic
+        .Null | .Other -> BoundType.Dynamic
     }
     Ok((nullable: nullable, ty: ty))
 }
@@ -99,7 +99,7 @@ pkg_data_json_number_type: fn(numbers: [Dyn]) -> BoundType Never! {
     loop value in numbers {
         if value == {
             .Float(_) -> return BoundType.Scalar("Float")
-            else -> {}
+            .Null | .Bool(_) | .Int(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {}
         }
         lexeme: pkg_data_json_number_lexeme(value) ?? next
         if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return BoundType.Scalar("Float")

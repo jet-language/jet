@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Writes Compiler/JetCli/hot-text.list: the compiler's own functions that a
-// cold hello `jet run`, `jet check` and `jet build` enter, in first-entry
-// order (run's first, then those check adds, then build's). `jet build` of
+// warm `jet script.jet` of a small script (its program kept, so the run only
+// plans, finds the kept image and launches it) and then a cold hello `jet
+// run`, `jet check` and `jet build` enter, in first-entry order (the warm
+// run's first, then those each next command adds). `jet build` of
 // Compiler/JetCli lays them out first (Host.jet jet_cli_hot_text, JetIR
-// ir_x64_hot_order), so a cold start faults in fewer pages of the compiler's
-// text. Names that no longer name a function are skipped by the build
-// (`--trace` counter ir.object.hot_missing); regenerate after large renames.
+// ir_x64_hot_order) and its data in the order they reach it (JetBackend
+// Object.jet), so a warm run touches few pages of the compiler's image and a
+// cold start faults in fewer. Names that no longer name a function are
+// skipped by the build (`--trace` counter ir.object.hot_missing); regenerate
+// after large renames.
 //
 //   node Tools/perf/hot-text.mjs --jet <jet> [--out Compiler/JetCli/hot-text.list]
 //
@@ -14,9 +18,10 @@
 // so they are the functions below the first one the runtime pack
 // (jet-runtime/jet_runtime.pack.o) defines; libc and libgcc, when a link
 // takes them, come after the pack. The environment names the toolchain as for any run
-// (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Needs `cc` and ptrace of a
-// child: each command runs under Tools/perf/fntrace.c, which puts a
-// breakpoint at every function of <jet> and records each one's first entry.
+// (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Needs a C compiler (`$CC`,
+// default `cc`) and ptrace of a child: each command runs under
+// Tools/perf/fntrace.c, which puts a breakpoint at every function of <jet>
+// and records each one's first entry.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -26,8 +31,59 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const COMMANDS = ["run", "check", "build"];
 const HELLO = 'run: fn() {\n    print("hello")\n}\n';
+// The warm run's program is a small script as the gauntlet's are. A warm run
+// still parses its source, so the script uses the common forms: `use` rows, a
+// struct, an enum and its match, a lambda, a map and a loop; it reads a file
+// (itself) and prints a summary.
+const SCRIPT = `use {
+    files: core.files
+    process: core.process
+}
+
+Row: struct {
+    name: String
+    count: Int
+}
+
+Kind: enum {
+    Empty
+    Words(count: Int)
+}
+
+kind: fn(line: String) -> Kind Never! {
+    words: line.split(" ").filter(w -> w != "").to_list()
+    if words.len() == 0 -> return Kind.Empty
+    Kind.Words{count: words.len()}
+}
+
+run: fn() {
+    args: process.args()
+    path: if args.len() > 0 -> args[0] else -> "script.jet"
+    text: files.read(path) ?? ""
+    rows := [Row]{}
+    seen := [String: Int]{}
+    loop line in text.lines() {
+        if kind(line.trim()) == {
+            .Empty -> next
+            .Words(count) -> rows.push(Row{name: line.trim(), count: count})
+        }
+        seen[line.trim()] = (seen.get(line.trim()) ?? 0) + 1
+    }
+    total := 0
+    loop row in rows -> total += row.count
+    longest: rows.filter(r -> r.count > 2).map(r -> r.name)
+    print("{rows.len()} rows, {total} words, {seen.len()} distinct, {longest.len()} long")
+}
+`;
+// Each trace: its program, the argv it runs with, and whether its cache is
+// filled by an untraced run of it first (warm) or starts empty (cold).
+const TRACES = [
+  { file: "script.jet", source: SCRIPT, argv: ["script.jet", "script.jet"], warm: true },
+  { file: "hello.jet", source: HELLO, argv: ["run", "hello.jet"], warm: false },
+  { file: "hello.jet", source: HELLO, argv: ["check", "hello.jet"], warm: false },
+  { file: "hello.jet", source: HELLO, argv: ["build", "hello.jet"], warm: false },
+];
 
 function parseArgs(argv) {
   const args = { jet: "", out: join(ROOT, "Compiler/JetCli/hot-text.list") };
@@ -82,19 +138,22 @@ function main() {
   const work = mkdtempSync(join(tmpdir(), "hot-text-"));
   try {
     const tracer = join(work, "fntrace");
-    execFileSync("cc", ["-O2", "-o", tracer, join(ROOT, "Tools/perf/fntrace.c")], { stdio: "inherit" });
+    execFileSync(process.env.CC || "cc", ["-O2", "-o", tracer, join(ROOT, "Tools/perf/fntrace.c")], { stdio: "inherit" });
     const addresses = join(work, "addresses");
     writeFileSync(addresses, [...byAddress.keys()].map((value) => value.toString(16)).join("\n") + "\n");
-    const project = join(work, "hello");
-    execFileSync("mkdir", ["-p", project]);
-    writeFileSync(join(project, "hello.jet"), HELLO);
     const names = [];
     const listed = new Set();
-    for (const command of COMMANDS) {
-      const entered = join(work, `${command}.entered`);
-      // A fresh cache each time: the cold path is the one to lay out.
-      const env = { ...process.env, XDG_CACHE_HOME: join(work, `cache-${command}`) };
-      execFileSync(tracer, [addresses, entered, "--", args.jet, command, "hello.jet"], { cwd: project, env, stdio: ["ignore", "ignore", "inherit"] });
+    for (const [index, trace] of TRACES.entries()) {
+      // Each trace has a project and a cache of its own: a cold one starts
+      // from nothing, a warm one from what its untraced run kept.
+      const project = join(work, `trace-${index}`);
+      execFileSync("mkdir", ["-p", project]);
+      writeFileSync(join(project, trace.file), trace.source);
+      const entered = join(work, `${index}.entered`);
+      const env = { ...process.env, XDG_CACHE_HOME: join(work, `cache-${index}`) };
+      const options = { cwd: project, env, stdio: ["ignore", "ignore", "inherit"] };
+      if (trace.warm) execFileSync(args.jet, trace.argv, options);
+      execFileSync(tracer, [addresses, entered, "--", args.jet, ...trace.argv], options);
       for (const line of readFileSync(entered, "utf8").split("\n")) {
         if (line === "") continue;
         const name = byAddress.get(BigInt(`0x${line}`));
@@ -107,7 +166,7 @@ function main() {
     const digest = createHash("sha256").update(jetBytes).digest("hex").slice(0, 16);
     const header = [
       "# Generated by `node Tools/perf/hot-text.mjs`; do not edit.",
-      `# The ${names.length} functions a cold hello \`jet ${COMMANDS.join("`, `jet ")}\` entered, first entry first (jet sha256 ${digest}).`,
+      `# The ${names.length} functions a warm \`jet script.jet\` and a cold hello \`jet run\`, \`jet check\`, \`jet build\` entered, first entry first (jet sha256 ${digest}).`,
     ];
     writeFileSync(args.out, [...header, ...names].join("\n") + "\n");
     console.log(`${args.out}: ${names.length} functions`);

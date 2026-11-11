@@ -513,21 +513,21 @@ nixeval_test_derivation_error: fn(source: String, system: String) -> NixEvalErro
 nixeval_test_unsupported: fn(error: NixEvalError) -> String {
     if error == {
         .Unsupported(reason) -> reason
-        else -> ""
+        .InputTooLarge | .UnsupportedSystem(_) | .Invalid(_) | .ResourceLimit(_) | .Syntax(_) | .Missing(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> ""
     }
 }
 
 nixeval_test_invalid: fn(error: NixEvalError) -> String {
     if error == {
         .Invalid(reason) -> reason
-        else -> ""
+        .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .ResourceLimit(_) | .Syntax(_) | .Missing(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> ""
     }
 }
 
 nixeval_test_resource_limit: fn(error: NixEvalError) -> String {
     if error == {
         .ResourceLimit(reason) -> reason
-        else -> ""
+        .InputTooLarge | .UnsupportedSystem(_) | .Unsupported(_) | .Invalid(_) | .Syntax(_) | .Missing(_) | .TypeMismatch(_, _) | .Cycle | .Denied(_) | .JSON(_) | .Manifest(_) | .Evaluation(_) | .UnsupportedOracleSystem(_) | .MissingOracleIdentity(_, _) | .MalformedSRI(_) | .OracleIdentityMismatch(_, _, _, _) | .OracleBuildBlocked(_, _) -> ""
     }
 }
 
@@ -539,7 +539,7 @@ nixeval_test_map_authority: fn(files: [String: String], label: String) -> NixEva
     NixEvalAuthority{answer: (request: String) -[]> {
         if responses.get(request) == {
             .Val(text) -> Ok(text)
-            else -> Err(NixEvalError.Denied("{prefix} `{request}`"))
+            .None -> Err(NixEvalError.Denied("{prefix} `{request}`"))
         }
     }}
 }
@@ -754,7 +754,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         output := "default"
         if value_case.get("output") == {
             .Val(output_index) -> output = document.string(output_index) ?? "default"
-            else -> {}
+            .None -> {}
         }
         evaluated: nixeval_evaluate_devshell_output(source, system, output) ?? panic("pinned Stage A devShell value must evaluate")
         assert_eq(evaluated.packages, nixeval_test_strings(document, nixeval_test_get(value_case, "jet_packages")))
@@ -808,7 +808,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         output := "default"
         if value.get("output") == {
             .Val(output_index) -> output = document.string(output_index) ?? "default"
-            else -> {}
+            .None -> {}
         }
         loop seed in seeds {
             evaluated: nixeval_evaluate_devshell_output(nixeval_test_breadth_variant(source, seed), system, output) ?? panic("seeded breadth value must evaluate")
@@ -951,7 +951,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         expected_outputs := [Int]{}
         if expected.get("outputs") == {
             .Val(outputs) -> expected_outputs = nixeval_test_array(document, outputs)
-            else -> expected_outputs.push(nixeval_test_get(expected, "output"))
+            .None -> expected_outputs.push(nixeval_test_get(expected, "output"))
         }
         assert_eq(evaluated.outputs.len(), expected_outputs.len())
         loop expected_index in expected_outputs {
@@ -1057,7 +1057,7 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
         nix_cross_packages := [String]{}
         if nix_value.get("cross_packages") == {
             .Val(cross_index) -> nix_cross_packages = nixeval_test_strings(document, cross_index)
-            else -> {}
+            .None -> {}
         }
         assert_eq(nix_cross_packages, expected_cross_packages)
         loop seed in seeds {

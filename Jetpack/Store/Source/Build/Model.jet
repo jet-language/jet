@@ -738,7 +738,7 @@ ProbeSpec: struct {
         updated := self
         if self.kind == {
             .PkgConfig(package, _) -> updated.kind = ProbeKind.PkgConfig{package, min_version: Val(version)}
-            else -> {}
+            .FindProgram(_) | .FindFolder(_) | .HeaderCheck(_) | .CompileCheck(_, _, _) -> {}
         }
         updated
     }

@@ -83,7 +83,7 @@ ExplainReport: struct {
                 extended.push((key: "kind", value: Dyn.Text(self.kind.label())))
                 Dyn.Object(extended)
             }
-            else -> tree
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> tree
         }
     }
 }
@@ -659,7 +659,7 @@ store_explain_receipt_projection: fn(roots: HangarRoots, entry: StoreEntry, grap
                 .NotFound(_) -> {
                     reports.push(ExplainReport.loss("Hangar receipt `{entry.receipt}` is missing"))
                 }
-                else -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     reports.push(ExplainReport.loss("Hangar receipt `{entry.receipt}` could not be inspected: {error}"))
                 }
             }
@@ -704,7 +704,7 @@ store_explain_provider_projection: fn(entry: StoreEntry, reports: &[ExplainRepor
                         .Err(error) -> {
                             reports.push(ExplainReport.loss("embedded provider facts fail validation: {error.message}"))
                         }
-                        else -> {}
+                        .Ok(_) -> {}
                     }
                     facts = Val(decoded)
                 }
@@ -731,7 +731,7 @@ store_explain_check_embedded_facts: fn(entry: StoreEntry, producer: ProducerReco
         .Val(value) -> {
             if value == {
                 .Text(authority) -> authority == entry_facts.provider
-                else -> false
+                .Null | .Bool(_) | .Number(_) | .List(_) | .Map(_) -> false
             }
         }
         .None -> false
@@ -771,7 +771,7 @@ store_explain_report_provider_validation: fn(facts: ProviderFacts, context: Stri
                 reports.push(ExplainReport.loss("{context} provider facts fail validation: {error.message}"))
             }
         }
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -839,7 +839,7 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: &[ExplainRep
         }
         valid: if facts.validate() == {
             .Ok(_) -> true
-            else -> false
+            .Err(_) -> false
         }
         if !valid -> next
         if matches_entry && identity_ok -> matches.push(facts)
@@ -1090,7 +1090,7 @@ store_explain_provider_is_usable: fn(provider: ExplainProvider) -> Bool Never! {
     facts: provider.provider_facts ?? return false
     valid: if facts.validate() == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
     digest: facts.digest()
     valid && provider.producer_facts.get("provider-facts-digest") == Val((digest))

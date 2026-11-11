@@ -160,9 +160,6 @@ apply_project_transaction_json_inner: fn(path: OSPath, request: String) -> Strin
         _ -> .Err(project_edit_error("unsupported", "unknown Canvas project transaction operation"))
     }
 }
-query_json_for_file: fn(path: OSPath, request: String) -> String Err! {
-    run_compiler_work(() -> query_json_for_file_inner(path, request)).map((payload) -> canvas_machine_success("canvas.query", payload)).map_err((error) -> canvas_machine_error("canvas.query", error))
-}
 query_json_for_file_inner: fn(path: OSPath, request: String) -> String Err! {
     src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
     revision: required_query_string(request, "revision")?
@@ -230,23 +227,6 @@ core_catalog_json_for_entry: fn(entry: OSPath, query: String) -> String Err! {
     })()
     result.map((payload) -> canvas_machine_success("canvas.core_catalog", payload)).map_err((error) -> canvas_machine_error("canvas.core_catalog", error))
 }
-source_control_json_for_file: fn(path: OSPath) -> String {
-    payload: source_control_json_for_file_inner(path)
-    canvas_machine_success("canvas.source_control", payload)
-}
-source_control_json_for_file_inner: fn(path: OSPath) -> String {
-    src: read_source_without_symlinks(path).unwrap_or_default()
-    semantic_ops: semantic_ops_json(path, src)
-    root: git_root(path) ?? return "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(src))},\"available\":false,\"dirty\":false,\"status\":{json_str("not a Git worktree")},\"diff\":{json_str("")},\"history\":[],\"semantic_ops\":[{semantic_ops}]}}"
-    rel: git_relative_path(root, path)
-    status: git_output(root, ["status", "--porcelain", "--", rel]).unwrap_or_default()
-    tracked: git_output(root, ["ls-files", "--error-unmatch", "--", rel]).is_some()
-    diff: if tracked { git_output(root, ["diff", "--", rel]).unwrap_or_default() } else if path.exists() { untracked_diff(rel, src) } else { "" }
-    log: git_output(root, ["log", "--oneline", "-5", "--", rel]).unwrap_or_default()
-    history: log.lines().map(json_str).collect().join(",")
-    dirty: !status.trim().is_empty() || !diff.trim().is_empty()
-    "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(src))},\"available\":true,\"dirty\":{if dirty { "true" } else { "false" }},\"status\":{json_str(status.trim())},\"diff\":{json_str(diff)},\"history\":[{history}],\"semantic_ops\":[{semantic_ops}]}}"
-}
 semantic_ops_json: fn(path: OSPath, source: String) -> String {
     source_hash: SHA256.sha256_hex(source.as_bytes())
     semantic_ops_for_file(path, source_hash).iter().map(semantic_op_json).collect().join(",")
@@ -292,9 +272,6 @@ source_control_json_for_entry_inner: fn(path: OSPath) -> String {
         git_output(root, ["log", "--oneline", "-5", "--", rel])
     }).unwrap_or_default().lines().map(json_str).collect().join(",")
     "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(entry_src))},\"project_revision\":{json_str(ctx.project_revision)},\"project_root\":{json_str(ctx.project_root.display().to_string())},\"available\":{if root.is_some() { "true" } else { "false" }},\"dirty\":{if dirty_files > 0 { "true" } else { "false" }},\"dirty_files\":{dirty_files},\"status\":{json_str(statuses.join("\n"))},\"diff\":{json_str("")},\"history\":[{history}],\"files\":[{files}]}}"
-}
-proof_json_for_entry: fn(entry: OSPath, source_id: String?) -> String Err! {
-    proof_json_for_entry_with_receipt(entry, source_id, .None)
 }
 proof_json_for_entry_with_receipt: fn(entry: OSPath, source_id: String?, command_receipt: String?) -> String Err! {
     proof_json_for_entry_with_receipt_inner(entry, source_id, command_receipt).map((payload) -> canvas_machine_success("canvas.proof", payload)).map_err((error) -> canvas_machine_error("canvas.proof", error))
@@ -414,26 +391,10 @@ apply_transaction_json_inner: fn(path: OSPath, request: String) -> String Err! {
     }
     edit_transaction.apply_transaction_json(path, request)
 }
-debug_session_json_for_entry: fn(entry: OSPath, request: String) -> String Err! {
-    sessions: DebugSessions.one_shot()
-    debug_session_json_for_entry_with_sessions(entry, request, sessions)
-}
-debug_session_json_for_entry_with_sessions: fn(entry: OSPath, request: String, sessions: &DebugSessions) -> String Err! {
-    source_id: json_string_field(request, "source_id")
-    path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.debug", error))?
-    debug_session_json_for_file_with_sessions(path, request, sessions)
-}
 debug_session_json_for_entry_with_sessions_and_host: fn(entry: OSPath, request: String, sessions: &DebugSessions, host: &PausedEvaluateHost) -> String Err! {
     source_id: json_string_field(request, "source_id")
     path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.debug", error))?
     debug_session_json_for_file_with_sessions_inner(path, request, sessions, .Some(host)).map((payload) -> canvas_machine_success("canvas.debug", payload)).map_err((error) -> canvas_machine_error("canvas.debug", error))
-}
-debug_session_json_for_file: fn(path: OSPath, request: String) -> String Err! {
-    sessions: DebugSessions.one_shot()
-    debug_session_json_for_file_with_sessions(path, request, sessions)
-}
-debug_session_json_for_file_with_sessions: fn(path: OSPath, request: String, sessions: &DebugSessions) -> String Err! {
-    debug_session_json_for_file_with_sessions_inner(path, request, sessions, .None).map((payload) -> canvas_machine_success("canvas.debug", payload)).map_err((error) -> canvas_machine_error("canvas.debug", error))
 }
 debug_session_json_for_file_with_sessions_inner: fn(path: OSPath, request: String, sessions: &DebugSessions, paused_evaluate: (&PausedEvaluateHost)?) -> String Err! {
     paused_evaluate := paused_evaluate

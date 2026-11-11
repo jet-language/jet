@@ -1,0 +1,58 @@
+Report: planned.md; 4 receipts, 7 series, 0 gate failures
+--- planned.md
+# Scaling gate report (#4601)
+
+Receipt `counters.json`: 2026-11-09T12:00:00Z to (running), mode counters, compilers rust=/opt/jet, 0 failures.
+
+Receipt `runs/run-1/receipt.json`: r1 to e1, mode timing, compilers rust=/opt/jet, 0 failures.
+
+Receipt `runs/run-10/receipt.json`: r10 to (running), mode timing, compilers , 0 failures.
+
+Receipt `runs/run-2/receipt.json`: r2 to e2, mode counters, compilers rust=/opt/jet, 0 failures.
+
+Counter-only series gate deterministic work and compile outcomes; their contended wall/RSS observations are not timing samples. Timing floors and 1M projections come only from serial timing-mode series. Unmeasured timing cells remain uncovered, not wins.
+
+## Ladder outcome
+
+| Corpus | Layout | Compiler | Mode | Rungs passed (x: N or lines) | Top rung wall s | Peak RSS GB | Stopped |
+|---|---|---|---|---|---:|---:|---|
+| modules | files | rust | counters | 1000 | - | - |  |
+| generics | single | jetc | counters | none | - | - |  |
+| fan-in | files | rust | counters | none | - | - |  |
+| cli | files | rust | counters | none | - | - |  |
+| modules | files | rust | timing | 10 | 0.3 | 0.00 |  |
+| web | files | rust | timing | none | - | - |  |
+| modules | files | rust | counters | 20 | - | - |  |
+
+## Superlinear phases and counters (growth vs N log N over the measured rungs)
+
+| Corpus | Layout | Compiler | Mode | Metric | x N log N | Exponent | Dominating counter | Responsible functions (profile, phase share) |
+|---|---|---|---|---|---:|---:|---|---|
+
+## Floor failures at the top rung
+
+| Corpus | Layout | Compiler | Failure |
+|---|---|---|---|
+
+## Compile failures, timeouts and incomplete ladders
+
+| Corpus | Layout | Compiler | Mode | Phase | Failure |
+|---|---|---|---|---|---|
+| web | files | rust | timing | - | incomplete checkpoint |
+
+## Domain corpora: phases projected to 1M lines (budget 10 s end to end)
+
+| Corpus | Layout | Compiler | Measured at lines | Phase | Measured s | Exponent | Projected s at 1M |
+|---|---|---|---:|---|---:|---:|---:|
+
+## Timing coverage not established
+
+| Corpus | Layout | Compiler | Reason |
+|---|---|---|---|
+| generics | single | jetc | not in the timing sample |
+| fan-in | files | rust | not in the timing sample |
+| cli | files | rust | not in the timing sample |
+
+## Missing or unfinished receipts
+
+The proofq jobs ended without complete receipts for: timing/web, timing/fan-in, counters/cli. These cells are not covered.

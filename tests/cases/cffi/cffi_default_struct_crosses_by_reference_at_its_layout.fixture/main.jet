@@ -1,7 +1,7 @@
 use c: c.mixed
 
 // No `#Layout`: the compiler places the fields, and c/mixed.c declares the
-// struct from the `$layout` checked below.
+// struct from the `reflect().layout` checked below.
 Mixed: struct {
     a: U8
     b: I64
@@ -18,22 +18,22 @@ Mixed: struct {
     same: fn(value: &Mixed) -> Bool = "jet_mixed_same"
 }
 
-SIZE: comptime { Mixed.$layout.size ?? -1 }
-ALIGNMENT: comptime { Mixed.$layout.alignment ?? -1 }
-AT_A: comptime { Mixed.$layout.fields[0].offset ?? -1 }
-AT_B: comptime { Mixed.$layout.fields[1].offset ?? -1 }
-AT_C: comptime { Mixed.$layout.fields[2].offset ?? -1 }
-AT_D: comptime { Mixed.$layout.fields[3].offset ?? -1 }
-AT_E: comptime { Mixed.$layout.fields[4].offset ?? -1 }
+SIZE: comptime { Mixed.reflect().layout.size ?? -1 }
+ALIGNMENT: comptime { Mixed.reflect().layout.alignment ?? -1 }
+AT_A: comptime { Mixed.reflect().layout.fields[0].offset ?? -1 }
+AT_B: comptime { Mixed.reflect().layout.fields[1].offset ?? -1 }
+AT_C: comptime { Mixed.reflect().layout.fields[2].offset ?? -1 }
+AT_D: comptime { Mixed.reflect().layout.fields[3].offset ?? -1 }
+AT_E: comptime { Mixed.reflect().layout.fields[4].offset ?? -1 }
 
 run: fn() {
     facts: [Int]{SIZE, ALIGNMENT, AT_A, AT_B, AT_C, AT_D, AT_E}
     names: [String]{"size", "alignment", "a", "b", "c", "d", "e"}
     loop index in 0..<facts.len() {
         native: c.layout_fact(I64{index})
-        if (native != I64{facts[index]}) -> panic("C {names[index]} is {native}, Mixed.$layout says {facts[index]}")
+        if (native != I64{facts[index]}) -> panic("C {names[index]} is {native}, Mixed.reflect().layout says {facts[index]}")
     }
-    print("C agrees with Mixed.$layout: size {SIZE}, alignment {ALIGNMENT}, a {AT_A}, b {AT_B}, c {AT_C}, d {AT_D}, e {AT_E}")
+    print("C agrees with Mixed.reflect().layout: size {SIZE}, alignment {ALIGNMENT}, a {AT_A}, b {AT_B}, c {AT_C}, d {AT_D}, e {AT_E}")
     value := Mixed{a: U8{1}, b: I64{10}, c: U8{2}, d: I64{20}, e: U8{3}}
     c.remember(value)
     c.bump(value)

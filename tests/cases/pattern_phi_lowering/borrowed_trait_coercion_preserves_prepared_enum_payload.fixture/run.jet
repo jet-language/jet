@@ -1,9 +1,12 @@
 Producer: trait {
     produce: fn(self) -> Int Never!
 }
-CanonicalProducer: struct { values: [Int] }
-impl CanonicalProducer.Producer {
-    produce: fn(self) -> Int Never! { self.values[0] }
+CanonicalProducer: struct {
+    values: [Int]
+
+    impl Producer {
+        produce: fn(self) -> Int Never! { self.values[0] }
+    }
 }
 Preparation: enum { Prepared(producer: CanonicalProducer) }
 Host: struct { parent: Int }

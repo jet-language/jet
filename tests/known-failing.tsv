@@ -19,14 +19,11 @@ tests/ui/ownership/multi_trait_receiver_access_follows_first_match_dispatch_orde
 tests/ui/pattern_ratified_map_alias_duplicate	#6425	check not ported: E0117
 tests/ui/state_loop_unchanged	#6006	check not ported: L0529
 tests/ui/take_pattern_bad_hole	#6425	check not ported: E0003
-tests/ui/trailing_block_double	#6425	check not ported: E0335
 tests/ui/unit_family_unknown_header_field	#6425	check not ported: E0930
 tests/ui/web_output_refuses_run	#6425	check not ported: E-WEB-UNSUPPORTED
 tests/ui/workspace_e0995/workspace	#6425	check not ported: E0995
 tests/ui/workspace_e0996/workspace	#6425	check not ported: E0996
 tests/ui/workspace_e0997/workspace	#6425	check not ported: E0997
-tests/ui_lint/unreachable_else_open_int	#6006	check not ported: L0303; the .warn snapshot was never blessed (#4260)
-tests/ui_lint/unreachable_else_partial	#6006	check not ported: L0303; the .warn snapshot was never blessed (#4260)
 tests/ui/ownership/whole_place_alias_blocks_overlapping_write_argument	#6425	check not ported: E0204
 tests/ui/ownership/named_write_window_calls_keep_alias_and_read_view_checks	#6425	check not ported: E0111, E0204
 tests/ui/vault_key_unlock_outlives_owner	#6425	check not ported: E2305
@@ -59,8 +56,6 @@ tests/ui_lint/redundant_tail_return	#6006	stale fixture: an `if value == {…}` 
 tests/ui/task_spawn_parameters	#6425	check not ported: E1102, E0405, E0112; the parser rejects `task (x: Int) -> x` with E0003 first
 tests/ui/source_nesting_limit	#6425	check not ported: E1403; the parser stops at depth 254 with E0003 first
 tests/ui/matrix_measure_inner_mismatch	#6425	check not ported: E2512; the parser rejects `Matrix<3,4>` with E0003 (expected a type)
-tests/ui/trailing_block_not_function	#6425	check not ported: E0335 (reports E0112)
-tests/ui/marker_wrong_at_plane	#6425	check not ported: E0335 (reports E0102)
 tests/ui/identifier_casing	#6425	`.Val(BadBind)` (a value slot: PascalCase never binds) on an Option reports E0305 "Pattern `Val` doesn't match `Int?`": no value-slot Present pattern (Patterns.jet sema_pattern_normalize_nested); the snapshot still pins the Rust-era BadBind casing, `@bad_constant` and 10:20
 tests/ui/inline_module_return_type_mismatch	#6425	check not ported: E0080 (reports E0113 with the mangled function name)
 tests/ui/comptime_impure	#4926	E3410 (Tier-2 comptime effect) replaces E3401 and E0107
@@ -117,12 +112,9 @@ tests/cases/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_th
 tests/cases/compute_extended/curried_autodiff_shapes_share_the_prelude_handle.case	#6627	`jet run run.jet` is E2104 "`compute.jvp` is not built yet" and "`compute.vjp` is not built yet": gradient and value_and_gradient run on the Core tape, but the forward and pullback transforms have no lowering yet
 tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle.case	#6627	`jet run run.jet` is E2104 "`compute.jvp` is not built yet": the gradient half runs on the Core tape, but jvp has no lowering yet
 tests/cases/devtools/devtools_bless_rejects_unknown_target.case	#5454	`jet self devtools bless … --dry-run` exits 2 with E2104 "`jet devtools` is not built yet"
-tests/cases/dsl_blocks/boundary_typed_heads_validate_and_compile.case	#5454	E0003 "Expected a name after the field-access operator, found `{`": the typed DSL block heads do not parse
-tests/cases/dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw.case	#5454	E0003 "Expected a name after the field-access operator, found `{`": the typed text-form heads do not parse
-tests/cases/effect_roots/retired_flat_ffi_spellings_are_rejected_by_the_compiler.case	#5454	`run: fn() :[Go]> {}` stops in the parser with E0003 (return type uses `:`) and MissingFunctionBody; the original requires UnknownType for each retired root
 tests/cases/encoding_edition/edition_2027_cbor_decode_emits_l2001_and_2028_removes_it.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027/2028 manifests never reach L2001
 tests/cases/encoding_edition/edition_2027_cbor_encode_emits_l2001.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027 manifest never reaches L2001
-tests/cases/fact_reads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers.case	#5454	`jet run run.jet` E0391 UnsupportedCompileTimeValue: `comptime { TargetPointer.$layout.size ?? 0 }` inline in a `print(..)` comparison is a value form this compiler does not support yet
+tests/cases/fact_reads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers.case	#5454	`jet run run.jet` E0391 UnsupportedCompileTimeValue: `comptime { TargetPointer.reflect().layout.size ?? 0 }` inline in a `print(..)` comparison is a value form this compiler does not support yet
 tests/cases/generics/generic_codec_bounds_follow_structural_codec_contracts.case	#5454	E0904 UninferableTypeArgument: no trait named `Encode` is in scope for the bound on `T`
 tests/cases/http_client_law/public_client_allow_http_downgrade_method_typechecks.case	#5454	E2104 `HTTPClient.new` is not built yet: the configured HTTP client runtime waits on #3665
 tests/cases/http_client_law/public_client_retries_method_typechecks.case	#5454	E2104 `HTTPClient.new` is not built yet: the configured HTTP client runtime waits on #3665
@@ -195,7 +187,6 @@ tests/cases/dev_parts_routine/enum_variant_change_emits_e2210.case	#5454	REFUSED
 tests/cases/dev_parts_routine/fixed_width_mixed_sign_shift_counts_trap_across_tiers.case	#5454	`jet run shl_negative.jet` stops with the generic E3010 "Value doesn't fit in destination type": the mixed-sign count is narrowed before the shift, so the ShiftOutOfRange trap text never prints
 tests/cases/dev_parts_routine/fn_signature_change_emits_e2210.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/jit_1216_adversarial_regressions.case	#5454	stm_return: a bare `return` inside `#Transact(tx)` keeps the write, so `jet run` prints 9 where the original rolls back and prints 1
-tests/cases/dev_parts_routine/nested_ordinary_module_generic_instance_matches_resident_jit_and_aot.case	#5454	`jet run` and `jet build` report E0107 "Nothing named `closed` exists here": the generic module instance alias `closed: inner<T>` inside the nested ordinary module `plain` is not visible to its sibling `result` fn
 tests/cases/dev_parts_routine/package_callable_survives_dev_and_run_watch_reload.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/persist_binding_survives_hot_swap_and_resets_on_shape_change.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/persist_example_survives_hot_reload.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
@@ -205,14 +196,12 @@ tests/cases/dev_parts_routine/struct_field_change_emits_e2210.case	#5454	REFUSED
 tests/cases/dev_parts_routine/unused_expanding_generic_body_does_not_expand_the_instantiation_worklist.case	#5454	`jet run unused_expanding_generic_body.jet` exits 1 with UnknownFunction "`Grow` has no method `unused`" at line 8; the original runs the unreachable expanding method's caller and prints 7
 tests/cases/dev_parts_routine/wrapped_returned_view_fields_match_aot_and_default_dev.case	#5454	FAIL: `jet build wrapped_returned_view_fields.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
 tests/cases/dev_parts_tier_parity/ui_and_web_match_interpreter_default_run_and_aot_web_web_app.case	#5454	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
-tests/cases/core_files_opaque_handles/file_handles_have_no_fd_fields_and_cannot_be_written_or_forged.case	#6462	no E0339/E0605: `.path` of TempFile/TempDir/FileLock is readable by spec (core-library.md:635,701) and `priv` is read-private too; refusing the write and the forged literal waits on an owner ballot for a read-only field form
 tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#5454	`jet build workspace.jet --allow=Exec` exits 1 with E3505 BuildProbeFailed: build actions run only in the bubblewrap sandbox, and none is available to the testkit run, so the member `fn build` entries never execute (#5496)
 tests/cases/gate_ledger/i9_number_grid_repl_keeps_the_inline_range_behavior.case	#5454	`jet repl` is built and exits 0, but piped stdin echoes the numbered `N user>` prompts and prints a "`print` is from `use core.term`" note, so the canonical `ok\nok\n42\n3\n` transcript differs (#4891)
 tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
 tests/cases/net_tls/comptime_fetch_rejects_hardlinks_to_outside_files.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
 tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109 (#5524)
 tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398 (#5525)
-tests/cases/sema_burndown/source_qualified_file_scope_read_tiers.case	#6419	`jet run run.jet` is E2104 "`files.scope` is not built yet": the FileScope struct has no backend layout and the runtime exports no jet_files_scope_roots_raw
 tests/cases/numeric_methods/floating_contract_refusals_survive_source_routing.case	#5454	c1-c4 pass; c5 `math.hypot(Float{2.0}, F32 ..)` reports E0112 with the generic "`hypot` wants Float … but this is F32" text, not the "Mixing float widths" refusal that pow (c4) renders
 tests/cases/determinism/system_clock_is_monotonic_and_effectful.case	#5454	`jet check launder/main.jet --json` exits 0 with only an L0530 warning; neither the direct nor the return-type clock laundering reports E3403
 tests/cases/modules_and_enums/enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors.case	#5454	c1 passes; `jet check c2/main.jet` reports E0332 "`Branch` is a group, not a value" where the original requires exactly one E0304 for the bad child
@@ -266,7 +255,6 @@ tests/cases/cli_parts_surface/group_help_and_man_inventory_every_nested_descript
 tests/cases/fmt/layout_compiler_fact_rejects_unknown_and_user_owned_at_members.case	#6005	ok: `a.jet` has no problems
 tests/cases/fmt/fmt_layout_block_round_trips_byte_for_byte.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table.case	#6005	elif/run.jet
-tests/cases/fmt/fmt_preserves_computed_fields.case	#6005	Error [E0003]: Expected a value, found `>`
 tests/cases/fmt/fmt_simplify_keeps_a_struct_literal_return_braced.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/fmt_simplify_keeps_a_routed_value_loop_binding.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/fmt_migrates_each_retired_print_spelling_to_one_canonical_job.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
@@ -454,7 +442,6 @@ tests/cases/web_build/web_backends_traverse_impure_regions.case	#5201	pins text 
 tests/cases/web_build/web_click_counter_dom_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_compute_wasm_bridge_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_compute_webgpu_calls_use_the_browser_prelude.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
-tests/cases/web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_e3001_context_matches_on_js_and_wasm.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_e3012_context_matches_on_js_and_wasm.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_eager_collection_adapters_match_native_shape.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
@@ -515,7 +502,6 @@ Examples/Interop/Languages/PowerShell	#6418	`jet inspect bind` reports E2104 not
 Examples/Interop/Languages/Python	#6418	`jet inspect bind` reports E2104 not built yet
 Examples/Interop/Languages/R	#6418	`use r.ops` reports E1002 (foreign root `r` reserved); the foreign binding route is not built
 Examples/Interop/Languages/Ruby	#6418	`use ruby.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
-Examples/ErrorsAndEffects/Effects/FileScope	#6419	`jet run` is E2104 "`fs.scope` is not built yet": the FileScope struct has no backend layout and the runtime exports no jet_files_scope_roots_raw; FileScope.out is hand-derived
 Examples/Interop/FFI/Callbacks	#6418	`jet inspect bind` reports E2104 not built yet, so `source.on_data` is E0102; Callbacks.out is the run.sh oracle
 tests/run/Foundations/Capabilities	#4599	`jet check` is clean; the run loads guest/build/capability_guest.wasm, which no sandbox build target produces (only guest/hostile/ ships a prebuilt guest), and no expected stream exists
 Examples/Math/Compute/ComputeAutoDiff	#6627	`jet check` is clean, but `jet run` is E2104 "`compute.jvp` is not built yet" and "`compute.vjp` is not built yet": gradient and value_and_gradient run on the Core tape, but jvp and vjp have no lowering yet
@@ -641,7 +627,7 @@ tests/cases/encoding_parity/published_schema_preserves_unknown_wire_order_across
 tests/cases/env_hook/export_rejects_shell_syntax_in_environment_names.case	#5454	bug: the hostile name is refused (E1332 "preset.variables variable 'BAD; touch envhook-var-pwned' is not a valid environment name", no marker written), but `jetpack env export bash` exits 0: the refusal comes from the env plan load, which keeps the previous activation and returns 0 (Jetpack/CLI/Source/Env/EnvExport.jet:112); the Rust original had the same load-time validation and return-0 path (crates/jetpack/src/CLI/run_enter_dev.rs at 75a297cf28 and c9129d174d^), so where its expected nonzero exit came from is unexplained
 tests/cases/explain_syntax/explain_syntax_dictionary_golden.case	#4500	unbuilt: the `@` golden explains the retired compile-time `@NAME` constant; prefix `@` is the live link (syntax-decisions.md:34; JetFoundation/Data/Syntax/Spellings.jet:25), which is not built (`@first` reads as a name, E0107), so the syntax dictionary has no `@` row and `jet explain @@` cannot suggest `@`
 tests/cases/explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision.case	#4260	expected stream never blessed: explain_syntax_verbose_names_registry_constant_and_decision.stdout
-tests/cases/fact_reads/typed_fact_fixture_matches_aot_default_and_interpreter.case	#5454	bug: `send_report.$effects.values.len()` reads 0 for the empty-bodied fn where the golden reads 1; also the golden prints one `false` before `report` and two after, where the fixture's print order gives none before and three after (golden from a different print order)
+tests/cases/fact_reads/typed_fact_fixture_matches_aot_default_and_interpreter.case	#5454	bug: `send_report.reflect().effects.values.len()` reads 0 for the empty-bodied fn where the golden reads 1; also the golden prints one `false` before `report` and two after, where the fixture's print order gives none before and three after (golden from a different print order)
 tests/cases/fmt_wave_a/cli_check_diff_and_write_keep_distinct_file_outcomes.case	#5454	testkit: the step-name capture file canonical.stdout is not created
 tests/cases/gate_ledger/source_gate_kinds_keep_their_written_reasons.case	#6418	unbuilt: jet inspect gates --json has no gates.entries
 tests/cases/http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient.case	#4260	no doc decides how a printed HTTP error reads: Jet prints its message (`invalid HTTP framing`), the Rust-era golden its variant (`InvalidFraming`, `Policy { reason: … }`)
@@ -734,10 +720,10 @@ tests/cases/http_client_law/h2_rejects_invalid_hpack_names_padding_and_body_leng
 tests/cases/http_client_law/h2_response_body_overrun_is_rejected_at_64_mib.case	#3665	h2 client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
 tests/cases/http_client_law/public_client_tls_custom_only_trust.case	#3665	configured client TLS policy not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
 tests/cases/http_client_law/public_client_tls_identity_and_version_bounds.case	#3665	configured client TLS policy not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
-tests/cases/http_client_law/h2_upload_streams_data_frames_before_body_eof.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
-tests/cases/http_client_law/post_307_replays_streamed_body_under_redirect_tee_cap.case	#3665	streaming upload body and redirect tee not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
-tests/cases/http_client_law/unknown_length_upload_uses_h1_chunked_transfer_encoding.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
-tests/cases/http_client_law/upload_streams_before_the_body_source_finishes.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
+tests/cases/http_client_law/h2_upload_streams_data_frames_before_body_eof.case	#3665	streaming upload body not built: build refuses `HTTPClient.new` (not built yet), and `http.Body.reader` reads its source whole when the body is made, so no DATA frame could leave before the source's EOF
+tests/cases/http_client_law/post_307_replays_streamed_body_under_redirect_tee_cap.case	#3665	streaming upload body and redirect tee not built: the request's `.body(...)` takes text (`__with_body` wants String, ValueTypeMismatch on `Body`), and `http.Body.reader` reads its source whole when the body is made, so there is no streamed body to tee
+tests/cases/http_client_law/unknown_length_upload_uses_h1_chunked_transfer_encoding.case	#3665	streaming upload body not built: the request's `.body(...)` takes text (`__with_body` wants String, ValueTypeMismatch on `Body`), and `http.Body.reader` reads its source whole when the body is made, so there is no unknown-length upload to frame as chunked
+tests/cases/http_client_law/upload_streams_before_the_body_source_finishes.case	#3665	streaming upload body not built: the request's `.body(...)` takes text (`__with_body` wants String, ValueTypeMismatch on `Body`), and `http.Body.reader` reads its source whole when the body is made, so nothing could be sent before the source finishes
 tests/cases/http_client_law/stale_pooled_safe_retries_and_opt_in_are_bounded.source-check.case	#5454	owner ruling q0z3918p: HTTPRequest timeouts take Duration (not built: they still take ms Int, E0112); the source also needs the Body cutover (`.body(Body)`, E0112, #4903) and `.retries(.None)` enum inference (E0330)
 tests/cases/compiler_api/an_unselected_runtime_named_build_cannot_use_the_compiler_api.case	#5454	expects E0956 for core.compiler in a runtime file's `fn build`; the sema gate admits any function named `build`, and `print` can't show CompilerLexed (E0112)
 tests/cases/corelib/json_decode_lenient_surfaces_coercions.case	#5454	owner ruling q0z3918p C (decoded map values are dynamic, matched with .Int(n)) not built: Dyn.Object carries a [(key: String, value: Dyn)] list, so `m["port"]` is a list index that needs Int (E0108)
@@ -884,6 +870,7 @@ tests/cases/lsp/lsp_checked_imported_diagnostics_and_repairs.case	#6386	`jet sel
 tests/cases/text_unicode/word-sentence-segments.case	#3262	`jet build run.jet`: `core.text` has no item `word_segments` (jet.UnknownCoreItem at run.jet:102); word and sentence segmentation is not in Core
 tests/cases/text_unicode/normalization-casing-graphemes.case	#3262	the NormalizationTest corpus stops at run.jet:112: Core text `nfd` returns `Ḋ` (U+1E0A) where the corpus's c3 column is `D\u{307}`, so NFD output is not fully decomposed
 tests/cases/taskgroup_parameter_tiers/web_keeps_group_parameter_at_the_existing_checked_boundary.case	#5201	`jet check fixture.jet --target web` accepts the task-group parameter and exits 0 with only UnusedParameter warnings; no E-WEB-UNSUPPORTED refusal
+tests/cases/taskgroup_stack/web_refuses_a_stack_request.case	#5201	`jet check web.jet --target web` exits 0: the driver never selects the wasm.browser target machine (Pipeline.jet jet_driver_selected_target_machine passes web_target false), so the checker's web refusal of `stack:` does not run
 tests/cases/simd_witness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier.case	#6414	the dev, aot and release runs print the expected values, but `objdump -d` of the `jet build --release` binary prints nothing: the native ELF writer emits no `.text` section header (code sits only in the R E LOAD segment), and a raw disassembly of that segment shows scalar mulsd/addsd with no mulpd/vmulpd/addpd/vaddpd
 tests/cases/workspace/e1239_two_discovered_workspace_declarations.case	#5965	no emitter for E1239 DuplicateWorkspaceModule: with two discovered workspace declarations jetpack reports E1274 "No overlay record for `package-overlay:probe`" instead
 tests/cases/workspace/package_member_cannot_declare_nested_members.case	#5965	no emitter for E1323 NestedPackageMembers: a member package.jet that declares `members:` gets E0995 MissingWorkspaceModule instead
@@ -901,7 +888,6 @@ tests/cases/corelib/core_http_client_exposes_binary_body_once.case	#3665	`jet te
 tests/cases/corelib/core_http_client_multipart_boundary_does_not_collide_with_fields.case	#3665	`jet test fixture.jet` E-OperatorTypeMismatch: the fixture joins text with `+`
 tests/cases/corelib/core_http_client_owns_pre_response_errors.case	#3665	`jet test fixture.jet` E0205 at `requests.push(http_read(stream))`: `stream` has read access only
 tests/cases/corelib/core_http_client_rejects_invalid_redirect_limits_before_transport.case	#3665	`jet test fixture.jet` UnknownMethod: `to_list` isn't a method on the value at fixture.jet:49
-tests/cases/corelib/core_http_nominal_message_and_body_surface_is_executable.case	#3665	FallbackTypeMismatch: `http.Body.reader(input, 6) ?? panic(…)`, but `http.Body.reader` is not fallible
 tests/cases/corelib/game_run_needs_mutable_scene_lvalue.case	#6661	`jet check` reports nothing for the `game.run` scene the case expects rejected (exit 0, expected nonzero)
 tests/cases/corelib/generated_internal_tagged_enum_round_trips_every_variant_shape.case	#6661	generated internal-tag decode of the unit variant `{"type":"Idle"}` fails, so the fixture panics `unit` (exit 70)
 tests/cases/corelib/io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty.case	#6661	the pty transcript matches the stream predicate the case forbids (`!~`)
@@ -910,7 +896,6 @@ tests/cases/custom/generic_struct_fns.case	#6661	`jet build fixture.jet` E0904 "
 tests/cases/effects/cross_module_foreign_undo_bindings_keep_distinct_identities.case	#6366	foreign crate bridge fails to build: cargo E0428 `jet_ffi_mutate` is defined multiple times for two modules' undo bindings
 tests/cases/effects/strided_source_loop_projects_exact_arena_audit_multiplicity.case	#6066	MemoryDenialViolated: sema proves no byte size for the loop source list literal at exact.jet:9, so `!Mem.Alloc(above: 12)` rejects it (D-MEM-FACTS1); past it, `!Mem.Alloc(above: 12)` cannot be proved through the open dispatch at exact.jet:11
 tests/cases/ffi_callbacks_tasks/foreign_callback_reenters_jet_and_completes_on_a_jet_task.case	#6366	`jet build main.jet` E2104: passing a Jet function to a C callback parameter is not built yet (no native C callback trampoline)
-tests/cases/generics/generic_modules_complete_instantiation.case	#6661	UnknownName: nothing named `label` exists at body_items.jet:19 inside the instantiated generic module
 tests/cases/http_client_law/cookie_jar_enforces_per_domain_and_global_count_bounds.case	#3665	UnknownMethod: `strip_prefix` isn't a method on the value at main.jet:69
 tests/cases/http_client_law/cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth.case	#3665	BindingTypeMismatch at main.jet:47: this needs Unit, but the value is Bool
 tests/cases/http_client_law/h1_skips_early_hints_reuses_final_response_and_rejects_upgrade.case	#3665	the fixture stops with `panic: reuse` (exit 70, expected 0)

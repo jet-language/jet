@@ -29,6 +29,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [EffectHigherOrder](Effects/EffectHigherOrder.jet) — Effects flow through higher-order calls.
 - [EffectLevers](Effects/EffectLevers.jet) — Expert effect levers.
 - [EffectProhibition](Effects/EffectProhibition.jet) — effect prohibition -[!E]>.
+- [EffectRowLayers](Effects/EffectRowLayers.jet) — Every layer that bounds effects, in one program.
 - [Effects](Effects/Effects.jet) — Effect system: every function carries an inferred effect set — the ambient powers its body reaches.
 - [EffectTraitBound](Effects/EffectTraitBound.jet) — A trait method may declare an effect upper bound.
 - [EffectTree](Effects/EffectTree.jet) — The ten effect names (`Net`, `FS`, `DB`, …) are tree ROOTS.
@@ -38,6 +39,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
 - [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
 - [Pure](Effects/Pure.jet)
+- [ScopedEffects](Effects/ScopedEffects.jet) — An effect argument names a scope: `-[FS.Read("ScopedEffects.jet")]>` reads that one file, a folder scope covers the files below it, and a scoped denial refuses only its folder.
 - [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `&self` methods.
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
@@ -68,10 +70,10 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [PartialAndNotes](Errors/PartialAndNotes.jet) — The middle states of the one outcome carrier.
 - [PropagationJourney](Errors/PropagationJourney.jet) — A failure that propagates automatically reports where it started (`failed here`) and every call it passed through on the way out, origin first.
 - [QqControl](Errors/QqControl.jet) — `??
-- [RadixParse](Errors/RadixParse.jet) — `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`: both return `Int !ParseError`, so bad digits or a base outside 2..=36 reach the…
+- [RadixParse](Errors/RadixParse.jet) — `Int.from_radix(text, base)` is the explicit-base sibling of `Int.parse`: both return `Int ParseError!`, so bad digits or a base outside 2..=36 reach the…
 - [ResultHandler](Errors/ResultHandler.jet) — One fixed exhaustive Result handler handles both payloads.
 - [RollbackTrait](Errors/RollbackTrait.jet)
 - [Transact](Errors/Transact.jet)
 - [TypedErrorFamilies](Errors/TypedErrorFamilies.jet)
-- [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T !(E1 | E2)` lets one callable fail with any listed error domain.
+- [UnionErrorContract](Errors/UnionErrorContract.jet) — A whole-union error contract `T (E1 | E2)!` lets one callable fail with any listed error domain.
 - [UnitFailureContract](Errors/UnitFailureContract.jet)

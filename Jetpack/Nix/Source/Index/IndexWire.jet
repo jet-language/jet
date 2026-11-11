@@ -38,7 +38,7 @@ NixIndexError: enum {
         if self == {
             .NotIndexed(_, _, _, _, _) -> 1349
             .Offline(_) -> 1276
-            else -> 1348
+            .Invalid(_) | .Transport(_) -> 1348
         }
     }
 
@@ -724,7 +724,7 @@ nix_index_json_depth_within: fn(value: Dyn, depth: Int) -> Bool Never! {
             }
             true
         }
-        else -> true
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> true
     }
 }
 

@@ -67,12 +67,12 @@ impl des.DESError -> PEMError { PEMError.DES(self) }
 PEMBlock: struct {
     der: [U8]
     used: Int
-}
 
-impl PEMBlock.Close {
-    close: fn(&&self) {
-        der := self.der.move()
-        core.crypto.wipe(der)
+    impl Close {
+        close: fn(&&self) {
+            der := self.der.move()
+            core.crypto.wipe(der)
+        }
     }
 }
 
@@ -92,7 +92,7 @@ EQUALS: U8{61}
 
 /// The Base64 digit of a 6-bit value (0..63), without a branch or a table
 /// lookup on it (mbedtls_ct_base64_enc_char).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 base64_enc_char: fn(value: U8) -> U8 Never! {
     digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
     digit = digit.bit_or(ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26}))
@@ -103,7 +103,7 @@ base64_enc_char: fn(value: U8) -> U8 Never! {
 
 // One plus the value of Base64 digit c, or zero when c is no digit; no
 // branch or table lookup on c.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 dec_bits: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
     v = v.bit_or(ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27}))
@@ -125,7 +125,7 @@ LAYOUT_INVALID: U8{5}
 // What byte c of Base64 text is, with no branch or table lookup on c: a
 // digit, a space, a CR, an LF, an `=`, or invalid. The decoder branches on
 // the class, the text's layout; never on a digit's value.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 layout_class: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
     v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))
@@ -144,8 +144,8 @@ base64_encode: fn(src: [U8]) -> [U8] Never! {
         c2: src[3 * b + 1]
         c3: src[3 * b + 2]
         out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
-        out.push(base64_enc_char(((c1.bit_and(U8{3}) << 4) + (c2 >> 4)).bit_and(U8{0x3F})))
-        out.push(base64_enc_char(((c2.bit_and(U8{15}) << 2) + (c3 >> 6)).bit_and(U8{0x3F})))
+        out.push(base64_enc_char((c1.bit_and(U8{3}) << 4).bit_or(c2 >> 4)))
+        out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_or(c3 >> 6)))
         out.push(base64_enc_char(c3.bit_and(U8{0x3F})))
     }
     i: 3 * whole
@@ -154,7 +154,7 @@ base64_encode: fn(src: [U8]) -> [U8] Never! {
         two: i + 1 < src.len()
         c2: if two -> src[i + 1] else -> U8{0}
         out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
-        out.push(base64_enc_char(((c1.bit_and(U8{3}) << 4) + (c2 >> 4)).bit_and(U8{0x3F})))
+        out.push(base64_enc_char((c1.bit_and(U8{3}) << 4).bit_or(c2 >> 4)))
         if two -> out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_and(U8{0x3F}))) else -> out.push(EQUALS)
         out.push(EQUALS)
     }
@@ -225,43 +225,88 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
     Ok(out)
 }
 
-// The text of data: up to its first NUL byte, as C's string functions see it.
-text_len: fn(data: [U8]) -> Int Never! {
+// Where data's first NUL byte is, or its length when it has none. Every
+// byte is read alike, with no branch on one; a reader takes it only once a
+// header and a footer are found, when data is PEM text, and the emission
+// check takes it as public.
+nul_at: fn(data: [U8]) -> U64 Never! {
+    n := U64{data.len()}
+    seen := ctime.ct_false()
     loop i in 0..<data.len() {
-        if data[i] == (U8{0}) -> return i
+        nul: ctime.bool_and(ctime.uint_eq(U64{data[i]}, U64{0}), ctime.bool_not(seen))
+        n = ctime.select(nul, U64{i}, n)
+        seen = ctime.bool_or(seen, nul)
     }
-    data.len()
+    n
 }
 
-// data[i] within the text, else the NUL that ends it.
+// The text of data: up to its first NUL byte, as C's string functions see
+// it.
+text_len: fn(data: [U8]) -> Int Never! { Int.from_u64(nul_at(data)) }
+
+// data[i] within the text, else the NUL that ends it: a byte of a block's
+// header lines (a line end, the DEK-Info IV's hex) or of the line end after
+// its footer, which the emission check takes as public.
 byte_at: fn(data: [U8], n: Int, i: Int) -> U8 Never! {
     if i < n -> return data[i]
     U8{0}
 }
 
-// Whether data[at..] starts with pat.
+// Whether data[at..] starts with pat, compared in constant time: the input
+// may be a DER key, and whether a PEM line starts at one place is the
+// text's layout (ctime.memcmp's verdict is public).
 starts_at: fn(data: [U8], at: Int, pat: [U8]) -> Bool Never! {
     if at + pat.len() > data.len() -> return false
-    loop j in 0..<pat.len() {
-        if data[at + j] != pat[j] -> return false
-    }
-    true
+    ctime.memcmp(data, at, pat, 0, pat.len()) == 0
 }
 
-// The first position of pat in the first n bytes of data (strstr).
-locate: fn(data: [U8], n: Int, pat: [U8]) -> Int? Never! {
-    if pat.len() > n -> return None
-    loop at in 0..(n - pat.len()) {
+// The first position of pat in data, by starts_at at each position; no
+// DER key spells out a PEM header or footer line, so its absence shows
+// nothing of the key.
+locate: fn(data: [U8], pat: [U8]) -> Int? Never! {
+    if pat.len() > data.len() -> return None
+    loop at in 0..(data.len() - pat.len()) {
         if starts_at(data, at, pat) -> return Val(at)
     }
     None
 }
 
-// `count` IV bytes from the 2 * count hex digits at data[at..] (pem_get_iv).
+// Where the first header and the first footer of a block start, and the
+// length of the text (mbedtls_pem_read_buffer's strstr calls).
+PEMSpan: struct {
+    header: Int
+    footer: Int
+    n: Int
+}
+
+// The header and footer of data's first block, as strstr finds them in the
+// text up to its first NUL: the first match in data, when it ends within
+// the text. The footer must come after the header.
+find_block: fn(data: [U8], header: [U8], footer: [U8]) -> PEMSpan? Never! {
+    start: locate(data, header) ?? return None
+    s2: locate(data, footer) ?? return None
+    n: text_len(data)
+    if start + header.len() > n || s2 + footer.len() > n || s2 <= start -> return None
+    Val(PEMSpan{header: start, footer: s2, n: n})
+}
+
+// The end of the footer line of span's block: past the footer, an optional
+// space, CR and LF.
+block_end: fn(data: [U8], span: PEMSpan, footer_len: Int) -> Int Never! {
+    end := span.footer + footer_len
+    if byte_at(data, span.n, end) == SPACE -> end += 1
+    if byte_at(data, span.n, end) == CR -> end += 1
+    if byte_at(data, span.n, end) == LF -> end += 1
+    end
+}
+
+// `count` IV bytes from the 2 * count hex digits at data[at..] (pem_get_iv),
+// read through byte_at: the IV is a header line's, as public as the
+// ciphertext it opens.
 get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
     iv := cipher.zero_bytes(count)
     loop i in 0..<(2 * count) {
-        c: data[at + i]
+        c: byte_at(data, data.len(), at + i)
         j: if {
             c >= (U8{48}) && c <= (U8{57}) -> c - U8{48}
             c >= (U8{65}) && c <= (U8{70}) -> c - U8{55}
@@ -311,13 +356,19 @@ decrypt: fn(alg: PEMCipher, iv: &[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! 
     }
     key := pbkdf1(keylen, iv, pwd)
     if alg == .DESCBC {
-        k: des.des_setkey_dec(key)
+        k: des.des_setkey_dec(key) ?? {
+            core.crypto.wipe(key)
+            return Err(.DES(err))
+        }
         core.crypto.wipe(key)
         out: des.des_crypt_cbc(k, .Decrypt, iv, body)
         return Ok(out)
     }
     if alg == .DESEDE3CBC {
-        k: des.des3_set3key_dec(key)
+        k: des.des3_set3key_dec(key) ?? {
+            core.crypto.wipe(key)
+            return Err(.DES(err))
+        }
         core.crypto.wipe(key)
         out: des.des_crypt_cbc(k, .Decrypt, iv, body)
         return Ok(out)
@@ -347,15 +398,9 @@ unpadded_len: fn(input: [U8]) -> Int PEMError! {
 /// (the use_len of mbedtls_pem_read_buffer, which callers skip by when a
 /// block fails to read).
 pem_block_len: fn(header: String, footer: String, data: [U8]) -> Int? Never! {
-    n: text_len(data)
-    start: locate(data, n, header.bytes()) ?? return None
-    s2: locate(data, n, footer.bytes()) ?? return None
-    if s2 <= start -> return None
-    end := s2 + footer.bytes().len()
-    if byte_at(data, n, end) == SPACE -> end += 1
-    if byte_at(data, n, end) == CR -> end += 1
-    if byte_at(data, n, end) == LF -> end += 1
-    Val(end)
+    fb: footer.bytes()
+    span: find_block(data, header.bytes(), fb) ?? return None
+    Val(block_end(data, span, fb.len()))
 }
 
 /// The first block of data between the header and footer lines
@@ -363,17 +408,17 @@ pem_block_len: fn(header: String, footer: String, data: [U8]) -> Int? Never! {
 /// any. pwd decrypts a block with Proc-Type 4,ENCRYPTED and DEK-Info
 /// headers; None means no password.
 pem_read_buffer: fn(header: String, footer: String, data: [U8], pwd: [U8]?) -> PEMBlock PEMError! {
-    n: text_len(data)
     hb: header.bytes()
-    start: locate(data, n, hb) ?? return Err(.NoHeaderFooterPresent)
-    s2: locate(data, n, footer.bytes()) ?? return Err(.NoHeaderFooterPresent)
-    if s2 <= start -> return Err(.NoHeaderFooterPresent)
-    s1 := start + hb.len()
+    fb: footer.bytes()
+    span: find_block(data, hb, fb) ?? return Err(.NoHeaderFooterPresent)
+    n: span.n
+    s2: span.footer
+    s1 := span.header + hb.len()
     if byte_at(data, n, s1) == SPACE -> s1 += 1
     if byte_at(data, n, s1) == CR -> s1 += 1
     if byte_at(data, n, s1) != LF -> return Err(.NoHeaderFooterPresent)
     s1 += 1
-    used: pem_block_len(header, footer, data) ?? return Err(.NoHeaderFooterPresent)
+    used: block_end(data, span, fb.len())
     encrypted: s2 - s1 >= 22 && starts_at(data, s1, "Proc-Type: 4,ENCRYPTED".bytes())
     alg := PEMCipher.DESCBC
     known := false
@@ -417,9 +462,15 @@ pem_read_buffer: fn(header: String, footer: String, data: [U8], pwd: [U8]?) -> P
     body := base64_decode(cipher.bytes_of(data, s1, s2 - s1)) ?? return Err(.InvalidData(Val(err)))
     if body.len() == 0 -> return Err(.BadInputData)
     if !encrypted -> return Ok(PEMBlock{der: body.move(), used: used})
-    der: open_block(alg, iv, body, pwd)
+    sealed := sealed_body(body)
+    der: open_block(alg, iv, sealed, pwd)
     Ok(PEMBlock{der: der, used: used})
 }
+
+// An encrypted block's body, ciphertext under the password's key: public as
+// the file is, so the emission check takes it as public. The password, the
+// key drawn from it and the decrypted key stay secret.
+sealed_body: fn(body: [U8]) -> [U8] Never! { body.copy() }
 
 // The decrypted, unpadded body of an encrypted block; body is wiped on every
 // path.

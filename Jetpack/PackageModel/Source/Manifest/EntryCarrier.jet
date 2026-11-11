@@ -36,7 +36,7 @@ pkg_unreadable_entry: fn(entry: String, error: AuthorityError) -> ManifestError 
         .Missing(_, cause) -> cause
         .IO(_, _, detail) -> detail
         .NotText(_, _) -> "stream did not contain valid UTF-8"
-        else -> error.message()
+        .ManifestParse(_, _) | .Symlink(_) | .WrongKind(_, _, _) | .Escapes(_) | .WorkspaceAmbiguous(_) | .WorkspaceNoModule | .NestedMembers(_, _) | .Invalid(_, _) | .Changed(_) | .Unsupported(_) -> error.message()
     }
     ManifestError{diagnostic: diagnostic_from_registry("E1331", None,
         "entry `{entry}` cannot be read", detail,
@@ -48,7 +48,7 @@ pkg_unreadable_entry: fn(entry: String, error: AuthorityError) -> ManifestError 
 pkg_entry_read_error: fn(entry: String, error: AuthorityError) -> ManifestError Never! {
     if error == {
         .Missing(_, _) | .IO(_, _, _) -> pkg_unreadable_entry(entry, error)
-        else -> pkg_entry_authority_error(error)
+        .ManifestParse(_, _) | .Symlink(_) | .WrongKind(_, _, _) | .Escapes(_) | .WorkspaceAmbiguous(_) | .WorkspaceNoModule | .NestedMembers(_, _) | .Invalid(_, _) | .NotText(_, _) | .Changed(_) | .Unsupported(_) -> pkg_entry_authority_error(error)
     }
 }
 
@@ -213,7 +213,7 @@ pkg_entry_load_conventional: fn(root: String) -[FS, Env]> PackageFacts? Manifest
     if compose_error == .Val(error) {
         authority_error: if error == {
             .NestedMembers(member_root, member) -> AuthorityError.NestedMembers{root: member_root, member: member}
-            else -> AuthorityError.Invalid{path: manifest.file.path, detail: error.message()}
+            .MissingName | .MissingRecord(_) | .MalformedField(_) | .UnknownField(_) | .UnknownOutputKind(_) | .InvalidValue(_, _) | .RetiredRecordHead | .ConfigMembers | .Composition(_) | .LintPolicyCode(_, _) | .BadTarget(_, _, _) | .BadTargetField(_, _) | .ReservedSection(_) | .BadEffectsBlock(_) | .RetiredAuthorityField(_, _) | .BadMemoryPolicy(_) | .RetiredPolicyField(_, _) | .BadGuaranteePolicy(_) | .BadPackagePolicy(_) | .BadAllocatorPolicy(_) -> AuthorityError.Invalid{path: manifest.file.path, detail: error.message()}
         }
         return Err(pkg_entry_authority_error(authority_error))
     }

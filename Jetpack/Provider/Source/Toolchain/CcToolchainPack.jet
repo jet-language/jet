@@ -482,7 +482,7 @@ provider_cc_pack_read_manifest: fn(root: String, asset: CcPackAsset) -[FS, Env]>
                 listed.push(provider_cc_manifest_string(fields, "triple"))
             }
         }
-        else -> return Err(CcToolchainError.Invalid("C toolchain pack manifest field `targets`: expected a Dyn array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(CcToolchainError.Invalid("C toolchain pack manifest field `targets`: expected a Dyn array"))
     }
     loop target in CC_PACK_TARGETS {
         if !listed.contains(target.triple) -> return Err(CcToolchainError.Invalid("C toolchain pack does not cover `{target.triple}`"))

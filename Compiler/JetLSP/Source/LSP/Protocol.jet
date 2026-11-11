@@ -22,7 +22,7 @@ lsp_member: fn(value: Dyn, key: String) -> Dyn? Never! {
                 if entry.key == key -> return Val(entry.value.copy())
             }
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {}
     }
     None
 }
@@ -45,7 +45,7 @@ lsp_param: fn(params: Dyn?, key: String) -> Dyn? Never! {
 lsp_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> true
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> false
     }
 }
 
@@ -62,14 +62,14 @@ lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
     if lsp_member(message, "id") == .Val(id) {
         valid: if id == {
             .Null | .Text(_) -> true
-            else -> foundation_json_integer(id) != None
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> foundation_json_integer(id) != None
         }
         if !valid -> return Err(lsp_invalid_request())
     }
     if lsp_member(message, "params") == .Val(params) {
         if params == {
             .Array(_) | .Object(_) -> {}
-            else -> { return Err(lsp_invalid_request()) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { return Err(lsp_invalid_request()) }
         }
     }
     Ok(message)

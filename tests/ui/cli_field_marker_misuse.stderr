@@ -1,26 +1,26 @@
-Error [jet.UnmappedCliMarker]: `#Short` has no CLI mapping for field `port`
+Error [jet.UnmappedCliMarker]: `#Arg` has no CLI mapping for field `port`
   --> tests/ui/cli_field_marker_misuse.jet:2:6
     |
-  2 |     #Short("p") port: Int
-    |      ^^^^^
- Why: `#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.
+  2 |     #Arg(short: "p") port: Int
+    |      ^^^
+ Why: `#Arg` describes a generated command input, but this struct is not `#CLI`.
  Fix: Remove the marker, or mark the command-input struct `#CLI`
 More: jet-lang.dev/e/E1319
 
-Error [jet.InvalidShortName]: `#Short("port")` is not a one-letter option
-  --> tests/ui/cli_field_marker_misuse.jet:7:6
+Error [jet.InvalidShortName]: `#Arg(short: "port")` is not a one-letter option
+  --> tests/ui/cli_field_marker_misuse.jet:7:17
     |
-  7 |     #Short("port") port: Int
-    |      ^^^^^
+  7 |     #Arg(short: "port") port: Int
+    |                 ^^^^^^
  Why: The shared command parser treats a short option as one ASCII letter.
- Fix: Use one letter, such as `#Short("p")`
+ Fix: Use one letter, such as `#Arg(short: "p")`
 More: jet-lang.dev/e/E1318
 
-Error [jet.UnmappedCliMarker]: `#Env` has no CLI mapping for field `verbose`
-  --> tests/ui/cli_field_marker_misuse.jet:8:6
+Error [jet.UnmappedCliMarker]: `#Arg(env:)` has no CLI mapping for field `verbose`
+  --> tests/ui/cli_field_marker_misuse.jet:8:15
     |
-  8 |     #Env("VERBOSE") verbose: Bool
-    |      ^^^
- Why: A `Bool` command field is a presence flag, while `#Env` lowers to a value option.
- Fix: Remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
+  8 |     #Arg(env: "VERBOSE") verbose: Bool
+    |               ^^^^^^^^^
+ Why: A `Bool` command field is a presence flag, while `env:` lowers to a value option.
+ Fix: Remove `env:`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
 More: jet-lang.dev/e/E1319

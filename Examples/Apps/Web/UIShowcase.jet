@@ -12,11 +12,11 @@ use {
 }
 // Native and browser entry points compose the same canonical UiNode tree.
 // Browser-side wiring converts typed Color values to real CSS hex colors.
-// `Color` is a plain r/g/b struct — same flat shape as 191_ui_typed_style.jet.
+// `Color` is a plain r/g/b struct — same flat shape as Apps/UI/UITypedStyle.jet.
 // `to_hex` is a REAL conversion (integer arithmetic, no shortcuts) that runs
 // in the browser and feeds `ui.node_color`'s paint pipeline directly: this is
-// the "typed style drives the actual paint" wiring 191 could only gesture at
-// (there, `Style`/`Color` were built but never reached the backend).
+// the "typed style drives the actual paint" wiring UITypedStyle.jet could only
+// gesture at (there, `Style`/`Color` were built but never reached the backend).
 //
 // Organization note: tried grouping every browser-side function into ONE
 // `#Target(JS) browser: module { ... }` instead of a `#Target(JS)` tag on each one —
@@ -38,12 +38,12 @@ use {
 // Jet `Int / Int` truncates). Comparisons/sub/mul are exact under both.
 // `stat_card` builds typed data and `paint_stat_card` turns it into a UiNode.
 // ── Phase 5: motion — smoothstep tween, pure function of elapsed time ─────
-// Identical shape to 193_ui_motion.jet's `tween`: no imperative frame tick,
+// Identical shape to Apps/UI/UIMotion.jet's `tween`: no imperative frame tick,
 // just an eased interpolation of (from, to, elapsed, duration).
 // ── Phase 7: the real reactive/DOM dashboard ───────────────────────────────
 // Two independent entry points, each returning a `Signal` the host page
 // keeps and drives directly (`.get()`/`.set()`) — the same real
-// `jetDom.makeSignal` object 195_ui_web_reactive.jet's `reactive.signal`
+// `jetDom.makeSignal` object UIWebReactive.jet's `reactive.signal`
 // compiles to, not a lookalike. `init_app` paints the two static stat cards
 // once and wires a `Signal<Int>` boost counter through `reactive_render` (the
 // counter box repaints itself whenever the returned signal changes — real

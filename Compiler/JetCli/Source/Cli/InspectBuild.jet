@@ -11,7 +11,7 @@ use {
     jet_foundation.[
         BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, Span,
         build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
-        diagnostic_render_all,
+        diagnostic_render_all, JET_COMPTIME_TOOLCHAIN_PREFIX,
     ]
     core.build.[BuildGraph, BuildGraphNode]
     build_files: core.files
@@ -354,7 +354,7 @@ jet_cli_workspace_index_of: fn(file: String, color: Bool) -[FS]> JetCLIWorkspace
             if (build_files.realpath(path) ?? path) != canonical -> return None
             return Val(JetCLIWorkspaceIndex{root: root, path: path})
         }
-        else -> return None
+        .Absent | .Authority(_) | .Failed(_) -> return None
     }
 }
 
@@ -555,7 +555,7 @@ jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
         .Char(character) -> Val(FactValue.Char{value: character})
         .Text(text) -> Val(FactValue.Text{value: text.copy()})
         .Enum(variant) -> Val(FactValue.Enum{variant: variant.copy()})
-        else -> None
+        .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> None
     }
 }
 
@@ -598,6 +598,35 @@ jet_cli_lock_effect_rows: fn(file: String, result: JetDriverCompileResult, snaps
     loop gain in gains {
         loop reach in gain.reaches -> recorded.stderr = "{recorded.stderr}{pkg_lock_widened_note(gain.name, reach)}"
     }
+    recorded
+}
+
+// After a build's checks pass: record each file the compile read through
+// `embed_file`, `embed_bytes` or `find`, and each glob a `find` walked (the
+// compile's `comptime_inputs`), as a `[[comptime_inputs]]` row of the lock
+// of `file`'s project, its path relative to the project root (a toolchain
+// read keeps its `toolchain:` name) and its SHA-256, a glob's the digest of
+// its sorted membership, upserted by path so an edited file's row takes its
+// new digest (pkg_lock_record_generated_inputs). A loose file, a compile
+// that read none and a `locked` build record nothing.
+jet_cli_lock_comptime_inputs: fn(file: String, result: JetDriverCompileResult, locked: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
+    recorded := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if locked || result.comptime_inputs.len() == 0 -> return recorded
+    root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? return recorded
+    physical: build_files.realpath(root) ?? root.copy()
+    inputs := [ComptimeInput]{}
+    loop input in result.comptime_inputs {
+        if input.path.starts_with(JET_COMPTIME_TOOLCHAIN_PREFIX) {
+            inputs.push(ComptimeInput{path: input.path.copy(), hash: "sha256:{input.sha256}"})
+            next
+        }
+        read: build_files.realpath(input.file) ?? input.file.copy()
+        if !read.starts_with("{physical}/") -> next
+        inputs.push(ComptimeInput{path: read.slice(physical.len() + 1..<read.len()), hash: "sha256:{input.sha256}"})
+    }
+    if inputs.len() == 0 -> return recorded
+    stamp: pkg_lock_build_stamp(root, false) ?? return jet_cli_lock_refusal(err, color)
+    if pkg_lock_record_generated_inputs(root, inputs, false, stamp) == .Err(error) -> return jet_cli_lock_refusal(error, color)
     recorded
 }
 

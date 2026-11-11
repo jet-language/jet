@@ -95,11 +95,11 @@ PackageGenerationStage: struct {
     publish: fn(self, destination: String) CLIError! -[FS]> {
         files.rename(self.path, destination)
     }
-}
 
-impl PackageGenerationStage.Close {
-    close: fn(&&self) -[FS]> {
-        if files.exists(self.path) -> files.remove_all(self.path).drop("an unpublished generation stage is scratch")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            if files.exists(self.path) -> files.remove_all(self.path).drop("an unpublished generation stage is scratch")
+        }
     }
 }
 

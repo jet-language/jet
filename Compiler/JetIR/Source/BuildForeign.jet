@@ -8,7 +8,7 @@
 use {
     jet_backend.[x64_assemble_template]
     jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find, name_rows_set, name_rows_value, type_carrier_identity]
-    jet_sema.[SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
+    jet_sema.[SEMA_GUEST_RUNTIME_ABI, SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
 }
 
 // A C handle type a foreign function names (IRProgram.foreign_handles): the
@@ -137,6 +137,32 @@ ir_foreign_comptime_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign:
     ir_unreachable_value(m, p, b, returned)
 }
 
+// A call of a jet.runtime binding (#6615): its checked arguments to the
+// runtime export it names, through the route its Jet signature projects
+// (BuildRoutes.jet ir_route_of_signature), lowered as a Core call's route
+// is; in a build invocation's `#Impure` block between the host marks
+// Impure.enter and Impure.leave. A Word argument crosses as its native I64,
+// any other one borrowed.
+ir_runtime_binding_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() -> return ir_fail_slot(b, span, "jet.runtime call {foreign.name} with {args.len()} arguments")
+    params: loop param in foreign.params -> param.ty.copy()
+    route: ir_route_of_signature(foreign.symbol, params, foreign.return_type) ?? return ir_fail_slot(b, span, "jet.runtime function {foreign.name} has a type no runtime route carries")
+    borrow_mask: loop carrier in route.params -> carrier != IRRouteCarrier.Word
+    values: loop arg in args -> arg.value
+    ty: foreign.return_type.copy() ?? Type.Named{name: "Unit"}
+    impure: p.invocation && b.impure > 0
+    if impure {
+        _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
+    }
+    ir_route_ambient_refusals(m, p, b, foreign.symbol, span)
+    result: ir_route_call_args(m, p, b, foreign.symbol, Val(route), values, borrow_mask, ty, [String]{}, false, span)
+    if ir_failed(b) -> return -1
+    if impure {
+        _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
+    }
+    result
+}
+
 // A call of the foreign function `foreign`: a direct C function (C language
 // and ABI, no callback or undo adapter) whose arguments cross as C scalars,
 // an exact Int as its I64 (jet_int_owned_to_i64), a String as a packed
@@ -151,6 +177,9 @@ ir_foreign_comptime_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign:
 // elements, as many as its written length parameter holds, copied into a new
 // List (the array stays the C library's).
 ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    // A jet.runtime binding is a runtime route, as a Core call's is: the
+    // runtime is every build's, compile-time evaluation included.
+    if foreign.abi == SEMA_GUEST_RUNTIME_ABI -> return ir_runtime_binding_call(m, p, b, foreign, args, span)
     if p.comptime_values || p.invocation -> return ir_foreign_comptime_stop(m, p, b, foreign)
     if foreign.language == "asm" -> return ir_asm_call(m, p, b, foreign, args, span)
     if foreign.language.starts_with("rust:") -> return ir_rust_foreign_call(m, p, b, foreign, args, span)
@@ -178,7 +207,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                     result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
                     result_width = ir_foreign_c_width(m, p, result_element) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no C array layout")
                 }
-                else -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                .Unit | .Float32 | .Char -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
             }
         }
     }
@@ -223,7 +252,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                     }
                     if !ir_foreign_plain_struct(m, p, row) -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
                 }
-                else -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                .Unit | .Bool | .Int | .Float32 | .Char | .String -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
             }
             address: ir_place_address(m, p, b, arg.value, backs, span)
             if ir_failed(b) -> return -1
@@ -293,7 +322,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                 staged_sizes.push(bytes)
                 lowered.push(buffer)
             }
-            else -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+            .Unit | .Float32 -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
         }
     }
     if result_element >= 0 && length_address < 0 -> return ir_fail_slot(b, span, "foreign C result {foreign.name} has no written length parameter")
@@ -326,7 +355,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
             length: ir_load_at(m, b, length_address, 0, length_row)
             dst = ir_foreign_list_result(m, b, result_row, result_element, result_width, raw, length)
         }
-        else -> dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
+        .Word | .Float | .Float32 | .Char | .Pointer -> dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
     }
     loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     loop (index, pointer) in strings {
@@ -354,7 +383,7 @@ ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if m.types[row].kind == {
         .Word | .Float | .Float32 | .Bool -> return Val(m.types[row].size)
         .Aggregate -> {}
-        else -> return None
+        .Unit | .Int | .Char | .String | .Pointer -> return None
     }
     ty: ir_untag(m.types[row].ty)
     nominal: ir_nominal_name(ty) ?? return None
@@ -367,7 +396,7 @@ ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
         if member.boxed || ir_enum_def(m, p, member.ty) != None -> return None
         if m.types[member.ty].kind == {
             .Word | .Float | .Float32 | .Bool -> {}
-            else -> return None
+            .Unit | .Int | .Char | .String | .Pointer | .Aggregate -> return None
         }
         reach: member.offset + m.types[member.ty].size
         if reach > end -> end = reach
@@ -477,7 +506,7 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
                 ir_emit(b.f, IROp.Store, -1, slots, base + 8, data, b.line)
                 ir_emit(b.f, IROp.Store, -1, slots, base + 16, length, b.line)
             }
-            else -> ir_emit(b.f, IROp.Store, -1, slots, base, value, b.line)
+            .Unit | .Bool | .Word | .Float | .Float32 | .Char | .Pointer | .Aggregate -> ir_emit(b.f, IROp.Store, -1, slots, base, value, b.line)
         }
     }
     argc: ir_word_const(m, b, args.len())
@@ -503,7 +532,7 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
                 dst = ir_runtime(m, b, "jet_rt_string_from_static", [Int]{data, length}, result_row)
                 _: ir_runtime(m, b, "jet_ffi_cabi_free", [Int]{data, length}, -1)
             }
-            else -> dst = ir_load_at(m, b, out, 0, result_row)
+            .Unit | .Bool | .Word | .Float | .Float32 | .Char | .Pointer | .Aggregate -> dst = ir_load_at(m, b, out, 0, result_row)
         }
     }
     loop value in values -> ir_release(m, b, value)
@@ -518,7 +547,7 @@ ir_rust_slot_crosses: fn(m: &IRModule, row: Int) -> Bool Never! {
     if m.types[row].kind == {
         .Int | .Bool | .Float | .Float32 | .Char | .String -> true
         .Word -> ir_untag(m.types[row].ty) == .IntN(_, _)
-        else -> false
+        .Unit | .Pointer | .Aggregate -> false
     }
 }
 
@@ -536,7 +565,7 @@ ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
             .Aggregate -> {
                 if !ir_foreign_plain_struct(m, p, member.ty) -> return false
             }
-            else -> return false
+            .Unit | .Int | .Char | .String | .Pointer -> return false
         }
     }
     true
@@ -557,7 +586,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
         if m.types[row].kind == {
             .Int -> leaf_params.push(word_row)
             .Word | .Pointer -> leaf_params.push(row)
-            else -> return ir_fail_slot(b, span, "inline asm: parameter {param.name} is not a machine word")
+            .Unit | .Bool | .Float | .Float32 | .Char | .String | .Aggregate -> return ir_fail_slot(b, span, "inline asm: parameter {param.name} is not a machine word")
         }
         if param.convention == AccessConvention.Write -> return ir_fail_slot(b, span, "inline asm: write parameters are unsupported")
         rows.push(row)
@@ -571,7 +600,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
             if m.types[result_row].kind == {
                 .Int -> leaf_result = word_row
                 .Word | .Pointer -> leaf_result = result_row
-                else -> return ir_fail_slot(b, span, "inline asm: result is not a machine word")
+                .Unit | .Bool | .Float | .Float32 | .Char | .String | .Aggregate -> return ir_fail_slot(b, span, "inline asm: result is not a machine word")
             }
         }
     }

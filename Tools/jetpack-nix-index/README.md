@@ -104,8 +104,22 @@ Manifest generation verifies each compressed target's filename digest,
 signature sidecar, and `released_unix` report, then writes the manifest and its
 `.sig.request`. It marks the newest twelve revisions per system discoverable;
 older immutable targets remain addressable by exact revision. Signature and
-upload executables are external. [`publish.sh`](publish.sh) signs and uploads
-immutable targets first, then the manifest, and never contains a private key.
+upload executables are external. [`Publish.jet`](Publish.jet) signs and uploads
+immutable targets first, then the manifest, and never contains a private key:
+
+```sh
+jet Tools/jetpack-nix-index/Publish.jet \
+  --target-root <publication-staging> \
+  --manifest <publication-staging>/manifest.json \
+  --destination <upload-root> \
+  --sign-index <index-signer> \
+  --sign-manifest <manifest-signer> \
+  --upload <uploader>
+```
+
+A signer runs as `SIGNER REQUEST OUTPUT` and the uploader as
+`UPLOAD SOURCE DESTINATION`; `--manifest-request` defaults to the manifest's
+`.sig.request`.
 
 The client-side cache and manifest acceptance rules are specified in
 [`Docs/spec/packaging/index-cache.md`](../../Docs/spec/packaging/index-cache.md).

@@ -1,15 +1,19 @@
-OrdinaryFirst: struct { value: Int }
-impl OrdinaryFirst {
+OrdinaryFirst: struct {
+    value: Int
+
     mul: fn(self, rhs: Int) -> Int { return rhs }
+
+    impl Mul(Int) {
+        mul: fn(self, rhs: Int) -> Int { return rhs }
+    }
 }
-impl OrdinaryFirst.Mul(Int) {
-    mul: fn(self, rhs: Int) -> Int { return rhs }
-}
-HookFirst: struct { value: Int }
-impl HookFirst.Mul(Int) {
-    mul: fn(self, rhs: Int) -> Int { return rhs }
-}
-impl HookFirst {
+HookFirst: struct {
+    value: Int
+
+    impl Mul(Int) {
+        mul: fn(self, rhs: Int) -> Int { return rhs }
+    }
+
     mul: fn(self, rhs: Int) -> Int { return rhs }
 }
 #Test("operator_method_clash_fixtures") {}

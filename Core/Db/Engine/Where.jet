@@ -1370,34 +1370,34 @@ CoveringIndexWalker: struct {
     has_expr: Bool
     b_expr: Bool
     b_unidx: Bool
-}
 
-impl CoveringIndexWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        op: a.exprs[e].op
-        if op == tk.TK_COLUMN || op == tk.TK_AGG_COLUMN {
-            if a.exprs[e].itable != self.cur -> return ast.WRC_CONTINUE
-            loop c in self.cols {
-                if c == a.exprs[e].icolumn -> return ast.WRC_CONTINUE
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            op: a.exprs[e].op
+            if op == tk.TK_COLUMN || op == tk.TK_AGG_COLUMN {
+                if a.exprs[e].itable != self.cur -> return ast.WRC_CONTINUE
+                loop c in self.cols {
+                    if c == a.exprs[e].icolumn -> return ast.WRC_CONTINUE
+                }
+                self.b_unidx = true
+                return ast.WRC_ABORT
             }
-            self.b_unidx = true
-            return ast.WRC_ABORT
-        }
-        if self.has_expr {
-            loop i in 0..<self.cols.len() {
-                if self.cols[i] == conn.XN_EXPR && ast.expr_compare(a, e, self.col_exprs[i], self.cur) == 0 {
-                    self.b_expr = true
-                    return ast.WRC_PRUNE
+            if self.has_expr {
+                loop i in 0..<self.cols.len() {
+                    if self.cols[i] == conn.XN_EXPR && ast.expr_compare(a, e, self.col_exprs[i], self.cur) == 0 {
+                        self.b_expr = true
+                        return ast.WRC_PRUNE
+                    }
                 }
             }
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // whereIsCoveringIndex: 0, WHERE_IDX_ONLY or WHERE_EXPRIDX for index ix on
@@ -2362,24 +2362,24 @@ short_cut: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
 // exprNodeIsDeterministic, with sqlite3SelectWalkFail for subqueries.
 DeterministicWalker: struct {
     code: Int
-}
 
-impl DeterministicWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_FUNCTION && !ast.has(a, e, ast.EP_CONST_FUNC) {
-            self.code = 0
-            return ast.WRC_ABORT
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_FUNCTION && !ast.has(a, e, ast.EP_CONST_FUNC) {
+                self.code = 0
+                return ast.WRC_ABORT
+            }
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+            self.code = 0
+            ast.WRC_ABORT
+        }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { true }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
-        self.code = 0
-        ast.WRC_ABORT
-    }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // exprIsDeterministic: `e` calls no non-deterministic function.

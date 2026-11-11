@@ -1,0 +1,26 @@
+# #6281 c154: `-[!Panic]>` holds only for an
+# index with a proving fact. The Die interval proves `faces[roll.raw() - 1]`
+# is inside six faces: `jet prove` reports that one obligation proved, and the
+# function checks and runs on every tier. An unproved index is E0749
+# (tests/ui/effects/unproved_index_denies_panic_is_e0749).
+fixture: fixed_list_index_proof_discharges_panic_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step prove: jet prove main.jet --lens solver
+exit: 0
+stdout: ~ "SOLVER   proved 1; disproved 0; unknown 0; unavailable 0" # the derived interval is the one obligation
+stdout: ~ "  proved  fixed_index_bounds at main.jet:5:60" # located at `faces[roll.raw() - 1]`
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "one\nsix\n"
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "one\nsix\n"
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "one\nsix\n"
+stderr: empty

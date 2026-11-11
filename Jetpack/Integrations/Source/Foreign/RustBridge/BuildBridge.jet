@@ -9,7 +9,7 @@
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_with_detail]
     jetpack_foundation.[
-        NativeSandboxMount, NativeSandboxOutput, foundation_native_sandbox_status,
+        NATIVE_SANDBOX_FIX, NativeSandboxMount, NativeSandboxOutput, foundation_native_sandbox_status,
         foundation_run_native_sandboxed_with_mounts,
     ]
     files: core.files
@@ -52,7 +52,7 @@ FFIBuildLock: struct {
                 .Err(error) -> {
                     if error == {
                         .AlreadyExists(_) -> {}
-                        else -> return Err(pkg_ffi_tool_error("couldn't lock the FFI cache folder: {error}"))
+                        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(pkg_ffi_tool_error("couldn't lock the FFI cache folder: {error}"))
                     }
                 }
             }
@@ -66,11 +66,11 @@ FFIBuildLock: struct {
             time.sleep(time.duration_ms(50))
         }
     }
-}
 
-impl FFIBuildLock.Close {
-    close: fn(&&self) -[FS]> {
-        files.remove_dir(self.dir).drop("the lock directory may already be gone")
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            files.remove_dir(self.dir).drop("the lock directory may already be gone")
+        }
     }
 }
 
@@ -110,7 +110,7 @@ pkg_ffi_first_dependency: fn(deps: [String: String]) -> String Never! {
 }
 
 pkg_ffi_sandbox_unavailable: fn(detail: String) -> RustBridgeError Never! {
-    pkg_ffi_single_error(diagnostic_from_registry("E1275", None, "build sandboxing is required but unavailable", detail, "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"))
+    pkg_ffi_single_error(diagnostic_from_registry("E1275", None, "build sandboxing is required but unavailable", detail, "{NATIVE_SANDBOX_FIX}; Jet will not run Cargo unsandboxed"))
 }
 
 pkg_ffi_build_bridge_full: fn(request: RustBridgeBuild) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {

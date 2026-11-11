@@ -16,13 +16,15 @@ use {
     pap_sys: core.sys
 }
 
-PapFixtureRoot: struct { path: String }
-impl PapFixtureRoot.Close {
-    close: fn(&&self) -[FS]> {
-        pap_files.remove_all(self.path).drop("test root cleanup")
+PapFixtureRoot: struct {
+    path: String
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            pap_files.remove_all(self.path).drop("test root cleanup")
+        }
     }
 }
-
 pap_root: fn(label: String) -[FS, Env]> String {
     root: pap_files.join(pap_sys.temp_dir(), "jet-public-api-{label}-{pap_process.current_pid()}")
     pap_files.remove_all(root).drop("a stale test root may be absent")

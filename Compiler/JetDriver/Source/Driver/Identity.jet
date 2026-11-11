@@ -222,11 +222,11 @@ JetDriverCoreSourceReader: trait {
 }
 
 jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
-    shared JetDriverCoreText{file: "", reader: None, text: Val(text)}
+    Shared{JetDriverCoreText{file: "", reader: None, text: Val(text)}}
 }
 
 jet_driver_core_text_file: fn(file: String, &&reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
-    shared JetDriverCoreText{file: file, reader: Val(reader), text: None}
+    Shared{JetDriverCoreText{file: file, reader: Val(reader), text: None}}
 }
 
 // Selected build output is compiler-produced source, never a fabricated
@@ -300,7 +300,13 @@ JetDriverCompileRequest: struct {
     // A shipped artifact (`jet build`): sema rejects every remaining `debug`
     // trace (E3405), as a release-profile compile does.
     artifact_build: Bool{false}
-    // The OS an OS-less build option selects (`os: web`), which `$build.os`
+    // `dead_code: remove` on the executable route (`jet build`, `jet run`, a
+    // script, `jet dev`): the entry package's top-level bodies lower only when
+    // its roots reach them (Pipeline.jet jet_driver_entry_root_keys), as a
+    // dependency's do. false lowers every one, as `dead_code: keep` and every
+    // other compile do.
+    lower_reached_only: Bool{false}
+    // The OS an OS-less build option selects (`os: web`), which `#build.target.os`
     // folds on instead of the host triple's; empty for a native build.
     build_os: String{""}
     capture_build_program: Bool{false}
@@ -323,7 +329,7 @@ JetDriverCompileRequest: struct {
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
     // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host:
-    // the provenance `$build.stamp.*` folds. None keeps the default stamp
+    // the provenance `#build.stamp.*` folds. None keeps the default stamp
     // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
     // The `[[build.contribution]]` rows of that lock: what
@@ -333,6 +339,32 @@ JetDriverCompileRequest: struct {
     // The `--set name=value` writers, the command-line layer of that fold
     // (BuildFactChain.jet).
     setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    // The toolchain tree `toolchain:` comptime inputs read: the tree this
+    // compile takes Core from, and the reader of which packages may read it
+    // (JetDriverToolchainTree). None: jet compiles against its built-in Core,
+    // and every `toolchain:` read refuses (E0945).
+    toolchain_tree: Shared<JetDriverToolchainTree>?{None}
+}
+
+// The toolchain tree of a compile's `toolchain:` comptime inputs:
+// `root`, its physical path, which every read is held
+// beneath (no-follow), and the package directories admitted to read it, the
+// toolchain's own packages. `reader` names them on the first `toolchain:`
+// read, which keeps them in `packages`, so a compile that reads none never
+// walks the toolchain's manifests. A file reads the tree when the package it
+// is in (its nearest package directory) is one of them.
+JetDriverToolchainTree: struct {
+    root: String
+    reader: JetDriverToolchainPackageReader
+    packages: [String]?
+}
+
+// The host's census of the toolchain's own packages under `root` (the
+// physical directory of each), and the package directory of a physical file:
+// the nearest directory above it, below `root`, holding a package.jet.
+JetDriverToolchainPackageReader: trait {
+    packages: fn(self, root: String) -[FS.Read]> [String]
+    package_of: fn(self, root: String, file: String) -[FS.Read]> String?
 }
 
 JetDriverGatePolicy: struct {
@@ -414,7 +446,7 @@ JetDriverSharedBuildInputs: struct {
     }
 }
 jet_driver_shared_build_inputs: fn(transport: &&JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
-    JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: transport.move()}}
+    JetDriverSharedBuildInputs{storage: Shared{JetDriverBuildInputsStorage{transport: transport.move()}}}
 }
 JetDriverBuildHTTPInputsStorage: struct { transport: JetDriverBuildHTTPInputs }
 JetDriverSharedBuildHTTPInputs: struct {
@@ -429,7 +461,7 @@ JetDriverSharedBuildHTTPInputs: struct {
     }
 }
 jet_driver_shared_build_http_inputs: fn(transport: &&JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
-    JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: transport.move()}}
+    JetDriverSharedBuildHTTPInputs{storage: Shared{JetDriverBuildHTTPInputsStorage{transport: transport.move()}}}
 }
 JetDriverBuildHTTPResponse: struct {
     status: Int
@@ -528,6 +560,9 @@ JetDriverPackageInfo: struct {
     policy_expert: Bool?{None}
     // `policy.lints.deny`: lint names that fail this package's build (E1293).
     policy_lints_deny: [String]{[String]{}}
+    // `policy.harden`: the package's fixed-timing code starts only on a
+    // confirmed host (jet_driver_entry_harden).
+    policy_harden: Bool{false}
     // The Package comes from a leading inline `package: { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
@@ -538,7 +573,7 @@ JetDriverPackageInfo: struct {
     // that declares a Library and no Executable has no `run: fn` (E0625).
     outputs: JetDriverPackageOutputs
     // The declared `settings:` and the values `build:` profiles give them
-    // (`$build.settings.*`, jet_driver_build_facts).
+    // (`#build.settings.*`, jet_driver_build_facts).
     settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
     profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
     // `boundaries: { deny: [...] }`: denied import edges
@@ -727,9 +762,16 @@ JetDriverCompileResult: struct {
     allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
     // The entry package's `log:` level filter (jet_driver_entry_log).
     log_filter: String{""}
+    // The entry package's `policy.harden` (jet_driver_entry_harden).
+    harden: Bool{false}
     // A compile through assembly: the encoded JetCommandSchema record its
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
     command_record: [U8]{[U8]{}}
+    // Every comptime input the compile read (`embed_file`, `embed_bytes`,
+    // `find`), in read order, when the host logged them (JetCli Request.jet
+    // jet_cli_compile_executable): the `jet build` store key and `jet dev`'s
+    // change test cover each, so editing one rebuilds.
+    comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
 }
 
 // The `allocator:` policy of the entry package of `load`
@@ -748,6 +790,14 @@ jet_driver_entry_log: fn(load: JetDriverLoadResult) -> String Never! {
         if package.identity == load.package_identity -> return package.log_filter.copy()
     }
     ""
+}
+
+// The `policy.harden` of the entry package of `load`.
+jet_driver_entry_harden: fn(load: JetDriverLoadResult) -> Bool Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.policy_harden
+    }
+    false
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -866,11 +916,6 @@ jet_driver_row_diagnostic: fn(code: String, span: Span?) -> Diagnostic {
 }
 
 jet_driver_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic: diagnostic_from_registry(code, span, what, why, fix)
-    diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
-}
-
-jet_driver_lint_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic: diagnostic_from_registry(code, span, what, why, fix)
     diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
 }

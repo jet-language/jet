@@ -430,7 +430,7 @@ recipe_debug_write_atomic: fn(path: String, bytes: [U8]) StoreError! -[FS, Env, 
         .Ok(info) -> {
             if info.is_symlink -> return Err(StoreError.InvalidData("build log destination is a symlink"))
         }
-        else -> {}
+        .Err(_) -> {}
     }
     name: files.basename(path)
     if name == "" -> return Err(StoreError.Other("build log path has no file name"))

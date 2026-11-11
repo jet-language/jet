@@ -144,28 +144,28 @@ trust_json_object: fn(value: Dyn) -> [String: Dyn]? Never! {
             loop pair in fields -> members[pair.key] = pair.value
             Val(members)
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
 trust_json_array: fn(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> None
     }
 }
 
 trust_json_string: fn(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
 trust_json_bool: fn(value: Dyn) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
-        else -> None
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -269,7 +269,7 @@ trust_flake_resolve_reference: fn(value: Dyn, nodes: [String: Dyn], path: [Flake
             return Ok(Val(name))
         }
         .Array(segments) -> return trust_flake_resolve_follow_path(segments, nodes, path, start_node)
-        else -> return Err(TrustError.IO("flake.lock node reference must be a node name or node list"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return Err(TrustError.IO("flake.lock node reference must be a node name or node list"))
     }
 }
 

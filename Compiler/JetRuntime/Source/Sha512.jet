@@ -109,7 +109,7 @@ rt_sha512_parts3_byte: fn(left: I64, left_len: I64, right: I64, right_len: I64, 
     if (at < length) -> return rt_text_byte(wrapping(wrapping(wrapping(third + at) - left_len) - right_len))
     return rt_sha512_byte(I64{1}, length, at, end)
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 rt_sha2_64_parts3: fn(input: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64, short: Bool) {
     if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || left_len > I64{9223372036854775671} - right_len || left_len + right_len > I64{9223372036854775671} - third_len) {
         jet_rt_unreachable(I64{0}, I64{0})

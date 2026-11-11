@@ -10,6 +10,15 @@
 // jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF: "Exec.Args"
+// Ending the program's own process, a leaf of `Exec`.
+AUTHORITY_EXEC_EXIT_LEAF: "Exec.Exit"
+
+// Whether `right` is an `Exec` leaf that acts on the program's own process,
+// reading its arguments or ending it, rather than starting other programs.
+authority_own_process_leaf: fn(right: String) -> Bool Never! {
+    right == AUTHORITY_EXEC_ARGS_LEAF || right == AUTHORITY_EXEC_EXIT_LEAF
+}
+
 // The beginner floor every program holds: print, allocate, and read
 // arguments. Never the `Exec` root.
 AUTHORITY_AMBIENT_BASIC_EFFECTS: comptime { [String]{"IO", "Mem.Alloc", AUTHORITY_EXEC_ARGS_LEAF} }
@@ -56,16 +65,10 @@ authority_holds: fn(rights: [String]) -> [String] Never! {
     out
 }
 
-// Insert one right, keeping the set sorted and duplicate-free.
-authority_holds_insert: fn(holds: &[String], right: String) {
-    if holds.contains(right) -> return
-    holds.push(right.copy())
-    holds.sort()
-}
-
-// Root segment of a dotted right (`FS.Read` -> `FS`).
+// Root segment of a dotted right (`FS.Read` -> `FS`), with any scope
+// argument set aside (`Net("api.example.com")` -> `Net`).
 authority_root: fn(right: String) -> String Never! {
-    parts: right.split(".").to_list()
+    parts: effect_scope_base(right).split(".").to_list()
     if parts.len() == 0 -> return right.copy()
     parts[0]
 }
@@ -91,35 +94,35 @@ authority_parse_root: fn(right: String) -> String? Never! {
     None
 }
 
-// Preserve a right's leaf spelling while normalizing its canonical root.
+// Preserve a right's leaf spelling and scope argument while normalizing its
+// canonical root.
 authority_parse_right: fn(right: String) -> String? Never! {
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
     trimmed := right.trim()
-    root: authority_parse_root(trimmed) ?? return None
+    split: effect_scope_split(trimmed)
+    root: authority_parse_root(split.base) ?? return None
     if root == AUTHORITY_PANIC_ROOT && trimmed != AUTHORITY_PANIC_ROOT -> return None
-    raw: trimmed.bytes()
+    canonical := root.copy()
+    raw: split.base.bytes()
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == 46 {
             leaf: String.from_bytes(raw[index + 1..<raw.len()]) ?? ""
-            return Val("{root}.{leaf}")
+            canonical = "{root}.{leaf}"
+            break
         }
     }
-    Val(root)
+    if split.scope == .Val(scope) -> return Val(effect_scope_name(canonical, scope))
+    Val(canonical)
 }
 
-// A bound covers itself and every descendant in the rights tree.
-// Resource-qualified rights use `:` for hosts and paths (`FS.Read:/data`); a
-// qualified descendant must cross a `/` boundary, so `/data` does not cover
-// `/database`.
+// A bound covers itself and every descendant in the rights tree, and a
+// scoped bound covers by its scope's law (EffectScope.jet): `/data` covers
+// `/data/a.txt` but not `/database`.
 authority_covers: fn(bound: String, right: String) -> Bool Never! {
     canonical_bound: authority_parse_right(bound) ?? bound.trim()
     canonical_right: authority_parse_right(right) ?? right.trim()
     if canonical_right == canonical_bound -> return true
-    if !canonical_right.starts_with(canonical_bound) -> return false
-    qualified: canonical_bound.contains(":")
-    next_byte: Int.from_u8(canonical_right.bytes()[canonical_bound.bytes().len()])
-    if qualified -> return next_byte == 47
-    next_byte == 46 || next_byte == 58 || next_byte == 47
+    effect_scope_covers(canonical_bound, canonical_right)
 }
 
 authority_covers_any: fn(bounds: [String], right: String) -> Bool Never! {
@@ -135,28 +138,11 @@ authority_answer: fn(held: [String], denied: [String], right: String) -> Authori
     AuthorityVerdict.Missing
 }
 
-// An inner scope may only tighten its parent's holds.
-authority_tighten: fn(outer: [String], inner: [String]) -> Bool Never! {
-    loop right in inner {
-        if !authority_covers_any(outer, right) -> return false
-    }
-    true
-}
-
 // Rights in `used` not covered by any held right.
 authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
         if !authority_covers_any(held, right) -> out.push(right.copy())
-    }
-    authority_holds(out)
-}
-
-// Rights in `used` covered by a prohibition or other matching set.
-authority_covered: fn(used: [String], matching: [String]) -> [String] Never! {
-    out := [String]{}
-    loop right in used {
-        if authority_covers_any(matching, right) -> out.push(right.copy())
     }
     authority_holds(out)
 }
@@ -194,8 +180,8 @@ CanonicalAuthority: struct {
     }
 
     // True when this authority can satisfy a host operation declaring
-    // `right`; a resource-qualified hold (`FS.Read:/data`) also satisfies the
-    // unqualified operation (`FS.Read`), bounded by the held descendant.
+    // `right`; a scoped hold (`FS.Read("/data")`) also satisfies the bare
+    // operation (`FS.Read`), bounded by the held scope.
     allows_operation: fn(self, right: String) -> Bool Never! {
         if self.allows(right) -> return true
         loop held in self.holds {

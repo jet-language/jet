@@ -154,12 +154,22 @@ IROp: enum {
 // are proven inline Ints but whose result may not be (OptRange.jet): only
 // the result is tested. IR_OVERFLOW_LEFT and IR_OVERFLOW_RIGHT mark one
 // whose left or right operand alone is proven inline: that operand's test
-// goes, the other's and the result's stay.
+// goes, the other's and the result's stay. IR_OVERFLOW_NONNEG marks an
+// exact Int Div or Rem that wraps as IR_OVERFLOW_WRAP does and whose
+// dividend is also proven nonnegative (OptRange.jet): its truncated quotient
+// needs no correction for a negative dividend (X64Select).
 IR_OVERFLOW_TRAP: 0
 IR_OVERFLOW_WRAP: 1
 IR_OVERFLOW_OPERANDS: 2
 IR_OVERFLOW_LEFT: 3
 IR_OVERFLOW_RIGHT: 4
+IR_OVERFLOW_NONNEG: 5
+
+// Whether overflow policy `c` wraps: the plain machine instruction, with no
+// test of an operand or the result.
+ir_overflow_wraps: fn(c: Int) -> Bool Never! {
+    c == IR_OVERFLOW_WRAP || c == IR_OVERFLOW_NONNEG
+}
 
 // The stop polls (Build.jet ir_stop_poll): after a call, and after a user
 // operation whose slow path can publish a numeric stop.
@@ -247,6 +257,9 @@ IRFunction: struct {
     // The counted loops of this body sema's loop proof covers, as built
     // (ir_range_loop).
     loop_proofs: [IRLoopProof]{[IRLoopProof]{}}
+    // The source line of each masked branch of this body, as built
+    // (BuildMask.jet).
+    masked: [Int]{[Int]{}}
     // Code that runs at most once and off the program's work (Opt.jet
     // ir_opt_mark_cold): optimized for size.
     cold: Bool{false}
@@ -257,6 +270,12 @@ IRFunction: struct {
     // each: the function inlined there and the site it sits in (0: the
     // function's own code). Site s (from 1) is words 2s - 2 and 2s - 1.
     inline_sites: [Int]{[Int]{}}
+    // Per slot, whether it holds a `timing: .Fixed` value: the builder marks
+    // each scalar slot whose checked type carries a fixed tag
+    // (BuildMask.jet ir_fix_slot), a pass that copies a slot copies its bit,
+    // and IR Lint follows the values computed from these (Lint.jet
+    // ir_lint_fixed). ir_slot adds every slot unmarked.
+    slot_fixed: [Bool]{[Bool]{}}
 }
 
 // The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C
@@ -298,6 +317,17 @@ ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
             facts: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
             rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
         }
+    }
+    rows
+}
+
+// One row per masked branch of `m`'s functions (`jet inspect decisions`,
+// taken before the optimizer inlines any): a branch on a `timing: .Fixed`
+// value whose arms both run, the result chosen with a masked select.
+ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
+    rows := [String]{}
+    loop function in m.functions {
+        loop line in function.masked -> rows.push("masked {function.name} {function.source_file}:{line}: both arms run, the result is a masked select")
     }
     rows
 }
@@ -559,6 +589,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
     f.slot_kind.push(kind.copy())
     f.slot_name.push(name)
     f.slot_line.push(line)
+    f.slot_fixed.push(false)
     if kind == .Param -> f.param_count += 1
     id
 }
@@ -759,9 +790,10 @@ ir_op_code: fn(op: IROp) -> Int Never! {
     }
 }
 
-// Text form for dumps and diffs: one line per slot, then one per
-// instruction, indented by structured nesting. Names and data resolve
-// through `m`, so the text is the function's content.
+// Text form for dumps and diffs: one line per slot (a fixed one ends in
+// `fixed`, IRFunction.slot_fixed), then one per instruction, indented by
+// structured nesting. Names and data resolve through `m`, so the text is
+// the function's content.
 ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
     lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={f.result}"}
     if f.asm == .Val(leaf) {
@@ -777,7 +809,8 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
             .Temp -> "temp"
         }
         ty: m.types[f.slot_type[slot]]
-        lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}")
+        fixed: if f.slot_fixed[slot] -> " fixed" else -> ""
+        lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}{fixed}")
     }
     depth := 1
     loop at in 0..<f.op.len() {

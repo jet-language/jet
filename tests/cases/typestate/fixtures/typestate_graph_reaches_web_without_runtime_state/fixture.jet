@@ -1,12 +1,10 @@
 
 Settlement: struct {
     state { Queued, Approved, Settled }
-}
 
-impl Settlement {
-    #Transition(_, Queued) begin: fn() -[]> Settlement { return Settlement{} }
-    #Transition(Queued, Approved) approve: fn(self: &&Settlement) -[]> Settlement { return self }
-    #Transition(Approved, Settled) settle: fn(self: &&Settlement) -[]> Settlement { return self }
+    #State(_ -> Queued) begin: fn() -[]> Settlement { return Settlement{} }
+    #State(Queued -> Approved) approve: fn(self: &&Settlement) -[]> Settlement { return self }
+    #State(Approved -> Settled) settle: fn(self: &&Settlement) -[]> Settlement { return self }
     #State(Settled) report: fn(self) -[]> String { return "settled" }
 }
 

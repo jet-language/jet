@@ -35,7 +35,7 @@ envmodel_is_module_surface: fn(src: String) -> Bool Never! {
     loop item in parsed.program.items {
         if item == {
             .Module(_) -> { return true }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -172,7 +172,7 @@ envmodel_profile_provider_label: fn(source: RefSource, source_name: String, tabl
             if provider != "" -> return provider
             table.provider(source_name).label()
         }
-        else -> source.label()
+        .Github | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary -> source.label()
     }
 }
 

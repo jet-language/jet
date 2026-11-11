@@ -49,7 +49,7 @@ pkg_fetch_lock_error: fn(error: LockError) -> PackageFetchError Never! {
     if error == {
         .Reported(diagnostic) -> return PackageFetchError{diagnostic: diagnostic}
         .IO(_) -> return pkg_fetch_error("E1224", error.message(), "the project lock must retain exact package facts", "check the project lock permissions and run `jet fetch`")
-        else -> {}
+        .Invalid(_) | .UnsupportedVersion(_) | .Incomplete(_) -> {}
     }
     pkg_fetch_error("E1205", error.message(), "the project lock must retain exact package facts", "run `jet fetch` and commit `.jet/lock`")
 }

@@ -137,7 +137,7 @@ run: fn() {
                 .Int(number) -> number
                 .Float(number) -> Int.from_float(number) ?? panic("Tower card JSON num is not an integer")
                 .Number(number) -> Int.parse(number) ?? panic("Tower card JSON num is not an integer: {number}")
-                else -> panic("Tower card JSON must contain a numeric num")
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Tower card JSON must contain a numeric num")
             }
             expected_num: audit_card_number(card)
             assert(resolved == expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")

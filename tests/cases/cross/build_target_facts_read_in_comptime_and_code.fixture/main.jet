@@ -1,0 +1,23 @@
+// `#build.target.*` reads the facts of the machine the build targets, in a
+// `comptime if` and in code; `core.target` declares the same facts for each
+// machine, with the effects it denies derived from the services it lacks.
+use core.target.[GPU, LinuxX64, MacOSArm64, Machine, Web, WindowsX64]
+
+show: fn<M: Machine>(label: String) {
+    layout: M.facts.layout
+    print("{label}: {M.facts.triple} pointer {layout.pointer_bits} word {layout.word_bits} line {layout.cache_line} cpu {M.facts.cpu_features} row {M.facts.row()}")
+}
+
+run: fn() {
+    comptime if #build.target.layout.pointer_bits == 64 {
+        print("64-bit pointers")
+    } else {
+        print("32-bit pointers")
+    }
+    print("{#build.target.triple} {#build.target.os} word {#build.target.layout.word_bits} line {#build.target.layout.cache_line} cpu {#build.target.cpu_features}")
+    show<LinuxX64>("linux")
+    show<MacOSArm64>("macos")
+    show<WindowsX64>("windows")
+    show<Web>("web")
+    show<GPU>("gpu")
+}

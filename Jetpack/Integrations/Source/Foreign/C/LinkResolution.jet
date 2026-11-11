@@ -132,7 +132,7 @@ pkg_cffi_generated_link_language: fn(lib: String) -> ForeignLanguage? Never! {
     loop language in ForeignLanguage.all() {
         if language == {
             .C | .Asm | .Rust | .Swift -> next
-            else -> {}
+            .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Cpp | .Py | .Octave | .JS -> {}
         }
         if lib.starts_with(language.bridge_prefix()) -> return Val(language)
     }
@@ -207,7 +207,7 @@ pkg_cffi_generated_link: fn(language: ForeignLanguage, lib: String, actual: Stri
         .Cobol -> pkg_cffi_runtime_link(dir, archive, actual, "cobol", "cob", [String]{static_link, "dylib=cob", "pthread", "dl", "m"})
         .Pascal -> pkg_cffi_pascal_link(lib, dir, archive)
         .Com -> pkg_cffi_com_link(dir, archive, target, static_link)
-        else -> None
+        .C | .Asm | .Rust | .Swift -> None
     }
 }
 
@@ -289,7 +289,7 @@ pkg_cffi_declared_c_dep_for_entry: fn(lib: String, project_root: String, entry: 
     source: facts.deps.get(lib) ?? return None
     if source == {
         .CLib(target) -> Val(target)
-        else -> None
+        .Version(_) | .Provider(_, _) | .Git(_, _) | .Foreign(_, _) -> None
     }
 }
 
@@ -394,7 +394,7 @@ pkg_cffi_realize_nixpkgs: fn(attr: String) -[Exec, Time.Wait]> String ForeignBri
 pkg_cffi_nix_spawn_reason: fn(error: IOError) -> String Never! {
     if error == {
         .NotFound(_) -> "`nix` is not installed"
-        else -> "{error}"
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "{error}"
     }
 }
 

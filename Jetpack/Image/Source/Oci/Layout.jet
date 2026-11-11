@@ -102,7 +102,7 @@ OCINode: enum {
     is_file: fn(self) -> Bool Never! {
         if self == {
             .File(_) -> true
-            else -> false
+            .Missing | .Directory | .Symlink | .Special -> false
         }
     }
 }
@@ -453,7 +453,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
                 image_digest_hex(digest)
                 diff_ids.push(digest)
             }
-            else -> return Err(image_invalid("OCI config diff_ids contains a non-string"))
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err(image_invalid("OCI config diff_ids contains a non-string"))
         }
     }
     if diff_ids.len() != layers.len() -> return Err(image_invalid("OCI config diff_ids do not match manifest layers"))
@@ -519,7 +519,7 @@ image_read_blob: fn(root: String, digest: String) -[FS]> [U8] ImageError! {
     node: image_existing_node(cursor)
     size: if node == {
         .File(bytes) -> bytes
-        else -> -1
+        .Missing | .Directory | .Symlink | .Special -> -1
     }
     if size < 0 || size > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI blob is not a regular file within its limit"))
     bytes: image_read_regular_bounded(cursor, IMAGE_MAX_BLOB_BYTES)
@@ -535,7 +535,7 @@ image_object: fn(value: Dyn, label: String) -> [String: Dyn] ImageError! {
             loop pair in fields -> members[pair.key] = pair.value
             Ok(members)
         }
-        else -> Err(image_invalid("{label} is not an object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Err(image_invalid("{label} is not an object"))
     }
 }
 
@@ -543,7 +543,7 @@ image_array: fn(value: Dyn?, label: String) -> [Dyn] ImageError! {
     found: value ?? return Err(image_invalid("{label} is not an array"))
     if found == {
         .Array(values) -> Ok(values)
-        else -> Err(image_invalid("{label} is not an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(image_invalid("{label} is not an array"))
     }
 }
 
@@ -613,7 +613,7 @@ image_node: fn(path: String) -[FS]> OCINode ImageError! {
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> Ok(OCINode.Missing)
-                else -> Err(ImageError.IO(error))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(ImageError.IO(error))
             }
         }
     }

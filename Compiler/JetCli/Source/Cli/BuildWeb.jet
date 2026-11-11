@@ -99,7 +99,7 @@ jet_cli_dev_web_loop: fn(file: String, color: Bool, options: BuildOptions, threa
     revision := 1
     version_path: "{first.build_dir}/__jet_dev_version"
     if jet_cli_web_write_text(file, color, version_path, "{revision}") == .Val(refused) -> return refused
-    state: shared JetCLIDevWebState{stopped: None}
+    state: Shared{JetCLIDevWebState{stopped: None}}
     mux: cli_server.mux()
     cli_server.static_files(mux, "", first.build_dir)
     fix: "pass a free port with `--port=N`, or leave `--port` out to let the preview listener choose one"

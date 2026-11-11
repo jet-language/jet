@@ -388,7 +388,7 @@ provider_luarocks_validate_archive: fn(path: String) RegistryError! -[FS]> {
     loop entry in listing {
         if entry.kind == {
             .Symlink | .Hardlink -> return Err(RegistryError.Reason("LuaRocks source archives may not contain symbolic or hard links"))
-            else -> {}
+            .File | .Directory | .Special -> {}
         }
     }
 }

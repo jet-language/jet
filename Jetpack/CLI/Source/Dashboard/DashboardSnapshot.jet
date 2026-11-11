@@ -119,7 +119,7 @@ cli_dashboard_forward_keys: fn(sender: Sender<DashboardKey>) -[IO, Time.Wait]> {
             .Char(character) -> cli_dashboard_key_for_text("{character}")
             .Escape -> DashboardKey.Escape
             .Ctrl(character) -> if character == 'c' -> DashboardKey.CtrlC else if character == 'd' -> DashboardKey.EOF else -> DashboardKey.Other
-            else -> DashboardKey.Other
+            .Enter | .Backspace | .Tab | .Delete | .Insert | .Up | .Down | .Left | .Right | .Home | .End | .PageUp | .PageDown | .Shift | .Control | .Alt | .Super | .CapsLock | .F(_) | .Unknown -> DashboardKey.Other
         }
         quits: cli_dashboard_key_quits(key)
         sender.send(key)
@@ -156,7 +156,7 @@ cli_dashboard_key_quits: fn(key: DashboardKey) -> Bool Never! {
 cli_dashboard_key_refreshes: fn(key: DashboardKey) -> Bool Never! {
     if key == {
         .Char(text) -> text == "r" || text == "R"
-        else -> false
+        .Escape | .CtrlC | .EOF | .Idle | .Other -> false
     }
 }
 
@@ -359,7 +359,7 @@ cli_dashboard_backoff: fn(delay: Int) -> Int Never! {
 cli_dashboard_frame_waits: fn(frame: DashboardFrame) -> Bool Never! {
     if frame == {
         .Ready(_) -> false
-        else -> true
+        .Loading | .Busy(_) | .Refreshing(_) -> true
     }
 }
 

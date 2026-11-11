@@ -4,7 +4,7 @@ value_if_list_err: fn(value: Dyn) -> [String] {
     empty := [String]{}
     return if value == {
         .Text(text) -> next(Dyn.Text(text.copy()))
-        else -> empty
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> empty
     }
 }
 run: fn() {

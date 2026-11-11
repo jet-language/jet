@@ -16,6 +16,11 @@
 #   JET_SEED          the admitted seed dir          ($JET_SEEDS/current)
 #   JET_DEV_WORKTREE  the checkout the lander commits to (this checkout; a
 #                     POSIX sh caller that sources this file sets it first)
+#
+# Run by bash rather than sourced (`bash Tools/agent/roots.sh NAME...`), it
+# prints `NAME=value` for each root named, and exits 64 at any other name.
+# Its Jet twin is Tools/agent/orchestrator/Roots.jet (gauntlet tool entry
+# roots-sh).
 
 if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/jet/env" ]; then
   . "${XDG_CONFIG_HOME:-$HOME/.config}/jet/env"
@@ -31,3 +36,13 @@ if [ -z "${JET_DEV_WORKTREE:-}" ] && [ -n "${BASH_VERSION:-}" ]; then
   eval 'JET_DEV_WORKTREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"'
 fi
 export JET_DEV_WORKTREE
+if [ -n "${BASH_VERSION:-}" ]; then
+  eval 'if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    for name in "$@"; do
+      case "$name" in
+        JET_STATE_ROOT|JET_SCRATCH_ROOT|JET_RUN_ROOT|JET_BASE_ROOT|JET_TARGET_ROOT|JET_SEEDS|JET_SEED|JET_DEV_WORKTREE) printf "%s=%s\n" "$name" "${!name}" ;;
+        *) echo "roots: unknown root $name" >&2; exit 64 ;;
+      esac
+    done
+  fi'
+fi

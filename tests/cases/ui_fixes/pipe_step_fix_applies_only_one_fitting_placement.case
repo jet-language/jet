@@ -1,0 +1,23 @@
+# #6281 c166: E0438's fix writes `<>` where it fits. A bare one-parameter
+# function gets `(<>)`, a call one argument short gets `<>` in the one slot
+# whose parameter takes the value, and a name only the value's method fits
+# gets `<>.`. `jet fix` applies only a fix with one placement: `add(10)` has
+# two Int slots, so its error lists both and the step is left for a person.
+fixture: pipe_step_fix_applies_only_one_fitting_placement.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "Fix: Write `<>` where the value goes: `double(<>)`" # a call one argument short, and a bare function name
+stderr: ~ "Fix: Write `<>` where the value goes: `label(<>, 2)`" # only the String slot takes the value
+stderr: ~ "Fix: Write `<>` where the value goes: `<>.trim()`" # a method of the value
+stderr: ~ "Fix: `<>` fits in more than one place: `add(<>, 10)`, `add(10, <>)`; write it where the value goes" # first slot first
+stderr: ~ "5 problems found" # the four one-placement steps and the two-slot step
+step: jet fix run.jet
+exit: 0
+stderr: ~ "applied 4 fixes" # the two-slot step keeps its error
+stderr: ~ "skipped 1 suggestion for review" # `add(10)`'s two placements need a person
+file: run.jet = pipe_step_fix_applies_only_one_fitting_placement.fixed
+step: jet check run.jet
+exit: 1
+stderr: ~ "`<>` fits in more than one place: `add(<>, 10)`, `add(10, <>)`" # the step jet fix skipped
+stderr: ~ "1 problem found" # every other step now reads `<>`

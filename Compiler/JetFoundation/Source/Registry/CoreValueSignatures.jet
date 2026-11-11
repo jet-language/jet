@@ -820,27 +820,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         if member == "setup" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
         }
-        if member == "__level_load" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
-        }
-        if member == "__disabled_load" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Bool)))
-        }
-        if core_sig_one_of(member, [String]{"__level_store", "__format_store", "__sample_store", "__sample_count_store"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, None))
-        }
-        if member == "__disabled_store" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read)}, None))
-        }
-        if core_sig_one_of(member, [String]{"__sink_store", "__filter_store"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
-        }
-        if member == "__config_load" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
-        }
-        if member == "__filter_load" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.String)))
-        }
     }
 
     None

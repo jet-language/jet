@@ -88,7 +88,7 @@ effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRo
 effect_type_row_run: fn() {
     failures := [String]{}
     graph := effect_type_row_graph(failures) ?? panic("EffectTypeRowFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
-    hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
     declared := stage.graph.move()
     stage.graph = None

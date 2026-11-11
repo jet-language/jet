@@ -195,19 +195,19 @@ DiagnosticCollector: struct {
 // with `with_invocation` record into it; closing it flushes every card once.
 DiagnosticInvocation: struct {
     collector: Shared<DiagnosticCollector>
-}
 
-impl DiagnosticInvocation.Close {
-    close: fn(&&self) {
-        collector: self.collector
-        permit: collector.guard_read()
-        rendered: permit.value.render()
-        if rendered != "" -> terminal_write_output(rendered)
+    impl Close {
+        close: fn(&&self) {
+            collector: self.collector
+            permit: collector.guard_read()
+            rendered: permit.value.render()
+            if rendered != "" -> terminal_write_output(rendered)
+        }
     }
 }
 
 terminal_begin_invocation: fn() -> DiagnosticInvocation Never! {
-    DiagnosticInvocation{collector: shared DiagnosticCollector.new()}
+    DiagnosticInvocation{collector: Shared{DiagnosticCollector.new()}}
 }
 
 terminal_repeat_count_line: fn(count: Int) -> String Never! {
@@ -692,7 +692,7 @@ Theme: struct {
     // Closing it stops the task and clears the line.
     spinner: fn(self, msg: String) -[IO, Env, Time]> Spinner Never! {
         if !self.live_enabled() -> return Spinner{stop: None, running: None}
-        stop: shared SpinnerState{stop: false}
+        stop: Shared{SpinnerState{stop: false}}
         flag: stop.copy()
         pad: terminal_pad()
         shown: terminal_fit_live_line(msg, terminal_columns() - 1)
@@ -768,15 +768,15 @@ SpinnerState: struct {
 Spinner: struct {
     priv stop: Shared<SpinnerState>?
     priv running: Task<Unit>?
-}
 
-impl Spinner.Close {
-    close: fn(&&self) {
-        if self.stop == .Val(flag) {
-            permit: flag.guard_edit()
-            permit.value.stop = true
+    impl Close {
+        close: fn(&&self) {
+            if self.stop == .Val(flag) {
+                permit: flag.guard_edit()
+                permit.value.stop = true
+            }
+            if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
         }
-        if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
     }
 }
 
@@ -852,7 +852,7 @@ ByteProgress: struct {
     state: Shared<ByteProgressState>
 
     new: fn() -> ByteProgress Never! {
-        ByteProgress{state: shared ByteProgressState.new()}
+        ByteProgress{state: Shared{ByteProgressState.new()}}
     }
 
     // Read the byte facts under one guard; `.snapshot()` is reserved for expect.

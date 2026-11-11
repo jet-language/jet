@@ -26,7 +26,7 @@ jettrace_test_valid: fn(value: TraceSkeleton) -> CanonicalJSON Never! { verify_j
 jettrace_test_error_bytes: fn(bytes: [U8]) -> String Never! {
     return if verify_jettrace(bytes) == {
         .Err(error) -> error.message
-        else -> panic("expected jettrace rejection")
+        .Ok(_) -> panic("expected jettrace rejection")
     }
 }
 jettrace_test_error: fn(value: TraceSkeleton) -> String Never! { jettrace_test_error_bytes(jettrace_test_bytes(value)) }
@@ -44,7 +44,7 @@ jettrace_test_set: fn(value: &CanonicalJSON, key: String, &&replacement: Canonic
             }
             panic("missing fixture key {key}")
         }
-        else -> panic("fixture is not an object")
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> panic("fixture is not an object")
     }
 }
 jettrace_test_wrap: fn(&&content: CanonicalJSON) -> [U8] Never! { canonical_json_bytes(jettrace_artifact(content) ?? panic(err.message)) }
@@ -79,7 +79,7 @@ jettrace_test_window: fn(&&status: String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.profile.window_cpu_ns = cpu
     return if verify_jettrace(jettrace_test_bytes(skeleton)) == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
 }
 #Test("profile_run_window_status_governs_its_measurements") {

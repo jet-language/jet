@@ -8,11 +8,7 @@ CountMinSketch: struct {
     impl Display {
         display: fn(self) -> String { "CountMinSketch" }
     }
-}
 
-new: fn() -> CountMinSketch Never! { CountMinSketch.new() }
-
-impl CountMinSketch {
     new: fn() -> CountMinSketch Never! {
         counters := [Int]{}
         loop _ in 0..<1024 -> counters.push(0)
@@ -37,6 +33,8 @@ impl CountMinSketch {
         count
     }
 }
+
+new: fn() -> CountMinSketch Never! { CountMinSketch.new() }
 
 hashes: fn(key: String) -> (first: U64, second: U64) Never! {
     seed: U64{14695981039346656037}

@@ -63,6 +63,16 @@ sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaPr
                 if target_module == definition.module_identity && graph.modules[module_row_index].impls[implementation_index].target_type_name == definition.name -> return true
             }
         }
+        // An `impl Decode { … }` block in the type's own body. Read in place.
+        module_index: sema_registration_module_index(graph, definition.module_identity) ?? return false
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            if graph.modules[module_index].nominals[nominal_index].symbol.name != definition.name -> next
+            if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if sema_serde_named_leaf(block.trait_name) == wanted -> return true
+                }
+            }
+        }
     }
     false
 }
@@ -104,7 +114,7 @@ sema_serde_mentions_parameter: fn(ty: Type, name: String) -> Bool Never! {
             false
         }
         .Quantity(base, _) -> sema_serde_mentions_parameter(base, name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }
 
@@ -135,7 +145,7 @@ sema_serde_definition_reaches_parameter: fn(definition: TTypeDef, param: String)
             }
         }
         .Distinct(base, _) | .Alias(base) -> return sema_serde_mentions_parameter(base, param)
-        else -> {}
+        .UnitFamily(_, _) -> {}
     }
     false
 }
@@ -199,6 +209,6 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
             sema_serde_implementation(environment, program, definition, direction)
         }
         .Apply(name, args) -> sema_serde_apply_head(environment, program, module_identity, name, args, direction)
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

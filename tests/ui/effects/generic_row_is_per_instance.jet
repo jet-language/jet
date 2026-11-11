@@ -1,14 +1,20 @@
 use log: core.log
 Item: trait { get: fn(self) -> Int }
-Pure: struct { n: Int }
-impl Pure.Item {
-    get: fn(self) -> Int { self.n }
+Pure: struct {
+    n: Int
+
+    impl Item {
+        get: fn(self) -> Int { self.n }
+    }
 }
-Logger: struct { n: Int }
-impl Logger.Item {
-    get: fn(self) -> Int {
-        log.info("get")
-        self.n
+Logger: struct {
+    n: Int
+
+    impl Item {
+        get: fn(self) -> Int {
+            log.info("get")
+            self.n
+        }
     }
 }
 Box: struct<T: Item> {

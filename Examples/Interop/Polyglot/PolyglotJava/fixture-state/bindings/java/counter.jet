@@ -8,7 +8,13 @@
 }
 use abi: c.jet_java_counter
 
-Handle: struct { priv value: Int }
+Handle: struct {
+    priv value: Int
+
+    impl Close {
+        close: fn(&&self) { abi.close(self.value) }
+    }
+}
 JavaError: enum { Exception }
 
 new: fn(arg0: Int) -[FFI.Java]> Handle JavaError! {
@@ -18,10 +24,6 @@ new: fn(arg0: Int) -[FFI.Java]> Handle JavaError! {
 }
 
 close: fn(&&handle: Handle) -[FFI.Java]> {}
-
-impl Handle.Close {
-    close: fn(&&self) { abi.close(self.value) }
-}
 
 add: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
     value: abi.add(handle.value, arg0)

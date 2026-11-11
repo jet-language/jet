@@ -219,6 +219,6 @@ env_shell_first_file: fn(candidates: [String]) -[FS]> String? Never! {
 env_shell_report_nix_projection_error: fn(theme: Theme, program: String, error: EnvironmentError) Never! -[IO, Time.Wait]> {
     if error == {
         .Unsupported(reason) -> theme.error_coded("E1351", "Nix closure execution is unavailable on this host.", "Jetpack could not create the isolated /nix/store projection: {reason}.", "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.")
-        else -> theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")
+        .IO(_) | .InvalidData(_) | .InvalidInput(_) | .NotFound(_) | .Conflict(_) | .Other(_) | .Overlay(_) | .Transition(_) | .ManagedFile(_) | .Activation(_) | .Gate(_) -> theme.error("could not project `{program}` through `/nix/store`", error.message(), "refresh the verified Hangar closure and run the command again")
     }
 }

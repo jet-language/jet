@@ -118,65 +118,16 @@ sema_job_every_error_span: fn(argument: EveryArg) -> Span {
 
 sema_job_schedule_error: fn(reason: EveryScheduleError, span: Span) -> Diagnostic {
     if reason == {
-        .UnknownDurationUnit -> sema_error("E0926", span, "this duration's unit isn't a recognized schedule cadence", "a schedule's repeat interval uses the canonical Time family — `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.", "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).")
-        .NonPositiveDuration -> sema_error("E0926", span, "a schedule interval must be a positive duration", "`#Every(0ms)` or a negative duration never becomes due — it isn't a real cadence.", "write a duration greater than zero, e.g. `#Every(5min)`.")
-        .DurationOutOfRange -> sema_error("E0926", span, "this schedule duration is outside the supported range", "schedule intervals use the same fixed i64 nanosecond carrier as Duration.", "write a smaller positive duration, e.g. `#Every(5min)`.")
-        .BadWallClockFormat -> sema_error("E0926", span, "this daily schedule isn't a plain `\"HH:MM\"` time", "a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone.", "write a fixed daily time like `#Every(\"03:00\")`.")
-        .HourOutOfRange -> sema_error("E0926", span, "this daily schedule's hour is out of range", "24h wall-clock hours run `00`..=`23`.", "write an hour between `00` and `23`, e.g. `#Every(\"03:00\")`.")
-        .MinuteOutOfRange -> sema_error("E0926", span, "this daily schedule's minute is out of range", "wall-clock minutes run `00`..=`59`.", "write a minute between `00` and `59`, e.g. `#Every(\"03:00\")`.")
-        .DynamicValue -> sema_error("E0926", span, "a job schedule must be known at compile time", "the marker argument has the right type, but job discovery needs one fixed cadence.", "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.")
+        .UnknownDurationUnit -> sema_error("E0926", span, "this duration's unit isn't a recognized schedule cadence", "a schedule's repeat interval uses the canonical Time family — `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.", "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Job(every: 2h)`).")
+        .NonPositiveDuration -> sema_error("E0926", span, "a schedule interval must be a positive duration", "`every: 0ms` or a negative duration never becomes due — it isn't a real cadence.", "write a duration greater than zero, e.g. `#Job(every: 5min)`.")
+        .DurationOutOfRange -> sema_error("E0926", span, "this schedule duration is outside the supported range", "schedule intervals use the same fixed i64 nanosecond carrier as Duration.", "write a smaller positive duration, e.g. `#Job(every: 5min)`.")
+        .BadWallClockFormat -> sema_error("E0926", span, "this daily schedule isn't a plain `\"HH:MM\"` time", "a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone.", "write a fixed daily time like `#Job(every: \"03:00\")`.")
+        .HourOutOfRange -> sema_error("E0926", span, "this daily schedule's hour is out of range", "24h wall-clock hours run `00`..=`23`.", "write an hour between `00` and `23`, e.g. `#Job(every: \"03:00\")`.")
+        .MinuteOutOfRange -> sema_error("E0926", span, "this daily schedule's minute is out of range", "wall-clock minutes run `00`..=`59`.", "write a minute between `00` and `59`, e.g. `#Job(every: \"03:00\")`.")
+        .DynamicValue -> sema_error("E0926", span, "a job schedule must be known at compile time", "the marker argument has the right type, but job discovery needs one fixed cadence.", "write a duration or wall-clock literal, e.g. `#Job(every: 5min)` or `#Job(every: \"03:00\")`.")
     }
 }
 
-sema_job_default_text: fn(expression: Expr) -> String? {
-    if expression == {
-        .Paren(value, _, _) -> return sema_job_default_text(value)
-        .Int(value, _, _, _, _) -> return Val("{value}")
-        .Float(value, _, _, raw, _) -> {
-            text: raw ?? "{value}"
-            return Val(text.replace("_", ""))
-        }
-        .Bool(value, _, _) -> return Val("{value}")
-        .Str(parts, _, _) -> {
-            if parts.len() != 1 -> return None
-            if parts[0] == {
-                .Lit(text) -> {
-                    return Val(text)
-                }
-                else -> {
-                    return None
-                }
-            }
-        }
-        else -> return None
-    }
-}
-
-sema_job_doc: fn(function: Func) -> String? {
-    loop marker in function.markers {
-        if marker.name != MARKER_DOC -> next
-        if marker.args.len() == 0 -> return None
-        if marker.args[0] == {
-            .Expr(expression) -> if expression == {
-                .Str(parts, _, _) -> {
-                    if parts.len() != 1 -> return None
-                    if parts[0] == {
-                        .Lit(text) -> {
-                            return Val(text)
-                        }
-                        else -> {
-                            return None
-                        }
-                    }
-                    return None
-                }
-                else -> return None
-            }
-            else -> return None
-        }
-    }
-    None
-}
 
 /// Sema and help read the same command registry.
 sema_job_is_reserved: fn(name: String) -> Bool Never! {
@@ -283,13 +234,13 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                 seen_names.push(function.name)
                 seen_scopes.push(scope)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     diagnostics
 }
 
-/// E0926: a job's `#Every(…)` must resolve to one fixed cadence. A function
+/// E0926: a job's `every:` schedule must resolve to one fixed cadence. A function
 /// parameter of a type other than `Duration` is the marker's argument-type
 /// error (E0930), so it is not also reported as a dynamic schedule.
 sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [Diagnostic] {
@@ -304,7 +255,7 @@ sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, p
                 resolution: sema_job_resolve_every_arg(marker.arg, environment, program)
                 if resolution.error == .Val(reason) -> diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     diagnostics

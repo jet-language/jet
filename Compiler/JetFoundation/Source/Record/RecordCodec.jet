@@ -183,7 +183,7 @@ record_value_is_null: fn(value: RecordValue) -> Bool Never! {
 record_value_as_str: fn(value: RecordValue) -> RecordStringResult Never! {
     if value == {
         .Str(text) -> RecordStringResult{value: Val(text), problem: None}
-        else -> RecordStringResult{value: None, problem: Val(record_value_shape("string", value))}
+        .Null | .Bool(_) | .Int(_) | .Bytes(_) | .List(_) | .Map(_) | .Digest(_) -> RecordStringResult{value: None, problem: Val(record_value_shape("string", value))}
     }
 }
 
@@ -196,7 +196,7 @@ record_value_as_optional_str: fn(value: RecordValue) -> RecordOptionalStringResu
 record_value_as_int: fn(value: RecordValue) -> RecordIntResult Never! {
     if value == {
         .Int(number) -> RecordIntResult{value: Val(number), problem: None}
-        else -> RecordIntResult{value: None, problem: Val(record_value_shape("integer", value))}
+        .Null | .Bool(_) | .Str(_) | .Bytes(_) | .List(_) | .Map(_) | .Digest(_) -> RecordIntResult{value: None, problem: Val(record_value_shape("integer", value))}
     }
 }
 
@@ -211,28 +211,28 @@ record_value_as_usize: fn(value: RecordValue) -> RecordCountResult Never! {
 record_value_as_bool: fn(value: RecordValue) -> RecordBoolResult Never! {
     if value == {
         .Bool(flag) -> RecordBoolResult{value: Val(flag), problem: None}
-        else -> RecordBoolResult{value: None, problem: Val(record_value_shape("boolean", value))}
+        .Null | .Int(_) | .Str(_) | .Bytes(_) | .List(_) | .Map(_) | .Digest(_) -> RecordBoolResult{value: None, problem: Val(record_value_shape("boolean", value))}
     }
 }
 
 record_value_as_list: fn(value: RecordValue) -> RecordListResult Never! {
     if value == {
         .List(values) -> RecordListResult{value: Val(values), problem: None}
-        else -> RecordListResult{value: None, problem: Val(record_value_shape("list", value))}
+        .Null | .Bool(_) | .Int(_) | .Str(_) | .Bytes(_) | .Map(_) | .Digest(_) -> RecordListResult{value: None, problem: Val(record_value_shape("list", value))}
     }
 }
 
 record_value_as_map: fn(value: RecordValue) -> RecordMapResult Never! {
     if value == {
         .Map(fields) -> RecordMapResult{value: Val(fields), problem: None}
-        else -> RecordMapResult{value: None, problem: Val(record_value_shape("map", value))}
+        .Null | .Bool(_) | .Int(_) | .Str(_) | .Bytes(_) | .List(_) | .Digest(_) -> RecordMapResult{value: None, problem: Val(record_value_shape("map", value))}
     }
 }
 
 record_value_as_digest: fn(value: RecordValue) -> RecordDigestResult Never! {
     if value == {
         .Digest(digest) -> RecordDigestResult{value: Val(digest), problem: None}
-        else -> RecordDigestResult{value: None, problem: Val(record_value_shape("digest", value))}
+        .Null | .Bool(_) | .Int(_) | .Str(_) | .Bytes(_) | .List(_) | .Map(_) -> RecordDigestResult{value: None, problem: Val(record_value_shape("digest", value))}
     }
 }
 
@@ -347,7 +347,7 @@ record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordVal
             sorted: loop index in record_sorted_order(names) -> canonical[index]
             RecordValue.Map{fields: sorted}
         }
-        else -> value
+        .Null | .Bool(_) | .Str(_) | .Bytes(_) -> value
     }
 }
 
@@ -405,7 +405,7 @@ record_intern_value: fn(table: &RecordStringTable, value: RecordValue) Never! {
                 record_intern_value(table, field.value)
             }
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Bytes(_) | .Digest(_) -> {}
     }
 }
 
@@ -700,12 +700,6 @@ record_section_index: fn(reader: RecordReader, id: Int) -> Int? Never! {
 record_section_elements: fn(reader: RecordReader, section: Int) -> Int Never! {
     next: if section + 1 < reader.firsts.len() -> reader.firsts[section + 1] else -> reader.bounds.len()
     next - reader.firsts[section] - 1
-}
-
-// Number of elements in a section; `None` when the section is absent.
-record_element_count: fn(reader: RecordReader, id: Int) -> Int? Never! {
-    section: record_section_index(reader, id) ?? return None
-    Val(record_section_elements(reader, section))
 }
 
 record_read_string_ref: fn(reader: RecordReader, cursor: &RecordCursor) -> String Never! {

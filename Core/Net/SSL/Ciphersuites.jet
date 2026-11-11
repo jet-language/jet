@@ -123,7 +123,7 @@ ssl_get_ciphersuite_sig_pk_alg: fn(cs: SSLCiphersuite) -> oids.PKType? Never! {
         .RSA | .DHERSA | .ECDHERSA | .RSAPSK -> Val(oids.PKType.RSA)
         .ECDHEECDSA -> Val(oids.PKType.ECDSA)
         .ECDHRSA | .ECDHECDSA -> Val(oids.PKType.ECKey)
-        else -> None
+        .NoExchange | .PSK | .DHEPSK | .ECDHEPSK -> None
     }
 }
 
@@ -133,7 +133,7 @@ ssl_get_ciphersuite_sig_alg: fn(cs: SSLCiphersuite) -> oids.PKType? Never! {
     if cs.key_exchange == {
         .DHERSA | .ECDHERSA -> Val(oids.PKType.RSA)
         .ECDHEECDSA -> Val(oids.PKType.ECDSA)
-        else -> None
+        .NoExchange | .RSA | .PSK | .DHEPSK | .RSAPSK | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> None
     }
 }
 
@@ -142,7 +142,7 @@ ssl_get_ciphersuite_sig_alg: fn(cs: SSLCiphersuite) -> oids.PKType? Never! {
 ssl_ciphersuite_uses_ec: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .ECDHERSA | .ECDHEECDSA | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> true
-        else -> false
+        .NoExchange | .RSA | .DHERSA | .PSK | .DHEPSK | .RSAPSK -> false
     }
 }
 
@@ -151,7 +151,7 @@ ssl_ciphersuite_uses_ec: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_uses_psk: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .PSK | .RSAPSK | .DHEPSK | .ECDHEPSK -> true
-        else -> false
+        .NoExchange | .RSA | .DHERSA | .ECDHERSA | .ECDHEECDSA | .ECDHRSA | .ECDHECDSA -> false
     }
 }
 
@@ -160,7 +160,7 @@ ssl_ciphersuite_uses_psk: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_has_pfs: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .DHERSA | .DHEPSK | .ECDHERSA | .ECDHEPSK | .ECDHEECDSA -> true
-        else -> false
+        .NoExchange | .RSA | .PSK | .RSAPSK | .ECDHRSA | .ECDHECDSA -> false
     }
 }
 
@@ -169,7 +169,7 @@ ssl_ciphersuite_has_pfs: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_no_pfs: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .ECDHRSA | .ECDHECDSA | .RSA | .PSK | .RSAPSK -> true
-        else -> false
+        .NoExchange | .DHERSA | .ECDHERSA | .ECDHEECDSA | .DHEPSK | .ECDHEPSK -> false
     }
 }
 
@@ -184,7 +184,7 @@ ssl_ciphersuite_uses_ecdh: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_cert_req_allowed: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .RSA | .DHERSA | .ECDHRSA | .ECDHERSA | .ECDHECDSA | .ECDHEECDSA -> true
-        else -> false
+        .NoExchange | .PSK | .DHEPSK | .RSAPSK | .ECDHEPSK -> false
     }
 }
 
@@ -193,7 +193,7 @@ ssl_ciphersuite_cert_req_allowed: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_uses_srv_cert: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .RSA | .RSAPSK | .DHERSA | .ECDHRSA | .ECDHERSA | .ECDHECDSA | .ECDHEECDSA -> true
-        else -> false
+        .NoExchange | .PSK | .DHEPSK | .ECDHEPSK -> false
     }
 }
 
@@ -208,7 +208,7 @@ ssl_ciphersuite_uses_dhe: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_uses_ecdhe: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .ECDHEECDSA | .ECDHERSA | .ECDHEPSK -> true
-        else -> false
+        .NoExchange | .RSA | .DHERSA | .PSK | .DHEPSK | .RSAPSK | .ECDHRSA | .ECDHECDSA -> false
     }
 }
 
@@ -217,7 +217,7 @@ ssl_ciphersuite_uses_ecdhe: fn(cs: SSLCiphersuite) -> Bool Never! {
 ssl_ciphersuite_uses_server_signature: fn(cs: SSLCiphersuite) -> Bool Never! {
     if cs.key_exchange == {
         .DHERSA | .ECDHERSA | .ECDHEECDSA -> true
-        else -> false
+        .NoExchange | .RSA | .PSK | .DHEPSK | .RSAPSK | .ECDHEPSK | .ECDHRSA | .ECDHECDSA -> false
     }
 }
 

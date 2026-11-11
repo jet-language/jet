@@ -146,7 +146,7 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
     payload_name: if payload.ty == {
         .Named(name) -> name
         .Apply(name, _) -> name
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if payload_name == "" {
         diagnostics.push(sema_error("E2411", payload_span, "receipt sections require a named `#Receipt` type", "the section schema and wire encoder are declaration-owned", "declare a `#Codable` record with `#Receipt(\"name\")`"))

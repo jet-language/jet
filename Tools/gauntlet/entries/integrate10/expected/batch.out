@@ -15,3 +15,137 @@ census rc=0
 ratchets rc=0
 tests use the built jetpack orch/built-jetpack
 ./lanes/Main/integ/b1/REPORT.md
+== b1
+A-1.files
+A-1.status: BAD
+B-1.files
+B-1.status: BAD
+BASE: 687c373
+C-1.apply
+C-1.status: NOAPPLY
+D-1.files
+D-1.status: OK
+E-1.files
+E-1.status: BAD
+F-1.files
+F-1.status: OK
+PRE: pre1 | subs/P-2
+REPORT.md
+apply.out
+basebin/jet -> seed/jet
+basebin/jetpack -> seed/jetpack
+bin/jet -> ./lanes/Main/integ/b1/tree/Compiler/JetCli/.jet/build/jet
+bin/jetpack -> ./lanes/Main/integ/b1/bin/jetpack.built
+bin/jetpack.built: #!/usr/bin/env bash | # A stand-in for the jetpack the integrate10 fixture's census builds. | echo built jetpack
+census/build-keep-going.tsv: kind	file	code	message | warning	<corelib>/Core/Text.jet:40	W0002	unused | error	Jetpack/orphan.jet:9	E0200	link
+census/check-keep-going.tsv: kind	file	code	message | error	<corelib>/Core/Text.jet:12	E0107	unknown name | warning	docs/a.md:3	W0001	spelling | error	src/orphan.jet:1	E0003	stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray stray
+census/jetpack.log: hosted bootstrap | hosted-binary: orch/old-jetpack | hosted-binary: orch/built-jetpack built
+census.out
+goldens.list: tests/golden/Prelude/eq.out | tests/golden/Text/upper.out | tests/golden/Text/zcase.out
+goldens.rc: 1	tests/golden/Prelude/eq | 0	tests/golden/Text/upper | 0	tests/golden/Text/zcase
+goldens.tests_golden_Prelude_eq.out
+goldens.tests_golden_Text_upper.out
+goldens.tests_golden_Text_zcase.out
+ratchets/CoreSourceRows.jet.out
+ratchets/CoreSourceRows.jet.rc: 0
+ratchets/UnsafeRatchet.jet.out
+ratchets/UnsafeRatchet.jet.rc: 0
+regen.CoreSourceRows.jet.out
+regen.RuntimeGenerators.jet.out
+tests/A-1.1.out
+tests/A-1.2.base.out
+tests/A-1.2.base.rc: 1
+tests/A-1.2.out
+tests/A-1.3.base.out
+tests/A-1.3.base.rc: 0
+tests/A-1.3.out
+tests/A-1.rc: 0	"$JET" passes | 1	"$JET" regresses parse lower | 1	"$JET" newfail | 0	JET=$JET jet Tools/agent/LaneCheck.jet (skipped: lane receipt)
+tests/B-1.1.base.out
+tests/B-1.1.base.rc: 1
+tests/B-1.1.out
+tests/B-1.2.base.out
+tests/B-1.2.base.rc: 1
+tests/B-1.2.out
+tests/B-1.rc: 1	"$JET" fails alpha beta | 101	"$JET" broken
+tests/E-1.1.out
+tests/E-1.rc: 0	"$JET" passes
+| # Integration b1 on origin/dev 687c373
+|
+| Census rc=0 (built compiler: yes). Summary:
+| ```
+| tree rc=0 sum=3886812870
+| check rc=0
+| build rc=0 rows=4
+| ratchet CoreSourceRows.jet rc=0
+| ratchet UnsafeRatchet.jet rc=0
+| golden tests/golden/Prelude/eq rc=1
+| golden tests/golden/Text/upper rc=0
+| golden tests/golden/Text/zcase rc=0
+| ```
+|
+| ## A-1
+| Census rows in files this patch touches:
+| ```
+| warning	docs/a.md:3	W0001	spelling
+| ```
+| - PASS `"$JET" passes`
+| - FAIL rc=1 `"$JET" regresses parse lower` (full output ./lanes/Main/integ/b1/tests/A-1.2.out; dev with the seed also fails, rc=1, ./lanes/Main/integ/b1/tests/A-1.2.base.out). FAIL rows not on dev:
+| ```
+| FAIL extra-parse ()
+| ```
+| - FAIL rc=1 `"$JET" newfail` (full output ./lanes/Main/integ/b1/tests/A-1.3.out; passes on origin/dev with the seed or was not rerun):
+| ```
+| FAIL sema (7ms)
+| an Error line
+| tail 3
+| tail 4
+| tail 5
+| tail 6
+| tail 7
+| ```
+| - PASS `JET=$JET jet Tools/agent/LaneCheck.jet (skipped: lane receipt)`
+|
+| **NOT OK**
+|
+| ## B-1
+| - PRE-EXISTING rc=1 `"$JET" fails alpha beta`: every FAIL row also fails on origin/dev with the seed (./lanes/Main/integ/b1/tests/B-1.1.base.out)
+| - FAIL rc=101 `"$JET" broken` (full output ./lanes/Main/integ/b1/tests/B-1.2.out; dev with the seed also fails, rc=1, ./lanes/Main/integ/b1/tests/B-1.2.base.out). FAIL rows not on dev:
+| ```
+| panic: the batch compiler crashed
+| trace 3
+| trace 4
+| trace 5
+| trace 6
+| trace 7
+| ```
+|
+| **NOT OK**
+|
+| ## C-1
+| Does not apply to origin/dev 687c373:
+| ```
+| error: patch failed: src/c.jet:3
+| error: src/c.jet: patch does not apply
+| conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict conflict con
+| ```
+|
+| ## D-1
+| No tests listed.
+|
+| **OK**
+|
+| ## E-1
+| Census rows in files this patch touches:
+| ```
+| error	<corelib>/Core/Text.jet:12	E0107	unknown name
+| warning	<corelib>/Core/Text.jet:40	W0002	unused
+| ```
+| - PASS `"$JET" passes`
+|
+| **NOT OK**
+|
+| ## F-1
+| No tests listed.
+|
+| **OK**
+|

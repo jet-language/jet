@@ -79,12 +79,22 @@ wipe_bytes: fn(b: &[U8]) Never! { loop i in 0..<b.len() -> b[i] = U8{0} }
 ARIAKey: struct {
     rk: [U32]
     nr: Int
-}
 
-impl ARIAKey.Close {
-    close: fn(&&self) {
-        rk := self.rk.move()
-        loop i in 0..<rk.len() -> rk[i] = U32{0}
+    impl Close {
+        close: fn(&&self) {
+            rk := self.rk.move()
+            loop i in 0..<rk.len() -> rk[i] = U32{0}
+        }
+    }
+
+    impl Block128 {
+        crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { aria_block(self, s, b) }
+    }
+
+    impl cipher.ForwardBlock {
+        encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
+        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_ctr32(self, ctr, src, off, count, out) }
+        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_cbc(self, iv, src, off, count, out) }
     }
 }
 
@@ -263,10 +273,6 @@ aria_block: fn(k: ARIAKey, s: &[U32], b: &[U8]) Never! {
     loop c in 0..<4 -> put_le32(b, 4 * c, s[c])
 }
 
-impl ARIAKey.Block128 {
-    crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { aria_block(self, s, b) }
-}
-
 // ---------------------------------------------------------------------------
 // Camellia (camellia.c).
 
@@ -276,12 +282,22 @@ impl ARIAKey.Block128 {
 CamelliaKey: struct {
     rk: [U32]
     nr: Int
-}
 
-impl CamelliaKey.Close {
-    close: fn(&&self) {
-        rk := self.rk.move()
-        loop i in 0..<rk.len() -> rk[i] = U32{0}
+    impl Close {
+        close: fn(&&self) {
+            rk := self.rk.move()
+            loop i in 0..<rk.len() -> rk[i] = U32{0}
+        }
+    }
+
+    impl Block128 {
+        crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { camellia_block(self, s, b) }
+    }
+
+    impl cipher.ForwardBlock {
+        encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
+        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_ctr32(self, ctr, src, off, count, out) }
+        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_cbc(self, iv, src, off, count, out) }
     }
 }
 
@@ -440,10 +456,6 @@ camellia_block: fn(k: CamelliaKey, s: &[U32], b: &[U8]) Never! {
     des.put_be32(b, 12, s[1].bit_xor(k.rk[r + 3]))
 }
 
-impl CamelliaKey.Block128 {
-    crypt_block: fn(self, s: &[U32], b: &[U8]) Never! { camellia_block(self, s, b) }
-}
-
 // ---------------------------------------------------------------------------
 // The modes (mbedtls_aria_crypt_*, mbedtls_camellia_crypt_*).
 
@@ -575,18 +587,6 @@ forward_cbc: fn<K: Block128>(k: K, iv: &[U8], src: [U8], off: Int, count: Int, o
         loop i in 0..<BLOCK_SIZE -> out.push(iv[i])
     }
     wipe_u32s(s)
-}
-
-impl ARIAKey.cipher.ForwardBlock {
-    encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_ctr32(self, ctr, src, off, count, out) }
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_cbc(self, iv, src, off, count, out) }
-}
-
-impl CamelliaKey.cipher.ForwardBlock {
-    encrypt_one: fn(self, b: &[U8]) Never! { forward_one(self, b) }
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_ctr32(self, ctr, src, off, count, out) }
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { forward_cbc(self, iv, src, off, count, out) }
 }
 
 ARIA_SB1: [U64]{

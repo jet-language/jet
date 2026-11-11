@@ -12,6 +12,7 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: ":=", meaning: "mutable binding" },
     { spelling: "use {{ … }} / use alias: path", meaning: "import block (#6542): one row per line, each a module path, `alias: path`, a \"file\" path or `alias: \"file\"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row" },
     { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value" },
+    { spelling: "name: T -> expr", meaning: "computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field" },
     { spelling: "#", meaning: "attached marker; #[A, B] stacks" },
     { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring" },
     { spelling: "Name: struct {{ impl Marker {{ group: #[A, B] }} }}", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals" },
@@ -29,13 +30,15 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "comptime fn", meaning: "build-time literal-hook method" },
     { spelling: "comptime use {{ … }} / comptime use alias: path", meaning: "build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime {{ … }}` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration" },
-    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left`" },
-    { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`)" },
-    { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`" },
-    { spelling: "$phase", meaning: "total evaluation-site phase fact" },
-    { spelling: "$program", meaning: "authorized checked-program fact root" },
-    { spelling: FACT_ROOT_HERE, meaning: "the `SourceLocation` (file, line, column, function, module) where it is written" },
-    { spelling: FACT_ROOT_CALLER, meaning: "the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{{$caller}}` or inside an #Expand macro" },
+    { spelling: "$", meaning: "config-surface environment read `$NAME`; program source has no `$` words" },
+    { spelling: "#{{name}}", meaning: "template paste: `#{{method}}: fn`, `self.#{{field}}`, `.#{{left}}` splice a derive or marker template binding" },
+    { spelling: "x.reflect().fact", meaning: "compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin`" },
+    { spelling: FACT_ROOT_BUILD, meaning: "compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`" },
+    { spelling: "#package", meaning: "package site value: `#package.name`, `.version`" },
+    { spelling: FACT_ROOT_PHASE, meaning: "compiler evaluation-site `Phase` value" },
+    { spelling: FACT_ROOT_PROGRAM, meaning: "compiler authorized checked-program fact value" },
+    { spelling: FACT_ROOT_HERE, meaning: "site value: the `SourceLocation` (file, line, column, function, module) where it is written, as in `#here.line` and `#here.file`" },
+    { spelling: FACT_ROOT_CALLER, meaning: "the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{{#caller}}` or inside an #Expand macro" },
     { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)" },
     { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)" },
     { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items" },
@@ -69,9 +72,9 @@ LEXICAL_LEDGER: [LexicalEntry]{
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.
-/// `$phase`, `$program`, `$package`, `$here` and `$caller` are the fact roots; type, function,
+/// `#build`, `#phase`, `#program`, `#package`, `#here` and `#caller` are the fact roots; type, function,
 /// method, closure and value facts are `$` members of their subject
-/// (`T.$fields`).
+/// (`T.reflect().fields`).
 META_QUERY_SOURCE: "@SOURCE"
 
 META_QUERY_TYPES: "@TYPES"
@@ -142,9 +145,6 @@ READINESS_AFTER: "after"
 /// Compiler-private field used while a readiness arm is carried through the
 /// existing one-field tuple AST node. It cannot be written by source code.
 INTERNAL_SELECT_AFTER_FIELD: String.from_bytes([U8]{0, 106, 101, 116, 46, 115, 101, 108, 101, 99, 116, 46, 97, 102, 116, 101, 114})
-
-/// Prefix for construction of a shared cell.
-KW_SHARED: "shared"
 
 /// Consuming task result operation.
 TASK_JOIN: "join"

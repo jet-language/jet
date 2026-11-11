@@ -440,10 +440,12 @@ SemaOwnershipUninitFact: struct {
 }
 
 // One frame per method call being checked. Receiver hooks
-// record the strongest convention the resolved call uses for its receiver.
+// record the strongest convention the resolved call uses for its receiver,
+// and under `#Policy(writes: .Explicit)` the signature line of that call.
 SemaReceiverMarkFrame: struct {
     receiver_span: Span
     convention: AccessConvention?
+    signature: String{""}
 }
 
 SemaOwnershipCallViewFact: struct {
@@ -667,7 +669,7 @@ sema_ownership_type_is_copy: fn(ty: Type) -> Bool Never! {
         .FixedList(inner, _) -> sema_ownership_type_is_copy(inner)
         .InlineRange(_, _, _) -> true
         .Named(name) -> name == "Unit" || name == "Never" || name == "IOOperation"
-        else -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Union(_) -> false
     }
 }
 
@@ -679,7 +681,7 @@ sema_ownership_type_is_scalar: fn(ty: Type) -> Bool Never! {
         .Int | .Float | .Bool | .Float32 | .IntN(_, _) | .Quantity(_, _) -> true
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_ownership_type_is_scalar(inner)
         .Apply(name, args) -> name == "Ptr" && args.len() == 1
-        else -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> false
     }
 }
 
@@ -720,28 +722,10 @@ sema_ownership_writes_temporary_edit_guard: fn(expr: Expr) -> Bool Never! {
             sema_ownership_writes_temporary_edit_guard(base)
         }
         .Index(base, _, _, _, _) | .Paren(base, _, _) | .Place(base, _, _, _) -> sema_ownership_writes_temporary_edit_guard(base)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
-// A place reached through the `.value` of a `guard_edit()` binding
-// (`guard.value.items`) is written under the guard's edit permit, so a
-// writing call on it needs no `&`, as a write through the guard needs none.
-sema_ownership_place_under_edit_guard: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
-    if expr == {
-        .Field(base, member, _, _) -> {
-            if member == "value" {
-                if base == .Ident(name, span, _) {
-                    index: sema_scope_resolve_index_at(scopes, name, span) ?? return false
-                    return sema_ownership_binding_is_edit_shared_guard(scopes.bindings[index])
-                }
-            }
-            sema_ownership_place_under_edit_guard(base, scopes)
-        }
-        .Index(base, _, _, _, _) | .Paren(base, _, _) -> sema_ownership_place_under_edit_guard(base, scopes)
-        else -> false
-    }
-}
 
 // Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
 // `.value` held by an untagged or `guard_read()` SharedGuard. A write
@@ -762,7 +746,7 @@ sema_ownership_place_reads_read_shared_guard: fn(expr: Expr, scopes: SemaScopeTa
             sema_ownership_place_reads_read_shared_guard(base, scopes)
         }
         .Index(base, _, _, _, _) | .Paren(base, _, _) | .Place(base, _, _, _) -> sema_ownership_place_reads_read_shared_guard(base, scopes)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -793,7 +777,7 @@ sema_ownership_type_cloneable: fn(ty: Type) -> Bool? {
         .Map(key, _, value) | .Result(key, value) -> sema_ownership_types_cloneable([Type]{key, value})
         .Tuple(fields) -> sema_ownership_types_cloneable(loop field in fields -> field.ty)
         .Named(_) | .Apply(_, _) | .TraitObject(_) | .Fn(_, _, _, _, _, _) -> None
-        else -> Val(false)
+        .Int | .Float | .Bool | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Measure(_) -> Val(false)
     }
 }
 
@@ -1230,7 +1214,7 @@ sema_ownership_const_index: fn(expr: Expr) -> Int? {
             Val(-number)
         }
         .Paren(value, _, _) -> sema_ownership_const_index(value)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1250,7 +1234,7 @@ sema_ownership_range_bounds: fn(start: Expr, end: Expr, range: Expr?) -> SemaOwn
                 }
                 return SemaOwnershipRangeBounds{start: first, end: last}
             }
-            else -> return SemaOwnershipRangeBounds{start: None, end: None}
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return SemaOwnershipRangeBounds{start: None, end: None}
         }
     }
     SemaOwnershipRangeBounds{start: sema_ownership_const_index(start), end: sema_ownership_const_index(end)}
@@ -1289,7 +1273,7 @@ sema_ownership_named_view_root: fn(expr: Expr, output_path: &[String]) -> String
             output_path.push("*")
             Val(root)
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Copy(_, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1318,7 +1302,7 @@ sema_ownership_typed_projection_facts: fn(expr: Expr) -> [SemaOwnershipProjectio
             facts.push(SemaOwnershipProjection.Deref{span: span})
             Val(facts)
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Copy(_, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1384,7 +1368,7 @@ sema_ownership_place_from_expr_inner: fn(expr: Expr, scopes: SemaScopeTable) -> 
             Val(place)
         }
         .Copy(_, _, _) -> None
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1426,7 +1410,7 @@ sema_ownership_typed_projection_overlap: fn(left: SemaOwnershipProjection, right
     if left == {
         .Field(name, _) -> if right == {
             .Field(other, _) -> name == other
-            else -> true
+            .Index(_, _) | .Range(_, _, _) | .Fresh(_) | .Deref(_) -> true
         }
         .Index(value, _) -> if right == {
             .Index(other, _) -> {
@@ -1440,7 +1424,7 @@ sema_ownership_typed_projection_overlap: fn(left: SemaOwnershipProjection, right
                 }
                 true
             }
-            else -> true
+            .Field(_, _) | .Fresh(_) | .Deref(_) -> true
         }
         .Range(start, end, _) -> if right == {
             .Index(value, _) -> {
@@ -1456,11 +1440,11 @@ sema_ownership_typed_projection_overlap: fn(left: SemaOwnershipProjection, right
                 }
                 true
             }
-            else -> true
+            .Field(_, _) | .Fresh(_) | .Deref(_) -> true
         }
         .Fresh(span) -> if right == {
             .Fresh(other) -> sema_ownership_span_same(span, other)
-            else -> true
+            .Field(_, _) | .Index(_, _) | .Range(_, _, _) | .Deref(_) -> true
         }
         .Deref(_) -> true
     }
@@ -1468,11 +1452,26 @@ sema_ownership_typed_projection_overlap: fn(left: SemaOwnershipProjection, right
 
 sema_ownership_typed_projection_exact: fn(left: SemaOwnershipProjection, right: SemaOwnershipProjection) -> Bool Never! {
     if left == {
-        .Field(name, _) -> if right == {.Field(other, _) -> name == other else -> false}
-        .Index(value, _) -> if right == {.Index(other, _) -> value == other else -> false}
-        .Range(start, end, _) -> if right == {.Range(other_start, other_end, _) -> start == other_start && end == other_end else -> false}
-        .Fresh(span) -> if right == {.Fresh(other) -> sema_ownership_span_same(span, other) else -> false}
-        .Deref(span) -> if right == {.Deref(other) -> sema_ownership_span_same(span, other) else -> false}
+        .Field(name, _) -> if right == {
+            .Field(other, _) -> name == other
+            .Index(_, _) | .Range(_, _, _) | .Fresh(_) | .Deref(_) -> false
+        }
+        .Index(value, _) -> if right == {
+            .Index(other, _) -> value == other
+            .Field(_, _) | .Range(_, _, _) | .Fresh(_) | .Deref(_) -> false
+        }
+        .Range(start, end, _) -> if right == {
+            .Range(other_start, other_end, _) -> start == other_start && end == other_end
+            .Field(_, _) | .Index(_, _) | .Fresh(_) | .Deref(_) -> false
+        }
+        .Fresh(span) -> if right == {
+            .Fresh(other) -> sema_ownership_span_same(span, other)
+            .Field(_, _) | .Index(_, _) | .Range(_, _, _) | .Deref(_) -> false
+        }
+        .Deref(span) -> if right == {
+            .Deref(other) -> sema_ownership_span_same(span, other)
+            .Field(_, _) | .Index(_, _) | .Range(_, _, _) | .Fresh(_) -> false
+        }
     }
 }
 
@@ -1506,7 +1505,7 @@ sema_ownership_view_producer: fn(expr: Expr) -> SemaOwnershipViewProducer? {
             convention: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
             Val(SemaOwnershipViewProducer{source: value, access: convention, span: expr_span(expr)})
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1517,7 +1516,7 @@ sema_ownership_arena_view_source: fn(binding: Binding) -> Expr? {
             if method != "alloc" && method != "try_alloc" -> return None
             Val(receiver)
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -1603,7 +1602,7 @@ sema_ownership_pattern_source_borrowed: fn(state: &SemaOwnershipState, source: E
             if sema_ownership_view_exists_for_expr(state, source, scopes) -> return true
             return sema_ownership_pattern_source_borrowed(state, base, scopes)
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     if sema_ownership_view_exists_for_expr(state, source, scopes) -> return true
     binding: sema_ownership_binding_for_expr(state, source, scopes) ?? return false
@@ -1658,7 +1657,7 @@ sema_ownership_rebase_root: fn(expr: Expr, source: Expr) -> Expr Never! {
         .Paren(inner, _, _) -> sema_ownership_rebase_root(inner, source)
         // copy: the moved place is a new path built on the binding's recorded
         // subject, which stays recorded for another `.move()` of the same binding.
-        else -> source.copy()
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> source.copy()
     }
 }
 
@@ -1681,7 +1680,7 @@ sema_ownership_move_pattern_payload: fn(state: &SemaOwnershipState, expr: Expr, 
     loop source in sources {
         if source == {
             .Field(_, _, _, _) | .Ident(_, _, _) -> {}
-            else -> next
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> next
         }
         place: sema_ownership_rebase_root(expr, source)
         owner: sema_ownership_binding_for_expr(state, place, scopes) ?? next
@@ -1696,7 +1695,7 @@ sema_ownership_move_pattern_payload: fn(state: &SemaOwnershipState, expr: Expr, 
         }
         element: if place == {
             .Index(_, _, _, _, _) -> true
-            else -> sema_expression_place_below_element(place)
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> sema_expression_place_below_element(place)
         }
         if element -> next
         if owner.symbol.kind == SymbolKind.Parameter && owner.access == AccessConvention.Read {
@@ -1732,20 +1731,6 @@ sema_ownership_record_binding_view: fn(state: &SemaOwnershipState, binding: Bind
         }
         recorded: state.views.len() - 1
         state.views[recorded].reborrow_parent = parent
-    }
-    valid
-}
-
-sema_ownership_record_call_view: fn(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source_expr: Expr, output_path: [String], access: AccessConvention, scopes: SemaScopeTable) -> Bool {
-    places := sema_ownership_places_from_expr_in_state(source_expr, scopes, state)
-    if places.len() == 0 -> return false
-    key: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return false
-    loop index in 0..<state.views.len() {
-        if state.views[index].carrier_key == key && state.views[index].active -> state.views[index].active = false
-    }
-    valid := true
-    loop place in places {
-        if !sema_ownership_record_view_fact_inner(state, carrier, carrier_span, place, output_path, access, scopes, -1) -> valid = false
     }
     valid
 }
@@ -1856,17 +1841,35 @@ sema_ownership_view_source_for_place: fn(place: SemaOwnershipPlace, receiver_key
 
 sema_ownership_view_source_equal: fn(left: ViewSource, right: ViewSource) -> Bool Never! {
     if left == {
-        .Receiver -> if right == {.Receiver -> true else -> false}
-        .Parameter(index) -> if right == {.Parameter(other) -> index == other else -> false}
-        .Static(module_path, name) -> if right == {.Static(other_module, other_name) -> module_path == other_module && name == other_name else -> false}
+        .Receiver -> if right == {
+            .Receiver -> true
+            .Parameter(_) | .Static(_, _) -> false
+        }
+        .Parameter(index) -> if right == {
+            .Parameter(other) -> index == other
+            .Receiver | .Static(_, _) -> false
+        }
+        .Static(module_path, name) -> if right == {
+            .Static(other_module, other_name) -> module_path == other_module && name == other_name
+            .Receiver | .Parameter(_) -> false
+        }
     }
 }
 
 sema_ownership_view_projection_equal: fn(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool Never! {
     if left == {
-        .Field(name) -> if right == {.Field(other) -> name == other else -> false}
-        .Index -> if right == {.Index -> true else -> false}
-        .Range -> if right == {.Range -> true else -> false}
+        .Field(name) -> if right == {
+            .Field(other) -> name == other
+            .Index | .Range -> false
+        }
+        .Index -> if right == {
+            .Index -> true
+            .Field(_) | .Range -> false
+        }
+        .Range -> if right == {
+            .Range -> true
+            .Field(_) | .Index -> false
+        }
     }
 }
 
@@ -1927,7 +1930,7 @@ sema_ownership_consumed_view_owner: fn(place: SemaOwnershipPlace, scopes: SemaSc
         ty: scopes.bindings[binding_index].symbol.ty ?? return true
         if ty == {
             .Apply(name, args) -> return !((name == "View" || name == "ViewMut") && args.len() == 1)
-            else -> return true
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return true
         }
     }
     false
@@ -1942,7 +1945,7 @@ sema_ownership_place_has_fresh_projection: fn(place: SemaOwnershipPlace) -> Bool
     loop projection in place.typed_projections {
         if projection == {
             .Fresh(_) -> return true
-            else -> {}
+            .Field(_, _) | .Index(_, _) | .Range(_, _, _) | .Deref(_) -> {}
         }
     }
     false
@@ -2067,32 +2070,6 @@ sema_ownership_check_owner_read: fn(state: &SemaOwnershipState, expr: Expr, scop
     true
 }
 
-// Registry-backed view inference calls this hook after it has proved the
-// returned place.  Ownership stores the window and enforces overlap; it does
-// not infer view kinds or invent a second type relation.
-sema_ownership_open_reference: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    if access == AccessConvention.Write && sema_ownership_place_refuses_write(state, place, scopes) {
-        sema_ownership_report_static_write(state, place, span, diagnostics)
-        return false
-    }
-    if !sema_ownership_view_open_deferred(state, span) {
-        if sema_ownership_active_view_conflict(state, place, access) {
-            diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-            return false
-        }
-        conflict: sema_ownership_active_loan_conflict(state, place, access)
-        if conflict != None {
-            diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
-            return false
-        }
-    }
-    loan_seq := sema_ownership_next_sequence(state)
-    state.loans.push(SemaOwnershipLoan{place: place, access: access, span: span, scope_depth: state.scope_depth, seq: loan_seq, carrier_fact_seq: -1, carrier_key: ""})
-    kind: if access == AccessConvention.Write -> SemaOwnershipReferenceKind.Write else -> SemaOwnershipReferenceKind.Read
-    sema_ownership_note_reference(state, place.root, span, scopes, kind)
-    true
-}
-
 sema_ownership_open_reference_for_expr: fn(state: &SemaOwnershipState, expr: Expr, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_report_invalidated_view(state, expr, scopes, span, diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
@@ -2176,7 +2153,7 @@ sema_ownership_list_view_element_spans: fn(elements: [Expr]) -> [Span] Never! {
 sema_ownership_check_list_view_element_aliases: fn(state: &SemaOwnershipState, elements: [Expr], element_ty: Type, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     direct_mutable: if element_ty == {
         .Apply(name, _) -> name == "ViewMut"
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     previous := [SemaOwnershipPlace]{}
     previous_access := [AccessConvention]{}
@@ -2277,11 +2254,6 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
     true
 }
 
-sema_ownership_close_reference: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace) Never! {
-    remaining: loop loan in state.loans if !sema_ownership_places_overlap(loan.place, place) -> loan
-    state.loans = remaining
-}
-
 sema_ownership_place_moved: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
     loop moved in state.moved {
         if moved.origin.deferred_depth == None && sema_ownership_places_overlap(moved.place, place) -> return Val(moved)
@@ -2334,7 +2306,7 @@ sema_ownership_is_share_site: fn(state: SemaOwnershipState, span: Span) -> Bool 
 sema_ownership_move_origin: fn(expr: Expr, ty: Type, consumer: String, unmarked: Bool, copies_explicit: Bool) -> SemaOwnershipMoveOrigin {
     plain_name := if expr == {
         .Ident(_, _, _) -> true
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     shareable: unmarked && plain_name && !copies_explicit && !sema_call_reflection_one_pass(ty) && sema_ownership_type_cloneable(ty) != (Val(false))
     share_ty: if shareable -> Val(ty) else -> None
@@ -2417,7 +2389,7 @@ sema_ownership_diag_moved: fn(place: String, origin: SemaOwnershipMoveOrigin, sp
     if consumer == "`close`" && origin.moved_ty == .Val(ty) {
         if ty == {
             .Named(name) | .Apply(name, _) -> return diagnostic_with_detail(labeled, " Note: acquire a new `{sema_call_reflection_leaf_name(name)}` resource; closed resources cannot be copied or reused")
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
     }
     labeled
@@ -2436,7 +2408,7 @@ sema_ownership_one_pass_note: fn(place: String, ty: Type) -> String Never! {
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Body" -> materializer = ".text(limit)"
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if materializer == "" -> return " Note: `{place}` is one-pass and cannot be copied — create a fresh source for the second drive"
     " Note: `{place}` is one-pass — materialize it first with `{place}{materializer}`, or create a fresh source for the second drive"
@@ -2529,7 +2501,7 @@ sema_ownership_report_arena_view_escape: fn(state: &SemaOwnershipState, expr: Ex
             }
             false
         }
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -2761,13 +2733,6 @@ sema_ownership_carrier_loan_exempt: fn(state: &SemaOwnershipState, expr: Expr, p
     false
 }
 
-sema_ownership_active_view_conflict: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
-    loop fact in state.views {
-        if fact.active && !fact.invalidated && !fact.contested && sema_ownership_places_overlap(fact.source, place) && sema_ownership_view_access_conflicts(fact.access, access) -> return true
-    }
-    false
-}
-
 // A live read view tolerates other reads only: a write or a move of its owner
 // would invalidate what it looks into.
 sema_ownership_view_access_conflicts: fn(view: AccessConvention, access: AccessConvention) -> Bool Never! {
@@ -2939,7 +2904,7 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
                     diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
                 }
             }
-            else -> diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), if call_why == "" -> "a write window can change its owner, so the owner must be mutable (`:=`)" else -> "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
+            .Write | .Move -> diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), if call_why == "" -> "a write window can change its owner, so the owner must be mutable (`:=`)" else -> "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
         }
         return false
     }
@@ -2973,7 +2938,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
             }
             true
         }
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -2984,7 +2949,7 @@ sema_ownership_report_group_loan_change: fn(state: SemaOwnershipState, changed: 
     loop held in state.group_loans {
         if sema_ownership_places_overlap(held.place, changed) {
             changed_name: sema_ownership_place_name(changed)
-            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `shared`"))
+            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
             return true
         }
     }
@@ -3088,7 +3053,7 @@ sema_ownership_unmarked_moves_name: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .Ident(_, _, _) -> true
         .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_ownership_unmarked_moves_name(inner)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3224,7 +3189,7 @@ sema_ownership_moved_name: fn(expr: Expr) -> Expr? Never! {
     if expr == {
         .Ident(_, _, _) -> Val(expr)
         .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_ownership_moved_name(inner)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -3420,6 +3385,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             }
             places.push(place)
         }
+        if (scopes.writes_explicit || arg.mark != None) && !binder_rooted -> sema_call_marks_check_argument(scopes, callee, receiver, params, param, arg, diagnostics)
         if !binder_rooted && single_use && !callee.starts_with("core.") && !sema_single_use_check_argument(state, callee, param.convention, arg.expr, scopes, diagnostics) {
             accepted = false
             next
@@ -3439,7 +3405,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                     write_place_ok = false
                     diagnostics.push(sema_ownership_call_diag_write_range_window(arg.span))
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
         }
         // E0204 (#4702, Rust `reject_take_while_lent`): an earlier argument
@@ -3469,7 +3435,10 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(state, arg.expr, "be passed with write access", scopes, diagnostics)
                     // Exact-place inference has already checked and consumed
                     // this projected argument; reading it again is a reuse.
-                    arg.convention == AccessConvention.Move && (if arg.expr == {.Place(_, access, _, _) -> access == PlaceAccess.Take else -> false}) -> true
+                    arg.convention == AccessConvention.Move && (if arg.expr == {
+                        .Place(_, access, _, _) -> access == PlaceAccess.Take
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+                    }) -> true
                     else -> sema_ownership_check_use(state, arg.expr, scopes, diagnostics)
                 }
                 if !checked -> accepted = false
@@ -3561,7 +3530,7 @@ sema_ownership_takes_projected_place: fn(arg: CallArg) -> Bool Never! {
     if arg.expr == {
         .Place(value, access, _, _) -> access == PlaceAccess.Take && !sema_ownership_unmarked_moves_name(value)
         .Field(_, _, _, _) -> true
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3591,7 +3560,7 @@ sema_ownership_place_root_start: fn(expr: Expr) -> Int? Never! {
         .Field(base, _, _, _) -> return sema_ownership_place_root_start(base)
         .Index(base, _, _, _, _) -> return sema_ownership_place_root_start(base)
         .Slice(base, _, _, _, _, _) -> return sema_ownership_place_root_start(base)
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -3601,7 +3570,7 @@ sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> name == "ViewMut" || name == "ComputeViewMut"
         .Tagged(_, inner) -> sema_ownership_is_window_type(inner)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3837,7 +3806,7 @@ sema_ownership_type_mentions_generic: fn(ty: Type, generic_params: [TGenericPara
             }
             false
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3848,7 +3817,7 @@ sema_ownership_check_call_arguments: fn(state: &SemaOwnershipState, callee: Stri
 sema_ownership_argument_name: fn(arg: CallArg) -> String Never! {
     if arg.expr == {
         .Ident(name, _, _) -> name
-        else -> "this value"
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> "this value"
     }
 }
 
@@ -3873,6 +3842,7 @@ sema_ownership_check_method_receiver: fn(state: &SemaOwnershipState, receiver: E
 // signature line a changeability error quotes.
 sema_ownership_check_call_receiver_as: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_note_call_receiver(state, receiver, convention)
+    if scopes.writes_explicit && convention != AccessConvention.Read -> sema_receiver_mark_sign(state, receiver, sema_ownership_signature_line(method, Val(convention), params))
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     if places.len() == 0 {
         if convention == AccessConvention.Write {
@@ -3894,7 +3864,7 @@ sema_ownership_check_call_receiver_as: fn(state: &SemaOwnershipState, receiver: 
             sema_ownership_label_moves(state, expr_span(receiver), expr_source_span(receiver))
             true
         }
-        else -> sema_ownership_check_use(state, receiver, scopes, diagnostics)
+        .Read -> sema_ownership_check_use(state, receiver, scopes, diagnostics)
     }
 }
 
@@ -3937,7 +3907,7 @@ sema_receiver_mark_place_root: fn(expr: Expr) -> String? {
         .Field(base, _, _, _) -> return sema_receiver_mark_place_root(base)
         .Index(base, _, _, _, _) -> return sema_receiver_mark_place_root(base)
         .Slice(base, _, _, _, _, _) -> return sema_receiver_mark_place_root(base)
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -3945,7 +3915,7 @@ sema_receiver_mark_rank: fn(convention: AccessConvention) -> Int Never! {
     if convention == {
         .Read -> 0
         .Write -> 1
-        else -> 2
+        .Move -> 2
     }
 }
 
@@ -3957,7 +3927,7 @@ sema_receiver_mark_begin: fn(state: &SemaOwnershipState, receiver: Expr) -> Expr
     if receiver == .Place(value, access, _, _) {
         window: if value == {
             .Slice(_, _, _, _, _, _) -> access == PlaceAccess.Write
-            else -> false
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
         }
         if access != PlaceAccess.Read && !window -> unmarked = value
     }
@@ -3980,6 +3950,22 @@ sema_receiver_mark_note: fn(state: &SemaOwnershipState, receiver: Expr, conventi
                 updated.convention = Val(convention)
                 state.receiver_frames[index] = updated
             }
+            return
+        }
+        index -= 1
+    }
+}
+
+// The signature line E0228 quotes for the innermost frame over `receiver`.
+sema_receiver_mark_sign: fn(state: &SemaOwnershipState, receiver: Expr, signature: String) {
+    span: expr_span(receiver)
+    index := state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end {
+            updated := frame
+            updated.signature = signature
+            state.receiver_frames[index] = updated
             return
         }
         index -= 1
@@ -4060,7 +4046,7 @@ sema_ownership_convention_mark: fn(convention: AccessConvention) -> String Never
     if convention == {
         .Write -> "&"
         .Move -> "&&"
-        else -> ""
+        .Read -> ""
     }
 }
 
@@ -4300,7 +4286,7 @@ sema_ownership_call_result_views: fn(state: SemaOwnershipState, expr: Expr) -> [
         }
         .Index(base, _, _, _, _) -> return sema_ownership_call_view_projected(sema_ownership_call_result_views(state, base), "[]")
         .Field(base, member, _, _) -> return sema_ownership_call_view_projected(sema_ownership_call_result_views(state, base), member)
-        else -> return none
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return none
     }
 }
 
@@ -4365,7 +4351,7 @@ sema_ownership_walk_place_shape: fn(expr: Expr, scopes: SemaScopeTable) -> Bool 
             return kind == SymbolKind.Local || kind == SymbolKind.Parameter || kind == SymbolKind.Constant
         }
         .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) | .Place(base, _, _, _) | .Paren(base, _, _) -> return sema_ownership_walk_place_shape(base, scopes)
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -4399,7 +4385,7 @@ sema_ownership_capture_place_info: fn(state: SemaOwnershipState, expr: Expr, sco
             return Val(info)
         }
         .Place(inner, _, _, _) | .Paren(inner, _, _) -> return sema_ownership_capture_place_info(state, inner, scopes)
-        else -> return None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
     }
 }
 
@@ -4580,10 +4566,10 @@ sema_ownership_walk_called_value: fn(receiver: Expr, method: String, scopes: Sem
             ty: scopes.bindings[index].symbol.ty ?? return false
             return if ty == {
                 .Fn(_, _, _, _, _, _) -> true
-                else -> false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
             }
         }
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -4616,7 +4602,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
                     sema_ownership_collect_evaluated_expr_accesses(state, end, mode, bound, nested, scopes, events, checks)
                 }
             }
-            else -> {}
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
         }
         return
     }
@@ -4725,7 +4711,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
                     }
                 }
                 .Value(value) -> sema_ownership_collect_evaluated_expr_accesses(state, value, mode, bound, nested, scopes, events, checks)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
         .TupleLit(fields, _, _, _) -> {
@@ -4756,7 +4742,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
                 .Panic(_, panic_args) -> {
                     loop arg in panic_args -> sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, mode, bound, nested, scopes, events, checks)
                 }
-                else -> {}
+                .Block(_, _, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
@@ -4779,7 +4765,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
                 sema_ownership_collect_evaluated_expr_accesses(state, step.value, mode, step_bound, nested, scopes, events, checks)
             }
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -4802,7 +4788,7 @@ sema_ownership_collect_pattern_values: fn(pattern: Pattern, values: &[Expr]) Nev
                     // copy: `value` is a payload of read parameter `pattern`; the value list owns this one
                     .Value(_, _, value) -> values.push(value.copy())
                     .Nested(_, _, nested) -> sema_ownership_collect_pattern_values(nested, values)
-                    else -> {}
+                    .Bind(_, _, _, _) -> {}
                 }
             }
         }
@@ -4814,7 +4800,7 @@ sema_ownership_collect_pattern_values: fn(pattern: Pattern, values: &[Expr]) Nev
                 sema_ownership_collect_slot_values(entry.slot, values)
             }
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
 }
 
@@ -4824,7 +4810,7 @@ sema_ownership_collect_slot_values: fn(slot: PatSlot, values: &[Expr]) Never! {
         .Value(value) -> values.push(value.copy())
         .Nested(pattern) -> sema_ownership_collect_pattern_values(pattern, values)
         .Named(_, _, inner) -> sema_ownership_collect_slot_values(inner, values)
-        else -> {}
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> {}
     }
 }
 
@@ -4844,7 +4830,7 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: &[String]) Never!
                 if field == {
                     .Bind(_, _, local, _) -> bound.push(local.copy())
                     .Nested(_, _, nested) -> sema_ownership_bind_pattern_names(nested, bound)
-                    else -> {}
+                    .Value(_, _, _) -> {}
                 }
             }
         }
@@ -4862,7 +4848,7 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: &[String]) Never!
                 if part == .Hole(name, _, _) -> bound.push(name.copy())
             }
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) -> {}
     }
 }
 
@@ -4871,7 +4857,7 @@ sema_ownership_bind_slot_names: fn(slot: PatSlot, bound: &[String]) Never! {
         .Bind(name, _) -> bound.push(name.copy())
         .Nested(pattern) -> sema_ownership_bind_pattern_names(pattern, bound)
         .Named(_, _, inner) -> sema_ownership_bind_slot_names(inner, bound)
-        else -> {}
+        .Wildcard | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
 }
 
@@ -4938,7 +4924,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: &SemaOwnershipState, b
                 // copy: `step_stmt` is a payload of the read statement list; the one-statement list owns this one
                 if step == .Val(step_stmt) -> sema_ownership_collect_evaluated_stmt_accesses(state, [Stmt]{step_stmt.copy()}, mode, loop_bound, nested, scopes, events, checks)
             }
-            // An `#Off` or `#DebugOnly` body never reaches the release runtime.
+            // An `#Off` or `#Off(.Release)` body never reaches the release runtime.
             .Switched(marker, switched_body, _) -> {
                 if !sema_authority_switched_erased(marker.name) {
                     body_bound := bound.copy()
@@ -4993,7 +4979,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: &SemaOwnershipState, b
                 sema_ownership_collect_evaluated_stmt_accesses(state, inner, mode, body_bound, nested, scopes, events, checks)
             }
             // Comptime forms erase before runtime evaluation.
-            else -> {}
+            .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) -> {}
         }
     }
 }
@@ -5016,7 +5002,7 @@ sema_ownership_collect_call_projection_accesses: fn(state: &SemaOwnershipState, 
             }
         }
         .Field(base, _, _, _) | .Place(base, _, _, _) | .Paren(base, _, _) | .Deref(base, _, _) -> sema_ownership_collect_call_projection_accesses(state, base, nested, scopes, events, checks)
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -5241,7 +5227,7 @@ sema_ownership_check_window_operands: fn(state: &SemaOwnershipState, place: Expr
             if range != None && !sema_ownership_check_expression(state, range, scopes, diagnostics) -> valid = false
             valid
         }
-        else -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> true
     }
 }
 
@@ -5396,7 +5382,7 @@ sema_ownership_check_expression: fn(state: &SemaOwnershipState, expr: Expr, scop
                     valid
                 }
                 .Value(value) -> sema_ownership_check_expression(state, value, scopes, diagnostics)
-                else -> true
+                .ByteText(_) | .Empty -> true
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
@@ -5456,7 +5442,7 @@ sema_ownership_check_expression: fn(state: &SemaOwnershipState, expr: Expr, scop
                         if !sema_ownership_check_expression(state, returned, scopes, diagnostics) -> valid = false
                     }
                 }
-                else -> {}
+                .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
             fallback_path: sema_ownership_fork_path(state, fork)
             sema_ownership_fork_rollback(state, fork)
@@ -5494,7 +5480,7 @@ sema_ownership_check_expression: fn(state: &SemaOwnershipState, expr: Expr, scop
             sema_ownership_merge_references(state, deferred.references)
             true
         }
-        else -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Range(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> true
     }
 }
 
@@ -6110,7 +6096,7 @@ sema_ownership_record_assignment_view: fn(state: &SemaOwnershipState, target: LV
     carrier_key: sema_ownership_carrier_key(scopes, carrier_name, expr_span(target_expr)) ?? return false
     if target == {
         .Local(_, _) -> {}
-        else -> return false
+        .Index(_, _, _, _) | .Field(_, _, _) -> return false
     }
     producer: sema_ownership_view_producer(value) ?? return false
     places := sema_ownership_places_from_expr_in_state(producer.source, scopes, state)
@@ -6141,7 +6127,7 @@ sema_ownership_check_assignment: fn(state: &SemaOwnershipState, target: LValue, 
         .Ident(_, _, _) | .Paren(_, _, _) | .Present(_, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Tainted(_, _, _, _) -> {
             if !sema_ownership_mark_unmarked_move(state, value, scopes, "the assignment", diagnostics) -> valid = false
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     valid
 }
@@ -6301,7 +6287,7 @@ sema_ownership_check_statement: fn(state: &SemaOwnershipState, statement: Stmt, 
             sema_ownership_fork_join_close(state, fork, then_path, else_path, else_body != None)
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
-        else -> SemaOwnershipFlowResult{complete: true, falls_through: true}
+        .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .AssumeDet(_, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> SemaOwnershipFlowResult{complete: true, falls_through: true}
     }
 }
 
@@ -6346,7 +6332,7 @@ sema_ownership_frozen_expr_site: fn(state: SemaOwnershipState, expr: Expr, scope
             }
             None
         }
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -6393,7 +6379,7 @@ sema_ownership_carries_lending_view: fn(expr: Expr, name: String) -> Bool {
                 .Value(value) -> return sema_expression_lambda_bound_expr_use(value, name)
                 .Return(value, _) -> return sema_expression_lambda_bound_optional_expr(value, name)
                 .Block(body, value, _) -> return sema_expression_lambda_bound_statements_use(body, name) || sema_expression_lambda_bound_optional_expr(value, name)
-                else -> {}
+                .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .TypedLit(_, body, _, _) -> {
@@ -6402,10 +6388,10 @@ sema_ownership_carries_lending_view: fn(expr: Expr, name: String) -> Bool {
                 .Elements(items) -> { loop item in items { if sema_expression_lambda_bound_expr_use(item, name) -> return true } }
                 .Entries(entries) -> { loop entry in entries { if sema_expression_lambda_bound_expr_use(entry.key, name) || sema_expression_lambda_bound_expr_use(entry.value, name) -> return true } }
                 .Value(value) -> return sema_expression_lambda_bound_expr_use(value, name)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     false
 }

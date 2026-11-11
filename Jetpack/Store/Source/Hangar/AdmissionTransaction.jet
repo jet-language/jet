@@ -6,7 +6,7 @@
 // here `commit` rolls back its own failures and a caller that abandons a
 // transaction before `commit` calls `rollback` on that path.
 
-STORE_TRANSACTION_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_TRANSACTION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 // Test seam (Rust thread-local ADMISSION_FAILURE): 0 = none, else the
 // 1-based `AdmissionFailurePoint` tag that fails after that step.
@@ -14,7 +14,7 @@ AdmissionFailureSeam: struct {
     armed: Int
 }
 
-STORE_ADMISSION_FAILURE: shared AdmissionFailureSeam{armed: 0}
+STORE_ADMISSION_FAILURE: Shared{AdmissionFailureSeam{armed: 0}}
 
 // A verified object supplied by a format adapter. The adapter owns how the
 // bytes were fetched and hashed; the transaction owns their durable
@@ -466,7 +466,7 @@ store_transaction_publish_receipt: fn(partial: String, path: String, receipts: S
                 if files.read_bytes(path) != receipt.bytes -> return Err(StoreError.InvalidData("Hangar receipt `{receipt.digest}` changed during publication"))
                 return Ok(false)
             }
-            else -> return Err(StoreError.IO(err))
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
         }
     }
     store_sync_store_directory(receipts)

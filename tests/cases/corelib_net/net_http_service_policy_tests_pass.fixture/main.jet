@@ -94,7 +94,7 @@ use {
     assert((response.body().text(64) ?? panic("error body")) == "500 Internal Server Error")
     if response.body().text(64) == {
         .Err(.BodyConsumed) -> {}
-        else -> panic("response body must be consumed once")
+        .Ok(_) | .Err(_) -> panic("response body must be consumed once")
     }
     events: server.sse("ready")
     assert((events.header("content-type") ?? panic("SSE content type")) == "text/event-stream")

@@ -251,7 +251,7 @@ sema_copy_walk_key: fn(identity: String, actual: Type) -> String Never! {
             joined: names.join(", ")
             "{identity}<{joined}>"
         }
-        else -> identity
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> identity
     }
 }
 
@@ -336,7 +336,7 @@ sema_copy_copyable_scalar: fn(ty: Type) -> Bool Never! {
         .InlineRange(base, _, _) -> sema_copy_copyable_scalar(base)
         .Apply(name, args) -> name == "Ptr" && args.len() == 1
         .Named(name) -> name == "Complex" || name == "Range" || name == "IOOperation"
-        else -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) -> false
     }
 }
 
@@ -349,7 +349,7 @@ sema_copy_owned_view_type: fn(ty: Type, string_view: Bool) -> (ty: Type, materia
                 return (materialized: true, ty: Type.List{element: args[0]})
             }
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     (materialized: false, ty: ty)
 }
@@ -362,7 +362,7 @@ sema_copy_generic_bindings: fn(nominal: SemaRegistrationNominal, actual: Type) -
             parameters: sema_inference_registration_params(nominal.generic_params)
             return (bindings: sema_inference_bindings_for_type_args(parameters, args), complete: true)
         }
-        else -> return (bindings: [SemaInferenceBinding]{}, complete: false)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return (bindings: [SemaInferenceBinding]{}, complete: false)
     }
 }
 
@@ -375,7 +375,7 @@ sema_copy_nominal_declared_types: fn(nominal: SemaRegistrationNominal, bindings:
             if item == {
                 .TypeAlias(definition) -> types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.target), bindings))
                 .Distinct(definition) -> types.push(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(graph, nominal, definition.base), bindings))
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
         .ForeignHandle(_) | .CompilerBuiltinTrait(_) -> {}
@@ -465,7 +465,7 @@ sema_copy_generic_param_facts: fn(ty: Type, params: [TGenericParam]) -> SemaCopy
             }
             None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -982,7 +982,7 @@ sema_copy_classify: fn(
     accepted: source_facts.complete && target_facts.complete && !source_facts.resource && (source_facts.copyable || target_facts.cloneable)
     memory: if owned.ty == {
         .Shared(_) -> SemaCopyMemoryKind.RetainRelease
-        else -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
     }
     SemaCopyFacts{
         source: source,
@@ -1008,7 +1008,7 @@ sema_copy_classify: fn(
 sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String -> return false
-        else -> {}
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
     walk := sema_copy_walk()
@@ -1024,7 +1024,7 @@ sema_copy_diagnostic: fn(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
             .Apply(name, args) -> {
                 if (name == "CellReadGuard" || name == "CellEditGuard") && args.len() == 1 -> shown = "{name}<{type_name(args[0])}>"
             }
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
     }
     if {
@@ -1044,6 +1044,6 @@ sema_copy_memory_operation: fn(facts: SemaCopyFacts) -> String? {
     if facts.memory == {
         .RetainRelease -> Val("{prefix} of `{type_name(facts.target)}` retains a shared reference")
         .Allocation -> Val("{prefix} of `{type_name(facts.target)}` allocates owned heap data")
-        else -> None
+        .NoEvent -> None
     }
 }

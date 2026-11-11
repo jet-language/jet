@@ -25,11 +25,19 @@ use {
 
 Session: struct {
     priv value: Int
+
+    impl Close {
+        close: fn(&&self) { abi.close(self.value) }
+    }
 }
 
 TableView: struct {
     priv session: Int
     priv table: Int
+
+    impl Close {
+        close: fn(&&self) { abi.view_release(self.session, self.table) }
+    }
 }
 
 #Error
@@ -57,14 +65,6 @@ decode_response: fn(raw: String, code: Int) -> Dyn LuaError! {
     decode_status(code)
     value := json.parse(raw) ?? return Err(LuaError.Protocol)
     return Ok(value)
-}
-
-impl Session.Close {
-    close: fn(&&self) { abi.close(self.value) }
-}
-
-impl TableView.Close {
-    close: fn(&&self) { abi.view_release(self.session, self.table) }
 }
 
 open: fn() -> Session LuaError! {

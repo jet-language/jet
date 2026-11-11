@@ -15,7 +15,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [DefaultRefs](DefaultRefs.jet) — A default may reference an earlier parameter.
 - [FencedNames](FencedNames.jet) — `<: … :>` repeats its whole statement once per entry without creating a list.
 - [FirstHour](FirstHour.jet) — First-hour tour: one small command-line tool that also builds as a native binary.
-- [FirstHourExpert](FirstHourExpert.jet) — Expert variant of first_hour.jet.
+- [FirstHourExpert](FirstHourExpert.jet) — Expert variant of FirstHour.jet.
 - [FizzBuzz](FizzBuzz.jet)
 - [Hello](Hello.jet) — Your first program: `run: fn` is the explicit entry.
 - [IfExpression](IfExpression.jet) — `if` as a value, and optional condition parens.

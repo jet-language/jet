@@ -12,11 +12,11 @@ use {
 run: fn() {
     if tui.color_ansi16(-20) == {
         .ANSI16(index) -> print(index)
-        else -> panic("ANSI16 constructor changed variant")
+        .ANSI256(_) | .RGB(_, _, _) -> panic("ANSI16 constructor changed variant")
     }
     if tui.color_rgb(-1, 128, 999) == {
         .RGB(red, green, blue) -> print("{red},{green},{blue}")
-        else -> panic("RGB constructor changed variant")
+        .ANSI16(_) | .ANSI256(_) -> panic("RGB constructor changed variant")
     }
     s: tui.style_underline(tui.style_dim(tui.style_bold(tui.style(), true), true), true)
     print("{s.bold},{s.dim},{s.underline}")
@@ -27,14 +27,14 @@ run: fn() {
     loop frame in frames -> print("{frame.x},{frame.width}")
     if tui.key_event_modifiers("A", -1) == {
         .Key(code, modifiers) -> print("{code},{modifiers}")
-        else -> panic("key constructor changed variant")
+        .Resize(_) | .Timer(_, _) | .IO(_, _) | .Focus(_) | .Interrupt | .Close -> panic("key constructor changed variant")
     }
     if tui.fill(1.5) == {
         .Fill(weight) -> print(weight)
-        else -> panic("fill constructor changed variant")
+        .Length(_) | .Min(_) | .Max(_) | .Percent(_) -> panic("fill constructor changed variant")
     }
     if tui.percent(200.0) == {
         .Percent(value) -> print(value)
-        else -> panic("percent constructor changed variant")
+        .Length(_) | .Min(_) | .Max(_) | .Fill(_) -> panic("percent constructor changed variant")
     }
 }

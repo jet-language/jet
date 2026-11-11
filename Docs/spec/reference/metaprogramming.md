@@ -23,8 +23,8 @@ become part of a program. The boundary is visible in source:
   again from the evaluator's erased value representation. The retired
   `@ { ... }` spelling teaches `comptime { ... }` (E0388).
 - `@name: expression` binds a value evaluated during compilation.
-- Compiler facts carry `$`: members of their subject such as `T.$fields`, or
-  the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
+- Compiler facts carry `$`: members of their subject such as `T.reflect().fields`, or
+  the roots `#build`, `#package`, `#phase` and `#program`. They do not replace
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
@@ -68,17 +68,18 @@ Nested `@if` forms use the same rule. See
 
 `comptime loop` is the one typed compile-time repetition mechanism used by derive
 and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptime/PrepLoop.jet)
-uses it to create methods from `T.$fields`, to emit an `impl` for each type,
+uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
-Inside a template the fact sigil also splices a template binding
-(D-NAME-SPLICE1=B). `$method: fn(self)` and `impl $type_name` name a
-declaration from the binding's text, `self.$field` reads the member a loop
-value names, `.$left` matches the variant it names, and `{$count}` or a bare
-`$count` reads the binding's build-time value. A `$` word that names no
-template binding, or that is read on a bound value such as `field.$name`,
-stays a compiler fact. The retired `@` splice teaches E0388 with the `$`
-respelling; prefix `@` in code marks only a live link.
+Inside a template a paste `#{name}` splices a template binding
+(D-META-HASH1=A). `#{method}: fn(self)` and `impl #{type_name}` name a
+declaration from the binding's text, `self.#{field}` reads the member a loop
+value names, `.#{left}` matches the variant it names, and a bare `#{count}`
+or a string hole `{count}` reads the binding's build-time value. A compiler
+fact reads through the subject, `field.reflect().name`, inside a template as
+anywhere else. A paste outside a derive or marker template is E0003, and so
+is any `$` word in program source (the site values are `#here` and
+`#caller`, D-SITE-CALLER1=A).
 
 ## Effect tiers and reproducibility
 
@@ -87,7 +88,7 @@ Compile-time effects are classified by what they can observe:
 | Tier | Allowed work | Reproducibility rule |
 |---|---|---|
 | 0 | Pure Jet values and effect-free Core calls | No external input is read. |
-| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | Inputs and hashes are recorded in `.jet/lock`; equal inputs produce equal values. |
+| 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | Inputs and hashes are recorded in `.jet/lock`; equal inputs produce equal values. Each file read is an input of the build identity: editing it rebuilds under `jet build` and reruns under `jet dev`. |
 | 2 | Ambient filesystem, environment, process, clock, random, or unpinned network access | The source uses `#Impure("reason")`, and the build invocation grants `impure`. |
 
 The examples show the Tier 1 boundary: [`embed.jet`](../../../Examples/Metaprogramming/Comptime/Embed.jet)
@@ -182,7 +183,7 @@ The source registry reserves typed item-template generation. `derive T.Trait {
 grammar, and neither form accepts a source string or re-lexes generated text.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
-A `$name` in a `b.generate` body that names a local of the build entry splices
+A `#{name}` paste in a `b.generate` body that names a local of the build entry splices
 that local's value into the generated items as a Jet literal, so build
 reflection can feed generated code:
 
@@ -192,7 +193,7 @@ build: fn(b: Build) {
         if function.name == "wrapped" {
             operation: function.arithmetic[0].operation
             b.generate("reflection_values") {
-                reflected_operation: fn() -> String { $operation }
+                reflected_operation: fn() -> String { #{operation} }
             }
         }
     }
@@ -202,7 +203,7 @@ build: fn(b: Build) {
 A spliced local is a `String`, `Int` or `Bool`, or a list of them; any other
 type is E3502. The value goes where an expression goes; a generated
 declaration's name comes only from a compile-time binding, such as a
-`comptime` loop name. A `$name` that names no build local stays a
+`comptime` loop name. A `#{name}` that names no build local stays a
 compile-time name of the items.
 
 ## Typed reflection
@@ -210,8 +211,8 @@ compile-time name of the items.
 Jet has two related reflection paths:
 
 1. A compile-time fact read is a `$` member of its subject. Examples include
-   `Severity.$range`, `send_report.$effects`, `T.$layout`, and
-   `$package.name`. These reads produce typed fact records that can be
+   `Severity.reflect().range`, `send_report.reflect().effects`, `T.reflect().layout`, and
+   `#package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
 2. `T.reflect()` returns aggregate type information for a derive body, while
    `reflect.of(value)` returns the runtime reflection floor for a value.
@@ -257,18 +258,18 @@ record rather than infer a fact from a string. `fact_reads.jet` and
 
 The owner-controlled lexical ledger names these ratified fact roots
 (D-META-ROOT3=A, D-BUILD-FACT3=A). Facts about a type, function, method,
-closure or value are `$` members of that subject, such as `T.$fields`, so no
+closure or value are `$` members of that subject, such as `T.reflect().fields`, so no
 query root exists for them. `@SOURCE` and `@TYPES` keep their registry
 spelling until a ballot names their `$` root.
 
 ```text
-$build  $package  $phase  $program
+#build  #package  #phase  #program
 ```
 
-`$phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
+`#phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
 exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
 block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
-program. The evaluation site decides it, so `print($phase)` in `run` prints
+program. The evaluation site decides it, so `print(#phase)` in `run` prints
 `Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
 shows both sites. Do not confuse that language phase with `CompilerStage`,
 which contains `Parsed`, `Resolved`, `Typed`, `Prepared`, and `Emitted` and
@@ -325,8 +326,16 @@ rails.
 ## Design boundary
 
 Jet takes compile-time power from systems such as Jai, but rejects invisible
-string insertion, arbitrary message-loop mutation, and ambient build authority.
-The durable rule is simple: compute typed values, inspect typed facts, generate
-checked items additively, and record external inputs. The source examples and
-the two executable registries linked above are the evidence; this page does
-not turn a schema row into an implementation claim.
+string insertion and ambient build authority. Standard code, which every
+program gets, computes typed values, inspects typed facts, generates checked
+items additively and records external inputs; its written code means what the
+file says. The approved root package's `Compiler` value is the advanced mode:
+it may build types from facts, parse code into checked fragments, specialize
+and rewrite written function bodies, each change rechecked with the callers it
+affects and recorded in a receipt that does not promise equivalence. Some
+limits hold in both modes: no token, tree or attribute macros, no custom
+syntax, no message loop, no user macros, no mutable compiler nodes, no forged
+facts, and no host permission carried by a Meta effect. The advanced operations
+are ratified contract and not yet built. The source examples and the two
+executable registries linked above are the evidence; this page does not turn
+a schema row into an implementation claim.

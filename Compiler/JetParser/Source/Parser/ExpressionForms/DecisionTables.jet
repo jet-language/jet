@@ -7,8 +7,8 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
+        AccessConvention,
         BinOp,
-        ElseArmSpan,
         Expr,
         Lambda,
         LambdaParam,
@@ -210,13 +210,13 @@ parser_expression_form_record_test_ahead: fn(state: &JetParserState) -> Bool Nev
 parser_expression_form_same_dispatch_subject: fn(left: Expr, right: Expr) -> Bool Never! {
     left_value: if left == {
         .Ident(name, _, _) -> name
-        else -> ""
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
     }
     if left_value == "" -> return false
     if left_value == "it" -> return true
     return if right == {
         .Ident(name, _, _) -> left_value == name
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -261,7 +261,7 @@ parser_expression_form_arm_atom: fn(state: &JetParserState, subject: Expr, op: B
         .Bool(_, _, _) -> prefer_predicate
         .Unary(unary_op, _, _, _) -> unary_op == UnOp.Not
         .Ident(_, _, _) | .Field(_, _, _, _) | .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) -> prefer_predicate
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     if is_predicate -> return raw.expr
     Expr.Binary{op: op, left: subject, right: raw.expr, span: parser_cover(expr_span(subject), raw.span), id: parser_node_id(state)}
@@ -346,7 +346,7 @@ parser_expression_form_redundant_dispatch: fn(state: &JetParserState, subject: E
     redundant: if raw.expr == {
         .PatternTest(lhs, _, _, _) -> parser_expression_form_same_dispatch_subject(lhs, subject) && op == BinOp.Eq
         .Binary(binary_op, lhs, _, _, _) -> binary_op == op && parser_expression_form_same_dispatch_subject(lhs, subject)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
     state.position = saved_position
     loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
@@ -437,6 +437,10 @@ parser_expression_form_selected_value: fn(state: &JetParserState, depth: Int) ->
     if parser_current_kind(state) == TOKEN_RETURN || parser_current_kind(state) == TOKEN_BREAK {
         start: parser_current(state).span
         control: parser_parse_statement(state)
+        // The statement took the line break that ends it. Give the break back
+        // so the table or the line around this branch ends there, and a `.Case`
+        // on the next line starts the next arm instead of continuing a value.
+        if state.position > 0 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> state.position -= 1
         end: parser_prev_token_end(state)
         return ParserExpressionFormValueBranch{body: [Stmt]{control}, value: Expr.NoElse{span: Span{start: end, end: end}, id: parser_node_id(state)}, span: Span{start: start.start, end: end}}
     }
@@ -512,28 +516,32 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
     // to `it` once (sema_expression_if_subject_is_table_it).
     head_subject: if subject == {
         .Ident(_, _, _) -> subject
-        else -> Expr.Paren{value: subject, span: expr_span(subject), id: AST_NODE_GENERATED}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> Expr.Paren{value: subject, span: expr_span(subject), id: AST_NODE_GENERATED}
     }
     arms := [ParserExpressionFormArm]{}
     else_body := [Stmt]{}
     else_value := Expr.NoElse{span: start, id: parser_node_id(state)}
     end := start
-    last_arm_end := start.end
+    open_end: parser_previous_end(state)
     loop {
         parser_skip_semicolons(state)
         kind: parser_current_kind(state)
         if kind == TOKEN_KW_ELSE {
+            // Token ends, not value spans: a value's span may stop short of
+            // its closing `)`.
+            arm_before_end: parser_previous_end(state)
             else_token: parser_bump(state)
             parser_expect_unified_arrow(state, "after `else` in a value dispatch")
             branch: parser_expression_form_selected_value(state, depth + 1)
+            arm_end: parser_previous_end(state)
             else_body = branch.body
             else_value = branch.value
             parser_skip_semicolons(state)
             close: parser_expect(state, TOKEN_RBRACE, "after the final `else` value dispatch arm")
             end = close.span
-            // L0303 (#3716): sema reports this arm when the arms before it
-            // already cover a closed set.
-            state.else_arms.push(ElseArmSpan{table: parser_cover(start, close.span), arm: Span{start: else_token.span.start, end: branch.span.end}, delete: Span{start: last_arm_end, end: branch.span.end}})
+            // E0641: sema reports this arm when the table's subject is a
+            // closed set; its edit names the cases the `else` stands for.
+            state.else_arms.push(parser_else_arm_span(state, parser_cover(start, close.span), open_end, arm_before_end, else_token.span.start, arm_end))
             break
         }
         if kind == TOKEN_RBRACE {
@@ -541,7 +549,7 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
             end = close.span
             all_patterns := arms.len() > 0
             loop arm in arms {
-                if arm.cond == { .PatternTest(_, _, _, _) -> {} else -> all_patterns = false }
+                if !parser_expression_form_pattern_arm(arm.cond) -> all_patterns = false
             }
             if !all_patterns {
                 parser_expression_form_error(state, "E0003", close.span, "a value dispatch needs a final `else` arm", "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm", "add `else -> value` so every path produces a value")
@@ -561,12 +569,20 @@ parser_expression_form_parse_dispatch_table: fn(state: &JetParserState, subject:
         arms.push(ParserExpressionFormArm{cond: condition.move(), body: branch.body, value: branch.value})
         if parser_aborting(state) -> break
         if state.position == arm_position -> parser_bump(state)
-        last_arm_end = branch.span.end
     }
     if arms.len() == 0 {
         parser_expression_form_error(state, "E0003", start, "a value dispatch needs at least one arm before `else`", "`else` is a fallback, not a condition", "add a value or pattern arm before `else`")
     }
     parser_expression_form_nest_arms(state, arms, else_body, else_value, start, end)
+}
+
+// A pattern arm of a value dispatch, guarded (`.Val(x) && x > 0`) or not.
+// A guarded arm covers no case, and sema's coverage proves that the other
+// arms cover the subject (E0307), so it needs no `else` either.
+parser_expression_form_pattern_arm: fn(cond: Expr) -> Bool Never! {
+    if cond == .PatternTest(_, _, _, _) -> return true
+    if cond == .Binary(op, left, _, _, _) -> return op == BinOp.And && parser_expression_form_pattern_arm(left)
+    false
 }
 
 // `lint_style` marks the root of a value `if` chain, which reports L0507 when
@@ -643,7 +659,7 @@ parser_expression_form_parse_bare_lambda: fn(state: &JetParserState, depth: Int)
     span: Span{start: name.span.start, end: body.end}
     lambda: Lambda{
         take_names: [NamedSpan]{},
-        params: [LambdaParam]{LambdaParam{name: parser_value(state, name), name_span: name.span, ty: None, ty_span: None}},
+        params: [LambdaParam]{LambdaParam{name: parser_value(state, name), name_span: name.span, ty: None, ty_span: None, convention: AccessConvention.Read}},
         effects: effects.effects,
         body: body.body,
         span: span,

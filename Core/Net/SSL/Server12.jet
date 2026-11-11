@@ -22,6 +22,7 @@ use {
     ecdh: __core_crypto_ecdh
     dhm: __core_crypto_dhm
     pk: __core_crypto_pk
+    rsa: __core_crypto_rsa
     x509: __core_crypto_x509
     x509crt: __core_crypto_x509crt
     ssldefs: __core_net_ssl_defs
@@ -292,7 +293,7 @@ ssl_srv12_parse_client_hello: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
             if ssl.conf.transport == ssldefs.SSL_TRANSPORT_DATAGRAM && ssl.renego_status == ssldefs.SSL_INITIAL_HANDSHAKE {
                 if e == {
                     .UnexpectedRecord -> return Err(.UnexpectedMessage)
-                    else -> {}
+                    .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .SessionTicketExpired | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> {}
                 }
             }
             return Err(e)
@@ -1001,10 +1002,11 @@ ssl_srv12_parse_client_dh_public: fn(ssl: &ssldefs.SSLContext, p: &Int, end: Int
     p += n
 }
 
-// Decrypt the RSA-encrypted premaster secret with our key into peer_pms,
-// whose length it gives; the encrypted value's length must be the key's
-// (ssl_decrypt_encrypted_pms).
-ssl_srv12_decrypt_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, end: Int, peer_pms: &[U8], rng: &R) -> Int ssldefs.SSLError! {
+// Decrypt the RSA-encrypted premaster secret with our key to 48 bytes, with
+// implicit rejection: `bad`, not an Err, when it does not decrypt to 48
+// bytes (ssl_decrypt_encrypted_pms). The encrypted value's length must be
+// the key's.
+ssl_srv12_decrypt_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, end: Int, rng: &R) -> rsa.V15Fixed ssldefs.SSLError! {
     len: ssltls.ssl_own_cert_pk_len(ssl)
     if len < 0 -> return Err(.NoClientCertificate)
     if p + 2 > end -> return Err(.DecodeError)
@@ -1012,34 +1014,38 @@ ssl_srv12_decrypt_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, en
     if p + 2 + len != end -> return Err(.DecodeError)
     if !ssltls.ssl_own_pk_can_do(ssl, .RSA) -> return Err(.PrivateKeyRequired)
     input: ssldefs.ssl_bytes_of(ssl.in_buf, p + 2, len)
-    out := ssltls.ssl_own_key_decrypt(ssl, input, peer_pms.len(), rng) ?? return Err(.PK(err))
-    ssldefs.ssl_copy_into(peer_pms, 0, out, 0, out.len())
-    ssldefs.ssl_wipe(out)
-    Ok(out.len())
+    fixed: ssltls.ssl_own_key_decrypt_fixed(ssl, input, 48, rng) ?? return Err(.PK(err))
+    Ok(fixed)
 }
 
 // The RSA-encrypted premaster secret, into premaster at pms_offset
-// (ssl_parse_encrypted_pms). Against Bleichenbacher's attack a message
-// that does not decrypt to 48 bytes with our version does not end the
-// handshake: a random premaster secret takes its place, chosen without a
-// branch on the outcome, and the Finished check fails later.
+// (ssl_parse_encrypted_pms). Against Bleichenbacher's attack and its
+// timing forms (Marvin), a message that does not decrypt to 48 bytes with
+// our version does not end the handshake: a random premaster secret takes
+// its place, chosen without a branch on the outcome, and the Finished check
+// fails later. The decryption reports the padding's verdict as a CtCond, so
+// nothing branches on it; only public failures (a malformed message, no
+// RSA key) take the Err arm.
 ssl_srv12_parse_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, end: Int, pms_offset: Int, rng: &R) ssldefs.SSLError! {
     peer_pms := ssldefs.ssl_zeros(48)
-    peer_pms[0] = U8{0xFF}
-    peer_pms[1] = U8{0xFF}
-    peer_pmslen := 0
-    failed := 1
-    if ssl_srv12_decrypt_encrypted_pms(ssl, p, end, peer_pms, rng) == {
-        .Ok(n) -> {
-            failed = 0
-            peer_pmslen = n
+    failed := ctime.ct_true()
+    if ssl_srv12_decrypt_encrypted_pms(ssl, p, end, rng) == {
+        .Ok(fixed) -> {
+            peer_pms = fixed.out
+            failed = fixed.bad
         }
         .Err(_) -> {}
     }
+    __ssl_srv12_take_premaster(ssl, peer_pms, failed, pms_offset, rng) ?? return Err(err)
+}
+
+// The part of ssl_srv12_parse_encrypted_pms after the decryption: the
+// client's 48 bytes, or a random premaster in their place when `failed` or
+// another version, into premaster at pms_offset; peer_pms is wiped.
+__ssl_srv12_take_premaster: fn<R: RNG>(ssl: &ssldefs.SSLContext, peer_pms: &[U8], failed: ctime.CtCond, pms_offset: Int, rng: &R) ssldefs.SSLError! {
     ver := ssldefs.ssl_zeros(2)
     sslmsg.ssl_write_version(ver, 0, ssl.conf.transport, ssl.spool[ssl.session_negotiate].tls_version)
-    diff := ctime.cond_of_int(failed)
-    diff = ctime.bool_or(diff, ctime.size_ne(peer_pmslen, 48))
+    diff := failed
     diff = ctime.bool_or(diff, ctime.uint_ne(U64{peer_pms[0]}, U64{ver[0]}))
     diff = ctime.bool_or(diff, ctime.uint_ne(U64{peer_pms[1]}, U64{ver[1]}))
     // Always made, whether or not it is used; an RNG failure reveals
@@ -1049,7 +1055,11 @@ ssl_srv12_parse_encrypted_pms: fn<R: RNG>(ssl: &ssldefs.SSLContext, p: Int, end:
         ssldefs.ssl_wipe(peer_pms)
         return Err(.RandomFailed)
     }
-    if ssl.handshake.premaster.len() < pms_offset + 48 -> return Err(.InternalError)
+    if ssl.handshake.premaster.len() < pms_offset + 48 {
+        ssldefs.ssl_wipe(peer_pms)
+        ssldefs.ssl_wipe(fake_pms)
+        return Err(.InternalError)
+    }
     ssl.handshake.pmslen = 48
     ctime.memcpy_if_else(diff, ssl.handshake.premaster, pms_offset, fake_pms, 0, peer_pms, 0, 48)
     ssldefs.ssl_wipe(peer_pms)
@@ -1155,7 +1165,7 @@ ssl_srv12_parse_client_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
             ssltls.ssl_psk_derive_premaster(ssl, kx, rng) ?? return Err(err)
         }
         .RSA -> ssl_srv12_parse_encrypted_pms(ssl, p, end, 0, rng) ?? return Err(err)
-        else -> return Err(.InternalError)
+        .NoExchange -> return Err(.InternalError)
     }
     ssltls.ssl_derive_keys(ssl) ?? return Err(err)
     sslmsg.ssl_handshake_increment_state(ssl)

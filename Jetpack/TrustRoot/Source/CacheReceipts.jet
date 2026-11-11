@@ -78,12 +78,12 @@ TrustKey: struct {
     sign: fn(self, message: [U8]) -> TrustSignature Never! {
         TrustSignature{key_id: self.key_id, algorithm: self.algorithm, sig_hex: hex.encode(crypto.hmac_sha256(self.secret, message))}
     }
-}
 
-// The secret is never rendered.
-impl TrustKey.Debug {
-    debug: fn(self) -> String {
-        "TrustKey {{ key_id: {self.key_id:Debug}, algorithm: {self.algorithm:Debug}, secret: \"<redacted>\" }}"
+    // The secret is never rendered.
+    impl Debug {
+        debug: fn(self) -> String {
+            "TrustKey {{ key_id: {self.key_id:Debug}, algorithm: {self.algorithm:Debug}, secret: \"<redacted>\" }}"
+        }
     }
 }
 
@@ -261,7 +261,7 @@ trust_read_cache_key_pin: fn(path: String, role: String) -[FS]> String TrustRoot
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Err(TrustRootError.CacheKeyMissing{role: role})
-                else -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -297,7 +297,7 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRoo
                     actual: trust_read_cache_key_pin(path, role)
                     if actual != expected -> return Err(TrustRootError.CacheKeyChanged{role, expected, actual})
                 }
-                else -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -324,7 +324,7 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Ok(None)
-                else -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -421,7 +421,7 @@ trust_ensure_real_dir: fn(path: String, not_real: String, parents: Bool) TrustRo
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> files.mkdir(path, parents)
-                else -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }

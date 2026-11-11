@@ -218,7 +218,7 @@ seams_checked_projection: fn() {
     ingress: schema_retained.schema_ingress ?? panic("supplied schema input was discarded")
     if ingress == {
         .Supplied(snapshots) -> seams_require(snapshots.get("Account") == Val((baseline)), "supplied schema map remains a distinct actual input")
-        else -> panic("supplied schema map was confused with a disk cache read")
+        .Cache(_, _) -> panic("supplied schema map was confused with a disk cache read")
     }
     parsed: parse_source("#PublishedSchema Account: struct {{\n    name: String\n    verified: Bool\n}}".bytes())
     pending: jet_driver_schema_pending_breaks([[Item]{parsed.program.items[0]}], [String:SchemaSnapshot]{"Account": baseline})

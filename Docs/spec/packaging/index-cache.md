@@ -4,9 +4,9 @@ This page defines the static publication trees consumed by Jetpack. The
 producer and verifier own the index format in
 [`Jetpack/Nix/Source/Index/`](../../../Jetpack/Nix/Source/Index/); the stage and publish
 implementation is
-[`stage-index-cache.mjs`](../../../Tools/jetpack-infra/stage-index-cache.mjs),
+[`StageIndexCache.jet`](../../../Tools/jetpack-infra/StageIndexCache.jet),
 and its local proof is
-[`test-index-cache.sh`](../../../Tools/jetpack-infra/test-index-cache.sh).
+[`TestIndexCache.jet`](../../../Tools/jetpack-infra/TestIndexCache.jet).
 The two services have separate origins:
 
 ```text
@@ -94,7 +94,7 @@ Generate and sign index targets with the existing producer. Then stage signed
 index files and eligible Hangar entries into separate local trees:
 
 ```sh
-Tools/jetpack-infra/stage-index-cache.sh \
+jet Tools/jetpack-infra/StageIndexCache.jet \
   --index-root <index-producer-output> \
   --hangar-root <jetpack-root> \
   --output <publication-staging> \
@@ -106,19 +106,22 @@ The output has `index/` for `index.jet-lang.dev` and `cache/` for
 `cache.jet-lang.dev`. The stage command validates a bounded lowercase ASCII
 channel, requires the manifest and every target signature, rejects symlinked,
 hard-linked, special, changed, and over-bound inputs, and does not copy signing
-requests.
+requests. Each target URL must be an `http` or `https` URL with a plain host
+name (and optional port), no query or fragment, and exactly the path
+`/index-v1/<revision>/<system>/<sha256>.json.zst`.
 
-The implementation holds POSIX directory descriptors with `O_NOFOLLOW`, reads
+The implementation holds directories opened without following links, reads
 files in bounded chunks, and creates immutable files through a temporary file
-and exclusive link. Cache staging invokes `jetpack hangar cache stage`, so it
-reuses Hangar provenance checks, the canonical NAR writer, cache receipts, and
+and a rename that never replaces an existing name. Cache staging invokes
+`jetpack hangar cache stage`, so it reuses Hangar provenance checks, the
+canonical NAR writer, cache receipts, and
 signing machinery. It uses private local scratch space and never contacts a
 remote endpoint.
 
 Run the local contract proof without a remote service:
 
 ```sh
-Tools/jetpack-infra/test-index-cache.sh
+JET=<admitted native jet> jet Tools/jetpack-infra/TestIndexCache.jet
 ```
 
 The official tier is explicit. Install the endpoint and pinned key together
@@ -131,7 +134,7 @@ catalog. The local unofficial keyless path remains separate.
 Publish the staged trees into two local host roots:
 
 ```sh
-Tools/jetpack-infra/stage-index-cache.sh publish \
+jet Tools/jetpack-infra/StageIndexCache.jet publish \
   --staging <publication-staging> \
   --channel nixpkgs-unstable \
   --index-destination <index-host-root> \

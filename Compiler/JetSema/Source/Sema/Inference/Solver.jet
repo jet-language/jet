@@ -127,22 +127,22 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
     if left == {
         .List(inner) -> if right == {
             .List(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Map(key, _, value) -> if right == {
             .Map(other_key, _, other_value) -> {
                 if !sema_inference_unify_inner(context, key, other_key, bindings, source, conflict) -> return false
                 sema_inference_unify_inner(context, value, other_value, bindings, source, conflict)
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Shared(inner) -> if right == {
             .Shared(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Option(inner) -> if right == {
             .Option(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Result(ok, err) -> if right == {
             .Result(other_ok, other_err) -> {
@@ -150,7 +150,7 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 err_result: sema_inference_unify_inner(context, err, other_err, bindings, source, conflict)
                 ok_result && err_result
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Fn(params, ret, _, _, _, _) -> if right == {
             .Fn(other_params, other_ret, _, _, _, _) -> {
@@ -160,7 +160,7 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 }
                 sema_inference_unify_optional(context, ret, other_ret, bindings, source, conflict)
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Apply(name, args) -> if right == {
             .Apply(other_name, other_args) -> {
@@ -170,7 +170,7 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 }
                 true
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Tuple(fields) -> if right == {
             .Tuple(other_fields) -> {
@@ -181,19 +181,19 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 }
                 true
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .FixedList(element, length) -> if right == {
             .FixedList(other, other_length) -> length == other_length && sema_inference_unify_inner(context, element, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .InlineRange(base, lo, hi) -> if right == {
             .InlineRange(other, other_lo, other_hi) -> lo == other_lo && hi == other_hi && sema_inference_unify_inner(context, base, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Tagged(_, inner) -> if right == {
             .Tagged(_, other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Union(members) -> if right == {
             .Union(other) -> {
@@ -203,13 +203,13 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 }
                 true
             }
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Quantity(base, dimension) -> if right == {
             .Quantity(other, other_dimension) -> dimension_identity(dimension) == dimension_identity(other_dimension) && sema_inference_unify_inner(context, base, other, bindings, source, conflict)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Measure(_) -> false
         }
-        else -> type_identity_equal(left, right)
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> type_identity_equal(left, right)
     }
 }
 
@@ -278,6 +278,13 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                 fix := "write `impl {name}.{bound} {{ … }}` with every required method"
                 if bound == "Comparable" -> fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
                 if bound == "Numeric" -> fix = "write `#Numeric` on a distinct number type, or `impl {name}.Numeric {{ … }}` with `zero` and `one` on a struct that implements {owned_trait_requires_listed(bound)}"
+                if graph == .Val(graph_value) {
+                    head_module: if parameter.bound_module == "" -> context.caller_module_identity else -> parameter.bound_module
+                    if sema_type_conditional_impl_head(graph_value, concrete, bound, head_module) == .Val(head) {
+                        why = "`{head}` applies only where its bounds hold, and the type arguments of `{name}` don't meet them"
+                        fix = "use type arguments that meet the bounds of `{head}`, or implement those traits for them"
+                    }
+                }
                 loop caller_parameter in context.lexical_generic_params {
                     if caller_parameter.name == name {
                         why = "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
@@ -368,12 +375,12 @@ sema_inference_expected_return_view: fn(declared_return: Type, expected: Type) -
         // copy: the expected return is a new owned Type. For a Result it equals `declared_return`,
         // the signature's return type (a read parameter), which stays in the signature.
         .Result(_, _) -> return declared_return.copy()
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if declared_return == {
         // copy: `success` is a payload of read parameter `declared_return`, which keeps the original; the returned value owns this one
         .Result(success, _) -> success.copy()
-        else -> declared_return
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> declared_return
     }
 }
 

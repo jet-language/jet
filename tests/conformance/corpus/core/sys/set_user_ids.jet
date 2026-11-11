@@ -6,7 +6,10 @@ run: fn() {
         before: os.user_ids() ?? panic("user_ids")
         os.set_user_ids(effective: before.effective) ?? panic("set_user_ids(effective:)")
         after: os.user_ids() ?? panic("user_ids after")
-        refused: os.set_user_ids(real: -2) ? ok -> false ! error -> (if error == { .InvalidInput(_) -> true else -> false })
+        refused: os.set_user_ids(real: -2) ? ok -> false ! error -> (if error == {
+            .InvalidInput(_) -> true
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
+        })
         print(after.real == before.real && after.effective == before.effective && after.saved == before.saved && refused)
     }
 }

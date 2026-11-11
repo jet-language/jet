@@ -160,7 +160,7 @@ text: fn(tree: Dyn) -> String {
         .Int(value) -> "{value}"
         .Number(lexeme) -> lexeme.copy()
         .Bool(value) -> if value -> "true" else -> "false"
-        else -> json.to_string(tree) ?? ""
+        .Null | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json.to_string(tree) ?? ""
     }
 }
 
@@ -173,7 +173,7 @@ count: fn(tree: Dyn) -> Int {
     if tree == {
         .Int(value) -> value
         .Number(lexeme) -> Int.parse(lexeme) ?? 0
-        else -> 0
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> 0
     }
 }
 
@@ -183,7 +183,7 @@ truthy: fn(tree: Dyn) -> Bool {
         .Bool(value) -> value
         .Int(value) -> value != 0
         .Text(value) -> value != ""
-        else -> true
+        .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

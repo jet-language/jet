@@ -62,7 +62,7 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
             id: jet_eval_build_field(data, "id") ?? return None
             if session == .Int(owner) && id == .Int(index) -> return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
         }
-        else -> {}
+        .Float(_, _) | .BigInt(_) | .Bytes(_) | .Map(_) | .Failed(_) -> {}
     }
     None
 }
@@ -173,13 +173,19 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         } else { return None }
         metadata: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
         identity_value: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
-        identity: if identity_value == {.String(text) -> text else -> { return None }}
+        identity: if identity_value == {
+            .String(text) -> text
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return None }
+        }
         details: jet_eval_build_field_present(metadata, "details") ?? return None
         variant: jet_eval_build_field_text(details, "variant") ?? return None
         if identity != "BuildError::{variant}" -> return None
         message: jet_eval_build_field_text(error, "message") ?? return None
         rows_value: jet_eval_build_field(details, "fields") ?? return None
-        rows: if rows_value == {.List(values) -> values else -> { return None }}
+        rows: if rows_value == {
+            .List(values) -> values
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return None }
+        }
         fields := [DiagnosticErrorField]{}
         loop field in rows {
             name: jet_eval_build_field_text(field, "name") ?? return None
@@ -212,10 +218,16 @@ jet_eval_build_graph_text: fn(value: String) -> TComptimeValue Never! { TComptim
 jet_eval_build_graph_ints: fn(values: [Int]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)} }
 jet_eval_build_graph_texts: fn(values: [String]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)} }
 jet_eval_build_graph_optional_int: fn(value: Int?) -> TComptimeValue Never! {
-    if value == {.Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}}
+    if value == {
+        .Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)}
+        .None -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}
+    }
 }
 jet_eval_build_graph_optional_bool: fn(value: Bool?) -> TComptimeValue Never! {
-    if value == {.Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Bool}}}
+    if value == {
+        .Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}}
+        .None -> TComptimeValue.Failed{report: .Clean{ty: Type.Bool}}
+    }
 }
 
 jet_eval_build_graph_action: fn(value: BuildGraphAction) -> TComptimeValue Never! {

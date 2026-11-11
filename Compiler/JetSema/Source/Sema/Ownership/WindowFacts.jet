@@ -88,7 +88,7 @@ sema_window_collect_rows: fn(items: [Item], rows: &[SemaWindowFunctionRow]) {
             .CodeModule(definition) -> {
                 if definition.body == .Val(body) -> sema_window_collect_rows(body, rows)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -102,7 +102,7 @@ sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow],
             .CodeModule(definition) -> {
                 if definition.body == .Val(body) -> sema_window_collect_candidates(body, rows, positions, candidates)
             }
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -152,7 +152,10 @@ sema_window_function_candidates: fn(func: Func, rows: [SemaWindowFunctionRow], p
     if (positions.get(func.name) ?? [Int]{}).len() > 1 -> return
     loop param_index in 0..<func.params.len() {
         if func.params[param_index].convention != AccessConvention.Write -> next
-        is_list := if func.params[param_index].ty == { .List(_) -> true else -> false }
+        is_list := if func.params[param_index].ty == {
+            .List(_) -> true
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        }
         if !is_list -> next
         scan := SemaWindowScan{resizes: false, onward: [SemaWindowEdge]{}}
         sema_window_scan_body(func.body, func.params[param_index].name, scan)
@@ -233,7 +236,7 @@ sema_window_is_param: fn(expr: Expr, param: String) -> Bool Never! {
     if expr == {
         .Paren(inner, _, _) -> return sema_window_is_param(inner, param)
         .Ident(name, _, _) -> return name == param
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -319,8 +322,9 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
             sema_window_scan_optional(audit, param, scan)
             sema_window_scan_body(body, param, scan)
         }
-        .TaskGroup(_, _, limit, body, _) -> {
-            sema_window_scan_optional(limit, param, scan)
+        .TaskGroup(_, _, args, body, _) -> {
+            sema_window_scan_optional(args.limit, param, scan)
+            sema_window_scan_optional(args.stack, param, scan)
             sema_window_scan_body(body, param, scan)
         }
         .AssumeDet(_, reason, body, _) -> {
@@ -336,7 +340,7 @@ sema_window_scan_statement: fn(statement: Stmt, param: String, scan: &SemaWindow
             loop arg in args -> sema_window_scan_expr(arg, param, scan)
             sema_window_scan_body(body, param, scan)
         }
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
 }
 
@@ -415,7 +419,7 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
                 }
                 .Return(inner, _) -> sema_window_scan_optional(inner, param, scan)
                 .Panic(_, args) -> sema_window_scan_args(args, param, scan)
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
@@ -448,9 +452,9 @@ sema_window_scan_expr: fn(expr: Expr, param: String, scan: &SemaWindowScan) {
                     sema_window_scan_expr(entry.value, param, scan)
                 }
                 .Value(value) -> sema_window_scan_expr(value, param, scan)
-                else -> {}
+                .ByteText(_) | .Empty -> {}
             }
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }

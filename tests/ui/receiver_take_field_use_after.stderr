@@ -1,11 +1,11 @@
 Error [jet.UseAfterMove]: `holder.buf` was consumed by `Buffer.seal`, so it can't be used here
-  --> tests/ui/receiver_take_field_use_after.jet:12:22
+  --> tests/ui/receiver_take_field_use_after.jet:13:22
     |
- 12 |     print(holder.buf.text)
+ 13 |     print(holder.buf.text)
     |                      ^^^^
-  --> tests/ui/receiver_take_field_use_after.jet:10:5
+  --> tests/ui/receiver_take_field_use_after.jet:11:5
     |
- 10 |     holder.buf.seal()
+ 11 |     holder.buf.seal()
     |     ^^^^^^^^^^ `holder.buf` moved to `Buffer.seal` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `holder.buf` after the move, or give `Buffer.seal` a copy with `holder.buf.copy()` where it moved.

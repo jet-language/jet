@@ -38,7 +38,7 @@ ScriptRegistryKind: struct {
                 pieces: name.split("/").to_list()
                 pieces.len() == 2 && provider_script_safe_piece(pieces[0], "_-.") && provider_script_safe_piece(pieces[1], "_-.")
             }
-            else -> false
+            .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> false
         }
     }
 
@@ -335,7 +335,7 @@ provider_script_fetch_candidates: fn(kind: ScriptRegistryKind, authority: Regist
         .RubyGems -> provider_rubygems_fetch(authority, scratch, name)
         .Cpan -> provider_cpan_fetch(authority, scratch, name)
         .Packagist -> provider_packagist_fetch(authority, scratch, name)
-        else -> Err(RegistryError.Reason("{kind.title} has no metadata reader"))
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> Err(RegistryError.Reason("{kind.title} has no metadata reader"))
     }
 }
 
@@ -346,7 +346,7 @@ provider_script_install_artifact: fn(kind: ScriptRegistryKind, artifact: Registr
         .RubyGems -> provider_rubygems_install(artifact, out, scratch)
         .Cpan -> provider_cpan_install(artifact, out, scratch)
         .Packagist -> provider_packagist_install(artifact, out, scratch)
-        else -> Err(RegistryError.Reason("{kind.title} has no installer"))
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> Err(RegistryError.Reason("{kind.title} has no installer"))
     }
 }
 
@@ -355,7 +355,7 @@ provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts
         .RubyGems -> provider_rubygems_write_projection(artifacts, out)
         .Cpan -> provider_registry_write_text(files.join(out, "perl5lib"), "lib\n", "could not write Perl runtime projection")
         .Packagist -> provider_packagist_write_autoloader(artifacts, out)
-        else -> Err(RegistryError.Reason("{kind.title} has no runtime projection"))
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .JetPackage -> Err(RegistryError.Reason("{kind.title} has no runtime projection"))
     }
 }
 
@@ -533,7 +533,7 @@ provider_script_json_string: fn(value: Dyn, field: String) -> String RegistryErr
 provider_script_version_satisfies: fn(kind: ScriptRegistryKind, actual: String, requirement: String) -> Bool Never! {
     if kind.family == {
         .Packagist -> provider_script_composer_satisfies(actual, requirement)
-        else -> provider_script_basic_satisfies(actual, requirement)
+        .Core | .Nix | .Path | .Github | .JetRegistry | .Npm | .PyPI | .Cargo | .SwiftPM | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary | .Cran | .LuaRocks | .RubyGems | .Cpan | .JetPackage -> provider_script_basic_satisfies(actual, requirement)
     }
 }
 

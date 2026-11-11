@@ -257,7 +257,7 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
                 // is fetched.
                 missed: if reason == {
                     .UnknownPackage -> true
-                    else -> false
+                    .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> false
                 }
                 if offline || !missed -> return PackageDependencyOutput{stderr: diagnostic_render_all(script, source.raw, [Diagnostic]{pkg_inline_deps_e1253(dep, reason)}, color), exit_code: EXIT_USER_ERROR}
                 cli_package_dependency_inline_fetch(script, script_dir, dep) ?? return cli_package_dependency_source_error(script, source.raw, err.diagnostic).output

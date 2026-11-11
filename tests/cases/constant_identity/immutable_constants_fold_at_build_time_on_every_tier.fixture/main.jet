@@ -1,12 +1,11 @@
 package: {
     name: "fold_tiers"
-    authority: { allow: [Env, IO] }
+    authority: { allow: [IO] }
 }
 
-use env: core.sys
-
 LIMIT: 6 * 7 + 1
-GREETING: env.get("JET_FOLD_TIERS_GREETING") ?? "hello"
+greet: fn(name: String) -> String { "hello {name}" }
+GREETING: greet("tiers")
 
 local_fold: fn() -> Int Never! {
     lanes: 8 * 4 + 2

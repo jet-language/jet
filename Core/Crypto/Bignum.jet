@@ -68,18 +68,18 @@ RNG: trait {
 // Constant-time primitives. Each condition is the low bit of a U64.
 
 /// 1 when x is not zero.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_bool: fn(x: U64) -> U64 Never! { x.bit_or(U64{0} - x) >> 63 }
 
 /// 1 when a < b: the borrow out of a - b (Hacker's Delight 2-13).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_lt: fn(a: U64, b: U64) -> U64 Never! {
     na: a.bit_not()
     na.bit_and(b).bit_or(na.bit_or(b).bit_and(a - b)) >> 63
 }
 
 /// All ones when the condition bit is 1, else zero.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_mask: fn(bit: U64) -> U64 Never! { U64{0} - bit }
 
 /// a when mask is all ones, b when it is zero.
@@ -87,7 +87,7 @@ ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b.bit_xor(mask.bit_and(
 
 /// The 128-bit product of a and b as its high and low halves, from four
 /// 32-bit partial products.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mul_wide: fn(a: U64, b: U64) -> (hi: U64, lo: U64) Never! {
     m: U64{0xffffffff}
     a0: a.bit_and(m)
@@ -281,7 +281,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
 }
 
 /// x = a + b over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -295,7 +295,7 @@ core_add: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x += a over `limbs` limbs when `cond` is 1, in constant time; the carry.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
     mask: ct_mask(cond)
     c := U64{0}
@@ -311,7 +311,7 @@ core_add_if: fn(x: &[U64], a: [U64], limbs: Int, cond: U64) -> U64 Never! {
 }
 
 /// x = a - b over `limbs` limbs; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -324,7 +324,7 @@ core_sub: fn(x: &[U64], a: [U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x = a - c over `limbs` limbs for one limb c; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
     borrow := c
     loop i in 0..<limbs {
@@ -338,7 +338,7 @@ core_sub_int: fn(x: &[U64], a: [U64], c: U64, limbs: Int) -> U64 Never! {
 
 /// d[off..<off + d_len] += s[0..<s_len] * b; the carry out. d_len must be at
 /// least s_len; a shorter d gives a wrong result, never a write past it.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_mla: fn(d: &[U64], off: Int, d_len: Int, s: [U64], s_len: Int, b: U64) -> U64 Never! {
     n: if d_len < s_len -> d_len else -> s_len
     c := U64{0}
@@ -366,7 +366,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 }
 
 /// -n^-1 mod 2^64 for odd n[0], by Newton iteration (Tom St Denis).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_montmul_init: fn(n: [U64]) -> U64 Never! {
     x := n[0]
     x += (n[0] + U64{2}).bit_and(U64{4}) << 1
@@ -378,7 +378,7 @@ core_montmul_init: fn(n: [U64]) -> U64 Never! {
 /// an_limbs limbs, b has b_limbs <= an_limbs, and a * b < R * n. t is
 /// scratch of at least 2 * an_limbs + 1 limbs. The final subtraction always
 /// runs and its result is chosen by mask.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 core_montmul: fn(x: &[U64], a: [U64], b: [U64], b_limbs: Int, n: [U64], an_limbs: Int, mm: U64, t: &[U64]) Never! {
     zero_limbs(t, 2 * an_limbs + 1)
     loop i in 0..<an_limbs {
@@ -416,17 +416,26 @@ core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int
 
 /// n_bytes random bytes read as a big-endian number into x's `x_limbs`
 /// limbs. The byte order is the one RFC 6979 section 3.3 expects of a
-/// deterministic ECDSA nonce.
+/// deterministic ECDSA nonce. A failed draw leaves neither its bytes nor
+/// a partial x behind.
 core_fill_random: fn<R: RNG>(x: &[U64], x_limbs: Int, n_bytes: Int, rng: &R) MpiError! {
     if x_limbs < (n_bytes + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BadInput)
     buf := cipher.zero_bytes(n_bytes)
-    if !rng.fill(buf) -> return Err(.Random)
-    core_read_be(x, x_limbs, buf) ?? return Err(err)
+    if !rng.fill(buf) {
+        core.crypto.wipe(buf)
+        return Err(.Random)
+    }
+    core_read_be(x, x_limbs, buf) ?? {
+        core.crypto.wipe(buf)
+        cipher.wipe_words(x)
+        return Err(err)
+    }
     core.crypto.wipe(buf)
 }
 
 /// A uniform draw min <= x < n over `limbs` limbs, by rejection: the leftmost
-/// bitlen(n) bits of each fill, as RFC 6979 section 3.3 does.
+/// bitlen(n) bits of each fill, as RFC 6979 section 3.3 does. A failure
+/// leaves no rejected draw in x.
 core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiError! {
     n_bits: core_bitlen(n, limbs)
     n_bytes: (n_bits + 7) /% 8
@@ -434,10 +443,16 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
     // many more to keep the failure probability negligible.
     count := if n_bytes > 4 -> 30 else -> 250
     loop {
-        core_fill_random(x, limbs, n_bytes, rng) ?? return Err(err)
+        core_fill_random(x, limbs, n_bytes, rng) ?? {
+            cipher.wipe_words(x)
+            return Err(err)
+        }
         core_shift_r(x, limbs, 8 * n_bytes - n_bits)
         count -= 1
-        if count == 0 -> return Err(.NotAcceptable)
+        if count == 0 {
+            cipher.wipe_words(x)
+            return Err(.NotAcceptable)
+        }
         if draw_in_range(x, min, n, limbs) -> return
     }
 }
@@ -690,12 +705,12 @@ core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [U64], a_limbs: 
 Mpi: struct {
     s: Int
     p: [U64]
-}
 
-impl Mpi.Close {
-    close: fn(&&self) {
-        p := self.p.move()
-        cipher.wipe_words(p)
+    impl Close {
+        close: fn(&&self) {
+            p := self.p.move()
+            cipher.wipe_words(p)
+        }
     }
 }
 
@@ -703,7 +718,7 @@ impl Mpi.Close {
 mpi: fn() -> Mpi Never! { Mpi{s: 1, p: [U64]{}} }
 
 /// |z| as a limb, the most negative Int64 included.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sint_abs: fn(z: Int) -> U64 Never! {
     if z >= 0 -> return U64{z}
     U64{-(z + 1)} + U64{1}
@@ -789,6 +804,19 @@ set_mpi: fn(x: &Mpi, y: Mpi) MpiError! {
         loop j in i..<x.p.len() -> x.p[j] = U64{0}
     }
     copy_limbs(x.p, y.p, i)
+}
+
+/// x = y in place with all of y's limbs, leading zero ones too, so no limb
+/// is tested: set_mpi for a secret, as copy_mpi_ct is copy_mpi for one.
+/// x is grown to y's length and zeroed above it.
+set_mpi_ct: fn(x: &Mpi, y: Mpi) MpiError! {
+    x.s = y.s
+    if x.p.len() < y.p.len() {
+        grow(x, y.p.len()) ?? return Err(err)
+    } else {
+        loop j in y.p.len()..<x.p.len() -> x.p[j] = U64{0}
+    }
+    copy_limbs(x.p, y.p, y.p.len())
 }
 
 /// Exchange x and y.
@@ -1091,7 +1119,7 @@ safe_cond_swap: fn(x: &Mpi, y: &Mpi, swap: Int) MpiError! {
 }
 
 /// |a| + |b| (HAC 14.7).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     x := copy_mpi(a)
     x.s = 1
@@ -1117,7 +1145,7 @@ add_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 
 /// |a| - |b| in a's limb count, or NegativeValue when |a| < |b|
 /// (HAC 14.9, 14.10).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sub_abs: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     n: used_limbs(b)
     if n > a.p.len() -> return Err(.NegativeValue)
@@ -1178,7 +1206,7 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a * b for one limb b, as a + a * (b - 1) through the multiply-add.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
     n: used_limbs(a)
     if b == (U64{0}) || n == 0 -> return Ok(from_int(0))
@@ -1191,7 +1219,7 @@ mul_int: fn(a: Mpi, b: U64) -> Mpi MpiError! {
 
 /// (u1 * 2^64 + u0) / d, saturating at 2^64 - 1 when u1 >= d or d is 0
 /// (Knuth TAOCP vol. 2 section 4.3.1 algorithm D on 32-bit halves).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 int_div_int: fn(high: U64, low: U64, divisor: U64) -> U64 Never! {
     if divisor == (U64{0}) || high >= divisor -> return U64{0}.bit_not()
     radix: U64{1} << 32
@@ -1311,7 +1339,7 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 }
 
 /// a mod b in [0, b) for an Int64 b > 0.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mod_int: fn(a: Mpi, b: Int) -> U64 MpiError! {
     if b == 0 -> return Err(.DivisionByZero)
     if b < 0 -> return Err(.NegativeValue)
@@ -1777,6 +1805,22 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
     assert(mod_int(a, most_negative) == .Err(.NegativeValue))
 }
 
+#Test("set_mpi_ct keeps every limb of its source, leading zero ones too, and zeroes a longer target above them") {
+    y: read_binary([U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{7}}) ?? panic("read")
+    assert(y.p.len() == 2)
+    short := mpi()
+    set_mpi_ct(short, y) ?? panic("grow")
+    assert(short.p.len() == 2 && short.p[0] == (U64{7}) && short.p[1] == (U64{0}) && cmp_int(short, 7) == 0)
+    trimmed := mpi()
+    set_mpi(trimmed, y) ?? panic("set")
+    assert(trimmed.p.len() == 1 && cmp_mpi(trimmed, short) == 0)
+    long: read_string(16, "112233445566778899AABBCCDDEEFF00") ?? panic("long")
+    wide := copy_mpi_ct(long)
+    set_mpi_ct(wide, from_int(-5)) ?? panic("wide")
+    assert(wide.s == -1 && wide.p.len() == long.p.len() && cmp_int(wide, -5) == 0)
+    loop j in 1..<wide.p.len() -> assert(wide.p[j] == (U64{0}))
+}
+
 #Test("Strings, bytes and files round-trip, with mbedtls's error for each malformed input") {
     x: read_string(10, "-128") ?? panic("read")
     assert((write_string(x, 16, 100) ?? "") == "-80")
@@ -1809,4 +1853,34 @@ safe_prime_step: fn<R: RNG>(x: Mpi, y: Mpi, rounds: Int, rng: &R) MpiError! {
     assert(cmp_int(i, 3) == 0)
     assert(div_int(from_int(1), 0) == .Err(.DivisionByZero))
     assert(gcd_modinv_odd(from_int(3), from_int(1), true) == .Err(.BadInput))
+}
+
+/// A generator of `left` draws of 0xFF bytes, then failures: below a
+/// small bound every draw is rejected.
+FailingDraws: struct {
+    left: Int
+
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! {
+            if self.left == 0 -> return false
+            self.left -= 1
+            loop i in 0..<out.len() -> out[i] = U8{0xFF}
+            true
+        }
+    }
+}
+
+#Test("A failed or exhausted random draw leaves no rejected draw in its output") {
+    n: [U64]{U64{5}}
+    lefts: [Int]{0, 3, 1000}
+    loop left in lefts {
+        x := [U64]{U64{0x5A5A5A5A5A5A5A5A}}
+        rng := FailingDraws{left: left}
+        if left == 1000 {
+            assert(core_random(x, U64{1}, n, 1, rng) == .Err(.NotAcceptable))
+        } else {
+            assert(core_random(x, U64{1}, n, 1, rng) == .Err(.Random))
+        }
+        assert(x[0] == (U64{0}))
+    }
 }

@@ -108,7 +108,7 @@ jet_cli_publish_no_root: fn(command: String) -> JetDriverVerbOutput Never! {
 jet_cli_publish_missing: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
-        else -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 
@@ -150,7 +150,7 @@ jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> (content_hash
         loop package in lock.packages {
             is_root: if package.source == {
                 .Root -> true
-                else -> false
+                .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
             }
             if package.name != name && !is_root -> next
             if package.fingerprint == "" -> break
@@ -269,7 +269,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     if jet_cli_find_project_entry(root, "publish", color, notices) == {
         .Entry(found) -> entry = found.path
         .Refused(plan) -> return jet_cli_publish_refusal(plan, color)
-        else -> {}
+        .Absent -> {}
     }
     build_ok := false
     if entry != "" && publish_files.is_file(entry) {
@@ -460,7 +460,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     if publication_write_index_entry(repo, entry_record) == .Err(error) {
         diagnostic: if error == {
             .AlreadyExists(_) -> publication_e1234(name, version)
-            else -> publication_e2607("registry index", "{error}")
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> publication_e2607("registry index", "{error}")
         }
         return jet_cli_publish_checkout_failed(log, checkout, diagnostic)
     }
@@ -588,7 +588,7 @@ jet_cli_publish_refusal: fn(plan: JetCLIPlan, color: Bool) -> JetDriverVerbOutpu
     if plan == {
         .Done(done) -> JetDriverVerbOutput{stdout: done.stdout, stderr: done.stderr, exit_code: done.exit_code}
         .Refused(report, report_color, exit_code, notice) -> JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, report_color)}", exit_code: exit_code}
-        else -> {
+        .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {
             shared: jet_cli_diagnostic_copy("E2105")
             jet_cli_report_output("", "E2105", "the package's project entry could not be resolved for `jet registry publish`", shared.why, shared.fix, color, JET_DRIVER_EXIT_USER_ERROR)
         }

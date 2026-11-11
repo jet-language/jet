@@ -111,20 +111,20 @@ reads_table: fn(p: &cg.Parse, i_db: Int, t: Int) -> Bool Never! {
 ColumnFlagWalker: struct {
     col_flags: [Int]
     e_code: Int
-}
 
-impl ColumnFlagWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].icolumn >= 0 {
-            self.e_code = self.e_code.bit_or(self.col_flags[a.exprs[e].icolumn])
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].icolumn >= 0 {
+                self.e_code = self.e_code.bit_or(self.col_flags[a.exprs[e].icolumn])
+            }
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { false }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // sqlite3ComputeGeneratedColumns: with the ordinary columns of table t in
@@ -265,25 +265,25 @@ autoincrement_begin: fn(p: &cg.Parse, a: &ast.AST) Never! {
 CheckConstraintWalker: struct {
     ai_col: [Int]
     e_code: Int
-}
 
-impl CheckConstraintWalker.SQLWalker {
-    walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
-        if a.exprs[e].op == tk.TK_COLUMN {
-            c: a.exprs[e].icolumn
-            if c >= 0 {
-                if self.ai_col[c] >= 0 -> self.e_code = self.e_code.bit_or(1)
-            } else {
-                self.e_code = self.e_code.bit_or(2)
+    impl SQLWalker {
+        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+            if a.exprs[e].op == tk.TK_COLUMN {
+                c: a.exprs[e].icolumn
+                if c >= 0 {
+                    if self.ai_col[c] >= 0 -> self.e_code = self.e_code.bit_or(1)
+                } else {
+                    self.e_code = self.e_code.bit_or(2)
+                }
             }
+            ast.WRC_CONTINUE
         }
-        ast.WRC_CONTINUE
+        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
     }
-    walk_has_select_cb: fn(&self) -> Bool Never! { false }
-    walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
-    walk_has_select_cb2: fn(&self) -> Bool Never! { false }
-    walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
-    walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
 }
 
 // sqlite3ExprReferencesUpdatedColumn: whether expression e (a CHECK

@@ -9,7 +9,7 @@ NixProvider: struct {
         if !files.is_dir(project) -> return
         if pkg_lock_load_strict(project) == {
             .Err(error) -> { return Err(ProviderError.BadOutput(error.message())) }
-            else -> {}
+            .Val(_) | .None -> {}
         }
     }
 
@@ -194,7 +194,7 @@ provider_nix_locked_expectation: fn(closure: NixClosureRecord, envelope: LockEnv
 provider_nix_index_not_indexed: fn(error: NixIndexError) -> Bool Never! {
     if error == {
         .NotIndexed(_, _, _, _, _) -> true
-        else -> false
+        .Invalid(_) | .Offline(_) | .Transport(_) -> false
     }
 }
 

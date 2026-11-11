@@ -756,7 +756,7 @@ pkg_extension_parse_host_imports: fn(value: Dyn) -> [HostImportFact] ExtensionPr
         raw_result: object["result_type_id"]
         result_type_id: if raw_result == {
             .Null -> None
-            else -> Val(pkg_extension_text(raw_result))
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(pkg_extension_text(raw_result))
         }
         out.push(HostImportFact{
             id: pkg_extension_text(object["id"]),

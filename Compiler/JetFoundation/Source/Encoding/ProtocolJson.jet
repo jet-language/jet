@@ -49,7 +49,7 @@ foundation_protocol_json_integer_error: fn(value: Dyn) -> String? Never! {
                 if error != None -> return error
             }
         }
-        else -> {
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             number: foundation_json_integer(value) ?? return None
             if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
         }
@@ -68,7 +68,7 @@ foundation_json_integer: fn(value: Dyn) -> Int? Never! {
             number: value.decode<Int>() ?? return None
             Val(number)
         }
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -88,7 +88,7 @@ foundation_protocol_json_valid: fn(value: Dyn, depth: Int) -> Bool Never! {
             }
             true
         }
-        else -> {
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
             number: foundation_json_integer(value) ?? return true
             number >= -9223372036854775808 && number <= 9223372036854775807
         }

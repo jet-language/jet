@@ -221,15 +221,15 @@ recipe_update_activate_unix: fn(current_exe: String, parent: String, staged: Str
     }
     if recipe_update_sync_parent(parent) == {
         .Err(error) -> { return Err(recipe_update_rollback_unix(current_exe, rollback, parent, state_path, state_before, error)) }
-        else -> {}
+        .Ok(_) -> {}
     }
     if recipe_update_health_check(current_exe) == {
         .Err(error) -> { return Err(recipe_update_rollback_unix(current_exe, rollback, parent, state_path, state_before, error)) }
-        else -> {}
+        .Ok(_) -> {}
     }
     if recipe_update_write_state(state_path, ToolchainUpdateState.from_plan(plan)) == {
         .Err(error) -> { return Err(recipe_update_rollback_unix(current_exe, rollback, parent, state_path, state_before, error)) }
-        else -> {}
+        .Ok(_) -> {}
     }
     // The new image and state are committed. A cleanup failure keeps the
     // rollback copy as a recoverable safety net and never reports a failed
@@ -319,14 +319,14 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
             files.remove(rollback).drop("a partial rollback copy is private")
             return Err(error)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if recipe_update_copy_regular_file(current_exe, helper, "self-update helper file") == {
         .Err(error) -> {
             files.remove(rollback).drop("a partial rollback copy is private")
             return Err(error)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if recipe_update_stage_windows_file(staged, bytes) == {
         .Err(error) -> {
@@ -334,7 +334,7 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
             files.remove(helper).drop("the helper copy is private")
             return Err(error)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     spec: process.cmd([String]{helper})
         .env(TOOLCHAIN_WINDOWS_HELPER_ENV, "1")

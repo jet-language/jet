@@ -71,7 +71,7 @@ lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool)
     }
     rows: if (lsp_param(params, "contentChanges") ?? return None) == {
         .Array(rows) -> rows
-        else -> { return None }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return None }
     }
     current: state.docs.get(uri) ?? return None
     if version <= current.version -> return None

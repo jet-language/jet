@@ -32,7 +32,7 @@ describe: fn(shape: Shape) -> String {
 first_blob: fn(shape: Shape) -> Blob? {
     if shape == {
         .Circle(blob, _) | .Square(blob, _) -> Val(blob)
-        else -> None
+        .Line(_) | .Empty -> None
     }
 }
 
@@ -54,7 +54,7 @@ last_use_subject: fn(k: Int) -> Int {
     shape: if k > 0 -> Shape.Circle{blob: Blob{data: [Int]{1, 2}, text: "x"}, size: k} else -> Shape.Empty
     if shape == {
         .Circle(blob, size) | .Square(blob, size) -> blob.data.len() + size
-        else -> 0
+        .Line(_) | .Empty -> 0
     }
 }
 
@@ -78,7 +78,7 @@ run: fn() {
     loop k in 0..<3 {
         if circle == {
             .Circle(blob, size) | .Square(blob, size) -> total += blob.data.len() + size + k
-            else -> total += 1000
+            .Line(_) | .Empty -> total += 1000
         }
     }
     print("total {total} {describe(circle)}")

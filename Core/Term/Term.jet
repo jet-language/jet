@@ -730,7 +730,7 @@ stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
                 assert(context.operation == .Write && context.resource == (Val("stdout")))
                 assert(context.os_code == None && context.cause == (Val("custom Windows console error")))
             }
-            else -> panic("stdio error kind")
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("stdio error kind")
         }
         .Ok(_) -> panic("stdio failure must be reported")
     }

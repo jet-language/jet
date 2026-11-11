@@ -20,11 +20,11 @@ DashboardAlternateScreen: struct {
         cli_dashboard_write_stdout(cli_dashboard_screen_enter_sequence())
         DashboardAlternateScreen{active: true}
     }
-}
 
-impl DashboardAlternateScreen.Close {
-    close: fn(&&self) -[IO]> {
-        if self.active -> cli_dashboard_write_stdout(cli_dashboard_screen_leave_sequence())
+    impl Close {
+        close: fn(&&self) -[IO]> {
+            if self.active -> cli_dashboard_write_stdout(cli_dashboard_screen_leave_sequence())
+        }
     }
 }
 

@@ -50,11 +50,12 @@ WebErrorPageError: enum {
             .OutputTooLarge -> "web error projection exceeds the output byte budget"
         }
     }
-}
-impl WebErrorPageError.Display { display: fn(&&self) -> String { self.message() } }
 
-WebErrorContentType: enum { Html Json }
-impl WebErrorContentType {
+    impl Display { display: fn(&&self) -> String { self.message() } }
+}
+WebErrorContentType: enum {
+    Html Json
+
     as_str: fn(self) -> String {
         if self == {
             .Html -> "text/html, charset=utf-8"
@@ -68,23 +69,22 @@ impl WebErrorContentType {
         }
     }
 }
-
 // Local details need a local capability outside a release build.
-WebErrorCapabilities: struct { local: Bool, release: Bool }
-impl WebErrorCapabilities {
+WebErrorCapabilities: struct {
+    local: Bool
+    release: Bool
+
     local: fn() -> WebErrorCapabilities { WebErrorCapabilities{local: true, release: false} }
     redacted: fn() -> WebErrorCapabilities { WebErrorCapabilities{local: false, release: true} }
     permits_local_details: fn(self) -> Bool { self.local && !self.release }
 }
-
 WebErrorPageIdentity: struct {
     request_id: String
     session_id: String
     source_id: String
     build_id: String
     revision: String
-}
-impl WebErrorPageIdentity {
+
     new: fn(request_id: String, session_id: String, source_id: String, build_id: String, revision: String) -> WebErrorPageIdentity WebErrorPageError! {
         identity: WebErrorPageIdentity{
             request_id: normalize_identity(request_id, "request id"),
@@ -113,9 +113,10 @@ impl WebErrorPageIdentity {
         self.request_id.bytes().len() + self.session_id.bytes().len() + self.source_id.bytes().len() + self.build_id.bytes().len() + self.revision.bytes().len()
     }
 }
+WebErrorSpan: struct {
+    start: Int
+    end: Int
 
-WebErrorSpan: struct { start: Int, end: Int }
-impl WebErrorSpan {
     new: fn(start: Int, end: Int) -> WebErrorSpan WebErrorPageError! {
         span: WebErrorSpan{start: start, end: end}
         span.validate()
@@ -128,7 +129,6 @@ impl WebErrorSpan {
     to_span: fn(self) -> Span { Span{start: self.start, end: self.end} }
     json: fn(self) -> String { "{{\"start\":{self.start},\"end\":{self.end}}}" }
 }
-
 WebErrorSourceExcerpt: struct {
     source_id: String
     label: String
@@ -136,8 +136,7 @@ WebErrorSourceExcerpt: struct {
     line: Int?
     column: Int?
     excerpt: String?
-}
-impl WebErrorSourceExcerpt {
+
     new: fn(source_id: String, label: String, start: Int, end: Int, excerpt: String?) -> WebErrorSourceExcerpt WebErrorPageError! {
         WebErrorSourceExcerpt.with_parts(source_id, label, Val(WebErrorSpan.new(start, end)), None, None, excerpt)
     }
@@ -180,9 +179,10 @@ impl WebErrorSourceExcerpt {
     }
     byte_count: fn(self) -> Int { self.source_id.bytes().len() + self.label.bytes().len() + web_error_optional_bytes(self.excerpt) }
 }
+WebErrorActionLink: struct {
+    label: String
+    href: String
 
-WebErrorActionLink: struct { label: String, href: String }
-impl WebErrorActionLink {
     new: fn(label: String, href: String) -> WebErrorActionLink WebErrorPageError! {
         validate_href(href)
         link: WebErrorActionLink{label: normalize_identity(label, "action label"), href: href}
@@ -195,15 +195,13 @@ impl WebErrorActionLink {
     }
     json: fn(self) -> String { "{{\"label\":{foundation_json_quote(self.label)},\"href\":{foundation_json_quote(self.href)}}}" }
 }
-
 WebErrorEdit: struct {
     source_id: String
     span: WebErrorSpan
     new_text: String
     applicability: String?
     safety: String?
-}
-impl WebErrorEdit {
+
     new: fn(source_id: String, span: WebErrorSpan, new_text: String, applicability: String?, safety: String?) -> WebErrorEdit WebErrorPageError! {
         edit := WebErrorEdit{source_id: normalize_source_identity(source_id), span: span, new_text: normalize_text(new_text, "fix edit", MAX_WEB_ERROR_TEXT_BYTES), applicability: None, safety: None}
         if applicability == .Val(value) -> edit.applicability = Val(normalize_identity(value, "fix applicability"))
@@ -233,9 +231,10 @@ impl WebErrorEdit {
         self.source_id.bytes().len() + self.new_text.bytes().len() + web_error_optional_bytes(self.applicability) + web_error_optional_bytes(self.safety)
     }
 }
+WebErrorInternalFact: struct {
+    code: String
+    message: String
 
-WebErrorInternalFact: struct { code: String, message: String }
-impl WebErrorInternalFact {
     new: fn(code: String, message: String) -> WebErrorInternalFact WebErrorPageError! {
         validate_code(code)
         fact: WebErrorInternalFact{code: code, message: normalize_required_text(message, "internal error message", MAX_WEB_ERROR_TEXT_BYTES)}
@@ -249,13 +248,14 @@ impl WebErrorInternalFact {
     }
     json: fn(self) -> String { "{{\"code\":{foundation_json_quote(self.code)},\"message\":{foundation_json_quote(self.message)}}}" }
 }
+WebErrorDevStatusFacts: struct {
+    state: String
+    code: String
+    diagnostic: String
 
-WebErrorDevStatusFacts: struct { state: String, code: String, diagnostic: String }
-impl WebErrorDevStatusFacts {
     is_internal_failure: fn(self) -> Bool { self.code == DEV_STATUS_INTERNAL_ERROR_CODE }
     is_error: fn(self) -> Bool { self.state == "error" }
 }
-
 WebErrorDiagnosticFact: struct {
     code: String?
     what: String?
@@ -265,8 +265,7 @@ WebErrorDiagnosticFact: struct {
     moment: String?
     typed_identity: String?
     span: WebErrorSpan?
-}
-impl WebErrorDiagnosticFact {
+
     new: fn(code: String, what: String, why: String, fix: String) -> WebErrorDiagnosticFact WebErrorPageError! {
         validate_code(code)
         fact: WebErrorDiagnosticFact{
@@ -365,7 +364,6 @@ impl WebErrorDiagnosticFact {
             + web_error_optional_bytes(self.severity) + web_error_optional_bytes(self.moment) + web_error_optional_bytes(self.typed_identity)
     }
 }
-
 WebErrorProjection: struct {
     status: Int
     content_type: WebErrorContentType
@@ -385,8 +383,7 @@ WebErrorPage: struct {
     action_links: [WebErrorActionLink]
     status: Int
     failure_id: String
-}
-impl WebErrorPage {
+
     new: fn(identity: WebErrorPageIdentity, diagnostic: WebErrorDiagnosticFact, source_excerpts: [WebErrorSourceExcerpt], related_cause: WebErrorDiagnosticFact?, action_links: [WebErrorActionLink]) -> WebErrorPage WebErrorPageError! {
         WebErrorPage.new_with_status(500, identity, diagnostic, source_excerpts, related_cause, action_links)
     }
@@ -508,7 +505,6 @@ impl WebErrorPage {
         "fail-{sha256_hex(WebErrorFacts.from_page(self, true).canonical_json())}"
     }
 }
-
 WebErrorFacts: struct {
     status: Int
     failure_id: String
@@ -520,8 +516,7 @@ WebErrorFacts: struct {
     related_cause: WebErrorDiagnosticFact?
     action_links: [WebErrorActionLink]
     redacted: Bool
-}
-impl WebErrorFacts {
+
     from_page: fn(page: WebErrorPage, local: Bool) -> WebErrorFacts {
         diagnostic := page.diagnostic
         internal := page.internal
@@ -611,7 +606,6 @@ impl WebErrorFacts {
         "{html}</main></body></html>"
     }
 }
-
 report_source_excerpts: fn(report: JetErrorReport) -> [WebErrorSourceExcerpt] WebErrorPageError! {
     excerpts := [WebErrorSourceExcerpt]{}
     if report.origin == .Val(origin) -> excerpts.push(source_excerpt_from_journey(origin))

@@ -74,7 +74,7 @@ sema_state_graph_add_method_transitions: fn(
                 outgoing.push(from_name.copy())
                 edges.push(SemaStateGraphEdge{from: from_name, to: to})
             }
-            else -> {
+            .None -> {
                 entries.push(to.copy())
             }
         }
@@ -102,7 +102,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
                 sema_state_graph_add_method_transitions(candidate.methods, definition.name, state_names, outgoing, edges, transitions, entries)
                 loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, outgoing, edges, transitions, entries)
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     reachable_states := [String]{}
@@ -162,7 +162,7 @@ sema_state_items_use_typestate: fn(items: [Item]) -> Bool Never! {
             .Enum(definition) -> {
                 if sema_state_methods_use_markers(definition.methods) -> return true
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -186,7 +186,7 @@ sema_state_owner_methods: fn(items: [Item], type_name: String) -> [Func] Never! 
             .Enum(definition) -> if definition.name == type_name {
                 loop method in definition.methods -> methods.push(method.copy())
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     methods
@@ -297,11 +297,11 @@ sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagn
                 owner = definition.name
                 methods = definition.methods
             }
-            else -> next
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if owner == sema_registration_core_builtin_task_name() || sema_state_graph_contains(declared, owner) -> next
         loop method in methods {
-            if method.state_requires != None || method.state_transition != None -> diagnostics.push(sema_error("E0159", method.span, "`{owner}` has a `#State` or `#Transition` marker but no `state {{ … }}` section", "markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected", "add one `state {{ Name, … }}` section inside `{owner}: struct`, or remove the typestate marker"))
+            if method.state_requires != None || method.state_transition != None -> diagnostics.push(sema_error("E0159", method.span, "`{owner}` has a `#State` marker but no `state {{ … }}` section", "markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected", "add one `state {{ Name, … }}` section inside `{owner}: struct`, or remove the typestate marker"))
         }
     }
     diagnostics

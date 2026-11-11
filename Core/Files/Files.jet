@@ -18,6 +18,7 @@ use {
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
     access_codes.[access_check, advice_code, map_advice_code]
+    scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
 }
 // core.files — one filesystem surface.
 //
@@ -45,14 +46,29 @@ use {
 // symlink and other special entries are never dereferenced.
 
 
+// Why a checked Path literal was rejected.
+#Error
+PathLiteralError: struct { reason: String }
+
 // The checked `Path{…}` literal: each hole's display text is one percent-
 // encoded path component, so its slashes and dot segments never become path
 // grammar.
-__path_literal: fn(literals: [String], holes: [String]) -> Path Never! {
-    if literals.len() != holes.len() + 1 -> panic("typed Path literal and hole counts do not match")
-    text := literals[0].copy()
-    loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{literals[index + 1]}"
-    Path.from(text)
+impl Path.CheckedText {
+    Error: PathLiteralError
+    Hole: String
+
+    check: fn(text: String) PathLiteralError! -[]> {
+        if text.bytes().contains(U8{0}) -> return Err(PathLiteralError{reason: "a Path cannot contain a NUL character"})
+        return Ok()
+    }
+
+    encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+    build: fn(parts: [String], holes: [String]) -[]> Path {
+        text := parts[0].copy()
+        loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{parts[index + 1]}"
+        Path.from(text)
+    }
 }
 
 path_component_encode: fn(component: String) -> String Never! {
@@ -227,10 +243,12 @@ FileScope: struct {
 }
 
 // The native file resources below are filled only by Core's own opens:
-// their `priv handle` keeps a literal outside core.files from forging one
-// (core-library.md:635/:701: `.path` stays readable, the handle does not).
+// their `priv handle` keeps a literal outside core.files from forging one,
+// and `path` is computed over `priv stored_path`, so it stays readable
+// (core-library.md:635/:701) while no code can write it.
 MappedFile: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     bytes: [U8]
     priv handle: Int
 
@@ -243,18 +261,21 @@ MappedFile: struct {
 }
 
 TempDir: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     is_dir: Bool
     priv handle: Int
 }
 
 TempFile: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 }
 
 FileLock: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 }
 
@@ -263,13 +284,15 @@ FileLock: struct {
 // opens, waits and identity checks therefore close without unlinking a name.
 // Close reads the consumed receiver in place. Rebinding it (`held := self.move()`)
 // would make a second owner whose scope-end Close re-enters this one.
-__LockFd: struct { fd: Int }
-impl __LockFd.Close {
-    close: fn(&&self) {
-        _: core.files.__lock_close(self.fd)
+__LockFd: struct {
+    fd: Int
+
+    impl Close {
+        close: fn(&&self) {
+            _: core.files.__lock_close(self.fd)
+        }
     }
 }
-
 // The FileLock becomes the descriptor's one owner: the caller's guard is
 // disarmed in place (-1 closes nothing), so its scope-end Close never closes
 // the descriptor the FileLock now holds.
@@ -294,20 +317,23 @@ __LockWait: struct {
 /// the OS lock without removing any filesystem name.
 AdvisoryLock: struct {
     priv handle: Int
-}
 
-impl AdvisoryLock.Close {
-    close: fn(&&self) {
-        core.files.__close_directory(self.handle)
+    impl Close {
+        close: fn(&&self) {
+            core.files.__close_directory(self.handle)
+        }
     }
 }
 
-/// An open file for reading. `read_line`, `lines`, and `read(max)` advance
-/// one shared position; `read` returns up to `max` bytes and an empty list
-/// at end of file. Only Core's opens fill the `priv handle`, so a literal
-/// outside core.files cannot forge one.
+/// An open file for reading. `read_line`, `lines`, `read(max)` and
+/// `read_into(buffer, limit)` advance one shared position; `read` returns up
+/// to `max` bytes and an empty list at end of file, and `read_into` appends up
+/// to `limit` bytes to `buffer` and returns the count, 0 at end of file.
+/// Only Core's opens fill the `priv handle`, so a literal outside core.files
+/// cannot forge one.
 FileReader: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// What the open file is now (fstat). Comparing
@@ -334,7 +360,8 @@ FileReader: struct {
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
 FileWriter: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// What the open file is now (fstat). Bytes still
@@ -419,7 +446,8 @@ rename_code: fn(if_exists: RenameIfExists) -> Int Never! {
 /// `IOError.InvalidInput`. The handle is close-on-exec and closes when it
 /// leaves scope or at `close(directory)`.
 Directory: struct {
-    path: String
+    priv stored_path: String
+    path: String -> stored_path
     priv handle: Int
 
     /// Open the regular file `name` for reading.
@@ -438,7 +466,7 @@ Directory: struct {
     open_directory: fn(self, name: String) -[FS.Read]> Directory IOError! {
         held_name(self.path, name, false)
         key: core.files.__open_directory(self.handle, name)
-        Ok(Directory{path: join(self.path, name), handle: key})
+        Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
     /// Create the directory `name` and hold it. An existing name reports
@@ -447,7 +475,7 @@ Directory: struct {
         held_name(self.path, name, true)
         core.files.__create_directory(self.handle, name, mode ?? -1)
         key: core.files.__open_directory(self.handle, name)
-        Ok(Directory{path: join(self.path, name), handle: key})
+        Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
     /// The entries in raw-name byte order. A link to a directory has
@@ -509,7 +537,7 @@ Directory: struct {
                 target = other.handle
                 target_path = other.path
             }
-            else -> {}
+            .None -> {}
         }
         held_name(target_path, to, true)
         core.files.__rename_at(self.handle, from, target, to, rename_code(if_exists))
@@ -551,7 +579,7 @@ Directory: struct {
     /// keeps the directory open in a child while this handle stays usable.
     duplicate: fn(self) -[FS.Read]> Directory IOError! {
         key: core.files.__open_directory(self.handle, ".")
-        Ok(Directory{path: self.path.copy(), handle: key})
+        Ok(Directory{stored_path: self.stored_path.copy(), handle: key})
     }
 
     // Kept only for CacheLease, which passes one lease directory into many
@@ -562,6 +590,12 @@ Directory: struct {
     /// A slot `spec` already passes is `IOError.InvalidInput`.
     pass_to: fn(self, spec: ProcessSpec, at: Int) -[FS, Exec, Env]> ProcessSpec IOError! {
         process_directory(spec, self, at, false)
+    }
+
+    impl Close {
+        close: fn(&&self) {
+            core.files.__close_directory(self.handle)
+        }
     }
 }
 
@@ -581,7 +615,7 @@ Directory: struct {
 // child's working directory. The Directory is borrowed through the
 // duplication, so a later rename or close here never changes the child's view.
 process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
-    context: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
+    context: IOContext{operation: .Resolve, resource: Val(directory.stored_path), os_code: None, cause: None}
     if child_fd < 3 || child_fd > 2147483646 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
             cause: Val("the inherited directory descriptor must be between 3 and 2147483646")}))
@@ -711,18 +745,11 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | File
 }
 
 
-impl Directory.Close {
-    close: fn(&&self) {
-        core.files.__close_directory(self.handle)
-    }
-}
-
-
 /// Hold the directory at `path`. The last part must be a
 /// real directory, not a link.
 open_directory: fn(path: String) -[FS.Read]> Directory IOError! {
     key: core.files.__open_directory(-1, path)
-    Ok(Directory{path: path.copy(), handle: key})
+    Ok(Directory{stored_path: path.copy(), handle: key})
 }
 
 
@@ -881,6 +908,13 @@ read: fn(path: String | Path) -[FS.Read]> String IOError! {
     Ok(String.from_bytes(bytes) ?? return Err(io_err("read", source, "stream did not contain valid UTF-8")))
 }
 
+/// The text of the file at `path`, or `fallback` when it cannot be read
+/// (missing, unreadable or not UTF-8): `files.read_or(path, "")` is a
+/// script's `cat path 2>/dev/null`, its fallback stated in the call.
+read_or: fn(path: String | Path, fallback: String) -[FS.Read]> String Never! {
+    read(path) ?? fallback
+}
+
 
 map: fn(path: String | Path) -[FS.Read]> MappedFile IOError! {
     text: path_text(path)
@@ -934,7 +968,7 @@ write_atomic: fn(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
-                    else -> { return Err(error) }
+                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(error) }
                 }
             }
             .Ok(handle) -> {
@@ -1026,7 +1060,10 @@ priv access_codes: module {
     // faccessat's mode bits: R_OK 4, W_OK 2, X_OK 1.
     access_check: fn(path: String | Path, mode: Int) -> Bool Never! {
         if read_probe_fault() -> return false
-        if core.files.__access_raw(path_text(path), mode) == { .Ok(_) -> true else -> false }
+        if core.files.__access_raw(path_text(path), mode) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
     }
 
     // posix_fadvise's advice numbers on Linux.
@@ -1313,17 +1350,44 @@ mktemp: fn(prefix: String) -[FS, Env, Time]> String Never! {
 }
 
 
-canonicalize: fn(path: String | Path) -[FS.Read]> String IOError! {
+/// The absolute path of `path` with every symbolic link, `.` and `..`
+/// resolved; every part must exist. `missing_last: true` lets the last part
+/// be missing, as `readlink -f` does: its parent is resolved and the last
+/// name joined to it.
+canonicalize: fn(path: String | Path, missing_last: Bool{false}) -[FS.Read]> String IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    core.files.__canonicalize_raw(text)
+    whole: core.files.__canonicalize_raw(text) ?? {
+        missing: err == .NotFound(_)
+        if !missing_last || !missing -> return Err(err)
+        parent: dirname(text)
+        resolved: core.files.__canonicalize_raw(if parent == "" -> "." else -> parent)
+        return Ok(join(resolved, basename(text)))
+    }
+    Ok(whole)
 }
 
 
-list_dir: fn(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+/// The entries of directory `path` in name order. With `matching`, only those
+/// whose name matches that shell pattern, where `*` is any run of bytes and
+/// `?` is one byte: `files.list_dir(dir, matching: "*.files")` is `dir/*.files`.
+list_dir: fn(path: String | Path, matching: String?{None}) -[FS.Read]> [DirEntry] IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    core.files.__list_dir_raw(text)
+    entries: core.files.__list_dir_raw(text)
+    pattern: matching ?? return Ok(entries)
+    kept := [DirEntry]{}
+    loop entry in entries {
+        if entries_glob_match(pattern.bytes(), entry.name.bytes()) -> kept.push(entry.copy())
+    }
+    Ok(kept)
+}
+
+/// The entries of directory `path` as `list_dir` gives them, or `fallback`
+/// when it cannot be listed: `files.list_dir_or(dir, [])` is a script's
+/// `ls dir 2>/dev/null`, its fallback stated in the call.
+list_dir_or: fn(path: String | Path, fallback: [DirEntry], matching: String?{None}) -[FS.Read]> [DirEntry] Never! {
+    list_dir(path, matching: matching) ?? fallback
 }
 
 
@@ -1445,17 +1509,82 @@ rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Re
 /// Create `link` as a symbolic link naming `original`. The link text is stored
 /// as given and is not resolved; later path operations follow it, so lexical
 /// `Path.is_within` cannot see an escape through a link — compare
-/// `canonicalize` results instead.
-symlink: fn(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+/// `canonicalize` results instead. `replace: true` first removes a link or
+/// file already at `link`, so a link to a directory is replaced, not
+/// followed, as `ln -sfn` does; a real directory there is an error.
+symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) IOError! -[FS.Write]> {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
     platform: core.files.__os_family()
     if platform != "unix" && platform != "windows" -> return Err(files8_other(.Write, Val(target), "symbolic links are unavailable on this platform"))
+    if replace && core.files.__remove_raw(target) == .Err(failure) {
+        gone: failure == .NotFound(_)
+        if !gone -> return Err(failure)
+    }
     directory := false
     if platform == "windows" -> directory = core.files.__symlink_directory_raw(source)
     core.files.__symlink_raw(source, target, directory)
 }
+
+/// File operations run best effort, where a script keeps going past one that
+/// fails as the shell does (`rm -rf old; mkdir -p new; cp a new/`): each
+/// call runs its `core.files` namesake (`copy_file` runs `copy`, since a
+/// method can't be named `copy`) and records a failure here instead of
+/// returning it, so the failure path stays visible at the call (the receiver
+/// is the record) and the run reports what failed once, through `failed()`,
+/// `report()` or `failures`.
+BestEffort: struct {
+    failures: [IOError]
+
+    copy_file: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+        if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    copy_dir: fn(&self, from: String | Path, to: String | Path) Never! -[FS]> {
+        if core.files.copy_dir(from, to) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    /// `rm -f`: a path that is already gone is no failure.
+    remove: fn(&self, path: String | Path) Never! -[FS.Write]> {
+        if core.files.remove(path) == .Err(failure) && !(failure == .NotFound(_)) -> self.failures.push(failure)
+    }
+
+    /// `rm -rf`: a path that is already gone is no failure.
+    remove_all: fn(&self, path: String | Path) Never! -[FS]> {
+        if core.files.remove_all(path) == .Err(failure) && !(failure == .NotFound(_)) -> self.failures.push(failure)
+    }
+
+    create_dir_all: fn(&self, path: String | Path) Never! -[FS.Write]> {
+        if core.files.create_dir_all(path) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    symlink: fn(&self, original: String | Path, link: String | Path, replace: Bool{false}) Never! -[FS.Write]> {
+        if core.files.symlink(original, link, replace: replace) == .Err(failure) -> self.failures.push(failure)
+    }
+
+    /// The resolved path, or `path` itself when it cannot be resolved (as
+    /// `readlink -f path || echo path`), the failure recorded.
+    canonicalize: fn(&self, path: String | Path, missing_last: Bool{false}) -[FS.Read]> String Never! {
+        core.files.canonicalize(path, missing_last: missing_last) ?? {
+            self.failures.push(err)
+            path_text(path)
+        }
+    }
+
+    /// Whether any operation failed.
+    failed: fn(self) -> Bool Never! { self.failures.len() > 0 }
+
+    /// One line per failure, in the order they happened; empty when none did.
+    report: fn(self) -> String Never! {
+        lines := [String]{}
+        loop failure in self.failures -> lines.push("{failure}")
+        lines.join("\n")
+    }
+}
+
+/// A new, empty best-effort record: `done := files.best_effort()`.
+best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
 
 
 hard_link: fn(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
@@ -1721,7 +1850,7 @@ walk_validate: fn(context: Int, directory: Int, root: String) IOError! -[FS]> {
 // yields every path in order without sorting the whole tree. Both lists are
 // in reverse, so the next one is the last. Every slot the batch is done with
 // is released; a child directory keeps its slot until it is read.
-__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> __WalkFrame IOError! {
+__walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool, skip: [String]) -[FS]> __WalkFrame IOError! {
     walk_validate(context, directory, root)
     if ignore != None {
         rules: core.files.__walk_rules(context, directory, ignore)
@@ -1735,8 +1864,8 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
         entry: core.files.__walk_next(context, directory)
         if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, root))
         if entry.end -> break
-        skipped := false
-        if ignore != None {
+        skipped := skip.len() > 0 && skip.contains(basename(entry.relative))
+        if !skipped && ignore != None {
             skipped = entry.ignore_file || core.files.__walk_ignored(context, directory, entry.relative, entry.directory)
         }
         if !skipped && (!files_only || (!entry.directory && entry.file)) {
@@ -1773,20 +1902,25 @@ Walk: struct {
     priv root: String
     priv ignore: String?
     priv files_only: Bool
+    priv skip: [String]
 
     /// Every entry in walk order, or the first error the walk meets.
     list: fn(&&self) -[FS]> [WalkEntry] IOError! {
         out := [WalkEntry]{}
-        loop entry in self -> out.push(entry?)
+        // The cursor's own `next`, not `loop entry in self`: the seed that
+        // builds this Core does not yet take a type's nested Iterable as a
+        // loop source inside the type's own body.
+        cursor := self.iter()
+        loop cursor.next() == .Val(entry) -> out.push(entry?)
         Ok(out)
     }
-}
 
-impl Walk.Iterable {
-    Iter: __WalkCursor
+    impl Iterable {
+        Iter: __WalkCursor
 
-    iter: fn(&&self) -> __WalkCursor {
-        __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, context: 0, frames: [__WalkFrame]{}, done: false}
+        iter: fn(&&self) -> __WalkCursor {
+            __WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, skip: self.skip, context: 0, frames: [__WalkFrame]{}, done: false}
+        }
     }
 }
 
@@ -1796,54 +1930,55 @@ __WalkCursor: struct {
     root: String
     ignore: String?
     files_only: Bool
+    skip: [String]
     context: Int
     frames: [__WalkFrame]
     done: Bool
-}
 
-impl __WalkCursor.Iterator {
-    Item: WalkEntry IOError!
+    impl Iterator {
+        Item: WalkEntry IOError!
 
-    // Yield the next entry, descending first into each child directory whose
-    // subtree key sorts before it.
-    next: fn(&self) -[FS]> (WalkEntry IOError!)? {
-        if self.done -> return None
-        if self.context == 0 {
-            if __walk_open(self) == .Err(error) {
-                __walk_finish(self)
-                return Val(Err(error))
-            }
-        }
-        loop self.frames.len() > 0 {
-            top: self.frames.len() - 1
-            entries: self.frames[top].entries.len()
-            children: self.frames[top].children.len()
-            if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
-                child: self.frames[top].children.pop() ?? panic("walk child")
-                depth: self.frames[top].depth + 1
-                if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only) == {
-                    .Ok(frame) -> {
-                        core.files.__walk_release(self.context, child.directory)
-                        self.frames.push(frame)
-                    }
-                    .Err(error) -> {
-                        core.files.__walk_release(self.context, child.directory)
-                        return Val(Err(error))
-                    }
+        // Yield the next entry, descending first into each child directory whose
+        // subtree key sorts before it.
+        next: fn(&self) -[FS]> (WalkEntry IOError!)? {
+            if self.done -> return None
+            if self.context == 0 {
+                if __walk_open(self) == .Err(error) {
+                    __walk_finish(self)
+                    return Val(Err(error))
                 }
-                next
             }
-            if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
-            _ := self.frames.pop()
+            loop self.frames.len() > 0 {
+                top: self.frames.len() - 1
+                entries: self.frames[top].entries.len()
+                children: self.frames[top].children.len()
+                if children > 0 && (entries == 0 || self.frames[top].children[children - 1].key < self.frames[top].entries[entries - 1].path) {
+                    child: self.frames[top].children.pop() ?? panic("walk child")
+                    depth: self.frames[top].depth + 1
+                    if __walk_batch(self.context, child.directory, depth, self.root, self.ignore, self.files_only, self.skip) == {
+                        .Ok(frame) -> {
+                            core.files.__walk_release(self.context, child.directory)
+                            self.frames.push(frame)
+                        }
+                        .Err(error) -> {
+                            core.files.__walk_release(self.context, child.directory)
+                            return Val(Err(error))
+                        }
+                    }
+                    next
+                }
+                if self.frames[top].entries.pop() == .Val(entry) -> return Val(Ok(entry))
+                _ := self.frames.pop()
+            }
+            __walk_finish(self)
+            None
         }
-        __walk_finish(self)
-        None
     }
-}
 
-impl __WalkCursor.Close {
-    close: fn(&&self) {
-        if self.context != 0 -> core.files.__walk_close(self.context)
+    impl Close {
+        close: fn(&&self) {
+            if self.context != 0 -> core.files.__walk_close(self.context)
+        }
     }
 }
 
@@ -1852,7 +1987,7 @@ __walk_open: fn(cursor: &__WalkCursor) IOError! -[FS]> {
     cursor.context = core.files.__walk_context(cursor.root, cursor.ignore ?? "", cursor.ignore != None)
     walk_validate(cursor.context, 0, cursor.root)
     if cursor.ignore != None -> core.files.__walk_matcher_new(cursor.context)
-    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only))
+    cursor.frames.push(__walk_batch(cursor.context, 0, 0, cursor.root, cursor.ignore, cursor.files_only, cursor.skip))
     Ok()
 }
 
@@ -1866,14 +2001,16 @@ __walk_finish: fn(cursor: &__WalkCursor) -[FS]> {
 
 
 /// The entries below `root`, every directory and file, read lazily in path
-/// order (see `Walk`); the call keeps the FS authority every walk needs.
-walk: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
-    Walk{root: path_text(root), ignore: ignore, files_only: false}
+/// order (see `Walk`); the call keeps the FS authority every walk needs. An
+/// entry whose name is in `skip` is neither yielded nor entered, as
+/// `find root -name NAME -prune` leaves it out.
+walk: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: false, skip: skip}
 }
 
 
-walk_files: fn(root: String | Path, ignore: String?{None}) -[FS]> Walk {
-    Walk{root: path_text(root), ignore: ignore, files_only: true}
+walk_files: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+    Walk{root: path_text(root), ignore: ignore, files_only: true, skip: skip}
 }
 
 
@@ -2514,7 +2651,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 readdir: fn(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-walkdir: fn(root: String, ignore: String?) -[FS]> Walk { Walk{root: root, ignore: ignore, files_only: false} }
+walkdir: fn(root: String, ignore: String?) -[FS]> Walk { Walk{root: root, ignore: ignore, files_only: false, skip: [String]{}} }
 
 
 truncate: fn(path: String, size: Int) IOError! -[FS]> {
@@ -2576,13 +2713,13 @@ cd: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
         .Err(.InvalidInput(context)) -> {
             if context.operation == {
                 .Read -> {}
-                else -> panic("invalid UTF-8 is a Read failure")
+                .Write | .Flush | .Connect | .Accept | .Close | .Resolve | .Codec -> panic("invalid UTF-8 is a Read failure")
             }
             assert_eq(context.resource, Val(path))
             assert_eq(context.os_code, None)
             assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
         }
-        else -> assert(false)
+        .Ok(_) | .Err(_) -> assert(false)
     }
     write(path, "abc") ?? panic("write text")
     assert_eq(read_at(path, -1, -1) ?? panic("empty range"), [U8]{})
@@ -2621,27 +2758,113 @@ scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError!
     Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
 }
 
+// One read root of a file scope. Only an `FS.Read("<path>")` right names one,
+// so a bare `FS.Read` never becomes an ambient file-system handle.
+ScopeRoot: struct {
+    encoded: [U8]
+    absolute: Bool
+}
+
+// The read roots and the held, no-follow read behind a file scope: not part
+// of the files surface.
+priv scope_reads: module {
+    // The scope's read roots, in the authority's sorted right order.
+    // `FS.Read("repo")` is the working directory; a root with a `..` part names none.
+    scope_roots: fn(scope: FileScope, platform: host_path.PathPlatform) -> [ScopeRoot] Never! {
+        roots := [ScopeRoot]{}
+        loop right in core.plugin.__authority_to_wire(scope.authority).split("\n") {
+            if !right.starts_with("FS.Read(\"") || !right.ends_with("\")") -> next
+            root: right.removeprefix("FS.Read(\"").removesuffix("\")")
+            if root == "" -> next
+            if root == "repo" {
+                roots.push(ScopeRoot{encoded: ".".bytes(), absolute: false})
+                next
+            }
+            path: host_path.from_text(root, platform)
+            if scope_has_parent(path) -> next
+            absolute: host_path.is_absolute(path)
+            roots.push(ScopeRoot{encoded: path.encoded, absolute: absolute})
+        }
+        roots
+    }
+
+    scope_has_parent: fn(path: host_path.OSPath) -> Bool Never! {
+        cursor := host_path.components(path)
+        loop {
+            part: host_path.next(path, cursor) ?? break
+            if part.kind == .ParentDir -> return true
+        }
+        false
+    }
+
+    scope_part_name: fn(path: host_path.OSPath, part: host_path.PathComponent, requested: String) -> String IOError! {
+        bytes := [U8]{}
+        loop i in part.span.start..<part.span.end -> bytes.push(path.encoded[i])
+        Ok(String.from_bytes(bytes) ?? return Err(scope_denied(requested)))
+    }
+
+    scope_input_error: fn(requested: String, why: String) -> IOError Never! {
+        IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(requested), os_code: None, cause: Val(why)})
+    }
+
+    // Read `relative` (normalized by scope_relative) below `root`. The root and
+    // every part below it are opened from their held parent without following a
+    // link, and the bytes come from that same opened regular file.
+    scope_read_at: fn(root: ScopeRoot, relative: String, platform: host_path.PathPlatform, requested: String) -[FS.Read]> [U8] IOError! {
+        directories := [Directory]{}
+        directories.push(open_directory(if root.absolute -> "/" else -> "."))
+        root_path: host_path.OSPath{encoded: root.encoded, platform: platform}
+        cursor := host_path.components(root_path)
+        loop {
+            part: host_path.next(root_path, cursor) ?? break
+            if part.kind == .Prefix -> return Err(scope_denied(requested))
+            if part.kind == .Normal {
+                name: scope_part_name(root_path, part, requested)
+                directories.push(directories[directories.len() - 1].open_directory(name))
+            }
+        }
+        parts: relative.split(if platform == .Windows -> "\\" else -> "/").to_list()
+        loop index in 0..<(parts.len() - 1) {
+            directories.push(directories[directories.len() - 1].open_directory(parts[index]))
+        }
+        reader := directories[directories.len() - 1].open(parts[parts.len() - 1])
+        opened: reader.stat()
+        if !opened.is_file -> return Err(scope_input_error(requested, "file authority input is not a regular file"))
+        if opened.links != 1 -> return Err(scope_input_error(requested, "file authority input has multiple hard links"))
+        bytes := [U8]{}
+        loop {
+            chunk: reader.read(65536)
+            if chunk.len() == 0 -> break
+            bytes.extend(chunk)
+        }
+        after: reader.stat()
+        if after.id != opened.id || after.size != bytes.len() {
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(requested), os_code: None, cause: Val("file changed while reading")}))
+        }
+        Ok(bytes)
+    }
+}
+
 scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     file_fault("FS.Read", .Read, path)
     platform: file_path_platform()
     requested: host_path.from_text(path, platform)
     absolute: host_path.is_absolute(requested)
-    roots: core.files.__scope_roots(scope)
     last := scope_denied(path)
-    loop index in 0..<roots.len() {
+    loop root in scope_roots(scope, platform) {
         relative := Val(requested)
         if absolute {
             relative = None
-            if roots[index].absolute {
-                root: host_path.OSPath{encoded: roots[index].encoded, platform: platform}
-                if host_path.strip_prefix_span(requested, root) == .Val(extent) {
+            if root.absolute {
+                root_path: host_path.OSPath{encoded: root.encoded, platform: platform}
+                if host_path.strip_prefix_span(requested, root_path) == .Val(extent) {
                     relative = Val(host_path.owned_span(requested, extent))
                 }
             }
         }
         if relative == .Val(selected) {
             relative_text: scope_relative(selected, path)
-            if core.files.__scope_read_at(scope, index, relative_text, path) == {
+            if scope_read_at(root, relative_text, platform, path) == {
                 .Err(error) -> last = error
                 .Ok(bytes) -> {
                     text: String.from_bytes(bytes) ?? return Err(io_err("read", path, file_utf8_error(bytes)))
@@ -2651,6 +2874,40 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
         }
     }
     Err(last)
+}
+
+#Test("a file scope reads only below its FS.Read roots and never through a link") {
+    platform: file_path_platform()
+    root: mktemp("file-scope-read")
+    create_dir_all(join(root, "inner")) ?? panic("scope root")
+    write(join(root, "inner/note.txt"), "scoped") ?? panic("scope file")
+    symlink(join(root, "inner/note.txt"), join(root, "link.txt")) ?? panic("scope link")
+    here: scope(Authority.from_rights(["FS.Read(\"{root}\")", "FS.Read(\"a/../b\")", "FS.Read"]))
+    roots: scope_roots(here, platform)
+    assert_eq(roots.len(), 1)
+    assert(roots[0].absolute)
+    assert(scope_has_parent(host_path.from_text("a/../b", platform)))
+    assert(!scope_has_parent(host_path.from_text("a/b", platform)))
+    assert_eq(scope_part_name(host_path.from_text("ab", platform), host_path.PathComponent{kind: .Normal, span: host_path.span(0, 2)}, "ab") ?? panic("part name"), "ab")
+    assert_eq(scope_read_at(roots[0], "inner/note.txt", platform, "note") ?? panic("held read"), "scoped".bytes())
+    assert_eq(here.read(join(root, "inner/note.txt")) ?? panic("absolute read inside the root"), "scoped")
+    assert_eq(scoped_read(here, join(root, "inner/note.txt")) ?? panic("scoped read inside the root"), "scoped")
+    if scoped_read(here, join(root, "link.txt")) == {
+        .Ok(_) -> panic("a scoped read followed a link")
+        .Err(_) -> {}
+    }
+    if here.read("/etc/hostname") == {
+        .Ok(_) -> panic("a scoped read left its root")
+        .Err(error) -> if error == {
+            .PermissionDenied(context) -> assert_eq(context.cause, Val("path is outside the granted FS.Read root"))
+            .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("outside the root is PermissionDenied")
+        }
+    }
+    if scope_input_error("x", "why") == {
+        .PermissionDenied(context) -> assert_eq(context.cause, Val("why"))
+        .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("scope input errors are PermissionDenied")
+    }
+    remove_all(root) ?? panic("cleanup file scope")
 }
 
 // std::str::Utf8Error's exact Display text; scoped reads used from_utf8,
@@ -2779,7 +3036,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
         .Err(error) -> {
             if error == {
                 .Other(context) -> assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
-                else -> assert(false)
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> assert(false)
             }
         }
     }
@@ -2811,6 +3068,83 @@ trim_file_line: fn(bytes: &[U8]) Never! {
     assert_eq(read(join(destination, "top.txt")) ?? panic("copied top"), "top")
     assert_eq(read(join(destination, "nested/deep.txt")) ?? panic("copied deep"), "deep")
     assert(!exists(join(destination, "link")))
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("list_dir matching, canonicalize missing_last, symlink replace and walk skip read as the shell does") {
+    root: mktemp("files-shell-kat")
+    create_dir_all(join(root, "keep/.jet")) ?? panic("tree")
+    create_dir_all(join(root, "out")) ?? panic("out")
+    write(join(root, "a.files"), "one\n") ?? panic("a")
+    write(join(root, "b.files"), "") ?? panic("b")
+    write(join(root, "notes.txt"), "x") ?? panic("notes")
+    write(join(root, "keep/.jet/cache"), "c") ?? panic("cache")
+    write(join(root, "keep/src.jet"), "s") ?? panic("src")
+    names := [String]{}
+    loop entry in list_dir(root, matching: "*.files") ?? panic("list") -> names.push(entry.name.copy())
+    assert_eq(names, [String]{"a.files", "b.files"})
+    base: canonicalize(root) ?? panic("canonical root")
+    assert_eq(canonicalize(join(root, "new.txt"), missing_last: true) ?? panic("missing last"), join(base, "new.txt"))
+    assert(canonicalize(join(root, "new.txt")) == .Err(_))
+    if core.files.__os_family() == "unix" {
+        link: join(root, "current")
+        symlink("keep", link) ?? panic("first link")
+        assert(symlink("out", link) == .Err(_))
+        symlink("out", link, replace: true) ?? panic("replace link")
+        assert_eq(read_link(link) ?? panic("read link"), "out")
+        assert(!exists(join(root, "keep/out")))
+        assert(symlink("out", join(root, "keep"), replace: true) == .Err(_))
+    }
+    walked := [String]{}
+    loop entry in walk_files(join(root, "keep"), skip: [String]{".jet"}) -> walked.push((entry ?? panic("walk")).relative)
+    assert_eq(walked, [String]{"src.jet"})
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("best_effort runs each operation, records what failed and reports it once") {
+    root: mktemp("files-best-effort-kat")
+    create_dir_all(root) ?? panic("root")
+    write(join(root, "a"), "one") ?? panic("a")
+    done := best_effort()
+    done.remove_all(join(root, "gone"))
+    done.remove(join(root, "gone"))
+    done.create_dir_all(join(root, "out/deep"))
+    done.copy_file(join(root, "a"), join(root, "out/a"))
+    done.copy_dir(join(root, "out"), join(root, "again"))
+    assert(!done.failed())
+    assert_eq(done.report(), "")
+    done.copy_file(join(root, "missing"), join(root, "out/b"))
+    assert_eq(done.canonicalize(join(root, "missing/x")), join(root, "missing/x"))
+    assert_eq(done.canonicalize(join(root, "a")), canonicalize(join(root, "a")) ?? panic("canonical a"))
+    if core.files.__os_family() == "unix" {
+        done.symlink("a", join(root, "link"))
+        done.symlink("out", join(root, "link"))
+        done.symlink("out", join(root, "link"), replace: true)
+        assert_eq(read_link(join(root, "link")) ?? panic("link"), "out")
+    }
+    assert_eq(read(join(root, "again/a")) ?? panic("copied"), "one")
+    assert(done.failed())
+    expected: if core.files.__os_family() == "unix" -> 3 else -> 2
+    assert_eq(done.failures.len(), expected)
+    assert_eq(done.report().split("\n").len(), expected)
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("read_or and list_dir_or give the file or listing, else the stated fallback") {
+    root: mktemp("files-or-kat")
+    create_dir_all(root) ?? panic("root")
+    write(join(root, "a.files"), "one\n") ?? panic("a")
+    write(join(root, "notes.txt"), "x") ?? panic("notes")
+    write_bytes(join(root, "bad"), [U8]{255, 10}) ?? panic("bad")
+    assert_eq(read_or(join(root, "a.files"), "none"), "one\n")
+    assert_eq(read_or(join(root, "missing"), "none"), "none")
+    assert_eq(read_or(join(root, "bad"), ""), "")
+    names := [String]{}
+    loop entry in list_dir_or(root, [DirEntry]{}, matching: "*.files") -> names.push(entry.name.copy())
+    assert_eq(names, [String]{"a.files"})
+    assert_eq(list_dir_or(root, [DirEntry]{}).len(), 3)
+    assert_eq(list_dir_or(join(root, "missing"), [DirEntry]{}).len(), 0)
+    assert_eq(list_dir_or(join(root, "a.files"), [DirEntry]{}).len(), 0)
     remove_all(root) ?? panic("cleanup")
 }
 
@@ -2857,7 +3191,7 @@ metadata_fault_fixture: fn(prefix: String) -[FS]> (root: TempDir, dir: String, f
 metadata_fault_seen: fn(probe: String, error: IOError) {
     if error == {
         .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
-        else -> panic("{probe} expected the injected FS.Read fault, got {error:Debug}")
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("{probe} expected the injected FS.Read fault, got {error:Debug}")
     }
     print("files fault observed: {probe}")
 }

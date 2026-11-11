@@ -64,10 +64,11 @@ publication_registry_clone_arguments: fn(url: String, pinned: String, path: Stri
 PublicationRegistryMarkerLock: struct {
     authority: FoundationDirectoryAuthority
     name: String
-}
-impl PublicationRegistryMarkerLock.Close {
-    close: fn(&&self) -[FS]> {
-        self.authority.remove(self.name).drop("release the owned registry marker on every result")
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            self.authority.remove(self.name).drop("release the owned registry marker on every result")
+        }
     }
 }
 publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: Int, wait_ms: Int, busy: String) -[FS, Env, Time, Time.Wait]> PublicationRegistryMarkerLock IOError! {
@@ -88,7 +89,7 @@ publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: In
                     time.sleep(time.duration_ms(delay_ms))
                     next
                 }
-                else -> { return Err(error) }
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(error) }
             }
         }
         if writer.fsync() == .Err(error) {
@@ -107,7 +108,7 @@ publication_validate_existing_index_clone: fn(registry: PublicationRegistryConfi
         .Ok(info) -> info
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(false) }
-            else -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(publication_registry_cache_error(registry, "{error}")) }
         }
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_registry_cache_error(registry, "the local registry cache path is not a real directory"))
@@ -116,7 +117,7 @@ publication_validate_existing_index_clone: fn(registry: PublicationRegistryConfi
         .Ok(metadata) -> metadata
         .Err(error) -> if error == {
             .NotFound(_) -> { return Err(publication_registry_cache_error(registry, "the local registry cache is not a git repository")) }
-            else -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(publication_registry_cache_error(registry, "{error}")) }
         }
     }
     if git_info.is_symlink || !git_info.is_dir -> return Err(publication_registry_cache_error(registry, "the local registry cache has an invalid git directory"))
@@ -169,7 +170,7 @@ publication_install_registry_clone: fn(registry: PublicationRegistryConfig, dir:
                     if cleanup == .Val(cleanup_failure) -> return Err(publication_registry_attach_clone_cleanup(publication_registry_cache_error(registry, "couldn't remove the losing partial registry clone"), partial_path, cleanup_failure))
                     return Ok(dir)
                 }
-                else -> { return Err(publication_registry_clone_failure(registry, parent, partial_path, "{error}")) }
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(publication_registry_clone_failure(registry, parent, partial_path, "{error}")) }
             }
         }
     }

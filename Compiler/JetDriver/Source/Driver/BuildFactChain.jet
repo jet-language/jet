@@ -138,7 +138,7 @@ jet_driver_setting_override_diagnostics: fn(load: JetDriverLoadResult, request: 
             if setting.name == override.name -> break true
         } ?? false
         if !known {
-            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`$build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`#build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
         }
     }
     found: package ?? return diagnostics
@@ -185,7 +185,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
             }
         }
         if contributions.len() == 0 {
-            undeclared: jet_driver_diagnostic_without_span("E0302", "`$build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
+            undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
             return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{undeclared}}
         }
     } else {

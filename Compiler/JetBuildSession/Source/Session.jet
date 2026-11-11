@@ -206,14 +206,14 @@ BuildSessionState: struct {
 BuildSession: struct { storage: Shared<BuildSessionState> }
 
 build_session_new: fn(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
-    {storage: shared BuildSessionState{
+    {storage: Shared{BuildSessionState{
         id: session_id, active: true, package: package, compiler_version: compiler_version, policy: policy,
         actions: [BuildSessionAction]{}, files: [BuildSessionFile]{}, targets: [BuildSessionTarget]{},
         toolchains: [BuildSessionToolchain]{{name: "host", role: "host", host_triple: "host", target_triple: "host", sdk: None, linker: None, sysroot: None}},
         signing: [BuildSessionSigning]{}, probes: [BuildSessionProbe]{}, plugins: [BuildSessionPlugin]{},
         generated: [BuildSessionGeneratedModule]{}, contributions: [BuildSessionContribution]{},
         diagnostics: [BuildSessionDiagnostic]{}, nodes: [BuildGraphNode]{}, options: [BuildSessionOption]{}, default_target: -1, args: [String]{}, start: 0, end: 0,
-    }}
+    }}}
 }
 
 build_session_abort: fn(session: &BuildSession) Never! {
@@ -265,7 +265,7 @@ build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
         loop value in values {
             if value == {
                 .Text(text) -> out.push(text.copy())
-                else -> return None
+                .Unit | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return None
             }
         }
         return Val(out)
@@ -311,11 +311,6 @@ build_session_path_error: fn(path: String) -> BuildSessionError? Never! {
     if path.trim() == "" -> return Val(.EmptyPath)
     if !build_session_path(path) -> return Val(BuildSessionError.InvalidPath{value: path})
     None
-}
-
-build_session_paths: fn(paths: [String]) -> Bool {
-    loop path in paths { if !build_session_path(path) -> return false }
-    true
 }
 
 build_session_caps: fn(values: [String]) -> [String]? {
@@ -402,7 +397,10 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if args.len() != 2 -> return build_session_fail(state, "`b.contribute` requires a fact name and one value")
         name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
         if name.trim() == "" || name.contains(".") -> return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
-        if args[1] == {.Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {} else -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")}
+        if args[1] == {
+            .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
+            .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
+        }
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
         state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
@@ -557,7 +555,7 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
             start = first
             end = last
         }
-        else -> return build_session_fail(state, "argument 1 must be SourceSpan")
+        .Unit | .Text(_) | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) -> return build_session_fail(state, "argument 1 must be SourceSpan")
     }
     code: build_session_text(args, 1) ?? return build_session_fail(state, "build rule code must be a string")
     what: build_session_text(args, 2) ?? return build_session_fail(state, "build rule what must be a string")

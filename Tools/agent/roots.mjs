@@ -14,8 +14,13 @@
 //   JET_SEED          the admitted seed dir          ($JET_SEEDS/current)
 //   JET_BIN           the jet under test, which `jet test` passes its children; node
 //                     tools run repository Jet tools with it  ($JET_SEED/jet)
+//
+// Run as a program (`node Tools/agent/roots.mjs NAME...`), it prints
+// `NAME=value` for each root named, and exits 64 at any other name. Its Jet
+// twin is Tools/agent/Roots.jet (gauntlet tool entry roots-mjs).
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const env = process.env;
 const home = () => env.HOME || homedir();
@@ -28,3 +33,23 @@ export const targetRoot = () => env.JET_TARGET_ROOT || join(scratchRoot(), 'targ
 export const seedsRoot = () => env.JET_SEEDS || join(env.XDG_DATA_HOME || join(home(), '.local/share'), 'jet-seeds');
 export const seedDir = () => env.JET_SEED || join(seedsRoot(), 'current');
 export const toolJet = () => env.JET_BIN || join(seedDir(), 'jet');
+
+const roots = {
+  JET_STATE_ROOT: stateRoot,
+  JET_SCRATCH_ROOT: scratchRoot,
+  JET_RUN_ROOT: runRoot,
+  JET_BASE_ROOT: baseRoot,
+  JET_TARGET_ROOT: targetRoot,
+  JET_SEEDS: seedsRoot,
+  JET_SEED: seedDir,
+  JET_BIN: toolJet,
+};
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  for (const name of process.argv.slice(2)) {
+    if (!Object.hasOwn(roots, name)) {
+      console.error(`roots: unknown root ${name}`);
+      process.exit(64);
+    }
+    console.log(`${name}=${roots[name]()}`);
+  }
+}

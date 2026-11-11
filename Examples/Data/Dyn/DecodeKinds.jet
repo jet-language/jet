@@ -31,10 +31,25 @@ run: fn() {
     }
     loop entry in trees {
         print(entry.name)
-        said("[Int]", if entry.tree.decode<[Int]>() == { .Err(errors) -> Val(errors) else -> None })
-        said("[String: Int]", if entry.tree.decode<[String: Int]>() == { .Err(errors) -> Val(errors) else -> None })
-        said("Bool", if entry.tree.decode<Bool>() == { .Err(errors) -> Val(errors) else -> None })
-        said("ZonedDateTime", if entry.tree.decode<time.ZonedDateTime>() == { .Err(errors) -> Val(errors) else -> None })
-        said("Decimal", if entry.tree.decode<Decimal>() == { .Err(errors) -> Val(errors) else -> None })
+        said("[Int]", if entry.tree.decode<[Int]>() == {
+            .Err(errors) -> Val(errors)
+            .Ok(_) -> None
+        })
+        said("[String: Int]", if entry.tree.decode<[String: Int]>() == {
+            .Err(errors) -> Val(errors)
+            .Ok(_) -> None
+        })
+        said("Bool", if entry.tree.decode<Bool>() == {
+            .Err(errors) -> Val(errors)
+            .Ok(_) -> None
+        })
+        said("ZonedDateTime", if entry.tree.decode<time.ZonedDateTime>() == {
+            .Err(errors) -> Val(errors)
+            .Ok(_) -> None
+        })
+        said("Decimal", if entry.tree.decode<Decimal>() == {
+            .Err(errors) -> Val(errors)
+            .Ok(_) -> None
+        })
     }
 }

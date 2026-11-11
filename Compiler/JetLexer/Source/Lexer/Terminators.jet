@@ -426,12 +426,12 @@ result_handler_failure_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
-// `&name` / `name.move()` written together at line start marks
+// `&name` / `&&name` / `name.move()` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
-// bitwise-and or power line keeps a space after its operator.
+// bitwise-and, logical-and or power line keeps a space after its operator.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     mark: kind_at(facts, index)
-    if mark != K_AMP && mark != K_CARET -> return false
+    if mark != K_AMP && mark != K_AND_AND && mark != K_CARET -> return false
     name: kind_at(facts, index + 1)
     if name != K_IDENT && name != K_SELF -> return false
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]

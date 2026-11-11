@@ -222,7 +222,7 @@ publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo
         } else if publication_write_index_entry(repo, expected) == .Err(error) {
             if error == {
                 .AlreadyExists(_) -> { return Err(PublicationDiagnosticError{diagnostic: publication_e1234(expected.name, expected.version)}) }
-                else -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(publication_registry_cache_error(registry, "{error}")) }
             }
         }
         source: publication_artifact_path(stale_repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}"))

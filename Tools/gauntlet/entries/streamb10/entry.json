@@ -1,21 +1,42 @@
 {
   "name": "streamb10",
   "mode": "tool",
-  "description": "The Lander's streamB10.sh and its Jet twin StreamB10.jet (#5072 c15): wait for batch A's stage-1 compiler, make it a seed, and hand batch B's staged SUBs to integrate10.sh; the fixtures hold the batches, the admitted seed and a stand-in integrate10.sh.",
+  "description": "The Lander's streamB10.sh and its Jet twin StreamB10.jet (#5072 c15): wait for batch A's stage-1 compiler, make it a seed, and hand batch B's staged SUBs to integrate10.sh; the fixtures hold the batches, the admitted seed and a stand-in integrate10.sh that writes what it was given and found, and check.jet prints those facts and what the report names.",
   "tool": {
     "original": "Tools/agent/orchestrator/streamB10.sh",
     "jet": "Tools/agent/orchestrator/StreamB10.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c39"
+    ],
     "cases": [
       {
-        "args": ["b1", "b1-next", "subs/Lane-1", "subs/Lane-9"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_SEED": "seeds/current", "JET_ORCHESTRATOR_DIR": "."},
+        "args": [
+          "b1",
+          "b1-next",
+          "subs/Lane-1",
+          "subs/Lane-9"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seeds/current",
+          "JET_ORCHESTRATOR_DIR": "."
+        },
+        "check": "check.jet",
         "expected": "expected/ready.out"
       },
       {
-        "args": ["b2", "b2-next"],
-        "env": {"JET_SCRATCH_ROOT": ".", "JET_SEED": "seeds/current", "JET_ORCHESTRATOR_DIR": "."},
+        "args": [
+          "b2",
+          "b2-next"
+        ],
+        "env": {
+          "JET_SCRATCH_ROOT": ".",
+          "JET_SEED": "seeds/current",
+          "JET_ORCHESTRATOR_DIR": "."
+        },
         "exit": 2,
+        "check": "check.jet",
         "expected": "expected/no-compiler.out"
       }
     ]

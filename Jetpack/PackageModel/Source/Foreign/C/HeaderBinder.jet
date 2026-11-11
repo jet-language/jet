@@ -206,7 +206,7 @@ pkg_cbind_declared_dependency: fn(package_source: String, package_path: String, 
     source: facts.deps.get(lib) ?? return None
     if source == {
         .CLib(target) -> Val(target)
-        else -> None
+        .Version(_) | .Provider(_, _) | .Git(_, _) | .Foreign(_, _) -> None
     }
 }
 

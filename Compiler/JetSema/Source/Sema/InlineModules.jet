@@ -65,6 +65,8 @@ use {
         MarkerCallArg,
         Measure,
         MeasureRule,
+        MetaAttr,
+        MetaField,
         sema_casing_pascal_words,
         NamedSpan,
         NamedType,
@@ -78,6 +80,7 @@ use {
         StructDef,
         SwitchArm,
         SymbolKind,
+        TaskGroupArgs,
         TraitConstDecl,
         TraitDef,
         TraitImplBlock,
@@ -94,6 +97,7 @@ use {
         ast_func,
         ast_const,
         core_module_export,
+        diagnostic_with_label,
         ast_program,
         ast_struct,
         type_name,
@@ -120,6 +124,9 @@ SemaInlineModuleSurface: struct {
     functions: [String:Bool]
     // Member constant names, read as `module.NAME`.
     constants: [String:Bool]
+    // The members written `priv`, each with its name's span;
+    // only this module and its children reach them.
+    private_members: [String:Span]
     // `pub use` inside the module: re-exported local name -> its owner.
     reexports: [String:SemaInlineTarget]
 }
@@ -472,7 +479,7 @@ sema_inline_core_imports: fn(items: [Item], file_imports: [ImportDecl], imports:
                             }
                         }
                     }
-                    else -> {}
+                    .File(_, _) -> {}
                 }
                 loop module_path in module_paths {
                     alias: sema_inline_core_alias(module_path)
@@ -575,8 +582,9 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         .Shared(inner) -> Type.Shared{inner: sema_inline_rewrite_type(rewrite, inner)}
         .Option(inner) -> Type.Option{inner: sema_inline_rewrite_type(rewrite, inner)}
         .FixedList(inner, len) -> Type.FixedList{elem: sema_inline_rewrite_type(rewrite, inner), len: sema_inline_rewrite_measure(rewrite, len)}
-        // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inline_rewrite_type(rewrite, inner)}
+        // A user tag declared in the module body renames with the module's
+        // other nominals (`#Marked T` -> `#complete_use_Marked T`).
+        .Tagged(marker, inner) -> Type.Tagged{marker: sema_inline_rewrite_tag_marker(rewrite, marker), inner: sema_inline_rewrite_type(rewrite, inner)}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
         .Map(key, key_span, value) -> Type.Map{key: sema_inline_rewrite_type(rewrite, key), key_span: key_span.copy(), value: sema_inline_rewrite_type(rewrite, value)}
         .Result(ok, err) -> Type.Result{ok: sema_inline_rewrite_type(rewrite, ok), err: sema_inline_rewrite_type(rewrite, err)}
@@ -610,7 +618,19 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged type kind is copied into the rebuilt program, while the
         // caller's program keeps the original.
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty.copy()
+    }
+}
+
+sema_inline_rewrite_tag_marker: fn(rewrite: SemaInlineRewrite, marker: TagMarker) -> TagMarker Never! {
+    if marker == {
+        .User(name) -> {
+            if rewrite.types.get(name) == .Val(.Named(mapped)) -> return TagMarker.User{name: mapped}
+            // copy: `name` is a payload of read parameter `marker`, which keeps the original
+            TagMarker.User{name: name.copy()}
+        }
+        // copy: an internal tag never renames; read parameter `marker` keeps the original
+        .Internal(_) -> marker.copy()
     }
 }
 
@@ -643,7 +663,7 @@ sema_inline_rewrite_measure: fn(rewrite: SemaInlineRewrite, measure: Measure) ->
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged measure kind is copied into the rebuilt program, while
         // the caller's program keeps the original.
-        else -> measure.copy()
+        .Literal(_, _) | .SignedLiteral(_, _) -> measure.copy()
     }
 }
 
@@ -660,7 +680,7 @@ sema_inline_value_at: fn(value: Expr, span: Span) -> Expr Never! {
         .EnumLit(type_name, variant, _, args, leading_dot, _, node) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: args, leading_dot: leading_dot, span: span, id: node}
         // copy: the re-spanned value is a new owned Expr. Other kinds keep `value`, a module
         // constant's expression that the constant table keeps for every other use site.
-        else -> value.copy()
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> value.copy()
     }
 }
 
@@ -722,7 +742,7 @@ sema_inline_rewrite_str_parts: fn(rewrite: &SemaInlineRewrite, parts: [StrPart])
     loop part in parts {
         if part == {
             .Interp(expression, format) -> mapped.push(StrPart.Interp{expr: sema_inline_rewrite_expr(rewrite, expression), format: format})
-            else -> mapped.push(part.copy())
+            .Lit(_) | .Byte(_) -> mapped.push(part.copy())
         }
     }
     mapped
@@ -743,7 +763,7 @@ sema_inline_rewrite_or_fallback: fn(rewrite: &SemaInlineRewrite, fallback: OrFal
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged fallback is copied into the rebuilt program, while the
         // caller's program keeps the original.
-        else -> fallback.copy()
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> fallback.copy()
     }
 }
 
@@ -772,7 +792,7 @@ sema_inline_rewrite_typed_body: fn(rewrite: &SemaInlineRewrite, body: TypedLitBo
         .Elements(elements) -> return TypedLitBody.Elements{elements: sema_inline_rewrite_exprs(rewrite, elements)}
         .Entries(entries) -> return TypedLitBody.Entries{entries: sema_inline_rewrite_pairs(rewrite, entries)}
         .Value(value) -> return TypedLitBody.Value{value: sema_inline_rewrite_expr(rewrite, value)}
-        else -> {}
+        .ByteText(_) | .Empty -> {}
     }
     // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming
     // match), so an unchanged typed body is copied into the rebuilt program, while the caller's
@@ -801,6 +821,7 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
         forwarded: Call{name: sema_inline_member_name(target.module_alias, target.member), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(rewrite, args)}
         return Val(Expr.Call{call: forwarded, id: AST_NODE_GENERATED})
     }
+    if sema_inline_private_member(rewrite, surface, method, method_span) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
     if surface.functions.get(method) == None {
         rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.path}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
         return None
@@ -829,6 +850,7 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
         if target.qualified -> return Val(Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: AST_NODE_GENERATED}, member: target.member, span: span, id: node})
         return Val(Expr.Ident{name: sema_inline_member_name(target.module_alias, target.member), span: span, id: node})
     }
+    if sema_inline_private_member(rewrite, surface, member, span) == .Val(diagnostic) -> rewrite.diagnostics.push(diagnostic)
     if surface.functions.get(member) == None && surface.constants.get(member) == None && surface.constants.get(SEMA_MODULE_META) != None {
         return Val(Expr.Field{base: Expr.Ident{name: sema_inline_member_name(surface.path, SEMA_MODULE_META), span: span, id: AST_NODE_GENERATED}, member: member, span: span, id: node})
     }
@@ -839,6 +861,34 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
         return Val(Expr.Field{base: base.copy(), member: member, span: span, id: node})
     }
     Val(Expr.Ident{name: sema_inline_member_name(surface.path, member), span: span, id: node})
+}
+
+// A `priv` member of an inline module is usable only inside that
+// module and its children (E0605, naming the member's `priv` declaration).
+sema_inline_private_member: fn(rewrite: SemaInlineRewrite, surface: SemaInlineModuleSurface, member: String, span: Span) -> Diagnostic? Never! {
+    declared: surface.private_members.get(member) ?? return None
+    if rewrite.sibling_module == surface.path || rewrite.sibling_module.starts_with("{surface.path}.") -> return None
+    diagnostic: sema_error("E0605", span, "`{member}` is private to module `{surface.path}`", "a `priv` declaration is usable only inside the module that declares it and that module's children", "use `{member}` from inside `{surface.path}`, or remove `priv` from it")
+    Val(diagnostic_with_label(diagnostic, declared, "`{member}` is declared `priv` here"))
+}
+
+// The functions and constants `body` declares onto `surface`. A member
+// written `priv` is private to the module unless the whole module is plain
+// `priv` (`hides_members`), whose narrowing already made every member so.
+sema_inline_surface_members: fn(surface: &SemaInlineModuleSurface, body: [Item], hides_members: Bool) Never! {
+    loop inner in body {
+        if inner == {
+            .Func(function) -> {
+                surface.functions[function.name] = true
+                if !hides_members && !function.is_pub && !function.is_package_pub -> surface.private_members[function.name] = function.name_span
+            }
+            .Const(constant) -> {
+                surface.constants[constant.name] = true
+                if !hides_members && !constant.is_pub && !constant.is_package_pub -> surface.private_members[constant.name] = constant.name_span
+            }
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
 }
 
 // `a.b.c` as a call receiver: each identifier segment with its span, false
@@ -854,7 +904,7 @@ sema_inline_receiver_path: fn(receiver: Expr, segments: &[NamedSpan]) -> Bool Ne
             segments.push(NamedSpan{name: member, span: span})
             return true
         }
-        else -> return false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
     }
 }
 
@@ -983,7 +1033,7 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
                         if !sema_inline_is_local(rewrite, alias) && rewrite.types.get("{alias}.{member}") == .Val(.Named(resolved)) -> mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
                     }
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
             return Expr.MethodCall{receiver: sema_inline_rewrite_expr(rewrite, mapped_receiver), method: method, method_span: method_span, owner_type_args: sema_inline_rewrite_types(rewrite, owner_type_args), type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(rewrite, args), id: node}
         }
@@ -1046,7 +1096,7 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
             loop step in steps -> mapped.push(PipeStep{name: step.name, value: sema_inline_rewrite_expr(rewrite, step.value), reads: step.reads, span: step.span})
             return Expr.Pipe{head: mapped_head, steps: mapped, span: span, id: node}
         }
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
     }
     // copy: the rewrite walks the module program by borrowed payload views (Jet has no consuming
     // match), so an unchanged expression kind is copied into the rebuilt program, while the
@@ -1066,7 +1116,7 @@ sema_inline_declare_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) N
         loop field in names {
             if field.rename == {
                 .Val(rename) -> rewrite.locals.push(rename.name)
-                else -> rewrite.locals.push(field.name)
+                .None -> rewrite.locals.push(field.name)
             }
         }
     }
@@ -1076,6 +1126,8 @@ sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -
     updated := binding
     updated.ty = sema_inline_rewrite_optional_type(rewrite, binding.ty)
     updated.init = sema_inline_rewrite_expr(rewrite, binding.init)
+    updated.markers = sema_inline_rewrite_markers(rewrite, binding.markers)
+    updated.meta = sema_inline_rewrite_meta(rewrite, binding.meta)
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
@@ -1083,7 +1135,7 @@ sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -
             // copy: the binding pattern is a payload view of the borrowed binding (Jet has no
             // consuming match), so it is copied into the rebuilt program, while the caller's
             // program keeps the original.
-            else -> pattern.copy()
+            .List(_, _) | .Tuple(_, _) -> pattern.copy()
         })
     }
     updated
@@ -1116,7 +1168,7 @@ sema_inline_rewrite_lvalue: fn(rewrite: &SemaInlineRewrite, target: LValue) -> L
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged assignment target is copied into the rebuilt program,
         // while the caller's program keeps the original.
-        else -> target.copy()
+        .Local(_, _) -> target.copy()
     }
 }
 
@@ -1181,7 +1233,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         .Switched(marker, body, span) -> Stmt.Switched{marker: marker.copy(), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Region(name, name_span, body, span) -> Stmt.Region{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Policy(declarations, body, span) -> Stmt.Policy{declarations: declarations, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
-        .TaskGroup(name, name_span, limit, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, limit: sema_inline_rewrite_optional_expr(rewrite, limit), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
+        .TaskGroup(name, name_span, args, body, span) -> Stmt.TaskGroup{name: name, name_span: name_span, args: TaskGroupArgs{limit: sema_inline_rewrite_optional_expr(rewrite, args.limit), stack: sema_inline_rewrite_optional_expr(rewrite, args.stack)}, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         .Layout(name, name_span, body, span) -> Stmt.Layout{name: name, name_span: name_span, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         // copy: `binding` is a payload of read parameter `stmt`, which keeps the original; field `binding` of the new Stmt.AuthorityScope owns this one
         .AuthorityScope(caps, caps_span, binding, body, span) -> Stmt.AuthorityScope{caps: caps, caps_span: caps_span, binding: binding.copy(), body: sema_inline_rewrite_stmts(rewrite, body), span: span}
@@ -1204,7 +1256,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged statement kind is copied into the rebuilt program,
         // while the caller's program keeps the original.
-        else -> stmt.copy()
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> stmt.copy()
     }
 }
 
@@ -1216,13 +1268,31 @@ sema_inline_rewrite_markers: fn(rewrite: &SemaInlineRewrite, markers: [Marker]) 
         loop arg in marker.args {
             if arg == {
                 .Expr(value) -> args.push(MarkerCallArg.Expr{value: sema_inline_rewrite_expr(rewrite, value)})
-                else -> args.push(arg.copy())
+                .EffectRow(_, _) -> args.push(arg.copy())
             }
         }
         updated.args = args
         mapped.push(updated)
     }
     mapped
+}
+
+// `#Meta(category: label)` inside a template reads the instance's value
+// arguments like any other expression of the module.
+sema_inline_rewrite_meta: fn(rewrite: &SemaInlineRewrite, meta: MetaAttr?) -> MetaAttr? Never! {
+    present: meta ?? return None
+    updated := present
+    fields := [MetaField]{}
+    loop field in present.fields {
+        if field == {
+            .Category(value, span) -> fields.push(MetaField.Category{value: sema_inline_rewrite_expr(rewrite, value), span: span})
+            .Maturity(value, span) -> fields.push(MetaField.Maturity{value: sema_inline_rewrite_expr(rewrite, value), span: span})
+            .Unknown(name, value, span) -> fields.push(MetaField.Unknown{name: name, value: sema_inline_rewrite_optional_expr(rewrite, value), span: span})
+            .Tunable(span) -> fields.push(MetaField.Tunable{span: span})
+        }
+    }
+    updated.fields = fields
+    Val(updated)
 }
 
 sema_inline_rewrite_clauses: fn(rewrite: &SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
@@ -1268,6 +1338,7 @@ sema_inline_rewrite_func: fn(rewrite: &SemaInlineRewrite, function: Func) -> Fun
     updated.params = sema_inline_rewrite_params(rewrite, function.params)
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
     updated.markers = sema_inline_rewrite_markers(rewrite, function.markers)
+    updated.meta = sema_inline_rewrite_meta(rewrite, function.meta)
     updated.pre = sema_inline_rewrite_clauses(rewrite, function.pre)
     updated.post = sema_inline_rewrite_clauses(rewrite, function.post)
     updated.body = sema_inline_rewrite_stmts(rewrite, function.body)
@@ -1422,7 +1493,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
             .Tag(definition) -> name = definition.name
             .Distinct(definition) -> name = definition.name
             .TypeAlias(definition) -> name = definition.name
-            else -> next
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         resolved: Type.Named{name: sema_inline_type_name(module_alias, name)}
         direct_types[name] = resolved
@@ -1453,7 +1524,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 kept.push(Item.CodeModule{value: hoisted.code_module})
             }
             .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) -> lifted.push(inner.copy())
-            else -> kept.push(inner.copy())
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> kept.push(inner.copy())
         }
     }
     visible := sema_inline_rewrite_empty()
@@ -1475,9 +1546,11 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 mapped := definition
                 mapped.value = sema_inline_rewrite_expr(visible, definition.value)
                 mapped.ty = sema_inline_rewrite_optional_type(visible, definition.ty)
+                mapped.markers = sema_inline_rewrite_markers(visible, definition.markers)
+                mapped.meta = sema_inline_rewrite_meta(visible, definition.meta)
                 kept_rewritten.push(Item.Const{value: mapped})
             }
-            else -> kept_rewritten.push(inner)
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> kept_rewritten.push(inner)
         }
     }
     loop inner in lifted {
@@ -1507,7 +1580,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 mapped.target = sema_inline_rewrite_type(visible, definition.target)
                 hoist.declarations.push(Item.TypeAlias{value: mapped})
             }
-            else -> {}
+            .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     updated.body = Val(kept_rewritten)
@@ -1552,7 +1625,7 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
                 if definition.body == .Val(body) -> updated.body = Val(sema_inline_rewrite_exported(body, rewrite))
                 mapped.push(Item.CodeModule{value: updated})
             }
-            else -> mapped.push(item.copy())
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> mapped.push(item.copy())
         }
     }
     mapped
@@ -1741,14 +1814,8 @@ sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [Impo
             path: "{parent}.{child.name}"
             private_to := String?{None}
             if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
-            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
-            loop inner in child_body {
-                if inner == {
-                    .Func(function) -> surface.functions[function.name] = true
-                    .Const(constant) -> surface.constants[constant.name] = true
-                    else -> {}
-                }
-            }
+            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}}
+            sema_inline_surface_members(surface, child_body, !child.is_pub && !child.is_package_pub)
             aliases: sema_inline_module_aliases(child, path, file_imports, inherited)
             binding := sema_inline_rewrite_empty()
             binding.sibling_module = path.copy()
@@ -1796,8 +1863,9 @@ sema_inline_lift_constant: fn(rewrite: &SemaInlineRewrite, constant: ConstDef, p
 
 // Lifts the member functions of every module nested in `body` (module
 // `parent`) under their member identities, each body rewritten with the
-// bindings sema_inline_collect_nested made for its module.
-sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], diagnostics: &[Diagnostic]) Never! {
+// bindings sema_inline_collect_nested made for its module; `owners` maps each
+// lifted function to its module's path.
+sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], owners: &[String:String], diagnostics: &[Diagnostic]) Never! {
     loop item in body {
         if item == .CodeModule(child) {
             child_body: child.body ?? next
@@ -1814,14 +1882,15 @@ sema_inline_lift_nested: fn(body: [Item], parent: String, nested: [SemaInlineMod
                     .Func(function) -> {
                         member := sema_inline_rewrite_func(rewrite, function)
                         member.name = sema_inline_member_name(path, function.name)
+                        owners[member.name] = path.copy()
                         lifted.push(Item.Func{value: member})
                     }
                     .Const(constant) -> lifted.push(sema_inline_lift_constant(rewrite, constant, path))
-                    else -> {}
+                    .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             loop diagnostic in rewrite.diagnostics -> diagnostics.push(diagnostic)
-            sema_inline_lift_nested(child_body, path, nested, bindings, lifted, diagnostics)
+            sema_inline_lift_nested(child_body, path, nested, bindings, lifted, owners, diagnostics)
         }
     }
 }
@@ -1840,7 +1909,7 @@ sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
                 if child.body == .Val(child_body) -> updated.body = Val(sema_inline_strip_members(child_body))
                 kept.push(Item.CodeModule{value: updated})
             }
-            else -> kept.push(item.copy())
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> kept.push(item.copy())
         }
     }
     kept
@@ -1871,31 +1940,7 @@ sema_inline_rewrite_item: fn(rewrite: &SemaInlineRewrite, item: Item) -> Item Ne
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged item kind is copied into the rebuilt program, while the
         // caller's program keeps the original.
-        else -> item.copy()
-    }
-}
-
-// Rebuilding items must not first copy the old item list only to discard it.
-// Keep the remaining source metadata, and transfer the replacement list.
-sema_program_with_items: fn(program: Program, items: &&[Item]) -> Program Never! {
-    Program{
-        imports: program.imports,
-        items: items.move(),
-        script_body: program.script_body,
-        block_spans: program.block_spans,
-        fenced_statements: program.fenced_statements,
-        web_target_ceiling: program.web_target_ceiling,
-        no_prelude: program.no_prelude,
-        default_target: program.default_target,
-        html_path: program.html_path,
-        policy_declarations: program.policy_declarations,
-        user_policy_declarations: program.user_policy_declarations,
-        applied_rules: program.applied_rules,
-        rule_facts: program.rule_facts,
-        else_arms: program.else_arms,
-        used_import_names: program.used_import_names,
-        debug_sites: program.debug_sites,
-        app_route_roots: program.app_route_roots,
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> item.copy()
     }
 }
 
@@ -1928,7 +1973,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     loop declaration in program.imports {
         if declaration.kind == {
             .Unqualified(_, _, _, _, _) -> {}
-            else -> file_aliases[declaration.alias] = true
+            .File(_, _) | .Module(_, _) -> file_aliases[declaration.alias] = true
         }
     }
     surfaces := [SemaInlineModuleSurface]{}
@@ -1938,14 +1983,8 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         if item == .CodeModule(definition) {
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
-                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
-                loop inner in body {
-                    if inner == {
-                        .Func(function) -> surface.functions[function.name] = true
-                        .Const(constant) -> surface.constants[constant.name] = true
-                        else -> {}
-                    }
-                }
+                surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, constants: [String:Bool]{}, private_members: [String:Span]{}, reexports: [String:SemaInlineTarget]{}}
+                sema_inline_surface_members(surface, body, !definition.is_pub && !definition.is_package_pub)
                 surfaces.push(surface)
             }
         }
@@ -1958,6 +1997,9 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
         }
     }
     lowered_items := [Item]{}
+    // Each lifted member function's module path: the file pass rewrites its
+    // body as that module's, so its `priv` reads stay inside.
+    owners := [String:String]{}
     loop item_index in 0..<hoisted_items.len() {
         item: hoisted_items[item_index]
         if item == .CodeModule(definition) {
@@ -1983,14 +2025,15 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                         .Func(function) -> {
                             member := sema_inline_rewrite_func(siblings, function)
                             member.name = sema_inline_member_name(definition.name, function.name)
+                            owners[member.name] = definition.name.copy()
                             lifted.push(Item.Func{value: member})
                         }
                         .Const(constant) -> lifted.push(sema_inline_lift_constant(siblings, constant, definition.name))
-                        else -> {}
+                        .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                     }
                 }
                 loop diagnostic in siblings.diagnostics -> diagnostics.push(diagnostic)
-                sema_inline_lift_nested(body, definition.name, nested, nested_bindings, lifted, diagnostics)
+                sema_inline_lift_nested(body, definition.name, nested, nested_bindings, lifted, owners, diagnostics)
                 module_item := definition
                 module_item.body = Val(sema_inline_strip_members(body))
                 lowered_items.push(Item.CodeModule{value: module_item})
@@ -2010,7 +2053,13 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     loop surface in nested -> surfaces.push(surface)
     calls.modules = surfaces.move()
     rewritten := [Item]{}
-    loop item in lowered_items -> rewritten.push(sema_inline_rewrite_item(calls, item))
+    loop item in lowered_items {
+        calls.sibling_module = ""
+        if item == .Func(function) {
+            if owners.get(function.name) == .Val(owner) -> calls.sibling_module = owner.copy()
+        }
+        rewritten.push(sema_inline_rewrite_item(calls, item))
+    }
     program.items = rewritten.move()
     program.imports = imports
     loop diagnostic in calls.diagnostics -> diagnostics.push(diagnostic)
@@ -2053,7 +2102,7 @@ sema_inline_modules_any_body: fn(items: [Item]) -> Bool Never! {
             .Struct(definition) -> {
                 if definition.name == sema_inline_type_name("internal", "OrderedRow") -> private_type = !definition.is_pub && !definition.is_package_pub
             }
-            else -> {}
+            .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     assert(resolved && private_type && private_function)

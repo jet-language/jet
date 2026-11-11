@@ -40,7 +40,7 @@ trust_pkg_integration_lock: fn(owner: String, key: String, exact: String) -> Sem
     parsed: trust_parse_semantic_lock(raw)
     future: if parsed.records[0].identity.kind == {
         .Future(_) -> true
-        else -> false
+        .Package | .SourceRef | .WorkspaceMember | .AdapterOutput | .SourceBuild | .CacheObject | .Toolchain | .SecretReference | .ServicePackage | .ImageInput | .ReplacementOverlay | .PackageOverlay | .FlakeComposition | .FlakeUnsupported | .FlakeEvaluator | .Variant -> false
     }
     assert(future)
     assert_eq(parsed.records[0].future_fields.get("future-key"), Val("future-value"))

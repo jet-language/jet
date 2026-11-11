@@ -1,0 +1,66 @@
+// Where the resolved Jetpack root and its Hangar live. PackageModel's
+// HangarRoots builds on these, and Foundation's own Hangar users (the pinned
+// Bubblewrap, NativeSandbox.jet) reach the same directory through them.
+use {
+    sys: core.sys
+    files: core.files
+}
+
+// The native data-directory leaf (macOS/Windows spell it
+// `Hangar`); explicit roots keep the historical lower-case child.
+HANGAR_NATIVE_SUBDIR_TITLE: "Hangar"
+HANGAR_LEGACY_SUBDIR: "hangar"
+// The explicit Jetpack root, which replaces the user data directory.
+HANGAR_ROOT_ENV: "JETPACK_ROOT"
+// The Hangar directory of verified single-file tools Jet pins by SHA-256
+// (`tools/<sha256>/<name>`), such as its Bubblewrap.
+HANGAR_TOOLS_DIR: "tools"
+
+// The native leaf of the resolved root's content-addressed store.
+foundation_hangar_subdir: fn() -[Env]> String Never! {
+    if sys.is_macos() || sys.is_windows() -> return HANGAR_NATIVE_SUBDIR_TITLE
+    HANGAR_LEGACY_SUBDIR
+}
+
+// The explicit Jetpack root `JETPACK_ROOT` names, if any.
+foundation_explicit_jetpack_root: fn() -[Env]> String? Never! {
+    foundation_environment_path(HANGAR_ROOT_ENV)
+}
+
+// The resolved root's Hangar: `<JETPACK_ROOT>/hangar`, else the native leaf
+// of the user data directory (PackageModel `pkg_resolve_roots().hangar_dir()`).
+foundation_hangar_dir: fn() -[Env]> String Never! {
+    explicit: foundation_explicit_jetpack_root() ?? return files.join(foundation_user_data_root(), foundation_hangar_subdir())
+    files.join(explicit, HANGAR_LEGACY_SUBDIR)
+}
+
+foundation_home_dir: fn() -[Env]> String Never! {
+    if sys.is_windows() {
+        if foundation_environment_path("USERPROFILE") == .Val(home) -> return home
+    }
+    foundation_environment_path("HOME") ?? "."
+}
+
+// A non-empty environment value.
+foundation_environment_path: fn(name: String) -[Env]> String? Never! {
+    value: sys.get(name) ?? return None
+    if value == "" -> return None
+    Val(value)
+}
+
+// An environment directory honoured only when absolute.
+foundation_absolute_environment_path: fn(name: String) -[Env]> String? Never! {
+    value: foundation_environment_path(name) ?? return None
+    if !files.is_abs(value) -> return None
+    Val(value)
+}
+
+foundation_user_data_root: fn() -[Env]> String Never! {
+    if sys.is_macos() -> return files.join(files.join(files.join(foundation_home_dir(), "Library"), "Application Support"), "Jet")
+    if sys.is_windows() {
+        local: foundation_environment_path("LOCALAPPDATA") ?? files.join(files.join(foundation_home_dir(), "AppData"), "Local")
+        return files.join(local, "Jet")
+    }
+    data: foundation_absolute_environment_path("XDG_DATA_HOME") ?? files.join(files.join(foundation_home_dir(), ".local"), "share")
+    files.join(data, "jet")
+}

@@ -20,7 +20,7 @@ TRANSITION_MAX_JOURNAL_BYTES: 67108864
 TRANSITION_READ_CHUNK: 65536
 
 // Rust TEMP_COUNTER: the per-process sequence in staged temporary names.
-ENV_TRANSITION_TEMP_COUNTER: shared ProcessSequence{next: 1}
+ENV_TRANSITION_TEMP_COUNTER: Shared{ProcessSequence{next: 1}}
 
 // One file a transition moves between two exact states. None is absent.
 TransitionFileChange: struct {
@@ -79,7 +79,7 @@ env_transition_read_state: fn(path: String) -[FS]> [U8]? EnvironmentError! {
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> Ok(None)
-                else -> Err(env_transition_error("couldn't inspect {path}: {error}"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_transition_error("couldn't inspect {path}: {error}"))
             }
         }
     }
@@ -162,7 +162,7 @@ env_transition_remove_regular: fn(root: String, path: String) EnvironmentError! 
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                else -> return Err(env_transition_error("couldn't inspect {path}: {error}"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(env_transition_error("couldn't inspect {path}: {error}"))
             }
         }
     }
@@ -196,7 +196,7 @@ env_transition_create_real_dirs: fn(root: String, directory: String) Environment
                         files.create_dir_all(cursor) ?? return Err(env_transition_error("couldn't create {cursor}: {err}"))
                         env_transition_sync_directory(cursor) ?? return Err(env_transition_error("couldn't sync {cursor}: {err}"))
                     }
-                    else -> { return Err(env_transition_error("couldn't inspect {cursor}: {error}")) }
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(env_transition_error("couldn't inspect {cursor}: {error}")) }
                 }
             }
         }
@@ -216,14 +216,14 @@ env_transition_write_atomic: fn(path: String, bytes: [U8]) EnvironmentError! -[F
             files.remove(temp).drop("the staged temporary is discarded")
             return Err(env_transition_error("couldn't stage {path}: {error}"))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     if files.rename(temp, path) == {
         .Err(error) -> {
             files.remove(temp).drop("the staged temporary is discarded")
             return Err(env_transition_error("couldn't publish {path}: {error}"))
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     env_transition_sync_directory(parent) ?? return Err(env_transition_error("couldn't sync {path}: {err}"))
 }

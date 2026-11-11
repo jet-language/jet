@@ -25,7 +25,7 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
             if error == {
                 .HashMismatch(engine, expected, actual) -> true
                 .SizeMismatch(engine, expected, actual) -> true
-                else -> false
+                .UnknownEngine(_) | .MissingBinary(_) | .MissingLock(_) | .IO(_) | .InvalidProtocol(_) -> false
             }
         }
     }
@@ -66,7 +66,7 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
         .Err(error) -> {
             if error == {
                 .UnknownEngine(name) -> assert_eq(name, "edge")
-                else -> panic("expected UnknownEngine")
+                .MissingBinary(_) | .MissingLock(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> panic("expected UnknownEngine")
             }
         }
         .Ok(_) -> panic("edge is not a supported engine")
@@ -76,7 +76,7 @@ env_browser_test_drifted: fn(result: LockedBrowser BrowserLockError!) -> Bool {
         .Err(error) -> {
             if error == {
                 .MissingLock(engine) -> assert_eq(engine, "firefox")
-                else -> panic("expected MissingLock")
+                .UnknownEngine(_) | .MissingBinary(_) | .HashMismatch(_, _, _) | .SizeMismatch(_, _, _) | .IO(_) | .InvalidProtocol(_) -> panic("expected MissingLock")
             }
         }
         .Ok(_) -> panic("no browser is locked")

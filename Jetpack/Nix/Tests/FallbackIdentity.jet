@@ -38,7 +38,7 @@ nix_test_repeat: fn(text: String, count: Int) -> String {
 nix_test_request_refused: fn(identity: NixFallbackIdentity, input: String, system: String, attr: [String], lock_sha256: String) -> Bool {
     if identity.validate_request(input, system, attr, lock_sha256) == {
         .Ok(_) -> false
-        else -> true
+        .Err(_) -> true
     }
 }
 
@@ -56,7 +56,7 @@ nix_test_request_refused: fn(identity: NixFallbackIdentity, input: String, syste
     with_unknown: provenance.replace(",\"lock_sha256\"", ",\"unexpected\":\"value\",\"lock_sha256\"")
     if NixFallbackIdentity.from_provenance(with_unknown) == {
         .Ok(_) -> panic("an unknown provenance field must be rejected")
-        else -> {}
+        .Err(_) -> {}
     }
     files.remove_all(root) ?? panic("scratch cleanup")
 }

@@ -42,8 +42,8 @@ cli_tools_test_replace_first: fn(text: String, from: String, to: String) -> Stri
     "{parts.before}{to}{parts.after}"
 }
 
-#Test("task names parse plain and every") {
-    src: "\n#Job serve: fn() {{ }}\n#Every(5min) #Job lint: fn() {{ }}\nrun: fn() {{ }}\n"
+#Test("task names parse plain and scheduled jobs") {
+    src: "\n#Job serve: fn() {{ }}\n#Job(every: 5min) lint: fn() {{ }}\nrun: fn() {{ }}\n"
     names: cli_task_names_in(src)
     assert(names.contains("serve"), "{names}")
     assert(names.contains("lint"), "{names}")

@@ -107,7 +107,7 @@ pkg_authority_bad: fn(detail: String) -> PackageParseError Never! {
 pkg_authority_error: fn(error: PackageParseError) -> PackageParseError Never! {
     if error == {
         .Composition(detail) -> pkg_authority_bad(detail)
-        else -> error
+        .MissingName | .MissingRecord(_) | .MalformedField(_) | .UnknownField(_) | .UnknownOutputKind(_) | .InvalidValue(_, _) | .RetiredRecordHead | .ConfigMembers | .NestedMembers(_, _) | .LintPolicyCode(_, _) | .BadTarget(_, _, _) | .BadTargetField(_, _) | .ReservedSection(_) | .BadEffectsBlock(_) | .RetiredAuthorityField(_, _) | .BadMemoryPolicy(_) | .RetiredPolicyField(_, _) | .BadGuaranteePolicy(_) | .BadPackagePolicy(_) | .BadAllocatorPolicy(_) -> error
     }
 }
 

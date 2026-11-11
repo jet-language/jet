@@ -98,23 +98,31 @@ HTML: struct {
     impl Equatable {
         equal: fn(self, rhs: HTML) -> Bool { self.markup == rhs.markup }
     }
-}
 
-impl HTML {
     text: fn(self) -> String Never! { self.markup.copy() }
     raw: fn(text: String) -> HTML Never! { HTML{markup: text.copy()} }
-}
 
-// The checked `HTML{…}` literal: `holes` hold each hole's display text and
-// `trusted` marks the holes that were HTML values, inserted unescaped.
-__html_literal: fn(literals: [String], holes: [String], trusted: [Bool]) -> HTML Never! {
-    if literals.len() != holes.len() + 1 || trusted.len() != holes.len() -> panic("typed HTML literal and hole counts do not match")
-    markup := literals[0].copy()
-    loop index in 0..<holes.len() {
-        hole: if trusted[index] -> holes[index].copy() else -> escape(holes[index])
-        markup = "{markup}{hole}{literals[index + 1]}"
+    // A checked `HTML{…}` literal: each hole becomes markup, an HTML value as it
+    // is and any other value as its escaped display text.
+    impl CheckedText {
+        Error: Never
+        Hole: String
+
+        check: fn(_text: String) Never! -[]> { return Ok() }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String {
+            if T == {
+                HTML -> value.markup.copy()
+                else -> escape("{value}")
+            }
+        }
+
+        build: fn(parts: [String], holes: [String]) -[]> HTML {
+            markup := parts[0].copy()
+            loop index in 0..<holes.len() -> markup = "{markup}{holes[index]}{parts[index + 1]}"
+            HTML{markup: markup}
+        }
     }
-    HTML{markup: markup}
 }
 
 entity: fn(name: String) -> String {

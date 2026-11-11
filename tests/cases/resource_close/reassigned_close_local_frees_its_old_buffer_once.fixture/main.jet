@@ -10,17 +10,17 @@
 Words: struct {
     name: String
     p: [U64]
-}
 
-impl Words.Close {
-    close: fn(&&self) {
-        p := self.p.move()
-        sum := U64{0}
-        loop i in 0..<p.len() {
-            sum = sum.wrapping_add(p[i])
-            p[i] = U64{0}
+    impl Close {
+        close: fn(&&self) {
+            p := self.p.move()
+            sum := U64{0}
+            loop i in 0..<p.len() {
+                sum = sum.wrapping_add(p[i])
+                p[i] = U64{0}
+            }
+            print("close {self.name} sum {sum}")
         }
-        print("close {self.name} sum {sum}")
     }
 }
 

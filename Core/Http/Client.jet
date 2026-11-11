@@ -255,7 +255,7 @@ retryable_method: fn(method: String) -> Bool Never! {
 retryable_error: fn(error: HTTPError) -> Bool Never! {
     if error == {
         .IO(_) -> true
-        else -> false
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> false
     }
 }
 
@@ -550,9 +550,13 @@ C_BUILD_INT_MAX: 9223372036854775807
 C_BUILD_READ_BYTES: 8192
 
 #Error
-__BuildHTTPFailure: struct { message: String }
-impl __BuildHTTPFailure.Display { display: fn(self) -> String { self.message.copy() } }
-impl __BuildHTTPFailure.Debug { debug: fn(&&self) -> String { self.message } }
+__BuildHTTPFailure: struct {
+    message: String
+
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+
+    impl Debug { debug: fn(&&self) -> String { self.message } }
+}
 __build_fail: fn(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPFailure{message: message} }
 
 // The connection (exactly one of tcp/tls), the bytes of the last read with
@@ -715,9 +719,10 @@ __build_remaining: fn(wire: __BuildWire) -[Time.Wait]> Int Never! {
     left
 }
 
-// One read into the drained buffer: the byte count, 0 at EOF. A replay's
-// buffer started as the whole tape, so a read past it is the recorded
-// ending.
+// One read into the drained buffer: the byte count, 0 at EOF. The buffer is
+// cleared and read into, so its capacity carries over between reads. A
+// replay's buffer started as the whole tape, so a read past it is the
+// recorded ending.
 __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
     if wire.prove == C_CLIENT_PROVE_REPLAY {
         if wire.ending != "eof" -> return Err(__build_fail(__build_ending_message(wire.ending)))
@@ -727,13 +732,15 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
     }
     remaining: __build_remaining(wire)
     if remaining <= 0 -> return Err(__build_tape_fail(wire, "timed_out", "timed out"))
-    got := [U8]{}
+    wire.buffer.clear()
+    wire.at = 0
+    count := 0
     failed := ""
     message := ""
     if wire.tls == {
         .Val(stream) -> {
-            if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
-                .Ok(bytes) -> got = bytes
+            if stream.read_into(wire.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                .Ok(read) -> count = read
                 .Err(err) -> {
                     failed = __build_io_portable(err)
                     message = "{err}"
@@ -743,8 +750,8 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
         .None -> {
             if wire.tcp == {
                 .Val(stream) -> {
-                    if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
-                        .Ok(bytes) -> got = bytes
+                    if stream.read_into(wire.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                        .Ok(read) -> count = read
                         .Err(err) -> {
                             failed = __build_net_portable(err)
                             message = "{err}"
@@ -756,13 +763,10 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
         }
     }
     if failed != "" -> return Err(__build_tape_fail(wire, failed, message))
-    count: got.len()
     if wire.prove == C_CLIENT_PROVE_CAPTURE {
-        wire.taped.extend(got.copy())
+        wire.taped.extend(wire.buffer.copy())
         if count == 0 -> wire.ending = "eof"
     }
-    wire.buffer = got
-    wire.at = 0
     Ok(count)
 }
 
@@ -797,7 +801,7 @@ __build_net_portable: fn(err: NetError) -> String Never! {
         .Cancelled(_) -> "interrupted"
         .Closed(detail) -> __build_errno_portable(detail.os_code)
         .Other(detail) -> __build_errno_portable(detail.os_code)
-        else -> "unmapped"
+        .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> "unmapped"
     }
 }
 
@@ -809,7 +813,7 @@ __build_io_portable: fn(err: IOError) -> String Never! {
         .Cancelled(_) -> "interrupted"
         .Closed(context) -> __build_errno_portable(context.os_code)
         .Other(context) -> __build_errno_portable(context.os_code)
-        else -> "unmapped"
+        .InvalidInput(_) | .NotFound(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "unmapped"
     }
 }
 
@@ -1490,6 +1494,12 @@ __client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL,
         return Err(.Timeout{phase: "transport"})
     }
     addresses: provider.jet_http_build_resolve(destination.host, destination.port) ?? {
+        // An effect scope in force refused the host before any lookup
+        // (spec.md "Effect scopes"): a policy failure, not a resolver one.
+        if err.starts_with("E0740: ") || err.starts_with("E0749: ") {
+            wire.ending = "unmapped"
+            return Err(.Policy{reason: err})
+        }
         wire.ending = __client_resolve_portable(err)
         return Err(.Resolve{host: "<redacted>"})
     }

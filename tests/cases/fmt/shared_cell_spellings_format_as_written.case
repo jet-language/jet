@@ -1,0 +1,13 @@
+# #6281 c130: `jet fmt` prints `Shared{value}` and `Shared<T>{value}` as
+# written; the result is stable.
+fixture: shared_cell_spellings_format_as_written.fixture
+env: NO_COLOR=1
+step: jet fmt cells.jet
+exit: 0
+file: cells.jet ~ "braced: Shared{count}" # the braces stay, the spaces inside go
+file: cells.jet ~ "typed: Shared<Int?>{None}" # the written payload type stays
+file: cells.jet ~ "built: Shared{Counter{hits: 0}}" # a nested literal stays inside the braces
+step: jet fmt --check cells.jet
+exit: 0
+step: jet check cells.jet
+exit: 0

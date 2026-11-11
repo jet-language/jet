@@ -779,7 +779,7 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
         loop level in levels -> push_rgba(line, max_int(level, 0))
         loop row in box.top..<box.bottom {
             start: (row * target.width + box.left) * 4
-            target.pixels.__fill(start, start + span * 4, line)
+            target.pixels.fill_repeat(start..<start + span * 4, line)
         }
     } else {
         loop row in box.top..<box.bottom {
@@ -1184,10 +1184,10 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
         // spans: a copy of the pixel, then the filled bytes doubling.
         pixel: [U8]{U8{red}, U8{green}, U8{blue}, U8{alpha}}
         if left == 0 && right == target.width {
-            target.pixels.__fill(top * target.width * 4, bottom * target.width * 4, pixel)
+            target.pixels.fill_repeat(top * target.width * 4..<bottom * target.width * 4, pixel)
             return
         }
-        loop row in top..<bottom -> target.pixels.__fill((row * target.width + left) * 4, (row * target.width + right) * 4, pixel)
+        loop row in top..<bottom -> target.pixels.fill_repeat((row * target.width + left) * 4..<(row * target.width + right) * 4, pixel)
         return
     }
     // over's sums, the source's bytes hoisted; x / 255 is
@@ -2462,27 +2462,26 @@ checks_20x10: fn() -> Image {
     assert_eq(solid_row(0x01020304, 0).len(), 0)
 }
 
-#Test("a range fill clamps its window and repeats its pattern in place") {
+#Test("a range fill repeats its pattern in place") {
     bytes := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    bytes.__fill(1, 11, [U8]{1, 2, 3})
+    bytes.fill_repeat(1..<11, [U8]{1, 2, 3})
     assert_eq(bytes, [U8]{0, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1})
-    bytes.__fill(-4, 2, [U8]{7, 8, 9})
+    bytes.fill_repeat(0..<2, [U8]{7, 8, 9})
     assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 3, 1})
-    // An empty window and an empty pattern write nothing.
-    bytes.__fill(9, 4, [U8]{5})
-    bytes.__fill(3, 30, [U8]{})
+    // An empty range writes nothing.
+    bytes.fill_repeat(4..<4, [U8]{5})
     assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 3, 1})
-    bytes.__fill(9, 40, [U8]{6, 6, 6, 6})
+    bytes.fill_repeat(9..<11, [U8]{6, 6, 6, 6})
     assert_eq(bytes, [U8]{7, 8, 2, 3, 1, 2, 3, 1, 2, 6, 6})
     words := [Int]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    words.__fill(-3, 7, [Int]{1, 2, 3})
+    words.fill_repeat(0..<7, [Int]{1, 2, 3})
     assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 0, 0})
-    words.__fill(8, 20, [Int]{4, 5})
+    words.fill_repeat(8..<10, [Int]{4, 5})
     assert_eq(words, [Int]{1, 2, 3, 1, 2, 3, 1, 0, 4, 5})
     // Owned elements: each replaced one is dropped and the pattern lent.
     names := [String]{"a", "b", "c", "d", "e"}
     pattern: [String]{"x", "yz"}
-    names.__fill(1, 4, pattern)
+    names.fill_repeat(1..<4, pattern)
     assert_eq(names, [String]{"a", "x", "yz", "x", "e"})
     assert_eq(pattern, [String]{"x", "yz"})
 }

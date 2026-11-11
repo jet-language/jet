@@ -25,7 +25,11 @@ ProcessSignal: enum {
 
 // An argv-safe shell command. `Sh{"cmd {value}"}` splits its literal text on
 // whitespace and keeps every hole as exactly one argv item; `Sh.raw(text)` is
-// the audited whole-text split.
+// the audited whole-text split. A command runs in one call: `status()` with
+// the terminal's stdio (a plain shell line), `ok()` for its verdict (stdout
+// discarded, stderr passed through), `text()`/`lines()` for its stdout
+// (`$(…)`), `run()` for the whole receipt, and `spec()` when it needs a
+// directory, environment or limit first.
 Sh: struct {
     argv: [String]
     impl Display {
@@ -37,14 +41,66 @@ Sh: struct {
     impl Equatable {
         equal: fn(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
     }
-}
 
-impl Sh {
     args: fn(self) -> [String] Never! { self.argv.copy() }
     raw: fn(text: String) -> Sh Never! {
         argv := [String]{}
         sh_split_into(text, argv)
         Sh{argv: argv}
+    }
+    // The command with `items` appended, each one argv item (`"$@"`).
+    extend: fn(self, items: [String]) -> Sh Never! { Sh{argv: self.argv.concat(items)} }
+    // The command's ProcessSpec, for a run that sets a directory,
+    // environment, stdio or limit first.
+    spec: fn(self) -[Exec]> ProcessSpec Never! { cmd(self.argv.copy()) }
+    // Runs with the terminal's stdin, stdout and stderr, as a shell runs a
+    // plain command line; its exit status as `exit_status` gives it.
+    status: fn(self) -[Exec, Time.Wait]> Int IOError! {
+        exit_status(self.spec().stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run())
+    }
+    // Whether the command runs and exits 0; its stdout is discarded and its
+    // stderr passed through (`cmd >/dev/null`).
+    ok: fn(self) -[Exec, Time.Wait]> Bool Never! {
+        receipt: self.spec().stderr(.Inherit).run() ?? return false
+        receipt.success
+    }
+    // The command's stdout without its trailing newlines, its stderr passed
+    // through, whatever its status (`$(cmd)`).
+    text: fn(self) -[Exec, Time.Wait]> String IOError! {
+        output: self.spec().stderr(.Inherit).run().output
+        bytes: output.bytes()
+        end := bytes.len()
+        loop end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
+        if end == bytes.len() -> return output
+        String.from_bytes_lossy(bytes.slice(0, end))
+    }
+    // The lines of the command's stdout, its stderr passed through, whatever
+    // its status.
+    lines: fn(self) -[Exec, Time.Wait]> [String] IOError! {
+        self.spec().stderr(.Inherit).run().output.lines()
+    }
+    // The receipt of the command run with its stdout and stderr captured.
+    run: fn(self) -[Exec, Time.Wait]> ProcessReceipt IOError! { self.spec().run() }
+
+    // A checked `Sh{…}` literal: literal text splits on whitespace and each
+    // hole's display text is one argv item.
+    impl CheckedText {
+        Error: Never
+        Hole: String
+
+        check: fn(_text: String) Never! -[]> { return Ok() }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+        build: fn(parts: [String], holes: [String]) -[]> Sh {
+            argv := [String]{}
+            sh_split_into(parts[0], argv)
+            loop index in 0..<holes.len() {
+                argv.push(holes[index].copy())
+                sh_split_into(parts[index + 1], argv)
+            }
+            Sh{argv: argv}
+        }
     }
 }
 
@@ -61,20 +117,6 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
     if word != "" -> argv.push(word)
 }
 
-// The checked `Sh{…}` literal: literal text splits on whitespace, each hole's
-// display text is one argv item.
-__sh_literal: fn(literals: [String], holes: [String]) -> Sh Never! {
-    if literals.len() != holes.len() + 1 -> panic("typed Sh literal and hole counts do not match")
-    argv := [String]{}
-    sh_split_into(literals[0], argv)
-    loop index in 0..<holes.len() {
-        argv.push(holes[index].copy())
-        sh_split_into(literals[index + 1], argv)
-    }
-    Sh{argv: argv}
-}
-
-
 args: fn() -[Exec.Args]> [String] Never! { args_from_argv(core.process.argv()) }
 
 check: fn(receipt: ProcessReceipt) IOError! {
@@ -83,7 +125,6 @@ check: fn(receipt: ProcessReceipt) IOError! {
     if limit_hit == {
         .None -> { _ := 0 }
         .Val(limit) -> return Err(IOError.ResourceLimit(limit))
-        else -> { _ := 0 }
     }
     if receipt.timed_out {
         return Err(IOError.TimedOut(IOContext{
@@ -171,15 +212,23 @@ env_get: fn(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
 // A program's own exit status 101 becomes the user-error status 1 (S36): only
 // a Jet defect (a compiler or runtime panic) ends with 101.
-exit: fn(code: Int) -[Exec]> Never Never! {
+exit: fn(code: Int) -[Exec.Exit]> Never Never! {
     core.process.exit(if code == 101 -> 1 else -> code)
     loop {}
+}
+
+// Ends the program with `code` after `message` and a newline on stderr: a
+// script's `echo "$message" >&2; exit $code` in one call. Status 101 maps to
+// 1, as in `exit`.
+fail: fn(code: Int, message: String) -[Exec.Exit, IO, Time.Wait]> Never Never! {
+    core.term.eprint(message)
+    exit(code)
 }
 
 /// End the process with exactly `code`, after the same cleanup boundary as
 /// `process.exit`, without mapping 101 to the user-error status 1. Only a tool
 /// that reports a Jet defect (a compiler panic) ends with 101.
-#Unsafe("process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status") exit_unmapped: fn(code: Int) -[Exec]> Never Never! {
+#Unsafe("process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status") exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
     core.process.exit(code)
     loop {}
 }
@@ -386,6 +435,15 @@ stdout_lines: fn(receipt: ProcessReceipt) -> [String] Never! {
 exited: fn(receipt: ProcessReceipt) -> Bool Never! {
     receipt.signal == None && !receipt.timed_out
 }
+
+/// A finished child's exit status as the shell reports it in `$?`: 124 when
+/// its timeout stopped it (as `timeout(1)` reports one), 128 + n after
+/// signal n, else its exit code.
+exit_status: fn(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
 contains_path_separator: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if byte == (U8{47}) || byte == (U8{92}) -> return true
@@ -508,6 +566,33 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
     assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
 }
 
+#Test("Sh extends its argv item by item") {
+    command: Sh{argv: [String]{"printf", "%s|"}}.extend([String]{"a b", "c"})
+    assert(command.argv == [String]{"printf", "%s|", "a b", "c"})
+    assert_eq(command.text() ?? "error", "a b|c|")
+}
+
+#Test("Sh runs a command whole: its verdict, stdout text and lines, status and receipt") {
+    assert(Sh{argv: [String]{"true"}}.ok())
+    assert(!Sh{argv: [String]{"false"}}.ok())
+    assert(!Sh{argv: [String]{"/nonexistent/jet-sh-test"}}.ok())
+    printed: Sh{argv: [String]{"printf", "%s\n", "a b", "c", ""}}
+    assert_eq(printed.text() ?? "error", "a b\nc")
+    assert((printed.lines() ?? [String]{}) == [String]{"a b", "c", ""})
+    assert_eq(Sh{argv: [String]{"printf", "a \n"}}.text() ?? "error", "a ")
+    assert_eq(Sh{argv: [String]{"printf", "plain"}}.text() ?? "error", "plain")
+    assert_eq(Sh{argv: [String]{"true"}}.text() ?? "error", "")
+    assert_eq(Sh{argv: [String]{"sh", "-c", "exit 3"}}.status() ?? -1, 3)
+    assert_eq(Sh{argv: [String]{"sh", "-c", "kill -9 $$"}}.status() ?? -1, 137)
+    receipt: Sh{argv: [String]{"sh", "-c", "echo out; exit 4"}}.run() ?? panic("sh did not start")
+    assert(receipt.code == 4 && receipt.output == "out\n")
+    assert_eq(exit_status(receipt), 4)
+    killed: Sh{argv: [String]{"sh", "-c", "kill -9 $$"}}.run() ?? panic("sh did not start")
+    assert_eq(exit_status(killed), 137)
+    stopped: Sh{argv: [String]{"sleep", "10"}}.spec().timeout(1s).run() ?? panic("sleep did not start")
+    assert_eq(exit_status(stopped), 124)
+}
+
 // Temporary native-carrier layout. This is not a second public builder API:
 // the canonical ProcessSpec stays opaque and its existing methods stay intact.
 ProcessFields: struct {
@@ -569,6 +654,14 @@ ProcessChunks: struct {
     __stdout: ProcessStdoutStream?{None}
     __stderr: ProcessStderrStream?{None}
     __size: Int
+
+    impl Iterable {
+        Iter: __ProcessChunkCursor
+
+        iter: fn(&&self) -> __ProcessChunkCursor {
+            __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
+        }
+    }
 }
 
 __ProcessChunkCursor: struct {
@@ -576,32 +669,24 @@ __ProcessChunkCursor: struct {
     stderr: ProcessStderrStream?
     size: Int
     done: Bool
-}
 
-impl __ProcessChunkCursor.Iterator {
-    Item: [U8]
+    impl Iterator {
+        Item: [U8]
 
-    next: fn(&self) -[Exec, Time.Wait]> [U8]? {
-        if self.done -> return None
-        piece := [U8]{}
-        if self.stdout == .Val(stream) {
-            piece = stream.read(self.size) ?? [U8]{}
-        } else if self.stderr == .Val(stream) {
-            piece = stream.read(self.size) ?? [U8]{}
+        next: fn(&self) -[Exec, Time.Wait]> [U8]? {
+            if self.done -> return None
+            piece := [U8]{}
+            if self.stdout == .Val(stream) {
+                piece = stream.read(self.size) ?? [U8]{}
+            } else if self.stderr == .Val(stream) {
+                piece = stream.read(self.size) ?? [U8]{}
+            }
+            if piece.len() == 0 {
+                self.done = true
+                return None
+            }
+            Val(piece)
         }
-        if piece.len() == 0 {
-            self.done = true
-            return None
-        }
-        Val(piece)
-    }
-}
-
-impl ProcessChunks.Iterable {
-    Iter: __ProcessChunkCursor
-
-    iter: fn(&&self) -> __ProcessChunkCursor {
-        __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
     }
 }
 

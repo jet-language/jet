@@ -24,7 +24,7 @@ ir_string_format: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, form
     expected: if format == {
         .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) -> 2
         .Pad(_, _) | .PadLeft(_, _) -> 3
-        else -> 1
+        .Display | .Debug | .Pretty | .Bin | .Oct | .Unit(_) -> 1
     }
     if params.len() != expected -> return ir_fail_slot(b, span, "interpolation helper {member} takes {params.len()} parameters")
     target: params[0].ty
@@ -58,7 +58,7 @@ ir_string_format: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, form
             ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, fill), -1, -1, b.line)
             operands.push(text)
         }
-        else -> {}
+        .Display | .Debug | .Pretty | .Bin | .Oct | .Unit(_) -> {}
     }
     result: ir_fresh_temp(m, b, string_row)
     start: ir_args(b.f, operands)

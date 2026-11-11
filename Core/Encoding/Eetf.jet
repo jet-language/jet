@@ -3,7 +3,7 @@ use {
     // Standalone Erlang External Term Format, version 131 (OTP 29.0.6 / ERTS
     // 17.0.6): one term, not node distribution, LOCAL_EXT or a BEAM runtime.
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
-    encoding: core.encoding
+    rt: jet.runtime.encoding
     stream: __core_encoding_stream
     json: core.encoding.json
     binary: core.encoding.binary
@@ -44,30 +44,30 @@ ByteEncoding: enum {
 #Equatable
 Atom: struct {
     name: String
-}
-impl Atom {
+
     new: fn(name: String) -> Atom EncodingError! {
         if scalar_count(name) > 255 -> return Err(etf_error(.Limit, 0, "", "an atom has at most 255 characters"))
         Ok(Atom{name: name})
     }
-}
-/// An Atom encodes as a one-entry object under a private key the ETF writer
-/// alone turns into an atom; other codecs see that object.
-impl Atom.Encode {
-    encode: fn(self) -> Dyn { stream.object_from_entries([(key: String, value: Dyn)]{(key: ATOM_KEY, value: Dyn.Text(self.name.copy()))}) }
-}
-/// An Atom reads any atom, including `true`, `false` and `nil`, which other
-/// targets see as Bool and null.
-impl Atom.Decode {
-    decode: fn(tree: Dyn) -> Atom [FieldError]! {
-        if tree == .Text(name) -> return atom_field(name)
-        if tree == .Bool(value) -> return Ok(Atom{name: if value -> "true" else -> "false"})
-        if tree == .Null -> return Ok(Atom{name: "nil"})
-        if atom_name(tree) == Val(name) -> return atom_field(name)
-        Err([FieldError{path: "", reason: "expected an atom, found {tree}"}])
+
+    /// An Atom encodes as a one-entry object under a private key the ETF writer
+    /// alone turns into an atom; other codecs see that object.
+    impl Encode {
+        encode: fn(self) -> Dyn { stream.object_from_entries([(key: String, value: Dyn)]{(key: ATOM_KEY, value: Dyn.Text(self.name.copy()))}) }
+    }
+
+    /// An Atom reads any atom, including `true`, `false` and `nil`, which other
+    /// targets see as Bool and null.
+    impl Decode {
+        decode: fn(tree: Dyn) -> Atom [FieldError]! {
+            if tree == .Text(name) -> return atom_field(name)
+            if tree == .Bool(value) -> return Ok(Atom{name: if value -> "true" else -> "false"})
+            if tree == .Null -> return Ok(Atom{name: "nil"})
+            if atom_name(tree) == Val(name) -> return atom_field(name)
+            Err([FieldError{path: "", reason: "expected an atom, found {tree}"}])
+        }
     }
 }
-
 atom_field: fn(name: String) -> Atom [FieldError]! {
     atom: Atom.new(name) ?? return Err([FieldError{path: "", reason: err.reason}])
     Ok(atom)
@@ -140,14 +140,14 @@ to_json: fn(bytes: [U8], limits: EncodingLimits{EncodingLimits.safe()}) -> Strin
 /// Errors carry the wire path; limits are charged as `to_json` charges them.
 decode: fn<T: Decode>(bytes: [U8], layout: TermLayout{.Map}, strings: StringEncoding{.UTF8Binary}, byte_arrays: ByteEncoding{.Binary}, limits: EncodingLimits{EncodingLimits.safe()}) -> T [FieldError]! {
     tree: read(bytes, false, layout, strings, limits) ?? return Err([FieldError]{FieldError{path: err.path, reason: "{err.kind:Debug}: {err.reason}"}})
-    previous: encoding.__etf_strings_enter(if strings == .UTF8Binary -> 1 else -> 2)
+    previous: rt.etf_strings_enter(if strings == .UTF8Binary -> 1 else -> 2)
     if tree.decode<T>() == {
         .Ok(value) -> {
-            encoding.__etf_strings_leave(previous)
+            rt.etf_strings_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            encoding.__etf_strings_leave(previous)
+            rt.etf_strings_leave(previous)
             return Err(failures)
         }
     }
@@ -598,7 +598,6 @@ TermWriter: struct {
                     }
                     if self.layout == .Proplist -> self.put(106)
                 }
-                else -> return Err(etf_error(.Unsupported, self.out.len(), path, "this value has no ETF form"))
             }
         }
     }

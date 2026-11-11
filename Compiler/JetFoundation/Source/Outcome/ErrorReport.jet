@@ -122,7 +122,7 @@ jet_error_journey_json: fn(frame: JetErrorJourneyFrame) -> String Never! {
 jet_error_json_object: fn(value: Dyn, name: String) -> [(key: String, value: Dyn)] JetErrorReportError! {
     if value == {
         .Object(fields) -> Ok(fields)
-        else -> Err(jet_error_report_error("error report {name} is not an object"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> Err(jet_error_report_error("error report {name} is not an object"))
     }
 }
 jet_error_json_lookup: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? Never! {
@@ -137,7 +137,7 @@ jet_error_json_field: fn(fields: [(key: String, value: Dyn)], name: String) -> D
 jet_error_json_text: fn(value: Dyn, name: String) -> String JetErrorReportError! {
     if value == {
         .Text(text) -> Ok(text)
-        else -> Err(jet_error_report_error("error report {name} is not text"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(jet_error_report_error("error report {name} is not text"))
     }
 }
 jet_error_json_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? JetErrorReportError! {
@@ -150,7 +150,7 @@ jet_error_json_optional_array: fn(fields: [(key: String, value: Dyn)], name: Str
     value: jet_error_json_lookup(fields, name) ?? return Ok([Dyn]{})
     if value == {
         .Array(values) -> Ok(values)
-        else -> Err(jet_error_report_error("error report {name} is not an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(jet_error_report_error("error report {name} is not an array"))
     }
 }
 jet_error_json_u32: fn(value: Dyn, name: String) -> Int JetErrorReportError! {
@@ -179,7 +179,7 @@ jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportErr
     span_value: jet_error_json_field(fields, "source_span")
     source_span: if span_value == {
         .Null -> None
-        else -> {
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             span: jet_error_json_object(span_value, "source span")
             // The Rust original writes every usize but reads back only a u32.
             Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
@@ -194,14 +194,14 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
     code_value: jet_error_json_field(fields, "code")
     code: if code_value == {
         .Null -> None
-        else -> Val(jet_error_json_text(code_value, "code"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(jet_error_json_text(code_value, "code"))
     }
     causes := [JetErrorReport]{}
     if jet_error_json_field(fields, "cause") == {
         .Null -> {}
         .Object(_) -> causes.push(jet_error_report_from_json(jet_error_json_field(fields, "cause")))
         .Array(values) -> { loop cause_value in values -> causes.push(jet_error_report_from_json(cause_value)) }
-        else -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
     }
     typed_identity: jet_error_json_optional_text(fields, "typed_identity")
     context := [JetErrorContextFrame]{}

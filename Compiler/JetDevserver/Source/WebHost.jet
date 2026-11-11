@@ -467,7 +467,7 @@ terminal_style_adapter: fn(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     return adapter
 }
 DevRevisionFacts: struct { accepted: U64?; candidate: U64?; diagnostic: U64? }
-DevStatusSnapshot: struct { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
+DevStatusSnapshot: struct { state: String; code: String; diagnostic: String; last_build_ms: U64; candidate: U64? }
 DevStatus: struct {
     version: AtomicU64; clients: Mutex<[String:Instant]>; state: Mutex<DevStatusSnapshot>
     browser_relay: Mutex<BrowserTrace.Relay?>; browser_trace_enabled: AtomicBool; command_receipt: Mutex<String?>
@@ -475,8 +475,7 @@ DevStatus: struct {
     verbose: AtomicBool; active: AtomicBool; exit_code: AtomicU64; published: AtomicBool
     controls_ready: AtomicBool; reconnecting: AtomicBool; color: Bool; pin: Bool
     term_lock: Mutex<Unit>; last_block_lines: Mutex<Usize>; header_started: Mutex<Bool>
-}
-impl DevStatus {
+
     new: fn(file: String, verbose: Bool) -> Self {
         is_tty: std.io.stderr().is_terminal()
         color: ColorChoice.Auto.resolve(is_tty)
@@ -629,7 +628,7 @@ impl DevStatus {
         drop(state)
         self.refresh()
     }
-    mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+    mark_ready: fn(self: Self, elapsed_ms: U64, is_rebuild: Bool) -> Unit {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
             _: browser_relay.take()
@@ -730,9 +729,10 @@ impl DevStatus {
 CanvasHostOptions: struct {
     host: String; port: U16?; transport: String; authority: String
     audit: Bool; output: String?; target: String?
-}
-impl CanvasHostOptions.Default {
-    default: fn() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
+
+    impl Default {
+        default: fn() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
+    }
 }
 WebHost: struct {
     listener: Mutex<TcpListener?>; application_listener: Mutex<TcpListener?>; started: AtomicBool
@@ -743,8 +743,7 @@ WebHost: struct {
     static_root: OSPath; browser_state: Arc<Mutex<BrowserWebState?>>; web_swap_enabled: Bool
     hot_swap_decision: Mutex<HotSwapDecision?>; paused_evaluate: Arc<Mutex<PausedEvaluateHost>>
     terminal_style: Arc<TerminalStyleHostAdapter>
-}
-impl WebHost {
+
     bind_with_policy: fn(file: String, static_root: &OSPath, verbose: Bool, port: U16?, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         return Self.bind_application_only_with_policy(file, verbose, port, static_root.to_path_buf(), release_policy, true)
     }

@@ -320,7 +320,7 @@ x509_crt_get_ext: fn(crt: &X509Crt, data: [U8], p: &Int, end: Int, cb: X509ExtCa
                         // enforce; otherwise only a critical one fails.
                         unavailable: if e == {
                             .FeatureUnavailable(_) -> true
-                            else -> false
+                            .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertVerifyFailed(_) | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> false
                         }
                         handled := false
                         given := cb
@@ -1261,7 +1261,7 @@ x509_crt_verify_with_profile_at: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_
 x509_crt_callback_error: fn(e: x509.X509Error) -> x509.X509Error Never! {
     if e == {
         .CertVerifyFailed(_) -> .FatalError
-        else -> e
+        .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .UnknownVersion | .UnknownSigAlg(_) | .SigMismatch | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> e
     }
 }
 

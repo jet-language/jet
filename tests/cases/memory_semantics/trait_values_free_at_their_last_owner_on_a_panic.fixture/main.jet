@@ -22,14 +22,14 @@ Sink: trait {
 Worker: struct {
     context: Shared<Context>
     n: Int
-}
 
-impl Worker.Sink {
-    finish: fn(&&self) -[]> Int {
-        self.n + 2
-    }
-    peek: fn(self) -[]> Int {
-        self.n + 1
+    impl Sink {
+        finish: fn(&&self) -[]> Int {
+            self.n + 2
+        }
+        peek: fn(self) -[]> Int {
+            self.n + 1
+        }
     }
 }
 
@@ -50,6 +50,6 @@ stop_with: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := shared Context{id: 1}
+    s := Shared{Context{id: 1}}
     stop_with(s)
 }

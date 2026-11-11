@@ -140,13 +140,6 @@ os_unmap: fn(address: Int, size: Int) -> Int {
     }
 }
 
-// End the process with `status`; never returns.
-os_exit: fn(status: Int) {
-    #Unsafe("exit_group ends every thread of the process") {
-        _ := os_syscall(OS_SYS_EXIT_GROUP, status, 0, 0, 0, 0, 0)
-    }
-}
-
 #[Unsafe("stores one word at an address the caller owns and has mapped writable"), FFI(asm)]
 os_store_word: fn(address: Int, value: Int) {
     """
@@ -1541,6 +1534,23 @@ os_copy_descending_words_i64: fn(target_last: I64, source_last: I64, count: I64)
     """
 }
 
+// The word store for the runtime's fill (Collections.jet jet_rt_mem_fill):
+// stores `word` into `count` 8-byte words from `target` upward.
+#[Unsafe("the caller owns count writable words starting at target"), FFI(asm)]
+os_fill_words_i64: fn(target: I64, word: I64, count: I64) {
+    """
+    push {target}
+    push {word}
+    push {count}
+    pop rcx
+    pop rax
+    pop rdi
+    cld
+    rep stosq
+    ; clobbers rax, rcx, rdi
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 os_load_u8: fn(address: I64) -> I64 {
     """
@@ -2253,108 +2263,12 @@ os_statx_created_i64: fn(directory: I64, path: I64, flags: I64, output: I64) -> 
     """
 }
 
-x64_value_word: fn(address: Int) -> Int {
-    error: x64_native_slot_error(address, 8)
-    if error != "" -> panic(error)
-    word := 0
-    #Unsafe("address names an initialized canonical native word owned by the pinned request or retained slot") { word = os_load_word(address) }
-    word
-}
-x64_value_byte: fn(address: Int) -> Int {
-    error: x64_native_slot_error(address, 1)
-    if error != "" -> panic(error)
-    byte := 0
-    #Unsafe("address names an initialized canonical native byte owned by the pinned request or retained slot") { byte = os_load_byte(address) }
-    byte
-}
-x64_value_unsigned_bytes: fn(address: Int, size: Int) -> Int {
-    error: x64_native_slot_error(address, size)
-    if error != "" -> panic(error)
-    value := 0
-    #Unsafe("width and address range are checked; the caller retains the initialized slot's physical permit") {
-        loop index in 0..<size -> value = value.bit_or(os_load_byte(address + index) << (8 * index))
-    }
-    value
-}
 X64NativeAllocation: struct {
     pointer: Int
     size: Int
     align: Int
     release: Int
     refusal_key: String
-}
-
-x64_native_slot_error: fn(address: Int, size: Int) -> String Never! {
-    if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
-    if address <= 0 || address > 9223372036854775807 - size -> return "NativeSlotAddressInvalid"
-    ""
-}
-x64_native_slot_write_error: fn(address: Int, size: Int, value: Int) -> String Never! {
-    error: x64_native_slot_error(address, size)
-    if error != "" -> return error
-    x64_native_word_range_error(size, value)
-}
-x64_native_word_range_error: fn(size: Int, value: Int) -> String Never! {
-    if size != 1 && size != 2 && size != 4 && size != 8 -> return "NativeSlotWidthInvalid: {size}"
-    if size == 8 {
-        if value < -9223372036854775808 || value > 18446744073709551615 -> return "NativeSlotValueOutOfRange: {size}"
-    } else if value < 0 || value >= (1 << (size * 8)) -> return "NativeSlotValueOutOfRange: {size}"
-    ""
-}
-// Only initialized slots under their original physical permit reach these
-// helpers. Byte stores never write beyond a Bool/Char/narrow integer payload.
-x64_native_slot_write: fn(address: Int, size: Int, value: Int) -> String {
-    error: x64_native_slot_write_error(address, size, value)
-    if error != "" -> return error
-    bits: if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
-    #Unsafe("the caller owns exactly size writable bytes under the native payload permit; width and value were checked above") {
-        if size == 8 -> os_store_word(address, bits)
-        else -> loop index in 0..<size -> os_store_byte(address + index, (bits >> (8 * index)).bit_and(255))
-    }
-    ""
-}
-x64_native_allocation_error: fn(size: Int, align: Int) -> String Never! {
-    if size <= 0 || size > 9223372036854775807 -> return "NativeAllocationSizeInvalid: {size}"
-    if align <= 0 || align > 9223372036854775807 || (align.bit_and((align - 1))) != 0 -> return "NativeAllocationAlignmentInvalid: {align}"
-    ""
-}
-// Allocate and release addresses are resolved by the caller's one admitted
-// runtime inventory. The receipt, not dlsym or a symbol spelling, selects them.
-x64_execution_alloc: fn(allocate: Int, release: Int, size: Int, align: Int) -> X64NativeAllocation {
-    error := x64_native_allocation_error(size, align)
-    pointer := 0
-    if error == "" && (allocate == 0 || release == 0) -> error = "NativeAllocationProviderMissing"
-    if error == "" {
-        #Unsafe("both addresses have the checked canonical alloc(size,align) / free(pointer,size,align) ABI") { pointer = os_call_address_two(allocate, size, align) }
-        if pointer == 0 -> error = "NativeAllocationFailed"
-    }
-    X64NativeAllocation{pointer: pointer, size: size, align: align, release: release, refusal_key: error}
-}
-x64_native_free_error: fn(allocation: X64NativeAllocation, size: Int, align: Int) -> String Never! {
-    if allocation.refusal_key != "" -> return allocation.refusal_key
-    error: x64_native_allocation_error(size, align)
-    if error != "" -> return error
-    if allocation.pointer == 0 || allocation.release == 0 -> return "NativeAllocationProviderMissing"
-    if allocation.size != size || allocation.align != align -> return "NativeAllocationFreeLayoutMismatch"
-    ""
-}
-x64_execution_free: fn(allocation: X64NativeAllocation, size: Int, align: Int) -> String {
-    error: x64_native_free_error(allocation, size, align)
-    if error != "" -> return error
-    #Unsafe("the allocation receipt pairs this owner with its original free address and exact size/alignment") { _ := os_call_address_three(allocation.release, allocation.pointer, size, align) }
-    ""
-}
-// The caller checks the sealed runtime signature or parent-pinned callable
-// role first. No raw-address operation escapes this vetted OS module.
-x64_native_call: fn(address: Int, arity: Int, first: Int, second: Int, third: Int) -> Int {
-    if address == 0 || arity < 0 || arity > 3 -> panic("NativeCallSignatureInvalid")
-    result := 0
-    #Unsafe("the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI") {
-        if arity <= 1 -> result = os_call_address(address, if arity == 0 -> 0 else -> first)
-        else if arity == 2 -> result = os_call_address_two(address, first, second)
-        else -> result = os_call_address_three(address, first, second, third)
-    }
-    result
 }
 
 #[Unsafe("calls machine code; the caller vouches for its three-word System V signature"), FFI(asm)]

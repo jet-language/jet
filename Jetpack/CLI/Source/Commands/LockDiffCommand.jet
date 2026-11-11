@@ -44,14 +44,14 @@ CLILockDiffGuard: struct {
     set_sizes: fn(&self, sizes: DiffSizes) Never! {
         self.sizes = sizes
     }
-}
 
-impl CLILockDiffGuard.Close {
-    close: fn(&&self) {
-        if !self.active -> return
-        after: pkg_lock_load(self.root)
-        diff: LockDiff.between(self.before, after)
-        if !diff.is_empty() -> cli_render_lock_diff(self.theme, diff, self.sizes)
+    impl Close {
+        close: fn(&&self) {
+            if !self.active -> return
+            after: pkg_lock_load(self.root)
+            diff: LockDiff.between(self.before, after)
+            if !diff.is_empty() -> cli_render_lock_diff(self.theme, diff, self.sizes)
+        }
     }
 }
 

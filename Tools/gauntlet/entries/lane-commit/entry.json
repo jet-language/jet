@@ -1,11 +1,15 @@
 {
   "name": "lane-commit",
   "mode": "tool",
-  "description": "Main's lane lander lane-commit.sh and its Jet twin LaneCommit.jet (#5072 c15): queue a lane's patch, take the commit lock, drain every queued job (drop one whose caller died, skip a held lane or a frozen path, leave a job that touches a path already in the batch for the next round), apply each clean patch, run one precommit over the union of paths, commit each job with its own message, and on a failed batch precommit revert and land each job alone. The fixtures hold a repository whose gitdir is repo/ and whose worktree is repo/work (with one uncommitted file and a commit-msg hook that refuses REFUSE), a stand-in precommit (pre.sh) that fails on a bad path, the patches and messages, and run roots whose queues hold another lane's job (live caller pid 0, a dead one above pid_max), a hold switch, a live path freeze and an expired one. Commit dates are fixed, so each landed sha is the same on both sides: the batch and next-round cases land on top of lane B's commit, the fallback, dead-caller, hold and freeze cases land alone.",
+  "description": "Main's lane lander lane-commit.sh and its Jet twin LaneCommit.jet (#5072 c15, c35): queue a lane's patch, take the commit lock, drain every queued job (drop one whose caller died, skip a held lane or a frozen path, leave a job that touches a path already in the batch for the next round), apply each clean patch, run one precommit over the union of paths, commit each job with its own message, and on a failed batch precommit revert and land each job alone. The fixtures hold a repository whose gitdir is repo/ and whose worktree is repo/work (with one uncommitted file and a commit-msg hook that refuses REFUSE), a stand-in precommit (pre.sh) that fails on a bad path, the patches and messages, and run roots whose queues hold another lane's job (live caller pid 0, a dead one above pid_max), a hold switch, a live path freeze and an expired one. Commit dates are fixed, so each landed sha is the same on both sides: the batch and next-round cases land on top of lane B's commit, the fallback, dead-caller, hold and freeze cases land alone. Each case's check.jet states the job: the printed lines, the worktree's commits (sha, author, subject, changed paths) and status, and every job left in the queue with its files, exit status and output.",
   "tool": {
     "original": "Tools/agent/orchestrator/lane-commit.sh",
     "jet": "Tools/agent/orchestrator/LaneCommit.jet",
     "fixtures": "fixtures",
+    "token_gaps": [
+      "#5072 c39",
+      "#5072 c40"
+    ],
     "cases": [
       {
         "args": [
@@ -26,7 +30,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run"
         },
-        "expected": "expected/lands.out"
+        "expected": "expected/lands.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -47,7 +52,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run"
         },
-        "expected": "expected/rename.out"
+        "expected": "expected/rename.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -69,7 +75,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 2,
-        "expected": "expected/bad-patch.out"
+        "expected": "expected/bad-patch.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -91,7 +98,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 2,
-        "expected": "expected/no-message.out"
+        "expected": "expected/no-message.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -113,7 +121,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 3,
-        "expected": "expected/dirty.out"
+        "expected": "expected/dirty.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -135,7 +144,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 4,
-        "expected": "expected/does-not-apply.out"
+        "expected": "expected/does-not-apply.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -157,7 +167,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 5,
-        "expected": "expected/precommit-failed.out"
+        "expected": "expected/precommit-failed.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -179,7 +190,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 6,
-        "expected": "expected/commit-failed.out"
+        "expected": "expected/commit-failed.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -200,7 +212,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-batch"
         },
-        "expected": "expected/batch.out"
+        "expected": "expected/batch.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -221,7 +234,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-fallback"
         },
-        "expected": "expected/fallback.out"
+        "expected": "expected/fallback.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -242,7 +256,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-conflict"
         },
-        "expected": "expected/next-round.out"
+        "expected": "expected/next-round.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -263,7 +278,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-dead"
         },
-        "expected": "expected/dead-caller.out"
+        "expected": "expected/dead-caller.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -284,7 +300,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-hold"
         },
-        "expected": "expected/hold.out"
+        "expected": "expected/hold.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -305,7 +322,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-freeze"
         },
-        "expected": "expected/freeze.out"
+        "expected": "expected/freeze.out",
+        "check": "check.jet"
       },
       {
         "args": [
@@ -326,7 +344,8 @@
           "GIT_COMMITTER_DATE": "2026-01-02T00:00:00Z",
           "JET_RUN_ROOT": "run-thaw"
         },
-        "expected": "expected/thaw.out"
+        "expected": "expected/thaw.out",
+        "check": "check.jet"
       },
       {
         "args": [],
@@ -344,7 +363,8 @@
           "JET_RUN_ROOT": "run"
         },
         "exit": 1,
-        "expected": "expected/no-args.out"
+        "expected": "expected/no-args.out",
+        "check": "check.jet"
       }
     ]
   }

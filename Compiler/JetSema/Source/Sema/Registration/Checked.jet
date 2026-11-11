@@ -23,6 +23,7 @@ use {
         Item,
         LayoutFacts,
         MARKER_MEMO,
+        MARKER_RENAME,
         Marker,
         NamedSpan,
         OperatorMarker,
@@ -185,10 +186,39 @@ sema_checked_marker_text: fn(marker: Marker) -> String? {
                 }
                 None
             }
-            else -> None
+            .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
         }
-        else -> None
+        .EffectRow(_, _) -> None
     }
+}
+
+// A type's `#Rename(.Camel)` sets the wire casing of its
+// fields or variants. The style is the casing menu's word (`camel`); a
+// NamingCase the menu doesn't know comes back as written so E2409 can name
+// it. None when the type has no casing `#Rename`.
+sema_checked_rename_case: fn(markers: [Marker]) -> String? {
+    loop marker in markers {
+        if marker.name != MARKER_RENAME || marker.negated -> next
+        return sema_checked_rename_case_word(marker)
+    }
+    None
+}
+
+sema_checked_rename_case_word: fn(marker: Marker) -> String? {
+    if marker.args.len() == 0 -> return None
+    if marker.args[0] == .Expr(expression) {
+        if expression == .EnumLit(_, name, _, _, _, _, _) {
+            return if name == {
+                "Camel" -> Val("camel")
+                "Snake" -> Val("snake")
+                "Pascal" -> Val("pascal")
+                "Kebab" -> Val("kebab")
+                "Screaming" -> Val("screaming")
+                else -> Val(name.copy())
+            }
+        }
+    }
+    None
 }
 
 sema_checked_marker_text_label: fn(marker: Marker, label: String) -> String? {
@@ -205,10 +235,10 @@ sema_checked_marker_text_label: fn(marker: Marker, label: String) -> String? {
                                 return None
                             }
                             .Ident(name, _, _) -> return Val(name)
-                            else -> return None
+                            .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
                         }
                     }
-                    else -> return None
+                    .EffectRow(_, _) -> return None
                 }
             }
         }
@@ -255,7 +285,7 @@ sema_checked_has_generated_block: fn(definition: Item, trait_name: String) -> Bo
                 if block.compiler_generated && block.trait_name == trait_name -> return true
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     false
 }
@@ -293,9 +323,7 @@ sema_checked_shape_names: fn(name: String) -> TShapeFieldNames Never! {
 }
 
 sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShapeFieldNames Never! {
-    style := String?{None}
-    rename_all: sema_checked_marker(definition.serde_markers, "RenameAll")
-    if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
+    style: sema_checked_rename_case(definition.serde_markers)
     rename: sema_checked_marker(field.serde_markers, "Rename")
     shared := sema_checked_wire_case(style, field.name)
     if rename == .Val(marker) -> shared = sema_checked_marker_text(marker) ?? shared
@@ -315,23 +343,24 @@ sema_checked_field_shape_names: fn(definition: StructDef, field: Field) -> TShap
             layout: sema_checked_marker_text_label(rename_marker, "layout"),
         }
     }
-    env_marker: sema_checked_marker(field.serde_markers, "Env")
-    if env_marker == .Val(marker) {
-        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: sema_checked_marker_text(marker) ?? names.env, db: names.db, layout: names.layout}
+    // `#Arg(env:)` names the field's environment fallback.
+    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) {
+        names = TShapeFieldNames{text: names.text, json: names.json, cbor: names.cbor, csv: names.csv, toml: names.toml, yaml: names.yaml, xml: names.xml, args: names.args, env: env, db: names.db, layout: names.layout}
     }
     names
 }
 
 sema_checked_serde_attribute: fn(marker: Marker) -> TSerdeAttribute? {
     kind: if marker.name == {
-        "RenameAll" -> Val(TSerdeAttributeKind.RenameAll)
+        "Rename" -> Val(TSerdeAttributeKind.RenameAll)
         "Discriminant" | "Tag" -> Val(TSerdeAttributeKind.Tag)
         "Untagged" -> Val(TSerdeAttributeKind.Untagged)
         "DenyUnknownFields" -> Val(TSerdeAttributeKind.DenyUnknownFields)
         else -> None
     }
     kind_value: kind ?? return None
-    TSerdeAttribute{kind: kind_value, value: sema_checked_marker_text(marker), span: marker.span}
+    value: if kind_value == .RenameAll -> sema_checked_rename_case_word(marker) else -> sema_checked_marker_text(marker)
+    TSerdeAttribute{kind: kind_value, value: value, span: marker.span}
 }
 
 sema_checked_serde_attributes: fn(markers: [Marker]) -> [TSerdeAttribute] Never! {
@@ -365,7 +394,7 @@ sema_checked_failure: fn(return_type: Type?) -> TFailureCarrier Never! {
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
         .Option(value) -> TFailureCarrier.Optional{value: value}
         .Result(ok, err) -> if err == (Type.Named{name: "Never"}) -> TFailureCarrier.Infallible else -> TFailureCarrier.Result{success: ok, error: err}
-        else -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
     }
 }
 
@@ -373,7 +402,7 @@ sema_checked_parameter_ownership: fn(convention: AccessConvention) -> TDeclarati
     if convention == {
         .Move -> TDeclarationOwnership.Move
         .Write -> TDeclarationOwnership.WriteBorrow
-        else -> TDeclarationOwnership.ReadBorrow
+        .Read -> TDeclarationOwnership.ReadBorrow
     }
 }
 
@@ -665,7 +694,7 @@ sema_checked_foreign_provider: fn(input: SemaForeignProviderInput, diagnostics: 
                     valid = false
                 }
             }
-            else -> valid = false
+            .None -> valid = false
         }
     }
     loop library in input.direct_links {
@@ -804,7 +833,7 @@ sema_checked_foreign_struct_c_layout: fn(layout: StructLayout?) -> Bool Never! {
     value: layout ?? return false
     if value == {
         .C | .CAligned(_, _) -> true
-        else -> false
+        .Columnar -> false
     }
 }
 
@@ -865,7 +894,7 @@ sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: Sem
             }
             .Distinct(definition) -> sema_checked_foreign_type(graph, definition.base, nominal.symbol.module_name, c_abi, generated, handles, next_seen)
             .TypeAlias(definition) -> sema_checked_foreign_type(graph, definition.target, nominal.symbol.module_name, c_abi, generated, handles, next_seen)
-            else -> false
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
         }
     }
 }
@@ -904,7 +933,7 @@ sema_checked_foreign_type: fn(graph: SemaRegistrationGraph, ty: Type, caller_mod
         }
         .Tagged(_, inner) -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
         .InlineRange(base, _, _) -> sema_checked_foreign_type(graph, base, caller_module, c_abi, generated, handles, seen)
-        else -> false
+        .TraitObject(_) | .Tuple(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -939,7 +968,7 @@ sema_checked_foreign_by_reference_field: fn(graph: SemaRegistrationGraph, ty: Ty
             "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" | "Float" | "F64" | "F32" | "Bool" -> true
             else -> sema_checked_foreign_by_reference_struct(graph, ty, caller_module, seen)
         }
-        else -> false
+        .Int | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -996,12 +1025,12 @@ sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, modu
                     }
                     .Distinct(definition) -> return sema_checked_foreign_c_marshals(graph, definition.base, nominal.symbol.module_name, written)
                     .TypeAlias(definition) -> return sema_checked_foreign_c_marshals(graph, definition.target, nominal.symbol.module_name, written)
-                    else -> {}
+                    .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             true
         }
-        else -> true
+        .Float | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -1024,12 +1053,12 @@ sema_checked_foreign_c_array_element: fn(graph: SemaRegistrationGraph, ty: Type,
                     .Enum(_) -> return false
                     .Distinct(definition) -> return sema_checked_foreign_c_array_element(graph, definition.base, nominal.symbol.module_name)
                     .TypeAlias(definition) -> return sema_checked_foreign_c_array_element(graph, definition.target, nominal.symbol.module_name)
-                    else -> {}
+                    .Func(_) | .Struct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
             true
         }
-        else -> true
+        .Float | .Bool | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -1043,7 +1072,7 @@ sema_checked_foreign_type_error: fn(ty: Type, span: Span, c_abi: Bool) -> Diagno
 sema_checked_foreign_integer_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true
-        else -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1077,14 +1106,14 @@ sema_checked_foreign_bridge_scalar_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> true
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> sema_checked_foreign_bridge_scalar_type(base)
-        else -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> false
     }
 }
 
 sema_checked_foreign_bridge_array_element: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Named(_) -> !sema_checked_foreign_bridge_handle_type(graph, module_identity, ty, handles)
-        else -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> false
     }
 }
 
@@ -1113,7 +1142,7 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
             .List(inner) -> {
                 if parameter.convention == AccessConvention.Move || !sema_checked_foreign_bridge_array_element(graph, module_identity, inner, handles) || !sema_checked_foreign_bridge_companion_count(params, index) -> return false
             }
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 if parameter.convention == {
                     .Read -> {}
                     .Write -> {
@@ -1122,17 +1151,16 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
                             .Val(return_value) -> {
                                 if return_value == {
                                     .List(_) -> return_is_list = true
-                                    else -> {}
+                                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
                                 }
                             }
-                            else -> {}
+                            .None -> {}
                         }
                         if !return_is_list || !sema_checked_foreign_array_length_name(parameter.name) || !sema_checked_foreign_integer_type(parameter.ty) -> return false
                     }
                     .Move -> {
                         if !sema_checked_foreign_bridge_handle_type(graph, module_identity, parameter.ty, handles) -> return false
                     }
-                    else -> return false
                 }
             }
         }
@@ -1141,10 +1169,10 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
         .Val(return_value) -> {
             if return_value == {
                 .List(_) -> return sema_checked_foreign_bridge_return_count(params)
-                else -> {}
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
-        else -> {}
+        .None -> {}
     }
     true
 }
@@ -1158,7 +1186,6 @@ sema_checked_foreign_bridge_resident_shape: fn(graph: SemaRegistrationGraph, mod
             .Move -> {
                 if !sema_checked_foreign_bridge_handle_type(graph, module_identity, parameter.ty, handles) -> return false
             }
-            else -> {}
         }
     }
     if return_type == .Val(returned) -> sema_checked_foreign_bridge_resident_value(graph, module_identity, returned, handles) else -> true
@@ -1202,7 +1229,7 @@ sema_checked_foreign_bridge_legacy_shape: fn(graph: SemaRegistrationGraph, modul
                 .Bool -> return params.len() == 0 || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Bool}) || sema_checked_foreign_bridge_one_handle(graph, module_identity, params, handles)
                 .String -> return sema_checked_foreign_bridge_types_equal(params, [Type]{Type.String}) || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Int, Type.String}) || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Int, Type.String, Type.Int}) || sema_checked_foreign_bridge_one_handle(graph, module_identity, params, handles)
                 .Named(_) -> return params.len() == 0 && sema_checked_foreign_bridge_handle_type(graph, module_identity, return_type ?? Type.Named{name: "Unit"}, handles)
-                else -> return false
+                .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
             }
         }
     }
@@ -1229,7 +1256,7 @@ sema_checked_foreign_signature: fn(graph: SemaRegistrationGraph, module_identity
         return_span: registered.declaration.return_type_span ?? registered.declaration.name_span
         pointer_return: if return_type == {
             .Apply(name, _) -> c_abi && name == "Ptr"
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         if {
             pointer_return -> {
@@ -1246,7 +1273,7 @@ sema_checked_foreign_signature: fn(graph: SemaRegistrationGraph, module_identity
         generated_list_return := false
         if return_type == {
             .List(_) -> generated_list_return = true
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
         if c_abi && registered.declaration.generated && generated_list_return && !sema_checked_foreign_has_array_length(registered.declaration.params) {
             diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, c_abi))
@@ -1304,7 +1331,7 @@ sema_checked_foreign_access_keyword: fn(convention: AccessConvention) -> String 
     if convention == {
         .Read -> "read"
         .Write -> "&"
-        else -> "&&"
+        .Move -> "&&"
     }
 }
 
@@ -1465,7 +1492,7 @@ sema_checked_inline_ffi_scalar: fn(ty: Type) -> Bool Never! {
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .InlineRange(_, _, _) -> true
         .Named(name) -> name == "Unit"
-        else -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1476,7 +1503,7 @@ sema_checked_inline_asm_integer: fn(ty: Type) -> Bool Never! {
         .Int -> true
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .InlineRange(_, _, _) -> true
-        else -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1780,6 +1807,8 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
     if written == .Val(.Result(ok, err)) && err == (Type.Named{name: "Never"}) -> written = Val(ok)
     return_type: sema_checked_foreign_return_type(graph, module_identity, written)
     bridge_eligible: sema_guest_import_bridge_compatible(registered.declaration)
+    // A runtime binding crosses the runtime's route carriers (#6615).
+    runtime_binding: sema_guest_runtime_binding(module_row.package_identity, registered.declaration)
     // A plain written return is the default failure carrier at every call
     // site; the C value is that carrier's success (Rust `wraps_default_failure`).
     wraps_default_failure: if registered.declaration.return_type == {
@@ -1801,10 +1830,10 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
         symbol: symbol,
         path: symbol,
         params: params,
-        raw_scalar_abi: true,
+        raw_scalar_abi: !runtime_binding,
         bridge_eligible: bridge_eligible,
         return_type: return_type,
-        abi: "C",
+        abi: if runtime_binding -> SEMA_GUEST_RUNTIME_ABI else -> "C",
         language: "c",
         effect_root: None,
         callback_transport: if wraps_default_failure -> Val("guest-import-result") else -> None,
@@ -1926,7 +1955,7 @@ sema_checked_trait_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegistr
     definition: sema_registration_nominal_source_item(nominal.source) ?? return None
     if definition == {
         .Trait(value) -> Val(sema_checked_trait_row_value(graph, module_row, nominal, value))
-        else -> None
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -2087,7 +2116,7 @@ sema_checked_variant_wire_name: fn(variant: Variant, style: String?) -> String N
             if sema_checked_marker_text_label(marker, "json") == .Val(label) -> return label
             sema_checked_marker_text(marker) ?? variant.name
         }
-        else -> sema_checked_wire_case(style, variant.name)
+        .None -> sema_checked_wire_case(style, variant.name)
     }
 }
 
@@ -2096,7 +2125,7 @@ sema_checked_cli_bindings: fn(module_row: SemaRegistrationModule, definition: St
     loop binding in definition.cli_bindings {
         target_name: if binding.target == {
             .Ident(name, _, _) -> name
-            else -> binding.name
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> binding.name
         }
         markers: loop marker in binding.markers if !marker.negated -> marker.name
         result.push(TCLIBinding{name: binding.name, span: binding.name_span, function_key: sema_checked_module_key(module_row, target_name), markers: markers})
@@ -2130,10 +2159,10 @@ sema_checked_member_types_name_nothing: fn(graph: SemaRegistrationGraph, module_
                 if variant.payload == {
                     .Single(ty, span) -> sema_type_unknown_written_names(graph, module_index, ty, span, generic_names, unknown)
                     .Named(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, module_index, field.ty, field.ty_span, generic_names, unknown)
-                    else -> {}
+                    .Unit -> {}
                 }
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         if unknown.len() > 0 -> return true
     }
@@ -2186,7 +2215,7 @@ sema_checked_type_contains_name: fn(ty: Type, names: [String]) -> Bool Never! {
             false
         }
         .Quantity(base, _) -> sema_checked_type_contains_name(base, names)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }
 
@@ -2201,7 +2230,7 @@ sema_checked_layout_is_c: fn(layout: StructLayout?) -> Bool Never! {
 sema_checked_type_is_growable: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String | .List(_) | .Map(_, _, _) -> true
-        else -> false
+        .Int | .Float | .Bool | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2235,7 +2264,7 @@ sema_checked_type_is_float: fn(ty: Type) -> Bool Never! {
         .Float | .Float32 -> true
         .Tagged(_, inner) -> sema_checked_type_is_float(inner)
         .Quantity(base, _) -> sema_checked_type_is_float(base)
-        else -> false
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Union(_) | .Measure(_) -> false
     }
 }
 
@@ -2404,9 +2433,7 @@ sema_checked_variant_cell_guards: fn(variant: Variant, diagnostics: &[Diagnostic
 
 sema_checked_variants: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: EnumDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TVariant] {
     variants := [TVariant]{}
-    style := String?{None}
-    rename_all: sema_checked_marker(definition.serde_markers, "RenameAll")
-    if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
+    style: sema_checked_rename_case(definition.serde_markers)
     loop (index, variant) in definition.variants {
         duplicate: loop previous in 0..<index {
             if definition.variants[previous].name == variant.name -> break true
@@ -2423,7 +2450,7 @@ sema_checked_variants: fn(graph: SemaRegistrationGraph, module_row: SemaRegistra
         if variant.payload == {
             .Single(ty, span) -> sema_checked_member_type_names(graph, module_row, ty, span, generic_params, diagnostics)
             .Named(fields) -> loop field in fields -> sema_checked_member_type_names(graph, module_row, field.ty, field.ty_span, generic_params, diagnostics)
-            else -> {}
+            .Unit -> {}
         }
         variants.push(TVariant{name: variant.name, wire_name: wire_name, span: variant.name_span, payload: sema_checked_variant_payload(graph, variant.payload, module_row.module_identity, generic_params), discriminant: variant.discriminant})
     }
@@ -2449,7 +2476,7 @@ sema_checked_box_targets: fn(graph: SemaRegistrationGraph, ty: Type, caller_modu
             sema_checked_box_targets(graph, ok, caller_module, nodes, targets)
             sema_checked_box_targets(graph, err, caller_module, nodes, targets)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -2457,7 +2484,7 @@ sema_checked_box_is_node: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
     if nominal.source == .SourceAST(item) {
         if item == {
             .Struct(_) | .Enum(_) -> return true
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -2495,7 +2522,7 @@ sema_checked_box_node_edges: fn(graph: SemaRegistrationGraph, nominal: SemaRegis
                     }
                 }
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -2661,7 +2688,7 @@ sema_checked_generic_params: fn(graph: SemaRegistrationGraph, module_row: SemaRe
             }
             bounds.push(sema_resolved_id(graph, symbol))
         }
-        result.push(TGenericParam{name: parameter.name, bounds: bounds})
+        result.push(TGenericParam{name: parameter.name, bounds: bounds, number: parameter.number})
     }
     result
 }
@@ -2688,7 +2715,7 @@ sema_checked_nominal_methods: fn(definition: Item, methods: [SemaRegistrationFun
                 }
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     keys
 }
@@ -2702,7 +2729,7 @@ sema_checked_item_span: fn(item: Item) -> Span Never! {
         .Trait(value) -> value.span
         .Tag(value) -> value.span
         .UnitFamily(value) -> value.span
-        else -> Span{start: 0, end: 0}
+        .Func(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> Span{start: 0, end: 0}
     }
 }
 
@@ -2768,7 +2795,7 @@ sema_checked_shared_reaches: fn(graph: SemaRegistrationGraph, owner: String, cal
             }
             (cut: cut, reaches: false)
         }
-        else -> (cut: false, reaches: false)
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> (cut: false, reaches: false)
     }
 }
 
@@ -2847,7 +2874,7 @@ sema_checked_shared_witness: fn(graph: SemaRegistrationGraph, owner: String, cal
             }
             None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -2923,7 +2950,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
             if value.base == .Val(named) -> base = Val(named.name)
             kind = Val(TTypeDefKind.UnitFamily{members: members, base: base})
         }
-        else -> return None
+        .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
     type_kind: kind ?? return None
     TTypeDef{
@@ -2987,7 +3014,6 @@ sema_checked_operator_marker: fn(marker: OperatorMarker?) -> TOperatorMarker? {
     value: marker ?? return None
     if value == {
         .Commutative -> Val(TOperatorMarker.Commutative)
-        else -> None
     }
 }
 
@@ -3031,7 +3057,7 @@ sema_checked_validate_impl: fn(graph: SemaRegistrationGraph, module_row: SemaReg
                 diagnostics.push(sema_error("E0913", implementation.declaration.type_span, "the impl target does not satisfy its declared trait", "a checked implementation requires a matching nominal trait contract", "implement the required trait methods for this target"))
             }
         }
-        else -> {}
+        .None -> {}
     }
     forwards: implementation.declaration.delegation_field != None || implementation.declaration.is_generated_serde
     sema_checked_validate_trait_contract(graph, module_row, implementation.target_type, trait_name, implementation.methods, implementation.associated_type_impls, forwards, implementation.declaration.type_span, diagnostics)
@@ -3121,7 +3147,7 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
         compatible: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)
         mismatch: if compatible == {
             .Val(value) -> !value
-            else -> graph.complete
+            .None -> graph.complete
         }
         if mismatch {
             expected_declaration: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration
@@ -3241,7 +3267,7 @@ sema_checked_coherence_state: fn(module_row: SemaRegistrationModule) -> SemaChec
             .UnitFamily(value) -> loop member in value.members {
                 state.local_types[member.name] = true
             }
-            else -> {}
+            .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -3293,7 +3319,7 @@ sema_checked_coherence_local_trait: fn(graph: SemaRegistrationGraph, module_row:
 sema_checked_coherence_rhs_local: fn(state: SemaCheckedCoherence, rhs: Type) -> Bool Never! {
     if rhs == {
         .Named(name) | .Apply(name, _) -> sema_checked_coherence_local_type(state, name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3543,7 +3569,11 @@ sema_checked_generated_helper: fn(method: SemaRegistrationFunction) -> Bool Neve
 sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, diagnostics: &[Diagnostic]) {
     sema_checked_member_names(graph, module_row, diagnostics)
     state := sema_checked_coherence_state(module_row)
-    loop implementation_index in 0..<module_row.impls.len() -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
+    // Written impls claim their traits first: the top-level ones, then the
+    // inline trait blocks; a generated codec repeating one reports the repeat.
+    loop implementation_index in 0..<module_row.impls.len() {
+        if !module_row.impls[implementation_index].declaration.is_generated_serde -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
+    }
     // The struct and enum sources are read in place (derives first, then
     // the inline trait blocks), never copied out of their nominal rows.
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -3551,7 +3581,7 @@ sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRe
             if item == {
                 .Struct(value) -> sema_checked_coherence_derives(state, value.derives, diagnostics)
                 .Enum(value) -> sema_checked_coherence_derives(state, value.derives, diagnostics)
-                else -> {}
+                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -3560,9 +3590,12 @@ sema_checked_impl_coherence: fn(graph: SemaRegistrationGraph, module_row: SemaRe
             if item == {
                 .Struct(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, state, diagnostics)
                 .Enum(value) -> sema_checked_coherence_blocks(graph, module_row, value.name, value.trait_impls, state, diagnostics)
-                else -> {}
+                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
+    }
+    loop implementation_index in 0..<module_row.impls.len() {
+        if module_row.impls[implementation_index].declaration.is_generated_serde -> sema_checked_coherence_impl(graph, module_row, module_row.impls[implementation_index], state, diagnostics)
     }
     loop implementation_index in 0..<module_row.impls.len() -> sema_checked_validate_delegation(graph, module_row, module_row.impls[implementation_index], diagnostics)
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -3719,7 +3752,7 @@ sema_checked_constant_type: fn(definition: ConstDef) -> Type? {
         .Char(_, _, _) -> Val(Type.Char)
         .Str(parts, _, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
         .TypedLit(_, _, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
-        else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -3730,7 +3763,7 @@ sema_checked_typed_scalar_literal_type: fn(value: Expr) -> Type? {
         ty: head ?? return None
         if ty == {
             .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> {}
-            else -> { return None }
+            .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
         }
         inner: if body == {
             .Value(item) -> item
@@ -3738,7 +3771,7 @@ sema_checked_typed_scalar_literal_type: fn(value: Expr) -> Type? {
                 if items.len() != 1 -> return None
                 items[0]
             }
-            else -> { return None }
+            .Fields(_) | .Entries(_) | .ByteText(_) | .Empty -> { return None }
         }
         if sema_checked_module_scalar_literal(inner) -> return Val(ty)
     }
@@ -3750,7 +3783,7 @@ sema_checked_module_scalar_literal: fn(value: Expr) -> Bool Never! {
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) -> true
         .Unary(op, inner, _, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _, _) || inner == .Float(_, _, _, _, _))
         .Paren(inner, _, _) -> sema_checked_module_scalar_literal(inner)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3786,17 +3819,17 @@ sema_checked_runtime_tvalue_supported: fn(definition: ConstDef, value: TComptime
             loop item in values {
                 if item == {
                     .Int(_) -> {}
-                    else -> return false
+                    .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return false
                 }
             }
             true
         }
-        else -> false
+        .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
     }
 }
 
 sema_checked_constant_from_value: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, value: SemaComptimeItemValue, diagnostics: &[Diagnostic]) -> TConstantDef? {
-    if !value.startup && !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
+    if !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
         diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
@@ -3807,21 +3840,20 @@ sema_checked_constant_from_value: fn(graph: SemaRegistrationGraph, module_row: S
             return None
         }
     }
-    init: if value.init == .Val(function) -> Val(function.key) else -> None
-    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value, init: init}
+    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value, shared_holder: value.shared_holder}
 }
 
 // `staged_values` holds the module's staged constant values by symbol key.
 sema_checked_constant_with_values: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
     if sema_output_metadata_binding(constant.declaration) -> return None
-    if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_soft(constant.declaration) {
+    if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_computed(constant.declaration) {
         diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
     staged: staged_values.get(constant.symbol.id.key)
     if staged == {
         .Val(value) -> sema_checked_constant_from_value(graph, module_row, constant, value, diagnostics)
-        else -> sema_checked_constant(graph, module_row, constant.declaration, diagnostics)
+        .None -> sema_checked_constant(graph, module_row, constant.declaration, diagnostics)
     }
 }
 
@@ -3836,10 +3868,9 @@ sema_checked_module_value_evaluates: fn(definition: ConstDef) -> Bool Never! {
 }
 
 // An immutable `NAME: expr` whose value is not literal data: the build
-// tries it (folding it when its evaluation is pure and succeeds) and
-// otherwise computes it at startup. Runtime storage (mutable or `#Persist`)
-// still needs a literal.
-sema_checked_module_value_soft: fn(definition: ConstDef) -> Bool Never! {
+// computes it, and refuses it (E0643) when its evaluation is impure or
+// fails. Runtime storage (mutable or `#Persist`) still needs a literal.
+sema_checked_module_value_computed: fn(definition: ConstDef) -> Bool Never! {
     if definition.mutable || definition.is_persist -> return false
     !sema_checked_module_value_evaluates(definition)
 }
@@ -3891,7 +3922,7 @@ sema_checked_module_literal: fn(value: Expr) -> Bool Never! {
             }
             true
         }
-        else -> false
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3920,7 +3951,7 @@ sema_checked_module_type_path: fn(value: Expr) -> Bool Never! {
     if value == {
         .Ident(name, _, _) -> sema_checked_module_uppercase(name)
         .Field(base, member, _, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -3944,12 +3975,12 @@ sema_checked_runtime_constant_supported: fn(definition: ConstDef, value: CtValue
             loop item in values {
                 if item == {
                     .Int(_) -> {}
-                    else -> return false
+                    .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> return false
                 }
             }
             true
         }
-        else -> false
+        .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> false
     }
 }
 
@@ -3984,7 +4015,7 @@ sema_checked_add_nested_impls: fn(graph: SemaRegistrationGraph, module_row: Sema
                 impls.push(sema_checked_nested_impl_row(graph, module_row, value.name, block, constants))
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -3994,7 +4025,7 @@ sema_checked_layout_item_name: fn(item: Item) -> String? {
         .Enum(value) -> Val(value.name)
         .Distinct(value) -> Val(value.name)
         .TypeAlias(value) -> Val(value.name)
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -4020,7 +4051,7 @@ sema_checked_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_ro
             loop arg in args -> sema_checked_layout_type_resolutions(graph, module_row, owner_qualified_name, generic_params, arg, resolutions)
         }
         .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_checked_layout_type_resolutions(graph, module_row, owner_qualified_name, generic_params, inner, resolutions)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
     }
 }
 
@@ -4045,7 +4076,7 @@ sema_checked_layout_item_resolutions: fn(graph: SemaRegistrationGraph, module_ro
             generic_params: value.type_params
             sema_checked_layout_type_resolutions(graph, module_row, owner_qualified_name, generic_params, value.target, resolutions)
         }
-        else -> {}
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -4061,10 +4092,6 @@ sema_checked_layout_engine: fn(graph: SemaRegistrationGraph, module_row: SemaReg
         }
     }
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, name_resolutions, jet_target_layout_from_machine(graph.target_machine))
-}
-
-sema_registration_check_declarations: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) -> TDeclarationFacts {
-    sema_registration_check_declarations_with_values(graph, module_index, diagnostics, [SemaComptimeItemValue]{}, sema_checked_program_boxed_edges(graph))
 }
 
 sema_checked_declaration_facts: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic], values: [SemaComptimeItemValue], boxed: [String:[String]]) -> TDeclarationFacts {

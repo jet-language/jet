@@ -1702,7 +1702,7 @@ TypestateUnknownState: struct {
 
     impl Diagnostic {
         code: "E0151"
-        meaning: "Typestate: `#State(X)` or `#Transition(A, B)` references a state not in the owning `state {{ … }}` section"
+        meaning: "Typestate: `#State(X)` or `#State(A -> B)` references a state not in the owning `state {{ … }}` section"
         detail: true
         edit: .SuggestedSourceEdit
         no_fix: None
@@ -1825,14 +1825,14 @@ ProtocolLineMissingSender: struct {
     }
 }
 
-InvalidTypedLiteral: struct {
+RetiredInvalidTypedLiteral: struct {
     impl Diagnostic {
         code: "E0155"
-        meaning: "Typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation"
-        detail: true
-        what: fn(self) -> String { "A typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation" }
-        why: fn(self) -> String { "Typed literal types are checked before the program runs; URL and Path holes must stay inside components, and DateTime literals must be complete." }
-        fix: fn(self) -> String { "Write a valid typed literal with holes only in URL or Path components; write `DateTime{{\"…\"}}` without holes, or parse a runtime String explicitly" }
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: invalid typed URL, Path or DateTime literal)" }
+        why: fn(self) -> String { "A typed literal's own CheckedText check now rejects its text, as E2712" }
+        fix: fn(self) -> String { "Do not use E0155" }
     }
 }
 
@@ -1889,7 +1889,7 @@ TypestateMarkerWithoutStates: struct {
         meaning: "Typestate marker on an owner without a state section"
         detail: true
         fix_next: "Add a `state {{ ... }}` section inside the owning struct, or remove the typestate marker."
-        what: fn(self) -> String { "`{self.type}` has a `#State` or `#Transition` marker but no `state {{ … }}` section" }
+        what: fn(self) -> String { "`{self.type}` has a `#State` marker but no `state {{ … }}` section" }
         why: fn(self) -> String { "Markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected" }
         fix: fn(self) -> String { "Add one `state {{ Name, … }}` section inside `{self.type}: struct`, or remove the typestate marker" }
     }
@@ -2409,12 +2409,26 @@ UnusedPlaceMark: struct {
 MarkedFunctionValue: struct {
     impl Diagnostic {
         code: "E0227"
-        meaning: "A named function with a `&` or `&&` parameter is used as a function value"
+        meaning: "A function value's `&` or `&&` parameter access doesn't match the parameter access the expected function type marks"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value instead of being called." }
-        why: fn(self) -> String { "A function type gives each parameter plain read access, so a value of this function would lose the write or take its parameter declares; the function can only be called directly." }
-        fix: fn(self) -> String { "Call the function directly, or pass a lambda that makes that call." }
+        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value where the expected function type doesn't mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes)." }
+        why: fn(self) -> String { "A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), and a call through it passes each argument that way, so a value whose parameter access differs would lose or invent the write or take its parameter declares." }
+        fix: fn(self) -> String { "Call the function directly, mark the parameter in the function type the way the function does (`fn(&T)`, `fn(&&T)`), or pass a lambda that makes that call." }
+    }
+}
+
+CallMarkRequired: struct {
+    impl Diagnostic {
+        code: "E0228"
+        meaning: "Under `#Policy(writes: .Explicit)`, a call's `&` or `&&` mark doesn't match what its signature does to the named value"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "A call under `#Policy(writes: .Explicit)` is missing the `&` or `&&` mark its callee's signature implies for a named argument or receiver, or writes a mark the signature doesn't imply." }
+        why: fn(self) -> String { "Calls are written plain and the signature decides what each one does. The policy asks that every call that changes a named value write `&` before it and every call that takes one write `&&`, so the text shows each write and take; a mark that disagrees with the signature would tell the reader something false." }
+        fix: fn(self) -> String { "Write the mark the quoted signature implies: `&` for a `&` parameter or `&self` method, `&&` for a `&&` parameter or `&&self` method, and no mark for a read." }
     }
 }
 
@@ -2758,6 +2772,9 @@ NonExhaustiveDispatch: struct {
 UntypedNone: struct {
     impl Diagnostic {
         code: "E0308"
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Bare `None` needs a known `T?` type" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Give `None` a known optional type such as `Int?`." }
@@ -3066,9 +3083,9 @@ ComputedFieldCycle: struct {
 ComputedFieldAssigned: struct {
     impl Diagnostic {
         code: "E0339"
-        what: fn(self) -> String { "A computed field given in a struct literal or assigned to directly" }
+        what: fn(self) -> String { "A computed field set in a struct literal, assigned, lent for writing or taken" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Remove the computed field from the struct literal or direct assignment." }
+        fix: fn(self) -> String { "Change the stored field the formula reads, or remove the computed field from the struct literal." }
     }
 }
 
@@ -3098,9 +3115,9 @@ SwitchOffOnItem: struct {
     impl Diagnostic {
         code: "E0342"
         stage: [.Parse]
-        meaning: "`#Off` / `#DebugOnly` written on an item instead of a statement"
+        meaning: "`#Off` written on an item instead of a statement"
         detail: true
-        what: fn(self) -> String { "`#Off` / `#DebugOnly` belongs before a statement." }
+        what: fn(self) -> String { "`#Off` belongs before a statement." }
         why: fn(self) -> String { "Statement switch attributes control code inside a function body, not top-level declarations." }
         fix: fn(self) -> String { "Move it inside a function, or remove it from the declaration." }
     }
@@ -3110,9 +3127,9 @@ SwitchOffAsExpression: struct {
     impl Diagnostic {
         code: "E0343"
         stage: [.Parse]
-        meaning: "`#Off` / `#DebugOnly` written in expression position"
+        meaning: "`#Off` written in expression position"
         detail: true
-        what: fn(self) -> String { "`#Off` / `#DebugOnly` does not produce a value." }
+        what: fn(self) -> String { "`#Off` does not produce a value." }
         why: fn(self) -> String { "Statement switch attributes control a whole statement; expressions must still produce values in every build." }
         fix: fn(self) -> String { "Put the marker before the statement." }
     }
@@ -3125,8 +3142,8 @@ DuplicateSwitchOff: struct {
         meaning: "Doubled statement switch-off attributes"
         detail: true
         what: fn(self) -> String { "Only one switch-off attribute can be written on a statement." }
-        why: fn(self) -> String { "`#Off` and `#DebugOnly` both control whether the same statement emits code." }
-        fix: fn(self) -> String { "Keep one marker: `#Off <statement>` or `#DebugOnly <statement>`." }
+        why: fn(self) -> String { "Two `#Off` markers both control whether the same statement emits code." }
+        fix: fn(self) -> String { "Keep one marker: `#Off <statement>` or `#Off(.Release) <statement>`." }
     }
 }
 
@@ -3629,13 +3646,13 @@ RetiredAtCompileTime: struct {
     impl Diagnostic {
         code: "E0388"
         status: .Retired
-        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME: value` is `NAME: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `$method: fn`, `self.$field` or `.$left`"
+        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME: value` is `NAME: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `#{{method}}: fn`, `self.#{{field}}` or `.#{{left}}`"
         detail: true
         edit: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`{self.old}` is retired; write `{self.new}`." }
-        why: fn(self) -> String { "Build-time blocks, branches, loops, functions and values carry the word `comptime`, so forced compile time is always explicit: a constant that must be evaluated while building is `NAME: comptime {{ value }}` (a plain `NAME: value` folds while building only when it can), and the case of a name never implies it. A template splices a binding's name with the fact sigil `$`. Prefix `@` now marks a live link. The meaning and the checks are unchanged." }
+        why: fn(self) -> String { "Build-time blocks, branches, loops, functions and values carry the word `comptime`, so forced compile time is always explicit: a constant that must be evaluated while building is `NAME: comptime {{ value }}` (a plain `NAME: value` folds while building only when it can), and the case of a name never implies it. A template pastes a binding's name as `#{{name}}`. Prefix `@` now marks a live link. The meaning and the checks are unchanged." }
         fix: fn(self) -> String { "Replace `{self.old}` with `{self.new}`." }
     }
 }
@@ -3660,14 +3677,15 @@ RetiredAtNumberParameter: struct {
 
 CompileTimeNumberParameter: struct {
     name: String
+    value_type: String
 
     impl Diagnostic {
         code: "E0390"
-        meaning: "Compile-time number parameters are not implemented yet"
+        meaning: "A compile-time number parameter must be `Int`"
         detail: true
-        what: fn(self) -> String { "`{self.name}` is a compile-time number parameter, which this compiler does not support yet." }
-        why: fn(self) -> String { "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented." }
-        fix: fn(self) -> String { "Use a type parameter, or pass the number as an ordinary argument or field until number parameters ship." }
+        what: fn(self) -> String { "`{self.name}` is a compile-time `{self.value_type}` parameter, and only `Int` number parameters exist." }
+        why: fn(self) -> String { "An instance of the declaration is named by its number arguments (`Packet<4>`), which are whole numbers known while compiling." }
+        fix: fn(self) -> String { "Declare it `comptime {self.name}: Int`, or make it a type parameter or an ordinary argument." }
     }
 }
 
@@ -3757,19 +3775,14 @@ SameEnumGuardTable: struct {
 }
 
 UnreachableElseArm: struct {
-    type: String
-
     impl Diagnostic {
         code: "L0303"
         severity: .Lint
-        lint_name: "unreachable_else_arm"
-        meaning: "An `else` arm follows arms that already cover every case of a closed set"
-        edit: .SourceEdit
+        status: .Retired
         no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This `else` can never run; every case of `{self.type}` is already handled" }
-        why: fn(self) -> String { "If a case is added to `{self.type}` later, it would go to this `else` silently instead of the compiler asking you to handle it" }
-        fix: fn(self) -> String { "Delete the `else` arm" }
+        what: fn(self) -> String { "*Retired* (was: an `else` arm follows arms that already cover every case of a closed set)" }
+        why: fn(self) -> String { "No `else` may stand for cases of a closed set, so a dead `else` is the error E0641" }
+        fix: fn(self) -> String { "Do not use L0303" }
     }
 }
 
@@ -3968,15 +3981,14 @@ RetiredForeignPrivate: struct {
     }
 }
 
-PrivNotAllowed: struct {
+RetiredPrivNotAllowed: struct {
     impl Diagnostic {
         code: "E0413"
-        edit: .SourceEdit
+        status: .Retired
         no_fix: None
-        fix_safety: .NeedsReview
-        what: fn(self) -> String { "`priv` on a non-module declaration; `priv` marks only modules and fields" }
-        why: fn(self) -> String { "Privacy is a property of a module or a field, never of a single declaration" }
-        fix: fn(self) -> String { "Delete `priv`; move the declaration into a `priv module` if it must stay internal." }
+        what: fn(self) -> String { "*Retired* (was: `priv` on a non-module declaration; `priv` now hides any declaration)" }
+        why: fn(self) -> String { "The registered parse rule applies here" }
+        fix: fn(self) -> String { "Follow the guidance for E0413" }
     }
 }
 
@@ -3987,9 +3999,9 @@ UnknownPrivQualifier: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
-        what: fn(self) -> String { "Unknown `priv(…)` qualifier; only `priv(package)` exists" }
-        why: fn(self) -> String { "`priv(package) module` is the only qualified module privacy" }
-        fix: fn(self) -> String { "Delete the qualifier, or write `priv(package)`." }
+        what: fn(self) -> String { "Unknown `priv(…)` qualifier, or `priv(package)` on a top-level declaration other than a module" }
+        why: fn(self) -> String { "`priv(package)` is the only qualifier, and at a file's top level plain `priv` already keeps a declaration inside its package" }
+        fix: fn(self) -> String { "Delete the qualifier: write `priv`, or `priv(package)` on a module." }
     }
 }
 
@@ -4226,6 +4238,9 @@ ValueThrownAway: struct {
 UntypedEmptyList: struct {
     impl Diagnostic {
         code: "E0501"
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Empty `[]` needs a context type" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Give the empty list a context type." }
@@ -4826,6 +4841,22 @@ MapGroupRoundTrip: struct {
     }
 }
 
+DetachedImpl: struct {
+    head: String
+    type_name: String
+
+    impl Diagnostic {
+        code: "L0535"
+        severity: .Lint
+        lint_name: "detached_impl"
+        stage: [.Tooling]
+        meaning: "A top-level impl of a struct or enum the same file declares (`jet check --style`)"
+        what: fn(self) -> String { "`impl {self.head}` sits outside the body of `{self.type_name}`" }
+        why: fn(self) -> String { "`{self.type_name}` is declared in this file, and a struct or enum holds its own impls; a top-level impl stays only where it has to be somewhere else" }
+        fix: fn(self) -> String { "Move it into the body of `{self.type_name}`: its methods as `fn` members, a trait impl as a nested `impl Trait {{ … }}`" }
+    }
+}
+
 SoftPublicUse: struct {
     name: String
 
@@ -5116,7 +5147,7 @@ ModuleGlobalNotLiteral: struct {
         meaning: "A mutable or `#Persist` module global's value is not a literal"
         fix_next: "Initialize the global from a literal, or keep a computed value in an immutable `:` constant."
         what: fn(self) -> String { "A module binding's value must be a literal" }
-        why: fn(self) -> String { "A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`. An immutable `:` constant may compute its value: the build folds it when it can and computes it at startup otherwise." }
+        why: fn(self) -> String { "A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`. An immutable `:` constant may compute its value, which the build works out and stores in the program." }
         fix: fn(self) -> String { "Use an integer, float, or bool literal, or keep a computed value in an immutable `:` constant." }
     }
 }
@@ -5179,17 +5210,29 @@ DependencyCheckFailed: struct {
     }
 }
 
-CompileTimeReadsStartupValue: struct {
-    name: String
-
+RetiredStartupValueRead: struct {
     impl Diagnostic {
         code: "E0627"
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: compile-time code reads a constant computed at startup; no module value is computed at startup now, E0643)" }
+        why: fn(self) -> String { "The registered comptime rule applies here" }
+        fix: fn(self) -> String { "Follow the guidance for E0643" }
+    }
+}
+
+ModuleValueNotBuilt: struct {
+    name: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E0643"
         stage: [.Comptime]
-        meaning: "Compile-time code reads a constant that is only computed at startup"
-        fix_next: "Read the startup constant at runtime, or make its value foldable."
-        what: fn(self) -> String { "This compile-time code reads `{self.name}`, which is only known at startup" }
-        why: fn(self) -> String { "`{self.name}` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `run: fn`. Compile-time code runs while building, before that value exists." }
-        fix: fn(self) -> String { "Compute the value at runtime instead, or make `{self.name}` foldable: a pure expression that evaluates without failing." }
+        meaning: "A module-level value can't be computed while building"
+        fix_next: "Move the work into `run`, make it a function, or read a pinned build input."
+        what: fn(self) -> String { "`{self.name}` can't be computed while building: {self.reason}" }
+        why: fn(self) -> String { "A module-level `name: value` is computed while building and stored in the program, the same value on every tier. No code runs before `run: fn`, so a value that stops, reaches the outside world, or can't run while building is a build error." }
+        fix: fn(self) -> String { "Compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `comptime {{ embed_file(\"config.txt\") }}`." }
     }
 }
 
@@ -5321,7 +5364,7 @@ TypeAsValue: struct {
         fix_next: "Build a value of the type, or read a compile-time fact of the type."
         what: fn(self) -> String { "`{self.name}` is a type, not a value" }
         why: fn(self) -> String { "A type describes values but is not one; it has no value to bind, pass, return, store or print." }
-        fix: fn(self) -> String { "Build a value such as `{self.name}{{…}}`, or read a compile-time fact of the type, such as `{self.name}.$fields`." }
+        fix: fn(self) -> String { "Build a value such as `{self.name}{{…}}`, or read a compile-time fact of the type, such as `{self.name}.reflect().fields`." }
     }
 }
 
@@ -5362,6 +5405,22 @@ SelfOutsideMethod: struct {
         what: fn(self) -> String { "`{self.name}` takes `self`, but it is not a method" }
         why: fn(self) -> String { "`self` is the value a method is called on; a function outside a type body or `impl` has no such value, so `self` would silently be an ordinary parameter" }
         fix: fn(self) -> String { "Move `{self.name}` into the type's body or an `impl` block to make it a method, or give the parameter another name" }
+    }
+}
+
+ClosedSetElse: struct {
+    type: String
+    cases: String
+
+    impl Diagnostic {
+        code: "E0641"
+        meaning: "An `else` arm stands for cases of a closed set: an enum, `T?`, `T E!`, or a union"
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "This `else` stands for cases of the closed set `{self.type}`" }
+        why: fn(self) -> String { "`{self.type}` is a closed set: an `else` would take any case added to `{self.type}` later silently, instead of the compiler asking you to handle it" }
+        fix: fn(self) -> String { "Name the cases instead: `{self.cases} ->`" }
     }
 }
 
@@ -5638,6 +5697,65 @@ ScrubSignatureMismatch: struct {
     }
 }
 
+FixedTimingSteer: struct {
+    tag: String
+    steers: String
+
+    impl Diagnostic {
+        code: "E0737"
+        meaning: "A `timing: .Fixed` value decides a branch, a loop, an index, a size or a call"
+        detail: true
+        fix_next: "Compute both outcomes and choose with a masked select, or reveal the value through its `#Scrub` function first."
+        what: fn(self) -> String { "A `{self.tag}` value decides {self.steers}." }
+        why: fn(self) -> String { "`{self.tag}` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it." }
+        fix: fn(self) -> String { "Compute both outcomes and choose with a masked select, or reveal the value through a `#Scrub({self.tag})` function first." }
+    }
+}
+
+FixedTimingWideHolder: struct {
+    tag: String
+    holder: String
+
+    impl Diagnostic {
+        code: "E0738"
+        meaning: "A `timing: .Fixed` value is held in an `Int` or a `Float`"
+        detail: true
+        fix_next: "Keep the value in a fixed-width type such as `U64` or `[U8]`."
+        what: fn(self) -> String { "`{self.holder}` holds a `{self.tag}` value." }
+        why: fn(self) -> String { "`{self.tag}` is `timing: .Fixed`, and an `Int` (a big integer) or a `Float` takes time that depends on its value." }
+        fix: fn(self) -> String { "Keep the value in a fixed-width type such as `U64` or `[U8]`, or reveal it through a `#Scrub({self.tag})` function first." }
+    }
+}
+
+FixedTimingCheckedArithmetic: struct {
+    tag: String
+    operation: String
+
+    impl Diagnostic {
+        code: "E0739"
+        meaning: "Checked arithmetic on a `timing: .Fixed` value could stop the program"
+        detail: true
+        fix_next: "Use `wrapping_add`, `wrapping_sub`, `wrapping_mul` or `wrapping(...)`, or mask the value into range first."
+        what: fn(self) -> String { "{self.operation} of a `{self.tag}` value could stop the program." }
+        why: fn(self) -> String { "`{self.tag}` is `timing: .Fixed`, and checked arithmetic stops when its result does not fit, so whether the program stops would depend on the value." }
+        fix: fn(self) -> String { "Use `wrapping_add`, `wrapping_sub`, `wrapping_mul` or `wrapping(...)`, or mask the value into range first." }
+    }
+}
+
+FixedTimingUnconfirmedTarget: struct {
+    target: String
+
+    impl Diagnostic {
+        code: "E0744"
+        meaning: "A `policy.harden` package with `timing: .Fixed` values is built for a target where no host is confirmed to run them in fixed time"
+        detail: true
+        fix_next: "Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package's `policy:`."
+        what: fn(self) -> String { "This package sets `policy.harden`, and its `timing: .Fixed` values would run on `{self.target}`, where no host is confirmed to run them in fixed time." }
+        why: fn(self) -> String { "WebAssembly leaves the machine instructions to the engine that compiles the module, and no engine states that its code takes the same time for every value; a hardened package refuses to start on an unconfirmed host, and on this target that is known when it is built." }
+        fix: fn(self) -> String { "Build for a native target, where the program checks its host when it starts, or remove `harden: true` from the package's `policy:`." }
+    }
+}
+
 RetiredPureWithEffects: struct {
     impl Diagnostic {
         code: "E0745"
@@ -5773,7 +5891,7 @@ WebBoundaryTypeNotAllowed: struct {
         code: "E-WEB-ABI-TYPE"
         meaning: "A JS/WASM boundary type is not ABI-safe"
         detail: true
-        what: fn(self) -> String { "`Point` cannot cross the JS/WASM boundary on a `#WasmExport` parameter" }
+        what: fn(self) -> String { "`Point` cannot cross the JS/WASM boundary on a `#Export(wasm)` parameter" }
         why: fn(self) -> String { "Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums). A `jet build --target=web` run reports this web-target diagnostic." }
         fix: fn(self) -> String { "Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#Codable` struct/enum whose fields are ABI-safe" }
     }
@@ -5864,11 +5982,11 @@ OsGatedTypeUngatedUse: struct {
 OsDispatchSubjectMismatch: struct {
     impl Diagnostic {
         code: "E-OSTARGET-BUILD-CONTEXT"
-        meaning: "A `comptime if … == {{ }}` OS dispatch's subject is not `$build.os`"
+        meaning: "A `comptime if … == {{ }}` OS dispatch's subject is not `#build.target.os`"
         detail: true
-        what: fn(self) -> String { "A `comptime if … == {{ … }}` dispatch branches on `$build.os`." }
-        why: fn(self) -> String { "`$build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time." }
-        fix: fn(self) -> String { "Write `comptime if $build.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
+        what: fn(self) -> String { "A `comptime if … == {{ … }}` dispatch branches on `#build.target.os`." }
+        why: fn(self) -> String { "`#build.target.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time." }
+        fix: fn(self) -> String { "Write `comptime if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time." }
     }
 }
 
@@ -5877,9 +5995,9 @@ InvalidOsDispatchArm: struct {
 
     impl Diagnostic {
         code: "E-OSTARGET-DISPATCH-ARM"
-        meaning: "A `comptime if $build.os == {{ }}` arm head is not a bare OS variant, or repeats one"
+        meaning: "A `comptime if #build.target.os == {{ }}` arm head is not a bare OS variant, or repeats one"
         detail: true
-        what: fn(self) -> String { "`{self.found}` is not an OS arm — an `$build.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`." }
+        what: fn(self) -> String { "`{self.found}` is not an OS arm — a `#build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`." }
         why: fn(self) -> String { "Each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once." }
         fix: fn(self) -> String { "Write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)." }
     }
@@ -5890,10 +6008,10 @@ NonExhaustiveOsDispatch: struct {
 
     impl Diagnostic {
         code: "E-OSTARGET-DISPATCH-EXHAUSTIVE"
-        meaning: "A `comptime if $build.os == {{ }}` dispatch leaves some target OS uncovered with no `else`"
+        meaning: "A `comptime if #build.target.os == {{ }}` dispatch leaves some target OS uncovered with no `else`"
         detail: true
         fix_next: "Add one dispatch arm for each missing OS or add an `else` catch-all."
-        what: fn(self) -> String { "This `$build.os` dispatch doesn't cover every target OS — missing: {self.list}." }
+        what: fn(self) -> String { "This `#build.target.os` dispatch doesn't cover every target OS — missing: {self.list}." }
         why: fn(self) -> String { "A build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run." }
         fix: fn(self) -> String { "Add an arm for each missing OS ({self.list}), or an `else -> …` catch-all." }
     }
@@ -6217,7 +6335,7 @@ StackOverflow: struct {
         no_fix: .Behavior
         what: fn(self) -> String { "Stack overflow in `{self.fn_name}`" }
         why: fn(self) -> String { "The call stack kept growing without reaching a safe return — with Jet file, line, and source context" }
-        fix: fn(self) -> String { "End the recursion or make progress toward a base case." }
+        fix: fn(self) -> String { "End the recursion or make progress toward a base case, or give deep work more stack with `task.group deep(stack: bytes)`." }
     }
 }
 
@@ -7748,16 +7866,18 @@ RetiredDeriveStatement: struct {
 MisplacedJobMarker: struct {
     impl Diagnostic {
         code: "E0925"
-        what: fn(self) -> String { "`#Job`/`#Every(…)` written somewhere they don't belong — a method, or `#Every(…)` without `#Job`" }
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "A standalone schedule marker; a job's schedule is the `every:` argument of `#Job`" }
         why: fn(self) -> String { "The registered parse rule applies here" }
-        fix: fn(self) -> String { "Place `#Job` on a function and attach `#Every(...)` only to that job." }
+        fix: fn(self) -> String { "Write the schedule as `#Job(every: 5min)`." }
     }
 }
 
 InvalidSchedule: struct {
     impl Diagnostic {
         code: "E0926"
-        what: fn(self) -> String { "`#Every(…)`'s argument isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `\"HH:MM\"`" }
+        what: fn(self) -> String { "`#Job(every: …)` isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `\"HH:MM\"`" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Use a positive, in-range duration or canonical `HH:MM` schedule." }
     }
@@ -7963,9 +8083,19 @@ ComptimeConstructNotSupported: struct {
 InvalidEmbedPath: struct {
     impl Diagnostic {
         code: "E0957"
-        what: fn(self) -> String { "`embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..`" }
+        what: fn(self) -> String { "`embed_file`/`embed_bytes` path or `find` glob not a String, absolute, or escaping via `..`" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Use a literal relative path or glob that stays inside the project." }
+        fix: fn(self) -> String { "Use a relative path or glob, written or computed, that stays inside the project." }
+    }
+}
+
+ToolchainInputOutsideTree: struct {
+    impl Diagnostic {
+        code: "E0945"
+        meaning: "A `toolchain:` comptime input (`embed_file`, `embed_bytes`, `find`) reads the toolchain tree the compile takes Core from; only the toolchain's own packages may read it, and a compile without that tree (jet's built-in Core) has nothing to read"
+        what: fn(self) -> String { "`toolchain:` comptime input read outside the toolchain tree's own packages" }
+        why: fn(self) -> String { "Only the compiler workspace's members, and the packages they depend on inside the toolchain tree, read that tree; there is no built-in copy of it" }
+        fix: fn(self) -> String { "Read the file beside this one, or build inside the toolchain tree with `JET_TOOLCHAIN_ROOT` set." }
     }
 }
 
@@ -8554,35 +8684,35 @@ RedundantFlagMarker: struct {
 
     impl Diagnostic {
         code: "E1309"
-        meaning: "`#Flag` on a `#CLI` field that is already flag-only"
+        meaning: "`#Arg(flag_only: true)` on a `#CLI` field that is already flag-only"
         detail: true
-        fix_next: "Remove `#Flag`, or make the field a required scalar without a default."
-        what: fn(self) -> String { "`#Flag` on `name` has nothing to opt out of" }
-        why: fn(self) -> String { "`#Flag` keeps a required value field flag-only. Bool fields, `T?` fields, and fields with a `{self.expr}` default are already flag-only." }
-        fix: fn(self) -> String { "Remove `#Flag`, or make the field a required scalar without a `{self.expr}` default." }
+        fix_next: "Remove `flag_only: true`, or make the field a required scalar without a default."
+        what: fn(self) -> String { "`#Arg(flag_only: true)` on `name` has nothing to opt out of" }
+        why: fn(self) -> String { "`flag_only: true` keeps a required value field off bare positional input. Bool fields, `T?` fields, and fields with a `{self.expr}` default are already flag-only." }
+        fix: fn(self) -> String { "Remove `flag_only: true`, or make the field a required scalar without a `{self.expr}` default." }
     }
 }
 
 InvalidShortName: struct {
     impl Diagnostic {
         code: "E1318"
-        meaning: "A `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name"
+        meaning: "An `#Arg(short:)` value is not one ASCII letter, or two `#CLI` fields use the same short name"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "`#Short(\"name\")` is not a one-letter option `` or `` `#Short(\"n\")` is used by both `first` and `second`" }
+        what: fn(self) -> String { "`#Arg(short: \"name\")` is not a one-letter option `` or `` `#Arg(short: \"n\")` is used by both `first` and `second`" }
         why: fn(self) -> String { "The shared command parser treats a short option as one ASCII letter, and each spelling must select only one `#CLI` field." }
-        fix: fn(self) -> String { "Use one letter and give colliding fields different values." }
+        fix: fn(self) -> String { "Use one letter and give colliding fields different `short:` values." }
     }
 }
 
 UnmappedCliMarker: struct {
     impl Diagnostic {
         code: "E1319"
-        meaning: "`#Short` or `#Env` has no typed-CLI builder mapping at its field"
+        meaning: "An `#Arg` option has no typed-CLI builder mapping at its field"
         detail: true
-        what: fn(self) -> String { "`#Short` has no CLI mapping for field `name`" }
-        why: fn(self) -> String { "`#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder's value-option fallback." }
-        fix: fn(self) -> String { "Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field." }
+        what: fn(self) -> String { "`#Arg` has no CLI mapping for field `name`" }
+        why: fn(self) -> String { "`#Arg` describes a generated command input. It does not apply outside a `#CLI` struct; its `env:` option also cannot map a presence-only `Bool` flag to the builder's value-option fallback." }
+        fix: fn(self) -> String { "Remove the marker, mark the command-input struct `#CLI`, or move `env:` to a value field." }
     }
 }
 
@@ -8856,7 +8986,7 @@ ConcurrentCaptureNotOwned: struct {
         detail: true
         what: fn(self) -> String { "`{self.value}` cannot cross the `{self.boundary}` boundary: the value writes shared state" }
         why: fn(self) -> String { "The `{self.boundary}` boundary can run concurrently with its owner; {self.reason}" }
-        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `shared`" }
+        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{{{{…}}}}`" }
     }
 }
 
@@ -9035,6 +9165,48 @@ DuplicateCaseNumber: struct {
         what: fn(self) -> String { "Two cases of a `#Layout({self.backing})` enum have the same number." }
         why: fn(self) -> String { "`from_int` turns a number back into a case, so each number names one case." }
         fix: fn(self) -> String { "Give the later case a number no other case uses." }
+    }
+}
+
+TargetDeniedEffect: struct {
+    function: String
+    denied: String
+    target: String
+
+    impl Diagnostic {
+        code: "E1123"
+        meaning: "Code built for a target uses an effect the target denies"
+        detail: true
+        what: fn(self) -> String { "`{self.function}` uses `{self.denied}`, which target `{self.target}` denies." }
+        why: fn(self) -> String { "An artifact built for `{self.target}` gets only the services that machine provides, and it lacks the one `{self.denied}` needs." }
+        fix: fn(self) -> String { "Keep the `{self.denied}` work out of the code this entry reaches, or build the entry for a target that provides `{self.denied}`." }
+    }
+}
+
+SpecifiedCaseUnnumbered: struct {
+    case_name: String
+    enum_name: String
+
+    impl Diagnostic {
+        code: "E1124"
+        meaning: "A case of a `#Specified` enum states no number"
+        detail: true
+        what: fn(self) -> String { "Case `{self.case_name}` of `{self.enum_name}` states no number." }
+        why: fn(self) -> String { "`#Specified` makes every case of `{self.enum_name}` state its number, so adding or moving a case renumbers no other." }
+        fix: fn(self) -> String { "Write the case's number, such as `{self.case_name} = 0`." }
+    }
+}
+
+SpecifiedWithoutNumbers: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1125"
+        meaning: "`#Specified` on a type whose cases have no numbers"
+        detail: true
+        what: fn(self) -> String { "`#Specified` is on `{self.name}`, whose cases have no numbers." }
+        why: fn(self) -> String { "`#Specified` makes every case of a numbered enum state its number, and only a `#Layout(U8)`-style or `#Layout(c)` enum numbers its cases." }
+        fix: fn(self) -> String { "Number the cases with a backing such as `#Layout(U8)`, or remove `#Specified`." }
     }
 }
 
@@ -11080,6 +11252,24 @@ FlagNotASetting: struct {
     }
 }
 
+CcProjectInputsTooLarge: struct {
+    command: String
+    size: String
+    root: String
+    cap: String
+
+    impl Diagnostic {
+        code: "E2118"
+        stage: [.Jet]
+        meaning: "`jet cc` or `jet c++` would declare a project input set over its size or file-count cap (#6686)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`jet {self.command}` would declare {self.size} under `{self.root}` as compile inputs, over the {self.cap} cap." }
+        why: fn(self) -> String { "`jet {self.command}` declares every file under the project root as an input of the compile, so a change to any of them reruns it. The project root is `--project-root` when it is given and the current directory otherwise; only `.git`, `.jet`, `target`, `build`, `CMakeFiles` and the build root are left out." }
+        fix: fn(self) -> String { "Run `jet {self.command}` from the directory that holds the sources, or pass `--project-root <dir>` naming it, so the input set holds only the files the compile reads." }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201"
@@ -11741,9 +11931,9 @@ UnknownCasingStyle: struct {
         code: "E2409"
         stage: [.Compile]
         detail: true
-        what: fn(self) -> String { "`#RenameAll({self.style})` isn't a known casing style." }
-        why: fn(self) -> String { "The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming`; anything else is rejected so a typo fails at compile time, not on the wire." }
-        fix: fn(self) -> String { "Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`." }
+        what: fn(self) -> String { "`#Rename({self.style})` on a type isn't a known casing style." }
+        why: fn(self) -> String { "On a type, `#Rename` sets the wire casing of every field or variant from the closed NamingCase menu `.Camel`/`.Snake`/`.Pascal`/`.Kebab`/`.Screaming`; anything else is rejected so a typo fails at compile time, not on the wire. A string name renames one field or variant." }
+        fix: fn(self) -> String { "Pick one of `.Camel` / `.Snake` / `.Pascal` / `.Kebab` / `.Screaming`, or move a string `#Rename` onto the field or variant it names." }
     }
 }
 
@@ -11998,9 +12188,19 @@ CallerSiteMisplaced: struct {
     impl Diagnostic {
         code: "E2427"
         detail: true
-        what: fn(self) -> String { "`$caller` is legal only as a parameter default or inside an #Expand macro." }
-        why: fn(self) -> String { "`$caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
-        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{$caller}}` and read `at`, or write `$here` for this line." }
+        what: fn(self) -> String { "`#caller` is legal only as a parameter default or inside an #Expand macro." }
+        why: fn(self) -> String { "`#caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
+        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{#caller}}` and read `at`, or write `#here` for this line." }
+    }
+}
+
+HereSiteDefault: struct {
+    impl Diagnostic {
+        code: "E2428"
+        detail: true
+        what: fn(self) -> String { "A `#here` parameter default names the declaration, not the call." }
+        why: fn(self) -> String { "`#here` is the place where it is written, so every call that leaves the parameter out would get the default's own line." }
+        fix: fn(self) -> String { "Write the default as `#caller` to get the place of each call." }
     }
 }
 
@@ -12475,6 +12675,20 @@ DuplicateRoute: struct {
     }
 }
 
+RouteMethodTokenRefused: struct {
+    method: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E2808"
+        stage: [.Compile]
+        detail: true
+        what: fn(self) -> String { "HTTP route method `{self.method}` is refused: {self.reason}." }
+        why: fn(self) -> String { "A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it." }
+        fix: fn(self) -> String { "Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~." }
+    }
+}
+
 UnknownHandler: struct {
     kind: String
     name: String
@@ -12886,12 +13100,12 @@ RetiredSharedNew: struct {
     impl Diagnostic {
         code: "E1115"
         status: .Retired
-        meaning: "Teaching: retired `Shared.new(x)` constructor → prefix `shared x`"
+        meaning: "Teaching: retired `Shared.new(x)` constructor → `Shared{{x}}`"
         detail: true
         no_fix: None
         what: fn(self) -> String { "`Shared.new(…)` is the retired shared-cell constructor." }
         why: fn(self) -> String { "Shared state has one construction word, so every shared cell reads the same on the page." }
-        fix: fn(self) -> String { "Write `shared <value>` instead of `Shared.new(<value>)`." }
+        fix: fn(self) -> String { "Write `Shared{{<value>}}` instead of `Shared.new(<value>)`." }
     }
 }
 
@@ -13048,11 +13262,11 @@ PipeValueOutsideStep: struct {
 PipeStepWithoutValue: struct {
     impl Diagnostic {
         code: "E0438"
-        stage: [.Parse]
         meaning: "A pipe step never reads `<>`, the value it receives"
         detail: true
-        no_fix: .Behavior
-        fix_next: "Write `<>` where the value goes, or end the pipe before this step."
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This pipe step doesn't use `<>`" }
         why: fn(self) -> String { "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value" }
         fix: fn(self) -> String { "Write `<>` where the value goes, such as `|> f(<>)`, or end the pipe before this step" }

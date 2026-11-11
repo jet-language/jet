@@ -24,14 +24,14 @@ Sink: trait {
 Worker: struct {
     context: Shared<Context>
     n: Int
-}
 
-impl Worker.Sink {
-    finish: fn(&&self) -[]> Int {
-        self.n + 2
-    }
-    peek: fn(self) -[]> Int {
-        self.n + 1
+    impl Sink {
+        finish: fn(&&self) -[]> Int {
+            self.n + 2
+        }
+        peek: fn(self) -[]> Int {
+            self.n + 1
+        }
     }
 }
 
@@ -70,7 +70,7 @@ checked: fn(s: Shared<Context>, n: Int) -> Int Reject! {
 }
 
 run: fn() {
-    s := shared Context{id: 1}
+    s := Shared{Context{id: 1}}
     print("looped {looped(s, 3)} {looped(s, 20)}")
     print("looped dropped {s.strong_count()}")
     print("fallback {fallback(s, 1)} {fallback(s, 2)}")

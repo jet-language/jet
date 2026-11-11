@@ -1,17 +1,26 @@
 // Lexical groups own shared task states. The state is independent of each
 // consumable handle: explicit join may take an outcome before lexical cleanup.
 // Group80B refs0 mutex8 closing16 limit24 active32 waiterHead40 childrenList48
-// reserved72. A limit of zero is unbounded, explicit limits clamp to1.
+// stack72. A limit of zero is unbounded, explicit limits clamp to1. stack is
+// the stack size its tasks' fibers take (Fiber.jet fiber_stack_class; 0, the
+// default size): a new group inherits the running task's, and a `stack:`
+// request (jet_rt_native_task_group_stack) replaces it before any task starts.
 // Public Group handles16B: sharedState0 owner8; clone handles never close.
 task_group_new: fn(limit: I64) -> I64 {
     group: jet_rt_alloc(I64{80}, I64{8})
     thread_zero(group, I64{80})
     sync_store(group, I64{1})
     sync_store(wrapping(group + I64{24}), limit)
+    sync_store(wrapping(group + I64{72}), fiber_stack_current())
     task_group_handle(group, true)
 }
 #Export(c) jet_rt_native_task_group_new: fn() -> I64 { task_group_new(I64{0}) }
 #Export(c) jet_rt_native_task_group_with_limit: fn(limit: I64) -> I64 { task_group_new(if (limit < I64{1}) -> I64{1} else -> limit) }
+// `task.group g(stack: bytes)`: the group's tasks, and the groups and tasks
+// they open, run on fibers of at least `bytes` of stack.
+#Export(c) jet_rt_native_task_group_stack: fn(handle: I64, bytes: I64) {
+    sync_store(wrapping(sync_load(handle) + I64{72}), fiber_stack_class(scheduler_root_required(), bytes))
+}
 
 task_group_handle: fn(state: I64, owner: Bool) -> I64 {
     handle: jet_rt_alloc(I64{16}, I64{8})

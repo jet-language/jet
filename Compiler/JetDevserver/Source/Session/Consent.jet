@@ -160,15 +160,15 @@ SensitiveCaptureConsent: struct {
     matches: fn(self, identity: CaptureIdentity, scope: CaptureConsentScope) -> Bool Never! {
         self._identity == identity && self._scope == scope
     }
-}
-// Rust fmt::Debug: do not derive a raw private-scope formatter.
-impl SensitiveCaptureConsent.Debug {
-    debug: fn(self) -> String {
-        digest: self.digest()
-        "SensitiveCaptureConsent {{ identity: {self._identity:Debug}, digest: {digest:Debug} }}"
+
+    // Rust fmt::Debug: do not derive a raw private-scope formatter.
+    impl Debug {
+        debug: fn(self) -> String {
+            digest: self.digest()
+            "SensitiveCaptureConsent {{ identity: {self._identity:Debug}, digest: {digest:Debug} }}"
+        }
     }
 }
-
 // Rust CaptureAttempt.new/safe_clock/with_sources/with_source/base_consent_scope.
 // #4449: native auto-Debug needs the Rust bridge for consent's custom Debug.
 // Production keeps the exact carrier and protected formatter. Even #!Debug is
@@ -243,11 +243,12 @@ CaptureSkipReason: enum {
             .SensitiveConsentScopeChanged(source) -> source.reason_text()
         }
     }
+
+    // #4403: sema currently requires &&self while the native Display ABI borrows.
+    impl Display { display: fn(&&self) -> String { self.reason_text() } }
 }
 // #4446: scalar parameter place -> View<T> is also rejected by sema.
 capture_consent_source_view: fn(source: CaptureSourceFact) -> View<CaptureSourceFact> Never! from source { return source }
-// #4403: sema currently requires &&self while the native Display ABI borrows.
-impl CaptureSkipReason.Display { display: fn(&&self) -> String { self.reason_text() } }
 CaptureSkip: struct {
     reason: CaptureSkipReason
     terminal_available: Bool

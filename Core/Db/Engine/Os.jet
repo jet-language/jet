@@ -983,7 +983,7 @@ OSTempDirectory: struct {
 }
 
 init_os_temp_directory: fn() -> Shared<OSTempDirectory> Never! {
-    shared OSTempDirectory{dir: None}
+    Shared{OSTempDirectory{dir: None}}
 }
 
 // sqlite3_temp_directory.
@@ -1053,7 +1053,7 @@ init_os_prng: fn() -> Shared<OSPrng> Never! {
     loop _i in 0..<16 -> s.push(0)
     out := [U8]{}
     loop _i in 0..<64 -> out.push(U8{0})
-    shared OSPrng{s: s, out: out, n: 0}
+    Shared{OSPrng{s: s, out: out, n: 0}}
 }
 
 // sqlite3_randomness(N, pBuf): `n` bytes. `n` <= 0 resets the generator,

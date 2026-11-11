@@ -286,7 +286,7 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     }
     seats := [IRX64Seat]{}
     loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
-    inputs: shared IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}
+    inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}}
     outputs := [[IRX64FunctionResult]]{}
     stops := [String]{}
     loop _ in 0..<count {
@@ -467,7 +467,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
-    released: shared IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}
+    released: Shared{IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}}
     ir_x64_release_fill(released, owned, threads)
     objects := [X64ExecutableResult]{}
     task.group ir_x64_object_release {
@@ -521,7 +521,7 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
                             work.push(target.value)
                         }
                     }
-                    else -> {}
+                    .Runtime(_) | .Data(_) -> {}
                 }
             }
         }
@@ -624,10 +624,13 @@ ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Ne
 
 // Order the functions of `compiled` (and their debug rows) for the object's
 // text: those `hot` names first, in the list's order, then the rest, each
-// group in function order. `hot` lists the functions a short run enters
-// (Compiler/JetCli/hot-text.list, written by Tools/perf/hot-text.mjs), so
-// their code shares pages and a cold start faults in fewer of them. Returns
-// how many names of `hot` name no function.
+// group in function order. `hot` lists the functions a warm run and short
+// cold runs enter (Compiler/JetCli/hot-text.list, written by
+// Tools/perf/hot-text.mjs), so their code shares pages: the kernel maps a
+// read fault's neighbouring pages with it, and a run that touches few
+// windows of the image keeps few pages resident. JetBackend Object.jet lays
+// `.data` out in the order this text references it. Returns how many names of
+// `hot` name no function.
 ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     if hot.len() == 0 -> return 0
     ranks := [String:Int]{}

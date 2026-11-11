@@ -230,7 +230,7 @@ MCPMessage: enum {
         raw_id: object.get("id") ?? return Err(MCPCodecError.InvalidMessage("response is missing id"))
         id: if raw_id == {
             .Null -> None
-            else -> Val(MCPRequestID.from_json_tree(raw_id))
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Val(MCPRequestID.from_json_tree(raw_id))
         }
         error: if object.get("error") == {
             .Val(raw_error) -> Val(MCPRPCError.from_json_tree(raw_error))
@@ -394,7 +394,7 @@ pkg_mcp_validate_params: fn(params: Dyn?) MCPCodecError! {
     if value == {
         .Array(_) -> {}
         .Object(_) -> {}
-        else -> return Err(MCPCodecError.InvalidMessage("params must be an object or array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(MCPCodecError.InvalidMessage("params must be an object or array"))
     }
 }
 
@@ -414,7 +414,7 @@ pkg_mcp_ensure_depth: fn(value: Dyn, depth: Int, maximum: Int) MCPCodecError! {
         .Object(fields) -> {
             loop pair in fields -> pkg_mcp_ensure_depth(pair.value, depth + 1, maximum)
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
     }
 }
 
@@ -431,7 +431,7 @@ pkg_mcp_ensure_encodable: fn(value: Dyn) MCPCodecError! {
         .Object(fields) -> {
             loop pair in fields -> pkg_mcp_ensure_encodable(pair.value)
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
     }
 }
 

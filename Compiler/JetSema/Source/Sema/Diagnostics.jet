@@ -307,7 +307,7 @@ sema_unknown_name: fn(name: String, span: Span) -> Diagnostic {
 // A `$` name is a compiler fact, which no declaration can make, so its fix
 // names the fact forms instead of a declaration.
 sema_unknown_name_declare_fix: fn(name: String) -> String Never! {
-    if name.starts_with("$") -> return "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`"
+    if name.starts_with("$") -> return "read a fact root such as `#build.target.os`, or read the fact on its subject, such as `T.reflect().fields`"
     "declare it first: `{name}: ...`"
 }
 
@@ -396,7 +396,10 @@ sema_slot_holds_mismatch: fn(slot: String, holder: String, required: Type, offer
 // (`Int` or `I64` into `U8`): narrowing is never implicit, and the
 // destination-owned conversion is fallible.
 sema_integer_narrowing_fix: fn(want: Type, got: Type) -> String? {
-    fixed: if want == {.IntN(_, _) -> true else -> false}
+    fixed: if want == {
+        .IntN(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
     if !fixed -> return None
     source := "int"
     if got == .IntN(signed, bits) {
@@ -482,7 +485,7 @@ sema_type_show: fn(ty: Type) -> String Never! {
             .User(name) -> "#{name} {sema_type_show(inner)}"
             .Internal(_) -> sema_type_show(inner)
         }
-        else -> type_name(ty)
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) | .Union(_) -> type_name(ty)
     }
 }
 
@@ -496,7 +499,7 @@ sema_type_show_quoted: fn(ty: Type) -> String Never! {
         }
         .Apply(_, _) -> return "`{type_name(ty)}`"
         .TraitObject(bounds) -> return "`{bounds.join(" + ")}`"
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     "`{sema_type_show(ty)}`"
 }
@@ -520,7 +523,7 @@ sema_type_nominal_leaf: fn(ty: Type) -> String Never! {
             if parts.len() < 2 -> parts = name.split(".").to_list()
             parts[parts.len() - 1]
         }
-        else -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
     }
 }
 
@@ -548,7 +551,7 @@ sema_type_fix_hint: fn(want: Type, got: Type) -> String Never! {
         .Named(name) -> {
             if name.ends_with(".RNG") -> return "use RNG here"
         }
-        else -> {}
+        .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     "use {want_show} here"
 }
@@ -628,7 +631,7 @@ sema_is_expiring_secret_member_type: fn(ty: Type) -> Bool Never! {
             false
         }
         .Named(name) -> sema_expiring_secret_leaf(sema_core_crypto_leaf(name) ?? "")
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -636,25 +639,6 @@ sema_expiring_secret_leaf: fn(leaf: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey"
 }
 
-// A secret-bearing `core.crypto` value: a cloned copy would be a second owned
-// credential, so an unmarked owning argument is E0201, never an implicit clone.
-sema_is_secret_bearing_crypto_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Tagged(marker, inner) -> {
-            if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
-                if inner == .Named(name) -> return sema_secret_bearing_crypto_leaf(name)
-                return false
-            }
-            sema_is_secret_bearing_crypto_type(inner)
-        }
-        .Named(name) -> sema_secret_bearing_crypto_leaf(sema_core_crypto_leaf(name) ?? "")
-        else -> false
-    }
-}
-
-sema_secret_bearing_crypto_leaf: fn(leaf: String) -> Bool Never! {
-    leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
-}
 
 // Whether a value of `ty` carries an ExpiringSecret loan anywhere a store,
 // return or escape could keep it.
@@ -683,6 +667,6 @@ sema_contains_expiring_secret_loan: fn(ty: Type) -> Bool Never! {
             }
             false
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

@@ -2548,9 +2548,9 @@ link_emit_pieces: fn(c: &&LinkContext, rows: [Int], threads: CompilerThreads) ->
     if workers <= 1 -> return LinkEmitted{context: c.move(), pieces: link_no_pieces()}
     bounds: compiler_threads_partition(weights, workers)
     live: c.live_secs.len()
-    inputs: shared LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: rows}
+    inputs: Shared{LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: rows}}
     parts := [Shared<LinkEmitPart>]{}
-    loop part in 0..<(bounds.len() - 1) -> parts.push(shared LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}})
+    loop part in 0..<(bounds.len() - 1) -> parts.push(Shared{LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}}})
     _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
     pieces := LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
     loop _ in 0..<live {

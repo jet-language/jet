@@ -166,6 +166,6 @@ pattern_collect_slot_names: fn(slot: PatSlot, names: &[BindName]) Never! {
         .Bind(name, span) -> names.push(BindName{name: name, span: span, rename: None})
         .Nested(pattern) -> pattern_collect_binding_names(pattern, names)
         .Named(_, _, inner) -> pattern_collect_slot_names(inner, names)
-        else -> {}
+        .Wildcard | .Range(_, _) | .Rest(_) | .Value(_) -> {}
     }
 }

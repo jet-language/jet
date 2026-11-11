@@ -13,14 +13,17 @@ use {
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
-        AUTHORITY_EXEC_ARGS_LEAF,
         Diagnostic,
         authority_effect_action,
         authority_root,
         authority_grantable_roots,
         authority_is_deny_only,
-        authority_parse_root,
+        authority_own_process_leaf,
+        authority_parse_right,
         diagnostic_from_registry,
+        effect_scope_argument_valid,
+        effect_scope_covers,
+        effect_scope_split,
     ]
     jet_sema.[
         sema_effect_builtin_leaf_unknown,
@@ -81,29 +84,22 @@ jet_cli_sorted_set: fn(values: [String]) -> [String] Never! {
     sorted
 }
 
-// `parse_right`: a right with its root canonical and its leaf spelling kept;
-// `Panic` has no leaves.
+// `parse_right`: a right with its root canonical and its leaf spelling and
+// scope argument kept (`FS.Read("data/")`, `Net("api.example.com")`); `Panic`
+// has no leaves.
 jet_cli_parse_right: fn(raw: String) -> String? Never! {
-    right: raw.trim()
-    root: authority_parse_root(right) ?? return None
-    if root == "Panic" && right != "Panic" -> return None
-    parts: right.split(".").to_list()
-    if parts.len() == 1 -> return Val(root)
-    canonical: "{root}{right.slice(parts[0].len()..<right.len())}"
-    if sema_effect_builtin_leaf_unknown(canonical) -> return None
-    Val(canonical)
+    right: authority_parse_right(raw) ?? return None
+    split: effect_scope_split(right)
+    if split.base.contains(".") && sema_effect_builtin_leaf_unknown(split.base) -> return None
+    if split.scope == .Val(scope) && !effect_scope_argument_valid(scope) -> return None
+    Val(right)
 }
 
-// `covers`: a bound covers itself and every descendant; a resource-qualified
-// bound (`FS.Read:/data`) only across a `/` boundary.
+// `covers`: the one covers rule (EffectScope.jet) between canonical rights.
 jet_cli_right_covers: fn(raw_bound: String, raw_right: String) -> Bool Never! {
     bound: jet_cli_parse_right(raw_bound) ?? raw_bound.trim()
     right: jet_cli_parse_right(raw_right) ?? raw_right.trim()
-    if right == bound -> return true
-    if !right.starts_with(bound) || right.len() == bound.len() -> return false
-    next_byte: right.bytes()[bound.bytes().len()]
-    if bound.contains(":") -> return next_byte == (U8{47})
-    next_byte == (U8{46}) || next_byte == (U8{58}) || next_byte == (U8{47})
+    effect_scope_covers(bound, right)
 }
 
 jet_cli_covers_any: fn(bounds: [String], right: String) -> Bool Never! {
@@ -166,8 +162,8 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 
 // `authority` with this invocation's rows merged in: `-A` grants every
 // grantable right, `--allow` its rights, and `--deny` denies, which wins.
-// `--allow=FS.Read:<path>` grants `FS.Read` itself: the run it launches can
-// read only those paths (jet_cli_read_scope).
+// `--allow='FS.Read("<path>")'` grants `FS.Read` itself: the run it launches
+// can read only those paths (jet_cli_read_scope).
 jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
     if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 -> return
@@ -187,7 +183,7 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
     authority.authority = "{authority.authority} + CLI invocation"
 }
 
-// The paths `--allow=FS.Read:<path>` rows confine a run's reads to: its
+// The paths `--allow='FS.Read("<path>")'` rows confine a run's reads to: its
 // launch lets the program read those files and directories and nothing else
 // (Loader.jet x64_confine_reads). Empty when the invocation names none, or
 // also lets it read everything (`-A`, `--allow=FS`, `--allow=FS.Read`).
@@ -195,9 +191,11 @@ jet_cli_read_scope: fn(invocation: JetCLIInvocationAuthority?) -> [String] Never
     rows: invocation ?? return [String]{}
     if rows.all -> return [String]{}
     paths := [String]{}
-    loop right in rows.allow {
+    loop raw in rows.allow {
+        right: jet_cli_parse_right(raw) ?? next
         if right == "FS" || right == "FS.Read" -> return [String]{}
-        if right.starts_with("FS.Read:") -> paths.push(right.slice(8..<right.len()))
+        split: effect_scope_split(right)
+        if split.base == "FS.Read" && split.scope == .Val(path) -> paths.push(path)
     }
     paths
 }
@@ -279,7 +277,7 @@ jet_cli_invocation_denials: fn(authority: JetCLIAuthority, denied: [String]) -> 
 // `Exec.Exit` starts other programs.
 jet_cli_effect_open_ended: fn(right: String) -> Bool Never! {
     root: authority_root(right)
-    root == "FFI" || (root == "Exec" && right != AUTHORITY_EXEC_ARGS_LEAF && right != "Exec.Exit")
+    root == "FFI" || (root == "Exec" && !authority_own_process_leaf(right))
 }
 
 // Plain words for what a program does with `right`.

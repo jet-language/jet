@@ -1,0 +1,22 @@
+Door: struct {
+    state { Closed, Open }
+
+    name: String
+
+    #State(_ -> Closed) new: fn(name: String) -[]> Door { Door{name: name.copy()} }
+
+    #State(Closed -> Open) open: fn(self: &&Door) -[]> Door { self }
+
+    #State(Open -> Closed) close: fn(self: &&Door) -[]> Door { self }
+
+    #State(Open) label: fn(self) -[]> String { "{self.name} is open" }
+}
+
+run: fn() {
+    door := Door.new("front")
+    door = door.open()
+    print(door.label())
+    door = door.close()
+    door = door.open()
+    print(door.label())
+}

@@ -236,30 +236,30 @@ sema_call_core_unbuilt_error: fn(callee: String, row: CoreUnbuiltRow, span: Span
     sema_error("E2104", span, "`{callee}` is not built yet", "This `jet` has no implementation of {row.feature} yet, and no other `jet` can run it.", "Remove the `{callee}` call for now; {row.feature} needs its Jet implementation first (card #{row.card}).")
 }
 
-// E2104 at a checked user call of a method (or the static `new`) of an
-// unbuilt handle type (core_unbuilt_handle); true when reported. Core's own
-// source may still name it; only a call from user code is refused, and only
-// by a compile that lowers it (sema_refuses_unbuilt).
+// E2104 at a checked call of a method (or the static `new`) of an unbuilt
+// handle type (core_unbuilt_handle); true when reported. The call is refused
+// wherever it is written, Core's own source included, and only by a compile
+// that lowers it (sema_refuses_unbuilt).
 sema_call_core_handle_unbuilt: fn(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
-    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
+    if !sema_refuses_unbuilt(program) -> return false
     row: core_unbuilt_handle(owner) ?? return false
     diagnostics.push(sema_call_core_unbuilt_error("{owner}.{method}", row, span))
     true
 }
 
-// A user call of an unbuilt Core call (core_unbuilt_call): noted
-// where the call resolves its Core member, settled once the call is checked.
+// A call of an unbuilt Core call (core_unbuilt_call): noted where the call
+// resolves its Core member, settled once the call is checked.
 SemaCoreUnbuiltCall: struct {
     module_name: String
     member: String
     span: Span
 }
 
-// Notes a call from user code that names an unbuilt Core feature. Core's own
-// source may still name it; only a call from user code is refused, and only
-// by a compile that lowers it (sema_refuses_unbuilt).
+// Notes a call that names an unbuilt Core feature, wherever it is written
+// (Core's own source included), in a compile that lowers it
+// (sema_refuses_unbuilt).
 sema_call_core_unbuilt_note: fn(module_name: String, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, unbuilt: &SemaCoreUnbuiltCall?) Never! {
-    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return
+    if !sema_refuses_unbuilt(program) -> return
     if core_unbuilt_call(module_name, member) == None -> return
     unbuilt = Val(SemaCoreUnbuiltCall{module_name: module_name, member: member, span: span})
 }
@@ -782,12 +782,6 @@ sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args:
     sema_call_bind_direct("{record.module_name}.{record.member}", signature, local_args, span, diagnostics)
 }
 
-sema_call_core_check_typed_argument: fn(value: TExpr, expected: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
-    typed := value
-    typed.span = span
-    sema_expr_expected(typed, Val(expected), environment, program, diagnostics)
-}
-
 // `("core.math", "abs")`: `abs` takes Int, Float, F32, I64 and Complex,
 // returning the argument type (Float for Complex). The Int form stays the
 // routed source `abs`; any other argument is the MathBuiltin `abs`, which
@@ -914,7 +908,7 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
         // A written numeral adopts Float from the parameter itself.
         literal: if argument.expr == {
             .Float(_, _, _, _, _) | .Int(_, _, _, _, _) -> true
-            else -> false
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
         }
         crosses := false
         if !literal {
@@ -1144,7 +1138,10 @@ sema_call_core_type_parameter: fn(signature: CoreTypedCallSignature, name: Strin
 }
 
 sema_call_core_math_exact_type: fn(ty: Type) -> Bool Never! {
-    if ty == {.Named(name) -> name == "Fraction" || name == "Decimal" else -> false}
+    if ty == {
+        .Named(name) -> name == "Fraction" || name == "Decimal"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 sema_call_core_math_float_type: fn(ty: Type) -> Bool Never! {
@@ -1172,7 +1169,7 @@ sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint,
         .Debuggable -> {
             if ty == {
                 .Int | .Float | .Float32 | .Bool | .String | .Char | .IntN(_, _) -> { return true }
-                else -> {}
+                .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
             }
             if program.registration_graph == .Val(graph) {
                 return sema_type_bound_satisfied_at(graph, ty, "Debuggable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
@@ -1337,8 +1334,15 @@ sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index:
         fallibility: TFailureCarrier.Infallible}, span)
 }
 
+// Checked Core source: a `<corelib>/` file of a `core.*` module. The
+// compiler-private leaves that any Core module may call share this one rule.
+sema_call_core_checked_source: fn(environment: SemaScopeEnvironment) -> Bool Never! {
+    environment.source_file.starts_with("<corelib>/") && environment.module_name.starts_with("core.")
+}
+
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
+    // Outside checked Core source, only the plugin boundary inserts the wire.
+    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" && !sema_call_core_checked_source(environment) {
         diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
         return None
     }
@@ -1349,7 +1353,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         return None
     }
     if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
-        if !environment.source_file.starts_with("<corelib>/") || !environment.module_name.starts_with("core.") {
+        if !sema_call_core_checked_source(environment) {
             diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
             return None
         }
@@ -1357,13 +1361,6 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
             diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
-            return None
-        }
-    }
-    if record.module_name == "core.encoding" && (record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
-        // Core CSV decode, the typed `core.data.csv_reader` rows and `core.sys.decode` share the scope.
-        if !environment.source_file.starts_with("<corelib>/") || (environment.module_name != "core.encoding.csv" && environment.module_name != "core.data" && environment.module_name != "core.sys") {
-            diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV, typed data and environment decode source", "use csv.decode<T>"))
             return None
         }
     }
@@ -1387,7 +1384,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     }
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
-        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if $build.os` / `#Target(OS.*)`"))
+        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if #build.target.os` / `#Target(OS.*)`"))
     }
     actual_accesses: loop argument in args -> argument.convention
     signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
@@ -1473,7 +1470,10 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
     }
     if args.len() != 1 || type_args.len() != 0 -> return sema_call_core_shared_reject(member, span, diagnostics)
     if args[0].label != None || args[0].spread -> return sema_call_core_shared_reject(member, span, diagnostics)
-    name: if args[0].expr == {.Ident(value, _, _) -> Val(value) else -> None} ?? return sema_call_core_shared_reject(member, span, diagnostics)
+    name: if args[0].expr == {
+        .Ident(value, _, _) -> Val(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    } ?? return sema_call_core_shared_reject(member, span, diagnostics)
     nearest: sema_scope_resolve_index(scopes, name) ?? return sema_call_core_shared_reject(member, span, diagnostics)
     if scopes.bindings[nearest].symbol.kind != SymbolKind.Function -> return sema_call_core_shared_reject(member, span, diagnostics)
     target: sema_call_resolve_direct(name, [Type]{}, environment, program, scopes, args[0].span, diagnostics) ?? return sema_call_core_shared_reject(member, span, diagnostics)
@@ -1506,7 +1506,7 @@ sema_call_core_shared_initializer_declared: fn(environment: SemaScopeEnvironment
         if sema_registration_callable_row(graph, target.symbol.id.key) == .Val(row) {
             if row == {
                 .Function(module_index, index) -> return sema_call_core_shared_initializer_shape(graph.modules[module_index].functions[index].declaration)
-                else -> return false
+                .Foreign(_, _) | .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> return false
             }
         }
     }
@@ -1532,10 +1532,10 @@ sema_call_core_shared_success: fn(ty: Type) -> Type? Never! {
             if err != (Type.Named{name: "Never"}) -> return None
             if ok == {
                 .Shared(_) -> Val(ok.copy())
-                else -> None
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
             }
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1573,18 +1573,6 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     // `table.column("name", …)` checks its literal column against the row schema (E2475).
     if target.symbol.name == "column" && sema_call_core_module_identity(environment, program, "core.web.table") == (Val(target.symbol.module_name)) -> sema_call_web_table_column_schema(args, checked.value, environment, program, diagnostics)
     Val(checked.value)
-}
-
-// `core.prelude.keep` is an erased identity: its checked argument is the call
-// result, with an optional explicit type argument constraining that value.
-sema_call_core_identity_value: fn(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_call_core_check_type_args("core.prelude", "keep", 1, true, type_args, value.span, diagnostics) -> return None
-    result := value
-    if type_args.len() == 1 {
-        required := sema_expr_expected_type(type_args[0], environment, program)
-        result = sema_expr_expected(value, Val(required), environment, program, diagnostics) ?? return None
-    }
-    sema_expr_expected(result, expected, environment, program, diagnostics)
 }
 
 #Test("worker checked-function inference changes no other Core route") {

@@ -1,4 +1,4 @@
-Error [jet.ProhibitedEffectReached]: `load` uses the effect `FS.Read`, which module `report`'s `#FX(…)` cap doesn't allow
+Error [jet.ProhibitedEffectReached]: `load` uses the effect `FS.Read("rates.txt")`, which module `report`'s `#FX(…)` cap doesn't allow
   --> tests/ui/effects/module_cap_ceiling_is_e0749.jet:6:5
     |
   6 |     load: fn() -> String { fs.read("rates.txt") ?? "" }
@@ -8,7 +8,7 @@ Error [jet.ProhibitedEffectReached]: `load` uses the effect `FS.Read`, which mod
   3 | #FX(IO)
     | ^^^^^^^ module `report` is capped here
  Why: The module's cap allows only `IO` in every function inside it, even through a call
- Fix: Add `FS.Read` to the module's `#FX(…)` cap, or move that work out of module `report`
+ Fix: Add `FS.Read("rates.txt")` to the module's `#FX(…)` cap, or move that work out of module `report`
  Denial: invocation
  Call chain: load
  Scope chain: module report

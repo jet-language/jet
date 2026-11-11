@@ -55,7 +55,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
     if validate_provider_facts {
         if ProducerRecord.decode(entry.producer_record) == {
             .Ok(producer) -> provider_validate_nix_build_facts(producer) ?? return Err(StoreError.Other(err.message()))
-            else -> {}
+            .Err(_) -> {}
         }
     }
     direct_cas: store_reuse_direct_cas_entry(verification, roots, entry)
@@ -80,7 +80,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
             // The live lock already dropped with the failed build.
             if store_make_tree_writable_for_removal(lease_root) == {
                 .Err(_) -> {}
-                else -> {}
+                .Ok(_) -> {}
             }
             store_reuse_discard_tree(lease_root)
             // A raw OS error names nothing: every lease failure is about this
@@ -97,7 +97,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
 store_reuse_discard_tree: fn(path: String) Never! {
     if files.remove_all(path) == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -383,7 +383,7 @@ store_reuse_wrapper_keeper_error: fn(child: &&ProcessChild, action: String) -> S
     loop line in child.stderr.lines() -> lines.push(line)
     if child.wait() == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
     StoreError.Other("{action} failed: {lines.join("\n").trim()}")
 }

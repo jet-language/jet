@@ -39,7 +39,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 - [BoundedWorkers](Parallel/BoundedWorkers.jet)
 - [ParallelIter](Parallel/ParallelIter.jet) — Explicit parallel collection adapters.
 - [ParallelScan](Parallel/ParallelScan.jet) — Parallel file scan.
-- [ParallelScanExpert](Parallel/ParallelScanExpert.jet) — Expert variant of parallel_scan.jet.
+- [ParallelScanExpert](Parallel/ParallelScanExpert.jet) — Expert variant of ParallelScan.jet.
 - [Pipeline](Parallel/Pipeline.jet)
 
 ## Services

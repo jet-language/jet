@@ -1,0 +1,12 @@
+# `#Policy(writes: .Explicit)`: each plain call that changes or takes a named
+# value is E0228 with a Safe edit; `jet fix` writes the marks and the result
+# checks and runs.
+fixture: writes_policy_fix_inserts_call_marks.fixture
+step: jet check run.jet
+exit: 1
+stderr: ~ "E0228" # every missing mark is the policy's code
+step: jet fix run.jet
+file: run.jet = writes_policy_fix_inserts_call_marks.fixture/run.fixed.out
+step: jet run run.jet
+exit: 0
+stdout: = "5 5\n"

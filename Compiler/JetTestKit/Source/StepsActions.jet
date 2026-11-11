@@ -76,7 +76,10 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
             words[1] = "="
             captured: kit_steps_capture_value(words, context, state)
             if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
-            suffix: if captured.value == { .Text(text) -> text else -> "" }
+            suffix: if captured.value == {
+                .Text(text) -> text
+                .Bytes(_) | .Numbers(_) | .Tree(_) | .Absent -> ""
+            }
             found := false
             loop index in 0..<state.captures.len() {
                 if state.captures[index].name == words[0] {

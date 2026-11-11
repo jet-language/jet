@@ -84,7 +84,7 @@ access_sigil: fn(access: AccessConvention) -> String Never! {
     if access == {
         .Write -> "&"
         .Move -> "&&"
-        else -> ""
+        .Read -> ""
     }
 }
 
@@ -145,7 +145,7 @@ measure_literal_value: fn(measure: Measure) -> Int? {
                 .Match -> None
             }
         }
-        else -> None
+        .SignedLiteral(_, _) | .Symbol(_, _) -> None
     }
 }
 
@@ -168,7 +168,7 @@ measure_signed_value: fn(measure: Measure) -> Int? {
                 .Match -> None
             }
         }
-        else -> None
+        .Symbol(_, _) -> None
     }
 }
 
@@ -280,6 +280,25 @@ dimension_display_name: fn(dimension: Dimension) -> String Never! {
 
 escape_dimension_axis: fn(axis: String) -> String Never! {
     axis.replace("%", "%25").replace(";", "%3B").replace(":", "%3A")
+}
+
+// The dimension `identity` names (dimension_identity's inverse): `;`
+// separates the axes and the last `:` of each splits its escaped name from
+// its whole exponent. Every `%` an escaped name holds starts one of the three
+// escapes, so undoing them in the reverse order restores the name byte for
+// byte, a non-ASCII axis name included. None when a part is not `name:exponent`
+// or its exponent is not a whole number in i32.
+dimension_from_identity: fn(identity: String) -> Dimension? {
+    axes := [DimensionAxis]{}
+    if identity == "" -> return Val(Dimension{axes: axes})
+    loop part in identity.split(";") {
+        cut: part.cut_last(":") ?? return None
+        exponent: Int.parse(cut.after) ?? return None
+        if exponent == 0 || exponent < -2147483648 || exponent > 2147483647 -> return None
+        name: cut.before.replace("%3A", ":").replace("%3B", ";").replace("%25", "%")
+        axes.push(DimensionAxis{name: name, exponent: Measure.SignedLiteral{kind: "dimension", value: exponent}})
+    }
+    Val(Dimension{axes: axes})
 }
 
 Exactness: enum {
@@ -679,7 +698,12 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             names.join(" | ")
         }
         .Quantity(base, _) -> type_carrier_identity(base)
-        .Measure(_) -> "Int"
+        // A `<comptime N: Int>` argument names its instance by its number
+        // (`Packet<4>` and `Packet<2>` are two instances).
+        .Measure(measure) -> {
+            if measure == .Literal(kind, value) && kind == "length" -> return "{value}"
+            "Int"
+        }
     }
 }
 
@@ -691,7 +715,7 @@ type_carrier_identity_grouped: fn(ty: Type) -> String Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) | .Result(_, _) | .Union(_) -> "({type_carrier_identity(ty)})"
         .Tagged(_, inner) -> type_carrier_identity_grouped(inner)
-        else -> type_carrier_identity(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> type_carrier_identity(ty)
     }
 }
 
@@ -763,7 +787,7 @@ type_name: fn(ty: Type) -> String Never! {
             if shown_ret == .Val(value) -> out = "{out} {type_name(value)}"
             out
         }
-        else -> type_carrier_identity(ty)
+        .Int | .Float | .Bool | .String | .Char | .Float32 -> type_carrier_identity(ty)
     }
 }
 
@@ -821,7 +845,7 @@ type_unqualified_nominals: fn(ty: Type) -> Type Never! {
         // a new tree (owner: the result) while the caller keeps the input (owner: the read
         // parameter, a payload view of the caller's tree); taking the input would need a consuming
         // match of every rebuilt variant (children arrive as payload views).
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty.copy()
     }
 }
 
@@ -875,7 +899,7 @@ type_marked_name: fn(ty: Type) -> String Never! {
             "({names.join(" | ")})"
         }
         .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> "({type_name(ty)})"
-        else -> type_name(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 
@@ -883,7 +907,7 @@ type_is_unit_callable_return: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit"
         .Result(ok, err) -> ok == Type.Named{name: "Unit"} && err == Type.Named{name: "Err"}
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -920,19 +944,19 @@ type_identity_equal: fn(left: Type, right: Type) -> Bool Never! {
                         if !tag_is_identity_bearing(other_marker) || marker != other_marker -> return false
                         return type_identity_equal(inner, other_inner)
                     }
-                    else -> return false
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
                 }
             }
             return type_identity_equal(inner, right)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if right == {
         .Tagged(marker, inner) -> {
             if tag_is_identity_bearing(marker) -> return false
             return type_identity_equal(left, inner)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     same := if left == {
         .Int -> right == Type.Int
@@ -943,70 +967,69 @@ type_identity_equal: fn(left: Type, right: Type) -> Bool Never! {
         .Float32 -> right == Type.Float32
         .List(element) -> if right == {
             .List(other) -> type_identity_equal(element, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Map(key, _, value) -> if right == {
             .Map(other_key, _, other_value) -> type_identity_equal(key, other_key) && type_identity_equal(value, other_value)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Shared(inner) -> if right == {
             .Shared(other) -> type_identity_equal(inner, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Option(inner) -> if right == {
             .Option(other) -> type_identity_equal(inner, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Result(ok, err) -> if right == {
             .Result(other_ok, other_err) -> type_identity_equal(ok, other_ok) && type_identity_equal(err, other_err)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Fn(params, ret, _, contract, metadata, _) -> if right == {
             .Fn(other_params, other_ret, _, other_contract, other_metadata, _) -> type_array_identity_equal(params, other_params) && type_optional_identity_equal(ret, other_ret) && call_contract_identity_equal(contract, other_contract) && call_variadic_identity_equal(metadata, other_metadata)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Named(name) -> if right == {
             .Named(other) -> name == other
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Apply(name, args) -> if right == {
             .Apply(other_name, other_args) -> name == other_name && type_array_identity_equal(args, other_args)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .TraitObject(bounds) -> if right == {
             .TraitObject(other) -> string_array_identity_equal(bounds, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Tuple(fields) -> if right == {
             .Tuple(other) -> tuple_fields_identity_equal(fields, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .FixedList(element, length) -> if right == {
             .FixedList(other_element, other_length) -> type_identity_equal(element, other_element) && length == other_length
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .IntN(signed, bits) -> if right == {
             .IntN(other_signed, other_bits) -> signed == other_signed && bits == other_bits
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .InlineRange(base, lo, hi) -> if right == {
             .InlineRange(other_base, other_lo, other_hi) -> lo == other_lo && hi == other_hi && type_identity_equal(base, other_base)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Union(members) -> if right == {
             .Union(other) -> type_array_identity_equal(members, other)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         .Quantity(base, dimension) -> if right == {
             .Quantity(other_base, other_dimension) -> type_identity_equal(base, other_base) && dimension_identity_equal(dimension, other_dimension)
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Measure(_) -> false
         }
         .Measure(measure) -> if right == {
             .Measure(other) -> measure == other
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) -> false
         }
         .Tagged(_, _) -> false
-        else -> false
     }
     same
 }
@@ -1037,6 +1060,13 @@ call_contract_identity_equal: fn(left: [CallContractRow]?, right: [CallContractR
 
 call_variadic_identity_equal: fn(left: FunctionCallMetadata?, right: FunctionCallMetadata?) -> Bool Never! {
     function_variadic_obligation(left) == function_variadic_obligation(right)
+}
+
+// Whether a function type's call metadata marks parameter `index` written
+// (`fn(&[Int])`); a type with no metadata reads every parameter.
+function_param_writes: fn(metadata: FunctionCallMetadata?, index: Int) -> Bool Never! {
+    row: metadata ?? return false
+    index >= 0 && index < row.conventions.len() && row.conventions[index] == AccessConvention.Write
 }
 
 string_array_identity_equal: fn(left: [String], right: [String]) -> Bool Never! {
@@ -1099,7 +1129,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: type_with_effective_fn_returns(base), dimension: dimension.copy()}
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
 }
 
@@ -1122,7 +1152,7 @@ type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
         }
         // copy: `marker` and `inner` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker` and `inner`
         .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_parameter_fn_return(inner)}
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -1131,7 +1161,7 @@ effective_callable_return: fn(ty: Type) -> Type Never! {
         .Named(name) -> if name == "Never" -> ty else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
         .Option(_) -> ty
         .Result(_, _) -> ty
-        else -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Type.Result{ok: ty, err: Type.Named{name: "Err"}}
     }
 }
 
@@ -1139,14 +1169,11 @@ compute_dimension_type: fn(value: Int) -> Type Never! {
     Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
-compute_dimension_value: fn(ty: Type) -> Int? {
-    if ty == {
-        .Measure(value) -> {
-            if measure_kind(value) != "shape" -> return None
-            measure_literal_value(value)
-        }
-        else -> None
-    }
+// The number a `<comptime N: Int>` argument holds: a literal length
+// measure (`Packet<4>`, or a constant sema folded to one).
+number_argument_value: fn(ty: Type) -> Int? Never! {
+    if ty == .Measure(value) -> return measure_literal_value(value)
+    None
 }
 
 compute_shape_type: fn(name: String, dimensions: [Int]) -> Type Never! {
@@ -1157,7 +1184,7 @@ compute_shape_type: fn(name: String, dimensions: [Int]) -> Type Never! {
 compute_shape_measures: fn(ty: Type) -> [Measure]? {
     if ty == {
         .Apply(name, args) -> compute_shape_measures_apply(name, args)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1175,7 +1202,7 @@ compute_shape_measures_apply: fn(name: String, args: [Type]) -> [Measure]? {
                 if measure_kind(measure) != "shape" -> return None
                 measures.push(measure.copy())
             }
-            else -> return None
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) -> return None
         }
     }
     Val(measures)
@@ -1198,7 +1225,7 @@ is_compute_tensor_family: fn(ty: Type) -> Bool Never! {
         .Tagged(_, inner) -> is_compute_tensor_family(inner)
         .Named(name) -> name == "Tensor" || name == "<corelib>/core.compute::Tensor"
         .Apply(name, args) -> is_compute_tensor_application(name, args)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1217,17 +1244,11 @@ is_compute_tensor_application: fn(name: String, args: [Type]) -> Bool Never! {
     true
 }
 
-is_compute_view_mut: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, args) -> name == "ComputeViewMut" && args.len() == 1 && args[0] == Type.Float
-        else -> false
-    }
-}
 
 is_measure_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Measure(_) -> true
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) -> false
     }
 }
 
@@ -1243,7 +1264,7 @@ is_compute_shape_type: fn(name: String, args: [Type]) -> Bool Never! {
             .Measure(value) -> {
                 if measure_kind(value) != "shape" -> return false
             }
-            else -> return false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) -> return false
         }
     }
     true
@@ -1404,7 +1425,7 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
                         loop (i, arg) in args {
                             if arg == {
                                 .Measure(value) -> entries.push(KnowledgeEntry{path: [String]{"shape", "{i}"}, plane: "Measure", fact: KnowledgeFact.Measure{value: value}})
-                                else -> {}
+                                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) -> {}
                             }
                         }
                     }
@@ -1416,7 +1437,7 @@ type_identity_knowledge: fn(ty: Type) -> KnowledgeVector Never! {
             lanes := type_simd_lane_arity(name)
             if lanes != None -> entries.push(KnowledgeEntry{path: [String]{}, plane: "Measure", fact: KnowledgeFact.Measure{value: Measure.Literal{kind: "lane", value: lanes ?? 0}}})
         }
-        else -> {}
+        .Bool | .String | .Char | .TraitObject(_) -> {}
     }
     KnowledgeVector{entries: entries}
 }

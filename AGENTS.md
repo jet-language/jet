@@ -93,19 +93,29 @@ files, or one-off run artifacts.
 ## Tooling in other languages
 
 Repository tooling is Jet. New tooling may be written first in another
-language and proven working; then its Jet twin is written and proven to print
-the same output. The pair is a gauntlet entry: an entry under
+language and proven working; then its Jet twin is written, in the best Jet
+that does the job rather than a copy of the original's exact output, and
+proven to do the same job. The pair is a gauntlet entry: an entry under
 `Tools/gauntlet/entries/` with `"mode": "tool"` names the original as
 `tool.original` and the twin as `tool.jet`, and holds the shared fixtures and
-the parity cases with their expected output. The repository keeps running the
-original until the Jet twin wins every port bar (#5072: identical output,
-faster in wall time and peak memory, no more source tokens, and no harder to
-reason about); then the repository switches to the Jet twin and keeps the
-original only as the entry's reference. `Tools/agent/ScriptPairing.jet
---check`, which every lane check runs, refuses a change that adds a script in
-another language without its pair; browser-executed JavaScript, Nix files,
-and test and example subjects are exempt. `--census` lists every script in
-another language in the checkout and its pair.
+the parity cases with their expected output; a case's `check`, a Jet program
+in the entry, prints the facts the job leaves (the files, commits and queue
+lines it produces, the facts its report states), and both programs must give
+the case's exit status and that expected print. The repository keeps running
+the original until the Jet twin passes the port bars (#5072 c14, c34).
+Performance ranks first: the same job, lower wall time and lower peak memory
+decide, with the reasoning bar beside them (no harder to reason about,
+scored on a fixed checklist in the entry's `review.json`). Source tokens are
+measured and reported; a twin above the original's count blocks a switch
+only while its entry's `tool.token_gaps` names no Core API criterion or
+syntax ballot that closes the gap. Then the repository switches to the Jet
+twin and keeps the original only as the entry's reference in the entry's
+directory. `Tools/gauntlet/PortBars.jet` judges every tool entry on all four
+bars. `Tools/agent/ScriptPairing.jet --check`, which every lane check runs,
+refuses a change that adds a script in another language without its pair,
+or that switches an entry before it passes every bar; browser-executed
+JavaScript, Nix files, and test and example subjects are exempt. `--census`
+lists every script in another language in the checkout and its pair.
 
 ## Greenfield cutover
 
@@ -174,6 +184,13 @@ parity band. The second and final stage is the machine ceiling: hand-written,
 maximally optimized machine code for the same workload. Jet must match or beat
 it in both cycles and bytes (Jet/ceiling at most `1.00`). Beating the peers is
 the floor, not the goal.
+
+Measure live. Jet's goal is raw compile and run speed, not incremental or
+cached compilation: the compile-speed target is 30 million lines per second
+from cold. A measured run compiles from cold, and its compile time counts. No
+script cache, build-action reuse or other compile cache serves it, and every
+compile cache is off by default. Computers are fast and software is bloated,
+which is why the final comparison is always hand-optimized machine code.
 
 Every required cell needs a ceiling reference: an asm-parity cell
 (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
@@ -346,10 +363,12 @@ While the orchestrator's batches run, every worker keeps coding to spec.
 
 A worker's unit of work is one open criterion, read from the card before any
 code is written. If its proof already passes, the worker sends the command and
-its output and takes the next criterion. A criterion with no passing proof
-after 45 minutes is written up as a blocker and the worker moves on; the
-orchestrator routes the blocker. A worker never ends its turn to wait on its
-own job.
+its output and takes the next criterion. Every item is sized at most one hour
+of code plus one hour of testing and fixes. Larger work is split into such
+items and written, never sized in hours or days, parked or noted as blocked
+for its size. The only blockers are an open owner ballot and a missing
+dependency another lane owns; the worker names it to the orchestrator in one
+line and moves on. A worker never ends its turn to wait on its own job.
 
 This is a hard owner requirement. The orchestrator never lets a worker idle.
 No worker waits on a landing, a batch, a seed, a review, or a proof: it stacks
@@ -362,12 +381,37 @@ reassigning it.
 
 The orchestrator does every build and test. It keeps every worker's next task
 queued, integrates submissions in batches with one collect-all pass, and lands
-each passing submission on `dev` as its own commit. A failing submission is
+each passing submission on `dev` as its own commit. At intake it runs a quick,
+narrow, targeted check of each submission with the current train's compiler
+and returns every finding to the worker as one list. Trains run continuously:
+when a train's preflight or census finds failures, it collects them all, their
+owners fix them all, and the train retests only the affected rows and
+continues. A failing submission is
 set aside without holding back the rest, and every failure goes back at once
 to the worker that owns it, as one list and that worker's top priority. The
 orchestration skill's intake reference defines the submission format, batch
 integration, and landing; the skill also covers briefs, liveness, proof
 cadence, recovery, and closure.
+
+Landing throughput is the measure of progress. These standing owner orders
+keep it high:
+- Two trains run in flight whenever memory allows, composed on disjoint paths
+  so a set-aside in one never recomposes the other.
+- A submission that changes no build input of the compiler, the runtime or
+  Core (docs, tool twins, gauntlet entries, review records, tests, examples
+  the last train's compiler already proves) is tested with that compiler and
+  lands on `dev` directly, without a train, within the hour.
+- A submission meets whole criteria and names each one with its exact proof
+  command. Light work travels in its own submission, apart from compiler and
+  Core changes, so it is never held by a build.
+- Each lead reports every hour: the submissions it staged and the criterion
+  each one meets.
+- Criteria that already hold on `dev` are found by sweep, proved and met
+  directly, with no new code.
+- Every landed compiler train becomes the owner's next a0.0.N release:
+  `Tools/release/Main.jet` `admit` runs on the landed commit in the next free
+  build slot, so the owner always uses a compiler at most one train behind
+  `dev`.
 
 The orchestrator may name one Lander and one Closer. The Lander runs the
 batch, landing and seed loop in the orchestrator's place, as a rolling train

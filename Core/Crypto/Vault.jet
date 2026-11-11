@@ -43,13 +43,11 @@ ExpiringSecret: struct<T> {
     value: Shared<T?>
     deadline_ms: Int
     observer: time.__ClockObserver
-}
 
-impl ExpiringSecret {
     new: fn<T>(value: &&T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
         observer: clock.__observer()
         deadline: time.__expiry_deadline(observer.now(), ttl)
-        ExpiringSecret<T>{value: shared (T?{Val(value)}), deadline_ms: deadline, observer: observer}
+        ExpiringSecret<T>{value: Shared{(T?{Val(value)})}, deadline_ms: deadline, observer: observer}
     }
 
     expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
@@ -59,11 +57,11 @@ impl ExpiringSecret {
         guard: self.value.guard_read()
         __loan_secret<T, R>(guard.value, callback)
     }
-}
 
-impl ExpiringSecret.Close {
-    close: fn(&&self) {
-        __close_secret_storage<T>(self.value.move())
+    impl Close {
+        close: fn(&&self) {
+            __close_secret_storage<T>(self.value.move())
+        }
     }
 }
 
@@ -93,26 +91,30 @@ __loan_secret: fn<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired! {
 }
 
 ExpiryCloseCount: struct { count: Int }
-ExpiryCloseProbe: struct { count: Shared<ExpiryCloseCount> }
-impl ExpiryCloseProbe.Close {
-    close: fn(&&self) {
-        guard := self.count.guard_edit()
-        guard.value.count += 1
+ExpiryCloseProbe: struct {
+    count: Shared<ExpiryCloseCount>
+
+    impl Close {
+        close: fn(&&self) {
+            guard := self.count.guard_edit()
+            guard.value.count += 1
+        }
     }
 }
-
 // Structural twin of ExpiringSecret's Shared<T?> + Close, specialized to a
 // counted probe because the public wrapper's closed crypto family rejects it.
-ExpiryCloseOwner: struct { value: Shared<ExpiryCloseProbe?> }
-impl ExpiryCloseOwner.Close {
-    close: fn(&&self) {
-        __close_secret_storage<ExpiryCloseProbe>(self.value.move())
+ExpiryCloseOwner: struct {
+    value: Shared<ExpiryCloseProbe?>
+
+    impl Close {
+        close: fn(&&self) {
+            __close_secret_storage<ExpiryCloseProbe>(self.value.move())
+        }
     }
 }
-
 #Test("Expired storage takes its credential and closes it exactly once") {
-    count: shared ExpiryCloseCount{count: 0}
-    storage: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})
+    count: Shared{ExpiryCloseCount{count: 0}}
+    storage: Shared{(ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
     if true {
         __take_expired<ExpiryCloseProbe>(storage)
         guard: storage.guard_read()
@@ -121,7 +123,7 @@ impl ExpiryCloseOwner.Close {
     __take_expired<ExpiryCloseProbe>(storage)
     // Dropping still-live storage must run the same payload Close exactly once.
     if true {
-        live: ExpiryCloseOwner{value: shared (ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}
+        live: ExpiryCloseOwner{value: Shared{(ExpiryCloseProbe?{Val(ExpiryCloseProbe{count: count.copy()})})}}
     }
     observed: count.guard_read()
     assert_eq(observed.value.count, 2)
@@ -187,6 +189,16 @@ WrappedVaultKey: struct {
 
     from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(bytes) }
     bytes: fn(self) -> [U8] Never! { __wrapped_bytes(self) }
+
+    impl Display {
+        display: fn(self) -> String {
+            mode: if self.mode == 1 -> "recipient" else -> "passphrase"
+            key_type: if self.key_type == 1 -> "signing" else -> "x25519"
+            "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
+        }
+    }
+
+    impl Debug { debug: fn(&&self) -> String { self.display() } }
 }
 
 __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
@@ -195,25 +207,15 @@ __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
         origin_name: meta.name.move(), origin_generation: meta.generation, header_len: meta.header_len})
 }
 __wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
-
-impl WrappedVaultKey.Display {
-    display: fn(self) -> String {
-        mode: if self.mode == 1 -> "recipient" else -> "passphrase"
-        key_type: if self.key_type == 1 -> "signing" else -> "x25519"
-        "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
-    }
-}
-impl WrappedVaultKey.Debug { debug: fn(&&self) -> String { self.display() } }
-
 KeyUnlock: struct {
     kind: Int
     secret: View<U8>
 }
 // These retain a read borrow of the real owner's bytes, never a copied secret.
-__key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+#Unsafe("vault key import: the caller's unlock request borrows the private key's bytes for the unlock only") __key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
 }
-__key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+#Unsafe("vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only") __key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
 }
 

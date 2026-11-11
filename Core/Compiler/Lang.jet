@@ -1,7 +1,7 @@
 // core.compiler.lang — closed menus the compiler itself consults.
 //
 // These enums are the public names of marker arguments (`#Inline`, `#Layout`
-// `#FX`, `#Meta`, `#Job`, `#RenameAll`, …). Variant spellings match
+// `#FX`, `#Meta`, `#Job`, `#Off`, `#Rename`, …). Variant spellings match
 // `Policy::canonical_rule_arg_variants`. They are values, not a second
 // type system: a Jet program names a variant; the compiler records the fact.
 /// Calling convention for `#Import` / `#Export`.
@@ -19,6 +19,12 @@ ArithmeticMode: enum {
     Checked
     Wrapping
     Saturating
+}
+
+/// Build condition of `#Off(.Release)`: the closed menu of builds that erase
+/// the marked code. A bare `#Off` erases it from every build.
+BuildCondition: enum {
+    Release
 }
 
 /// Effect roots that may appear in an `effect_name` row. The cases are the
@@ -113,7 +119,7 @@ MemoBound: enum {
     Unset
 }
 
-/// Field-rename policy for codecs (`#RenameAll`).
+/// Wire casing for codecs (`#Rename(.Camel)` on a type).
 NamingCase: enum {
     Camel
     Snake
@@ -147,6 +153,9 @@ PolicySetting: enum {
     ExplicitUnits
     Copies
     Sentries
+    /// `arithmetic: .Wrapping`: the fixed-width arithmetic mode of one body.
+    Arithmetic(mode: ArithmeticMode)
+    Writes
     Explicit
     On
     Off
@@ -187,6 +196,26 @@ TaintKind: enum {
     PII
     Secret
     Credential
+}
+
+/// A tag's timing (`timing:` in a `tag` body). A `.Fixed`
+/// value's time and memory addresses must not depend on it: sema refuses a
+/// branch, index, division, shift, allocation size or call target on it
+/// (E0737), an `Int` or `Float` holding it (E0738), and arithmetic that
+/// could stop on it (E0739). `Secret` is `.Fixed`; every other tag, and a
+/// declared tag without `timing:`, is `.Free`.
+TagTiming: enum {
+    Free
+    Fixed
+}
+
+/// What a tag protects (`protects:` in a `tag` body): `.Secrecy`, where its
+/// value may flow, or `.Integrity`, what may flow into a place that needs a
+/// trusted value. `Input` is `.Integrity`; every other tag, and a declared
+/// tag without `protects:`, is `.Secrecy`.
+TagProtects: enum {
+    Secrecy
+    Integrity
 }
 
 /// Codegen target family.

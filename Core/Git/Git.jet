@@ -1,0 +1,215 @@
+package: {
+    name: "core.git"
+    version: "0.0.1"
+    edition: "2026"
+    description: "The git blocks scripts repeat, one call each on a work tree."
+    license: "MIT"
+    outputs: {
+        git: .Library{ entry: git }
+    }
+}
+use {
+    core: core
+    internal.[git_add_path, git_commit_staged, git_extra, git_fields, git_ran]
+}
+
+/// A git work tree, driven as scripts drive git: `w: git.repo(dir)`. Each
+/// call is one of the multi-command git blocks scripts repeat (stage a patch
+/// and commit exactly its paths, list the paths a patch touches, export a
+/// commit, compare the tracked files with a tested tree). Every git command
+/// runs in `dir` with the caller's GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE
+/// unset, so a script started from a hook, a lander or another repository's
+/// environment acts on this tree alone, and git's own errors go to stderr.
+Repo: struct {
+    dir: String
+
+    /// `line` as a ProcessSpec run in the work tree, the caller's git
+    /// environment unset and its errors shown, for a run that sets stdio,
+    /// a timeout or more environment first:
+    /// `w.spec(Sh{"git fetch -q origin"}).run()`.
+    spec: fn(self, line: Sh) -[Exec]> ProcessSpec Never! {
+        line.spec().cwd(self.dir).stderr(.Inherit).env_remove("GIT_DIR").env_remove("GIT_INDEX_FILE").env_remove("GIT_WORK_TREE")
+    }
+
+    /// The short sha of HEAD (`git rev-parse --short HEAD`), or "" when
+    /// there is none.
+    head: fn(self) -[Exec, Time.Wait]> String Never! {
+        receipt: self.spec(Sh{"git rev-parse --short HEAD"}).stderr(.Capture).run() ?? return ""
+        if receipt.success -> receipt.output.trim() else -> ""
+    }
+
+    /// Whether no tracked file has changes, staged or not
+    /// (`git status --porcelain -uno` prints nothing).
+    clean: fn(self) -[Exec, Time.Wait]> Bool Never! {
+        receipt: self.spec(Sh{"git status --porcelain=v1 -uno"}).run() ?? return false
+        receipt.success && receipt.output == ""
+    }
+
+    /// Every path `patch` touches without repeats: each file under its new
+    /// path in patch order, then the old path of each rename. Empty when
+    /// the patch does not parse.
+    patch_paths: fn(self, patch: String) -[Exec, Time.Wait, FS.Read]> [String] Never! {
+        receipt: self.spec(Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run() ?? return [String]{}
+        if !receipt.success -> return [String]{}
+        paths := [String]{}
+        // `added TAB deleted TAB path` records, a renamed file under its new
+        // path; the patch's `rename from` lines name the paths renames remove.
+        loop record in git_fields(receipt.output) -> git_add_path(paths, record.partition("\t").tail.partition("\t").tail)
+        loop line in (core.files.read(patch) ?? "").lines() {
+            if line.starts_with("rename from ") -> git_add_path(paths, line.removeprefix("rename from "))
+        }
+        paths
+    }
+
+    /// Stages `patch` (`git apply --index`) and commits exactly the paths
+    /// it staged, rename sources included, with `message`; the commit.
+    land: fn(self, patch: String, message: String) -[Exec, Time.Wait]> Landed GitError! {
+        if !git_ran(self.spec(Sh{"git apply --index {patch}"})) -> return Err(.NoApply)
+        listed: self.spec(Sh{"git diff --cached --name-only --no-renames -z"}).run() ?? return Err(.NoCommit)
+        paths: git_fields(listed.output).filter(path -> path != "")
+        sha: git_commit_staged(self, paths.copy(), message)
+        Landed{sha: sha, paths: paths}
+    }
+
+    /// Stages `paths` as they are in the work tree, deletions included
+    /// (`git add -A -f`), and commits exactly those paths with `message`;
+    /// the new commit's short sha.
+    commit: fn(self, paths: [String], message: String) -[Exec, Time.Wait]> String GitError! {
+        if !git_ran(self.spec(Sh{"git add -A -f --"}.extend(paths.copy()))) -> return Err(.NoCommit)
+        git_commit_staged(self, paths, message)
+    }
+
+    /// The tree of `commit` written into `dir`, created first
+    /// (`git archive COMMIT | tar -x -C DIR`).
+    export: fn(self, commit: String, dir: String) IOError! -[Exec, Time.Wait, FS.Write]> {
+        core.files.create_dir_all(dir)
+        receipt: core.process.pipeline([ProcessSpec]{self.spec(Sh{"git archive {commit}"}), Sh{"tar -x -C {dir}"}.spec()})
+        core.process.check(receipt)
+    }
+
+    /// How the tracked files differ from the tree at `dir` (an export that
+    /// was tested): each tracked file that differs or is missing there, in
+    /// git's order, then each file only `dir` has. Symlinks are not
+    /// compared; `skip` names directories never entered under `dir` (build
+    /// output).
+    drift: fn(self, dir: String, skip: [String]{[String]{}}) -[Exec, Time.Wait, FS.Read]> [Drift] IOError! {
+        listed: self.spec(Sh{"git ls-files -z"}).run()
+        core.process.check(listed)
+        tracked: git_fields(listed.output).filter(path -> path != "")
+        found := [Drift]{}
+        loop path in tracked.copy() {
+            mine: core.files.join(self.dir, path)
+            tested: core.files.join(dir, path)
+            if {
+                core.files.is_symlink(mine) -> next
+                !core.files.exists(tested) -> { if core.files.exists(mine) -> found.push(Drift{path: path, tracked: true, tested: false}) }
+                (core.files.read_bytes(mine) ?? [U8]{}) != (core.files.read_bytes(tested) ?? [U8]{}) -> found.push(Drift{path: path, tracked: true, tested: true})
+            }
+        }
+        git_extra(dir, "", Set.from(tracked), skip, found)
+        found
+    }
+}
+
+/// Why `land` or `commit` stopped; git's own message is on stderr.
+#Error
+GitError: enum {
+    /// The patch does not apply to the tree.
+    NoApply
+    /// git refused the commit (a hook, nothing to commit) or did not run.
+    NoCommit
+}
+
+/// A commit `land` made: its short sha and every path it committed, in
+/// git's order.
+Landed: struct {
+    sha: String
+    paths: [String]
+}
+
+/// One file the tracked files and a tested tree hold differently: `tracked`
+/// when the work tree tracks and has it, `tested` when the tested tree has
+/// it; with both, their bytes differ.
+Drift: struct {
+    path: String
+    tracked: Bool
+    tested: Bool
+}
+
+/// The work tree at `dir`.
+repo: fn(dir: String) -> Repo Never! { Repo{dir: dir} }
+
+// The steps behind the Repo calls: not part of the git surface.
+priv internal: module {
+    // `git commit` of exactly `paths` (already staged) with `message`; the
+    // new commit's short sha.
+    git_commit_staged: fn(repo: Repo, paths: [String], message: String) -[Exec, Time.Wait]> String GitError! {
+        core.process.stdin_text(repo.spec(Sh{"git commit -q -F - --"}.extend(paths)), message) ?? return Err(.NoCommit)
+        repo.head()
+    }
+
+    // Whether `spec` ran and exited 0, its stdout discarded.
+    git_ran: fn(spec: ProcessSpec) -[Exec, Time.Wait]> Bool Never! {
+        receipt: spec.run() ?? return false
+        receipt.success
+    }
+
+    // The NUL-separated fields of git's `-z` output.
+    git_fields: fn(output: String) -> [String] Never! {
+        output.split(String.from_bytes([U8]{0}) ?? "").to_list()
+    }
+
+    git_add_path: fn(paths: &[String], path: String) Never! {
+        if path != "" && !paths.contains(path) -> paths.push(path.copy())
+    }
+
+    // The files under `root` (below `rel`) not in `tracked`, `skip`
+    // directories and directory symlinks not entered.
+    git_extra: fn(root: String, rel: String, tracked: Set<String>, skip: [String], found: &[Drift]) Never! -[FS.Read]> {
+        loop entry in core.files.list_dir(core.files.join(root, rel)) ?? [] {
+            path: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
+            if {
+                entry.is_dir && !core.files.is_symlink(entry.path) -> { if !skip.contains(entry.name) -> git_extra(root, path, tracked, skip, found) }
+                !tracked.has(path) -> found.push(Drift{path: path, tracked: false, tested: true})
+            }
+        }
+    }
+}
+
+#Test("a work tree commits, lands a patch, exports and compares as one call each") {
+    root: core.files.mktemp("git-kat")
+    work: core.files.join(root, "work")
+    core.files.create_dir_all(work) ?? panic("work")
+    w: repo(work)
+    // A host without git has nothing to drive.
+    if !git_ran(w.spec(Sh{"git init -q"})) -> return
+    assert(git_ran(w.spec(Sh{"git config user.name kat"})) && git_ran(w.spec(Sh{"git config user.email kat@example.com"})))
+    assert_eq(w.head(), "")
+    core.files.write(core.files.join(work, "a.txt"), "one\n") ?? panic("a")
+    core.files.write(core.files.join(work, "old.txt"), "keep\n") ?? panic("old")
+    first: w.commit([String]{"a.txt", "old.txt"}, "first\n") ?? panic("first commit")
+    assert(first != "" && first == w.head() && w.clean())
+    patch: core.files.join(root, "change.patch")
+    core.files.write(patch, "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\ndiff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n") ?? panic("patch")
+    assert_eq(w.patch_paths(patch), [String]{"a.txt", "new.txt", "old.txt"})
+    assert_eq(w.patch_paths(core.files.join(root, "missing.patch")), [String]{})
+    landed: w.land(patch, "second\n") ?? panic("land")
+    assert_eq(landed.paths, [String]{"a.txt", "new.txt", "old.txt"})
+    assert(landed.sha == w.head() && w.clean())
+    assert(w.land(patch, "again\n") == .Err(.NoApply))
+    tested: core.files.join(root, "tested")
+    w.export("HEAD", tested) ?? panic("export")
+    assert_eq((w.drift(tested) ?? panic("drift")).len(), 0)
+    core.files.write(core.files.join(tested, "a.txt"), "three\n") ?? panic("three")
+    core.files.remove(core.files.join(tested, "new.txt")) ?? panic("remove")
+    core.files.create_dir_all(core.files.join(tested, "build")) ?? panic("build")
+    core.files.write(core.files.join(tested, "build/out"), "") ?? panic("out")
+    core.files.write(core.files.join(tested, "extra.txt"), "") ?? panic("extra")
+    drift: w.drift(tested, skip: [String]{"build"}) ?? panic("drift")
+    assert_eq(drift.map(change -> "{change.path} {change.tracked} {change.tested}"), [String]{"a.txt true true", "new.txt true false", "extra.txt false true"})
+    core.files.write(core.files.join(work, "a.txt"), "four\n") ?? panic("four")
+    assert(!w.clean())
+    third: w.commit([String]{"a.txt"}, "third\n") ?? panic("third commit")
+    assert(third == w.head() && w.clean())
+    core.files.remove_all(root) ?? panic("cleanup")
+}

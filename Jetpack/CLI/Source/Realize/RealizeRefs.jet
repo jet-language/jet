@@ -46,7 +46,7 @@ cli_classify_or_report: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw:
         .Err(error) -> {
             retry_default: if error == {
                 .MissingSeparator(_) | .UnknownMember(_, _) -> !raw.contains(REF_PROVIDER_AT) && !pkg_is_bare_path(raw)
-                else -> false
+                .EmptyHalf(_) | .Malformed(_) | .UnknownSource(_, _, _) | .AmbiguousBare(_) | .AmbiguousMember(_, _) -> false
             }
             if retry_default {
                 if RefSpec.classify_in(pkg_with_default_source(raw), table) == {
@@ -372,12 +372,12 @@ cli_realize_ref_outcome: fn(verification: &StoreVerification, theme: Theme, root
                     // the same class as a missing Nix bridge, so exit 2.
                     unavailable: if provider_error == {
                         .NixCache(_) | .NixIndex(_) | .Offline(_) -> true
-                        else -> false
+                        .BuildFailed(_) | .BadOutput(_) | .Ingest(_) | .FixtureMissing(_) | .Unsupported(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .SandboxUnavailable(_) | .Channel(_) -> false
                     }
                     provider_error.report(theme)
                     if unavailable -> RefOutcome.Unavailable else -> RefOutcome.Failed
                 }
-                else -> {
+                .LockedNix(_) | .Store(_) | .Integrity(_) -> {
                     cli_report_realize_error(theme, error)
                     RefOutcome.Failed
                 }
@@ -480,7 +480,7 @@ cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: H
                     provider_error.report(theme)
                     if flags.shell_on_fail -> cli_shell_on_failed_build(theme, roots, plan.name)
                 }
-                else -> cli_report_realize_error(theme, error)
+                .LockedNix(_) | .Store(_) | .Integrity(_) -> cli_report_realize_error(theme, error)
             }
             None
         }

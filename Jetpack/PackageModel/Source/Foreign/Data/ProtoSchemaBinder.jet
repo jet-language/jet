@@ -388,7 +388,7 @@ ProtoParser: struct {
         token: self.token_at(offset) ?? return None
         if token == {
             .Word(word) -> Val(word)
-            else -> None
+            .Number(_) | .StringLiteral(_) | .Symbol(_) -> None
         }
     }
 
@@ -401,7 +401,7 @@ ProtoParser: struct {
         token: self.token_at(offset) ?? return false
         if token == {
             .Symbol(symbol) -> symbol == expected
-            else -> false
+            .Word(_) | .Number(_) | .StringLiteral(_) -> false
         }
     }
 
@@ -418,7 +418,7 @@ ProtoParser: struct {
                 self.pos += 1
                 Ok(value)
             }
-            else -> Err(DataBindError{message: "proto expected {what}"})
+            .Word(_) | .Number(_) | .Symbol(_) -> Err(DataBindError{message: "proto expected {what}"})
         }
     }
 
@@ -578,7 +578,7 @@ ProtoParser: struct {
         number := ""
         if token == {
             .Number(text) -> number = text
-            else -> return Err(DataBindError{message: "proto expected {what}"})
+            .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto expected {what}"})
         }
         if number.contains(".") || number.contains("e") || number.contains("E") -> return Err(DataBindError{message: "proto {what} must be an integer"})
         self.pos += 1
@@ -595,7 +595,7 @@ ProtoParser: struct {
                 .Val(token) -> {
                     if token == {
                         .StringLiteral(name) -> literal = Val(name)
-                        else -> {}
+                        .Word(_) | .Number(_) | .Symbol(_) -> {}
                     }
                 }
                 .None -> {}
@@ -688,7 +688,7 @@ ProtoParser: struct {
         literal := ""
         if token == {
             .Number(text) -> literal = text
-            else -> return Err(DataBindError{message: "proto field number is missing"})
+            .Word(_) | .StringLiteral(_) | .Symbol(_) -> return Err(DataBindError{message: "proto field number is missing"})
         }
         self.pos += 1
         if literal.contains(".") || literal.contains("e") || literal.contains("E") -> return Err(DataBindError{message: "proto field number must be an integer"})
@@ -820,7 +820,7 @@ ProtoParser: struct {
                 if option.name == "allow_alias" {
                     if option.value == {
                         .Flag(flag) -> allow_alias = flag
-                        else -> return Err(DataBindError{message: "proto enum allow_alias must be true or false"})
+                        .Text | .Number | .Identifier | .Aggregate -> return Err(DataBindError{message: "proto enum allow_alias must be true or false"})
                     }
                 }
                 next
@@ -936,14 +936,14 @@ ProtoParser: struct {
 pkg_data_proto_is_string: fn(token: ProtoToken) -> Bool Never! {
     if token == {
         .StringLiteral(_) -> true
-        else -> false
+        .Word(_) | .Number(_) | .Symbol(_) -> false
     }
 }
 
 pkg_data_proto_is_number: fn(token: ProtoToken) -> Bool Never! {
     if token == {
         .Number(_) -> true
-        else -> false
+        .Word(_) | .StringLiteral(_) | .Symbol(_) -> false
     }
 }
 

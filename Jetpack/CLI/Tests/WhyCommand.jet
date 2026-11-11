@@ -32,14 +32,14 @@ cli_why_test_field: fn(tree: Dyn, key: String) -> Dyn {
             }
             panic("missing field {key}")
         }
-        else -> panic("expected an object around {key}")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> panic("expected an object around {key}")
     }
 }
 
 cli_why_test_text: fn(tree: Dyn) -> String {
     if tree == {
         .Text(text) -> text
-        else -> panic("expected a string")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("expected a string")
     }
 }
 
@@ -67,7 +67,7 @@ cli_why_test_text: fn(tree: Dyn) -> String {
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(requesting, "lock_file"), "text")), "name = \"ripgrep\"")
     dependents: if cli_why_test_field(why, "dependents") == {
         .Array(items) -> items
-        else -> panic("dependents is a list")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("dependents is a list")
     }
     assert_eq(cli_why_test_text(dependents[0]), "tool@1.0 (tool@jetpack)")
     assert_eq(foundation_json_integer(cli_why_test_field(cli_why_test_field(why, "disk"), "bytes")), Val(4096))

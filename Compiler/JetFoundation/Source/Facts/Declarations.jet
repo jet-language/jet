@@ -21,7 +21,7 @@ TEffectFacts: struct {
     // application's effect list follows them as well as `call_edges`.
     value_edges: [String]{[String]{}}
     // The module state this body writes (`name` and the write's span): a
-    // module `:=` binding, or a module `shared` holder or `Cell`. It is no
+    // module `:=` binding, or a module `Shared` holder or `Cell`. It is no
     // effect, but a pure function may not reach one.
     module_writes: [TEffectSpan]{[TEffectSpan]{}}
 }
@@ -42,6 +42,9 @@ TForeignProvenance: struct {
 TGenericParam: struct {
     name: String
     bounds: [SymbolID]
+    // A `<comptime N: Int>` number parameter: an instance binds it to a
+    // Type.Measure length, and a body reads `N` as that Int.
+    number: Bool{false}
 }
 TDeclarationFacts: struct {
     type_defs: [TTypeDef]
@@ -248,7 +251,7 @@ TTraitDef: struct {
     methods: [TTraitMethod]
 }
 
-// The OSes a build runs on: the one list `#Target(OS.*)`, a `$build.os`
+// The OSes a build runs on: the one list `#Target(OS.*)`, a `#build.target.os`
 // dispatch and the `os` build option read. Linux, macOS and Windows are the
 // native OSes; a web build runs in the browser, a Wasm build on a WebAssembly
 // host such as WASI, and a freestanding build on bare metal with no OS.
@@ -354,8 +357,8 @@ TConstantDef: struct {
     is_comptime: Bool
     is_storage: Bool
     value: TComptimeValue
-    // A constant computed at startup: the key of the function that computes
-    // it (its `value` is then Unit). The program initializes every such
-    // constant before `run`, and a read waits for its own on first use.
-    init: String?{None}
+    // A module `Shared{X}` holder: `value` is the payload the build folded
+    // and `ty` the holder's Shared type; the program allocates the cell on
+    // its first read and every read shares it.
+    shared_holder: Bool{false}
 }

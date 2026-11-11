@@ -1,7 +1,7 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
 // The compiler stage at which a checked fact becomes available; distinct from
-// the language execution phase `$phase` returns.
+// the language execution phase `#phase` returns.
 CompilerStage: enum {
     Parsed
     Resolved
@@ -130,7 +130,7 @@ failure_contract_from_return_type: fn(return_type: Type?) -> FailureContract Nev
             return FailureContract.Explicit{success: ok, error: err}
         }
         .Option(success) -> return FailureContract.Optional{success: success}
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     FailureContract.Default{success: declared, error: Type.Named{name: "Err"}}
 }
@@ -148,7 +148,7 @@ failure_contract_of_function: fn(return_type: Type?, return_type_span: Span?) ->
             if error == .Named(name) && name == "Err" -> return contract
             return FailureContract.Inferred{success: success, error: error}
         }
-        else -> {}
+        .Default(_, _) | .Optional(_) | .DeclaredNever | .Converted(_, _, _) | .InferredNever(_) | .Inferred(_, _) -> {}
     }
     contract
 }
@@ -175,7 +175,7 @@ failure_contract_written: fn(contract: FailureContract) -> FailureContract Never
         // copy: `success` is a payload of read parameter `contract`, which keeps the original; the new Default owns this one
         .InferredNever(success) | .Inferred(success, _) -> FailureContract.Default{success: success.copy(), error: Type.Named{name: "Err"}}
         // copy: `contract` is a read parameter; the caller keeps it and the result owns this one
-        else -> contract.copy()
+        .Default(_, _) | .Optional(_) | .DeclaredNever | .Explicit(_, _) | .Converted(_, _, _) | .ProvenUnreachable(_) -> contract.copy()
     }
 }
 
@@ -372,7 +372,7 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
                     if tail == .Val(inner) -> ast_comptime_walk_expr(inner, calls, sites)
                 }
                 .Panic(_, args) -> loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
@@ -394,7 +394,7 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
         }
         // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
         // (absent from the Rust walk) and compile-time names have no children.
-        else -> {}
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -415,7 +415,7 @@ ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNa
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
             if inner == .Val(nested) -> ast_comptime_walk_pattern(nested, calls, sites)
         }
-        else -> {}
+        .Absent(_) | .Range(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
     }
 }
 
@@ -424,7 +424,7 @@ ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: &[Comptime
         .Value(value) -> ast_comptime_walk_expr(value, calls, sites)
         .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, sites)
         .Named(_, _, inner) -> ast_comptime_walk_pattern_slot(inner, calls, sites)
-        else -> {}
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) -> {}
     }
 }
 
@@ -508,7 +508,7 @@ ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSi
         }
         .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, sites)
         // `#Impure` and `#AssumeDet` bodies are suppressed under PLAIN.
-        else -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .Impure(_, _, _, _) | .AssumeDet(_, _, _, _) -> {}
     }
 }
 
@@ -538,7 +538,7 @@ ast_comptime_key_from_value: fn(value: CtValue) -> CtKey? Never! {
             if type_name == "" || args.len() != 0 -> return None
             Val(CtKey.Enum{type_name: type_name, variant: variant})
         }
-        else -> None
+        .Float(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 
@@ -616,7 +616,7 @@ ast_comptime_key_rank: fn(key: CtKey) -> Int Never! {
 ast_comptime_key_record: fn(key: CtKey) -> [NamedCtKey] Never! {
     if key == {
         .Tuple(fields) | .Struct(_, fields) -> fields
-        else -> [NamedCtKey]{}
+        .Int(_) | .BigInt(_) | .Str(_) | .Bool(_) | .Char(_) | .Enum(_, _) -> [NamedCtKey]{}
     }
 }
 
@@ -624,7 +624,7 @@ ast_comptime_key_text: fn(key: CtKey) -> String Never! {
     if key == {
         .Str(text) -> text
         .Enum(_, variant) -> variant
-        else -> ""
+        .Int(_) | .BigInt(_) | .Bool(_) | .Char(_) | .Tuple(_) | .Struct(_, _) -> ""
     }
 }
 

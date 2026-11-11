@@ -145,7 +145,7 @@ curve_info: fn(id: GroupID) -> CurveInfo? Never! {
         .Secp192k1 -> Val(CurveInfo{grp_id: id, tls_id: 18, bit_size: 192, name: "secp192k1"})
         .Curve25519 -> Val(CurveInfo{grp_id: id, tls_id: 29, bit_size: 256, name: "x25519"})
         .Curve448 -> Val(CurveInfo{grp_id: id, tls_id: 30, bit_size: 448, name: "x448"})
-        else -> None
+        .Unknown -> None
     }
 }
 
@@ -186,7 +186,7 @@ curve_type: fn(id: GroupID) -> CurveType Never! {
         .Unknown -> CurveType.Unknown
         .Curve25519 -> CurveType.Montgomery
         .Curve448 -> CurveType.Montgomery
-        else -> CurveType.ShortWeierstrass
+        .Secp192r1 | .Secp224r1 | .Secp256r1 | .Secp384r1 | .Secp521r1 | .Bp256r1 | .Bp384r1 | .Bp512r1 | .Secp192k1 | .Secp224k1 | .Secp256k1 -> CurveType.ShortWeierstrass
     }
 }
 
@@ -314,10 +314,10 @@ empty_field: fn() -> Field Never! {
 }
 
 /// A random generator that always fails, for operations that need none.
-NoRNG: struct {}
-
-impl NoRNG.RNG {
-    fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+NoRNG: struct {
+    impl RNG {
+        fill: fn(&self, out: &[U8]) -> Bool Never! { false }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +427,7 @@ group_load: fn(id: GroupID) -> EcpGroup EcpError! {
         .Bp512r1 -> sw_group(id, .Mont, curves.BRAINPOOLP512R1_P, curves.BRAINPOOLP512R1_A, curves.BRAINPOOLP512R1_B, curves.BRAINPOOLP512R1_GX, curves.BRAINPOOLP512R1_GY, curves.BRAINPOOLP512R1_N, curves.BRAINPOOLP512R1_T)
         .Curve25519 -> mx_group(id, .P255, curves.CURVE25519_P, curves.CURVE25519_N, 0x01DB42, 9, 254)
         .Curve448 -> mx_group(id, .P448, curves.CURVE448_P, curves.CURVE448_N, 0x98AA, 5, 447)
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 
@@ -440,7 +440,7 @@ group_type: fn(grp: EcpGroup) -> CurveType Never! { curve_type(grp.id) }
 // ---------------------------------------------------------------------------
 
 /// x[i] += x[j] + nothing, accumulating the carry into c (add64 of p192).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_limb: fn(x: &[U64], i: Int, v: U64, c: U64) -> U64 Never! {
     t: x[i] + v
     x[i] = t
@@ -448,7 +448,7 @@ add_limb: fn(x: &[U64], i: Int, v: U64, c: U64) -> U64 Never! {
 }
 
 /// x[i] += c; the carry out (carry64 of p192).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 carry_limb: fn(x: &[U64], i: Int, c: U64) -> U64 Never! {
     t: x[i] + c
     x[i] = t
@@ -456,7 +456,7 @@ carry_limb: fn(x: &[U64], i: Int, c: U64) -> U64 Never! {
 }
 
 /// x += v over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_word_in: fn(x: &[U64], limbs: Int, v: U64) -> U64 Never! {
     c := v
     loop i in 0..<limbs {
@@ -468,7 +468,7 @@ add_word_in: fn(x: &[U64], limbs: Int, v: U64) -> U64 Never! {
 }
 
 /// x += b over `limbs` limbs; the carry out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -482,7 +482,7 @@ add_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// x -= b over `limbs` limbs; the borrow out.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sub_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
     c := U64{0}
     loop i in 0..<limbs {
@@ -495,7 +495,7 @@ sub_in: fn(x: &[U64], b: [U64], limbs: Int) -> U64 Never! {
 }
 
 /// mbedtls_ecp_mod_p192_raw: 2^192 = 2^64 + 1 mod p.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p192: fn(x: &[U64]) Never! {
     c := U64{0}
     v := x[3]
@@ -548,7 +548,7 @@ carry32: fn(cur: I64) -> I64 Never! { cur >> 32 }
 /// the top chunk folds back in with the signs in `fix`. False when a carry
 /// is left over, which no input below p^2 produces. The accumulator is a
 /// fixed word (it stays within 2^40 of zero), so no step tests the value.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chunk_reduce: fn(x: &[U64], x_limbs: Int, ops: [Int], fix: [Int], top: Int, rounds: Int) -> Bool Never! {
     i := 0
     cur := ld32(x, 0)
@@ -609,7 +609,7 @@ P384_OPS: [Int]{
 P384_FIX: [Int]{1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
 
 /// mbedtls_ecp_mod_p521_raw: 2^521 = 1 mod p. s is 9 limbs of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p521: fn(x: &[U64], s: &[U64]) Never! {
     loop i in 0..<9 -> s[i] = x[9 + i]
     carry: bn.core_mla(x, 0, 9, s, 9, U64{1} << 55)
@@ -621,7 +621,7 @@ raw_p521: fn(x: &[U64], s: &[U64]) Never! {
 }
 
 /// mbedtls_ecp_mod_p255_raw: 2^256 = 38 mod p. s is 4 limbs of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p255: fn(x: &[U64], s: &[U64]) Never! {
     loop i in 0..<4 -> s[i] = x[4 + i]
     carry := bn.core_mla(x, 0, 4, s, 4, U64{38})
@@ -635,7 +635,7 @@ raw_p255: fn(x: &[U64], s: &[U64]) Never! {
 
 /// mbedtls_ecp_mod_p448_raw: 2^448 = 2^224 + 1 mod p. m and q are 8 limbs
 /// of scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_p448: fn(x: &[U64], m: &[U64], q: &[U64]) Never! {
     loop i in 0..<7 -> m[i] = x[7 + i]
     m[7] = U64{0}
@@ -662,7 +662,7 @@ raw_p448: fn(x: &[U64], m: &[U64], q: &[U64]) Never! {
 
 /// ecp_mod_koblitz: 2^bits = r mod p for p = 2^bits - r. a1 holds
 /// bits / 64 + 1 limbs and m one more, both scratch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 raw_koblitz: fn(x: &[U64], r: U64, bits: Int, a1: &[U64], m: &[U64]) Never! {
     shift: bits %% 64
     adjust: if shift != 0 -> 1 else -> 0
@@ -694,7 +694,7 @@ kind_bits: fn(kind: FieldKind) -> Int Never! {
         .K192 -> 192
         .K224 -> 224
         .K256 -> 256
-        else -> 0
+        .Mont -> 0
     }
 }
 
@@ -712,7 +712,7 @@ raw_reduce: fn(kind: FieldKind, x: &[U64], m: &[U64], q: &[U64]) -> Bool Never! 
         .K192 -> raw_koblitz(x, U64{0x1000011C9}, 192, m, q)
         .K224 -> raw_koblitz(x, U64{0x100001A93}, 224, m, q)
         .K256 -> raw_koblitz(x, U64{0x1000003D1}, 256, m, q)
-        else -> return false
+        .Mont -> return false
     }
     true
 }
@@ -743,7 +743,7 @@ field_kind: fn(id: GroupID) -> FieldKind Never! {
         .Secp192k1 -> FieldKind.K192
         .Secp224k1 -> FieldKind.K224
         .Secp256k1 -> FieldKind.K256
-        else -> FieldKind.Mont
+        .Unknown | .Bp256r1 | .Bp384r1 | .Bp512r1 -> FieldKind.Mont
     }
 }
 
@@ -931,7 +931,7 @@ fe_sqr_in: fn(f: Field, w: &FeWork, x: &[U64]) Never! {
 }
 
 /// d = a + b.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_add: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
     c: bn.core_add(d, a, b, f.n)
     borrow: sub_in(d, f.p, f.n)
@@ -939,7 +939,7 @@ fe_add: fn(f: Field, d: &[U64], a: [U64], b: [U64]) Never! {
 }
 
 /// x = x + b.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_add_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
     c: add_in(x, b, f.n)
     borrow: sub_in(x, f.p, f.n)
@@ -947,7 +947,7 @@ fe_add_in: fn(f: Field, x: &[U64], b: [U64]) Never! {
 }
 
 /// x = 2 x.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 fe_dbl_in: fn(f: Field, x: &[U64]) Never! {
     c: x[f.n - 1] >> 63
     bn.core_shift_l(x, f.n, 1)
@@ -1429,7 +1429,7 @@ comb_select: fn(f: Field, w: &FeWork, table: [U64], ts: Int, i: U64, rx: &[U64],
 
 /// The comb digits of an odd m: d + 1 signed digits of `wnd` bits each,
 /// the sign in bit 7 (ecp_comb_recode_core).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 comb_recode_core: fn(d: Int, wnd: Int, m: bn.Mpi) -> [U64] Never! {
     x := cipher.words(d + 1)
     loop i in 0..<d {
@@ -1519,10 +1519,11 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets
     d: (grp.nbits + wnd - 1) /% wnd
     w := fe_work(n)
     t := fe_tmp(n)
-    rec: comb_recode_scalar(grp, m, d, wnd)
+    rec := comb_recode_scalar(grp, m, d, wnd)
     r := jac_new(n)
+    ran := 0
     if {
-        p_eq_g && grp.t_size == ts -> meets += comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind)
+        p_eq_g && grp.t_size == ts -> ran = comb_core(f, w, t, r, grp.t, ts, rec.k, d, rng, blind: blind) ?? return Err(comb_failed(r, t, w, rec.k, err))
         else -> {
             // The table of the public point P, built with its own scratch.
             pw := fe_work(n)
@@ -1532,17 +1533,32 @@ mul_comb_counted: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, meets
             fe_from_mpi(f, pw, px, pt.x)
             fe_from_mpi(f, pw, py, pt.y)
             table := comb_precompute(f, pw, ptmp, px, py, wnd, d)
-            meets += comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind)
+            ran = comb_core(f, w, t, r, table, ts, rec.k, d, rng, blind: blind) ?? {
+                cipher.wipe_words(table)
+                return Err(comb_failed(r, t, w, rec.k, err))
+            }
             cipher.wipe_words(table)
         }
     }
+    meets += ran
     fe_cond_neg(f, w, r.y, rec.parity)
     jac_normalize(f, w, t, r)
     out: jac_to_point(f, w, r)
     jac_wipe(r)
     fe_tmp_wipe(t)
     fe_work_wipe(w)
+    cipher.wipe_words(rec.k)
     Ok(out)
+}
+
+/// `err`, once a failed comb's running point, scratch and recoded scalar
+/// digits are wiped.
+comb_failed: fn(r: &JacPoint, t: &FeTmp, w: &FeWork, k: &[U64], err: &&EcpError) -> EcpError Never! {
+    jac_wipe(r)
+    fe_tmp_wipe(t)
+    fe_work_wipe(w)
+    cipher.wipe_words(k)
+    err
 }
 
 // ---------------------------------------------------------------------------
@@ -1630,7 +1646,7 @@ mul_internal: fn<R: RNG>(grp: EcpGroup, m: bn.Mpi, pt: Point, rng: &R, blind: Bo
     if group_type(grp) == {
         .Montgomery -> mul_mxz(grp, m, pt, rng)
         .ShortWeierstrass -> mul_comb(grp, m, pt, rng, blind: blind)
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1723,7 +1739,7 @@ check_pubkey: fn(grp: EcpGroup, pt: Point) EcpError! {
             rhs: sw_rhs(grp, pt.x)
             if bn.cmp_mpi(yy, rhs) != 0 -> return Err(.InvalidKey)
         }
-        else -> return Err(.BadInput)
+        .Unknown -> return Err(.BadInput)
     }
 }
 
@@ -1783,7 +1799,7 @@ gen_privkey: fn<R: RNG>(grp: EcpGroup, rng: &R) -> bn.Mpi EcpError! {
     if group_type(grp) == {
         .Montgomery -> gen_privkey_mx(grp.nbits, rng)
         .ShortWeierstrass -> gen_privkey_sw(grp.n, rng)
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1853,7 +1869,7 @@ read_key_into: fn(key: &Keypair, buf: [U8]) EcpError! {
             }
         }
         .ShortWeierstrass -> { key.d = bn.read_binary(buf) }
-        else -> return Err(.FeatureUnavailable)
+        .Unknown -> return Err(.FeatureUnavailable)
     }
     check_privkey(key.grp, key.d)
 }
@@ -1869,7 +1885,7 @@ write_key: fn(key: Keypair, buflen: Int) -> [U8] EcpError! {
             Ok(bn.write_binary_le(key.d, buflen) ?? return Err(EcpError.Mpi(err)))
         }
         .ShortWeierstrass -> Ok(bn.write_binary(key.d, buflen) ?? return Err(EcpError.Mpi(err)))
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1882,7 +1898,7 @@ write_key_ext: fn(key: Keypair, buflen: Int) -> [U8] EcpError! {
     if group_type(key.grp) == {
         .Montgomery -> Ok(bn.write_binary_le(key.d, len) ?? return Err(EcpError.Mpi(err)))
         .ShortWeierstrass -> Ok(bn.write_binary(key.d, len) ?? return Err(EcpError.Mpi(err)))
-        else -> Err(.BadInput)
+        .Unknown -> Err(.BadInput)
     }
 }
 
@@ -1944,7 +1960,7 @@ point_write_binary: fn(grp: EcpGroup, pt: Point, format: PointFormat, buflen: In
             out.extend(xs)
             Ok(out)
         }
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 
@@ -1984,7 +2000,7 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
             }
             Err(.BadInput)
         }
-        else -> Err(.FeatureUnavailable)
+        .Unknown -> Err(.FeatureUnavailable)
     }
 }
 

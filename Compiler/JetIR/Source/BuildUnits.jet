@@ -125,7 +125,7 @@ ir_unit_label: fn(p: IRProgram, ty: Type) -> String? Never! {
         .Quantity(_, dimension) -> Val(ir_quantity_label(p, dimension))
         .Named(name) -> ir_unit_member_label(p, name)
         .Tagged(_, inner) -> ir_unit_label(p, inner)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Measure(_) -> None
     }
 }
 
@@ -133,7 +133,7 @@ ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
     row: ir_type_def(p, name) ?? return None
     if p.types[row].kind == {
         .Distinct(_, _) -> {}
-        else -> return None
+        .Struct(_, _) | .Enum(_, _) | .Alias(_) | .UnitFamily(_, _) -> return None
     }
     owner: p.types[row].module_identity
     type_name: p.types[row].name
@@ -152,8 +152,10 @@ ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
 }
 
 // Rust `quantity_unit_label`: the positive axes over the negative ones, each
-// its family's base unit with any power past one (`meter*kilogram/ns^2`).
-// An axis with no visible family is Time's `ns` or its lowercase name.
+// its family's base unit with any power past one (`meter*kilogram/s^2`).
+// Quantity arithmetic reads a Duration in seconds (jet_duration_seconds_value),
+// so a Time axis is `s`, never Time's `ns` base member; an axis with no
+// visible family is its lowercase name.
 ir_quantity_label: fn(p: IRProgram, dimension: Dimension) -> String Never! {
     numerator := [String]{}
     denominator := [String]{}
@@ -161,7 +163,7 @@ ir_quantity_label: fn(p: IRProgram, dimension: Dimension) -> String Never! {
         exponent: measure_signed_value(axis.exponent) ?? 0
         if exponent == 0 -> next
         family: ir_short_name(axis.name)
-        label: ir_unit_family_base(p, family) ?? if family == "Time" -> "ns" else -> family.to_lower()
+        label: if family == "Time" -> "s" else -> ir_unit_family_base(p, family) ?? family.to_lower()
         power: if exponent < 0 -> -exponent else -> exponent
         part: if power == 1 -> label else -> "{label}^{power}"
         if exponent > 0 -> numerator.push(part) else -> denominator.push(part)

@@ -139,7 +139,7 @@ sema_comparability_auto_blocked: fn(graph: SemaRegistrationGraph, module_identit
                 }
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     false
 }
@@ -173,7 +173,7 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             }
             false
         }
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -189,7 +189,7 @@ sema_comparability_generated_block: fn(item: Item, trait_name: String) -> Bool N
     if item == {
         .Struct(definition) -> return sema_comparability_generated_in(definition.trait_impls, trait_name)
         .Enum(definition) -> return sema_comparability_generated_in(definition.trait_impls, trait_name)
-        else -> return false
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return false
     }
 }
 
@@ -230,10 +230,10 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
                     nested.push(key)
                     sema_comparability_native_ordering(environment, program, definition.module_identity, target, nested, query)
                 }
-                else -> false
+                .Struct(_, _) | .Enum(_, _) | .Distinct(_, _) | .UnitFamily(_, _) -> false
             }
         }
-        else -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -266,7 +266,7 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
             true
         }
         .InlineRange(base, _, _) -> sema_comparability_structural(environment, program, module_identity, base, query)
-        else -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -305,7 +305,7 @@ sema_comparability_definition_incomparable_field: fn(environment: SemaScopeEnvir
                 }
             }
         }
-        else -> {}
+        .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> {}
     }
     None
 }
@@ -324,7 +324,7 @@ sema_comparability_incomparable_field: fn(environment: SemaScopeEnvironment, pro
             if found != None -> return found
             sema_comparability_incomparable_field(environment, program, module_identity, err, query)
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -369,7 +369,7 @@ sema_comparability_stored_parameter: fn(item: Item, name: String) -> Bool Never!
                 }
             }
         }
-        else -> {}
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     false
 }
@@ -438,7 +438,7 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
             }
             true
         }
-        else -> false
+        .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -537,7 +537,7 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
             }
             valid
         }
-        else -> true
+        .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -561,7 +561,7 @@ sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaP
             query.visited[key] = eligible
             eligible
         }
-        else -> false
+        .Float | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -577,12 +577,12 @@ sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, pro
             loop variant in variants {
                 if variant.payload == {
                     .Unit -> {}
-                    else -> return false
+                    .Single(_) | .Named(_) -> return false
                 }
             }
             true
         }
-        else -> false
+        .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> false
     }
 }
 
@@ -636,7 +636,7 @@ sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: Sema
             query.visited[key] = eligible
             eligible
         }
-        else -> false
+        .Float | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Float32 | .Measure(_) -> false
     }
 }
 
@@ -672,6 +672,6 @@ sema_comparability_definition_hashable: fn(environment: SemaScopeEnvironment, pr
             }
             true
         }
-        else -> false
+        .UnitFamily(_, _) -> false
     }
 }

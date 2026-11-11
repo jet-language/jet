@@ -5,7 +5,7 @@
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
-    jet_foundation.[AutoVectorizationFacts]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, number_argument_value]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
@@ -30,10 +30,12 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
             }
         }
     }
+    ir_fixed_types(b, function)
     loop param in function.params {
         param_ty: ir_fact(p, b, param.ty, param.span)
         if ir_failed(b) -> return
-        if ir_param_slot(m, p, b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(b, param.span, "parameter type {ir_type_name(param_ty)}")
+        slot: ir_param_slot(m, p, b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) ?? return ir_fail(b, param.span, "parameter type {ir_type_name(param_ty)}")
+        if b.fixed_ids.len() > 0 && ir_fixed_type(function.fixed_tags, param_ty) -> ir_fix_slot(m, b, slot)
     }
     ir_coverage_probe(m, p, b, function)
     if ir_generator_element(p, b, function) == .Val(element) -> return ir_build_generator(m, p, b, function, element)
@@ -50,12 +52,15 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
         }
     }
     b.ret = executable
+    ir_masked_exits(m, p, b, function)
+    if ir_failed(b) -> return
     ir_memo_enter(m, p, b, function)
     if ir_failed(b) -> return
     captured: ir_mutable_captures(p, b, function.body)
     b.cells = ir_window_cells(m, p, b, captured)
     ir_cell_params(m, b)
     ir_sentry_frame(m, p, b)
+    ir_effect_scope_frame(m, b, function.effect_scope)
     if ir_failed(b) -> return
     ir_stmts(m, p, b, function.body)
     if ir_failed(b) || b.failures.len() > 0 -> return
@@ -352,7 +357,7 @@ ir_poison_binders: fn(p: IRProgram, b: &IRBuilder, statement: Int) Never! {
         .RefutableBind(pattern, _, _, _) -> {
             loop binding in pattern.bindings -> b.poisoned.push(binding.name)
         }
-        else -> {}
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
     }
 }
 
@@ -363,7 +368,7 @@ ir_stmts_leave: fn(p: IRProgram, b: IRBuilder, body: [Int]) -> Bool Never! {
         if ir_body_stmt(p, b, body[index]) == {
             .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return true
             .ExprStmt(value, _) -> return ir_never_type(ir_ty(p, b, value))
-            else -> return false
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> return false
         }
     }
     false
@@ -459,6 +464,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 _: b.map_stores.pop()
                 return
             }
+            if ir_masking(b) -> return ir_masked_assign(m, p, b, place, op, value, span)
             if place == .Expr(target_place) {
                 return ir_assign_place(m, p, b, target_place, op, value, span)
             }
@@ -580,6 +586,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 ir_scope_close(m, b)
                 return
             }
+            if ir_masked_branch(p, b, span) -> return ir_masked_if(m, p, b, condition, then_body, else_body, span)
             ir_scope_open(b)
             named: b.bindings.len()
             test: ir_condition(m, p, b, condition, span)
@@ -608,35 +615,51 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_scope_close(m, b)
         }
         .Loop(label, body, _) -> {
+            ir_masked_loop(b)
+            edge: ir_loop_edge(m, b)
             exit: ir_open(b.f, IROp.Block, b.line)
             top: ir_open(b.f, IROp.Loop, b.line)
-            b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len()})
+            b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
             ir_stmts(m, p, b, body)
             _: b.loops.pop()
             ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
             ir_end(b.f, b.line)
             ir_end(b.f, b.line)
+            ir_loop_join(m, b, edge, false)
         }
         .While(label, condition, body, span) -> {
+            ir_masked_loop(b)
+            edge: ir_loop_edge(m, b)
             exit: ir_open(b.f, IROp.Block, b.line)
             top: ir_open(b.f, IROp.Loop, b.line)
             test: ir_expr(m, p, b, condition)
             if ir_failed(b) -> return
             ir_exit_unless(m, b, test, exit)
-            b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len()})
+            b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
             ir_stmts(m, p, b, body)
             _: b.loops.pop()
             ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
             ir_end(b.f, b.line)
             ir_end(b.f, b.line)
+            ir_loop_join(m, b, edge, true)
         }
-        .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> ir_range_loop(m, p, b, label, local, start, end, step, exclusive, body, vectorization, span)
+        .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> {
+            ir_masked_loop(b)
+            ir_range_loop(m, p, b, label, local, start, end, step, exclusive, body, vectorization, span)
+        }
         .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
+            ir_masked_loop(b)
             if source == .Val(collection) -> return ir_range_value_loop(m, p, b, label, variable, collection, step, body, span)
             ir_range_loop(m, p, b, label, variable, start, end, step, exclusive, body, vectorization, span)
         }
-        .Break(label, span) -> ir_loop_jump_stmt(m, p, b, label, true, span)
-        .Continue(label, span) -> ir_loop_jump_stmt(m, p, b, label, false, span)
+        .Break(label, span) -> {
+            if b.mask >= 0 -> return ir_fail(b, span, "a masked branch breaks")
+            ir_loop_jump_stmt(m, p, b, label, true, span)
+        }
+        .Continue(label, span) -> {
+            if b.mask >= 0 -> return ir_fail(b, span, "a masked branch continues")
+            ir_loop_jump_stmt(m, p, b, label, false, span)
+        }
         .Inline(body, _) | .Region(body, _) -> ir_stmts(m, p, b, body)
         .Contract(contract) -> ir_contract(m, p, b, contract)
         .ContractScope(pre, body, post, result, span) -> ir_contract_scope(m, p, b, pre, body, post, result, span)
@@ -650,13 +673,14 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_scope_open(b)
             ir_stmt(m, p, b, init)
             if ir_failed(b) -> return
+            edge: ir_loop_edge(m, b)
             exit: ir_open(b.f, IROp.Block, b.line)
             _: ir_open(b.f, IROp.Loop, b.line)
             test: ir_expr(m, p, b, condition)
             if ir_failed(b) -> return
             ir_exit_unless(m, b, test, exit)
             step_block: ir_open(b.f, IROp.Block, b.line)
-            b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+            b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
             ir_stmts(m, p, b, body)
             _: b.loops.pop()
             ir_end(b.f, b.line)
@@ -664,9 +688,10 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
             ir_end(b.f, b.line)
             ir_end(b.f, b.line)
+            ir_loop_join(m, b, edge, true)
             ir_scope_close(m, b)
         }
-        .TaskGroup(group, limit, body, span) -> ir_task_group(m, p, b, group, limit, body, span)
+        .TaskGroup(group, args, body, span) -> ir_task_group(m, p, b, group, args.limit, args.stack, body, span)
         .DeferClose(close, _, span) -> ir_defer_close(m, p, b, close, span)
         .BreakValue(label, value, span) -> {
             frame: ir_loop_frame(b, label) ?? return ir_fail(b, span, "break outside a loop")
@@ -695,7 +720,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                     .LinesFile -> "jet_rt_native_iter_file_lines"
                     .LinesStdin -> "jet_rt_native_iter_stdin_lines"
                     .LinesProcessStream -> "jet_rt_native_iter_process_lines"
-                    else -> ""
+                    .Chars | .ChannelReceiver | .EncodingReader(_) | .Iterable(_, _, _, _, _) -> ""
                 }
                 .None -> ""
             }
@@ -716,9 +741,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             }
             ir_list_walk(m, p, b, label, variable, variable_two, collection, step, by_value, body, span)
         }
-        // A scope whose marker lowers to nothing: its body runs as a plain
-        // scope.
-        .DebugOnly(body, _) -> ir_stmts(m, p, b, body)
+        // An `#Off(.Release)` body runs as a plain scope in every build but
+        // a release build, which emits no code for it.
+        .DebugOnly(body, _) -> {
+            if !p.checks.release -> ir_stmts(m, p, b, body)
+        }
         .Live(body, _) -> ir_live(m, p, b, body)
         .Unsafe(gate, body) -> ir_unsafe_scope(m, p, b, gate, body)
         .UnsafeBlock(gate, body, _) -> ir_unsafe_scope(m, p, b, gate, body)
@@ -937,15 +964,16 @@ ir_pin_place_in_storage: fn(p: IRProgram, b: IRBuilder, place: Int) -> Bool Neve
         .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
         .Field(receiver, _) -> return ir_body_node(p, b, receiver).kind == .Local(_) || ir_pin_place_in_storage(p, b, receiver)
         .PoolSlot(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
-        else -> return false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return false
     }
 }
 
 // `task.group(group) { .. }`: `group` owns the runtime JetTaskGroup from
-// JetTaskGroup.new() or .with_limit(limit); the block's end closes it
+// JetTaskGroup.new() or .with_limit(limit), then .stack(bytes) for a
+// `stack:` request; the block's end closes it
 // (jet_rt_native_task_group_close joins its children), and its drop joins
 // them on an early exit.
-ir_task_group: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit: Int?, body: [Int], span: Span) Never! {
+ir_task_group: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limit: Int?, stack: Int?, body: [Int], span: Span) Never! {
     group_ty: Type.Named{name: "Group"}
     row: ir_value_type(m, p, group_ty) ?? {
         _: ir_type_fail(b, span, group_ty)
@@ -954,15 +982,20 @@ ir_task_group: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limi
     args := [Int]{}
     symbol := "jet_rt_native_task_group_new"
     if limit == .Val(count) {
-        operation: TNumericOp.CheckedIntToFixed{host_kind: 3, line: b.line}
-        count_span: ir_body_node(p, b, count).span
-        converted: ir_node(b, Type.IntN{signed: true, bits: 64}, NodeKind.NumericMethod{receiver: count, operation: operation}, count_span)
-        value: ir_expr(m, p, b, converted)
+        value: ir_task_group_word(m, p, b, count)
         if ir_failed(b) || value < 0 -> return
         args.push(value)
         symbol = "jet_rt_native_task_group_with_limit"
     }
+    stack_bytes := -1
+    if stack == .Val(bytes) {
+        stack_bytes = ir_task_group_word(m, p, b, bytes)
+        if ir_failed(b) || stack_bytes < 0 -> return
+    }
     handle: ir_runtime(m, b, symbol, args, row)
+    if stack_bytes >= 0 {
+        _: ir_runtime(m, b, "jet_rt_native_task_group_stack", [Int]{handle, stack_bytes}, -1)
+    }
     ir_scope_open(b)
     ir_bind_local(m, p, b, group, handle, span)
     binding: ir_lookup_local(b, group) ?? return ir_fail(b, span, "task group {group.name} without its binding")
@@ -970,6 +1003,14 @@ ir_task_group: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, group: TLocal, limi
     if ir_failed(b) -> return
     _: ir_runtime(m, b, "jet_rt_native_task_group_close", [Int]{binding.slot}, -1)
     ir_scope_close(m, b)
+}
+
+// A task-group argument as the runtime's i64 word.
+ir_task_group_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, node: Int) -> Int Never! {
+    operation: TNumericOp.CheckedIntToFixed{host_kind: 3, line: b.line}
+    node_span: ir_body_node(p, b, node).span
+    converted: ir_node(b, Type.IntN{signed: true, bits: 64}, NodeKind.NumericMethod{receiver: node, operation: operation}, node_span)
+    ir_expr(m, p, b, converted)
 }
 
 // `task.all` / `task.any` / `task.race` over tasks (`kind` 0 all, 1 any, 2
@@ -1317,6 +1358,7 @@ ir_range_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loc
     counter: ir_new_slot(b, counter_ty, IRSlotKind.Local, ir_intern_name(m, local.name))
     ir_emit(b.f, IROp.Copy, counter, first, -1, -1, b.line)
     b.bindings.push(IRBinding{name: local.name, slot: counter})
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -1334,7 +1376,7 @@ ir_range_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loc
     }
     ir_exit_unless(m, b, test, exit)
     step_block: ir_open(b.f, IROp.Block, b.line)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
     if vectorization == .Val(facts) {
         proof: b.f.loop_proofs.len()
         line: ir_source_line_of(p, b.f.source_file, span.start) ?? b.line
@@ -1351,6 +1393,7 @@ ir_range_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loc
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, true)
     ir_scope_close(m, b)
 }
 
@@ -1384,12 +1427,13 @@ ir_range_value_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
     counter: ir_new_slot(b, counter_ty, IRSlotKind.Local, ir_intern_name(m, local.name))
     ir_emit(b.f, IROp.Copy, counter, first, -1, -1, b.line)
     b.bindings.push(IRBinding{name: local.name, slot: counter})
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     more: ir_bool_op(m, b, IROp.Lt, counter, bound)
     ir_exit_unless(m, b, more, exit)
     step_block: ir_open(b.f, IROp.Block, b.line)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
     ir_stmts(m, p, b, body)
     _: b.loops.pop()
     ir_end(b.f, b.line)
@@ -1397,6 +1441,7 @@ ir_range_value_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, true)
     ir_scope_close(m, b)
     ir_release(m, b, range)
 }
@@ -1441,9 +1486,17 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
 }
 
 // ---------------------------------------------------------------------------
-// Expressions. Each returns the slot holding the value (-1 for Unit).
+// Expressions. Each returns the slot holding the value (-1 for Unit),
+// marked fixed when the expression's checked type is (BuildMask.jet
+// ir_fix_expr).
 
 ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    slot: ir_expr_slot(m, p, b, expression)
+    ir_fix_expr(m, p, b, expression, slot)
+    slot
+}
+
+ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
     expression_ty: ir_ty(p, b, expression)
     if ir_failed(b) -> return -1
     node: ir_body_node(p, b, expression)
@@ -1613,6 +1666,7 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
                 if kept >= 0 -> b.fresh[kept] = ir_has_drop(m, b, kept)
                 return kept
             }
+            if ir_masked_branch(p, b, span) -> return ir_masked_if_value(m, p, b, cond, then_body, then_value, else_body, else_value, expression_ty, span)
             ir_scope_open(b)
             named: b.bindings.len()
             test: ir_condition(m, p, b, cond, span)
@@ -1764,15 +1818,16 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
             }
             if call == .MemoStats(function, bound) -> return ir_memo_stats(m, p, b, expression_ty, function, bound, span)
             if call == .ComptimeInput(builtin, path) {
-                // A comptime input (embed_file, embed_bytes, find) the checked
-                // program names by its literal; the compiler answers it
-                // (ir_host_route kind 3): builtin, path.
+                // A comptime input (embed_file, embed_bytes, find): the
+                // compiler answers it (ir_host_route kind 3) from its builtin
+                // and its path's String value, the checked literal or the
+                // value the comptime code computed.
                 row: ir_value_type(m, p, expression_ty) ?? return ir_type_fail(b, span, expression_ty)
                 string_row: ir_string_row(m)
                 builtin_text: ir_temp(m, b, string_row)
                 ir_emit(b.f, IROp.ConstText, builtin_text, ir_intern_text(m, builtin), -1, -1, b.line)
-                path_text: ir_temp(m, b, string_row)
-                ir_emit(b.f, IROp.ConstText, path_text, ir_intern_text(m, path), -1, -1, b.line)
+                path_text: ir_expr(m, p, b, path)
+                if ir_failed(b) -> return -1
                 return ir_host_route(m, b, 3, row, [Int]{builtin_text, path_text})
             }
             if call == .TupleIndex(base, index) {
@@ -1853,6 +1908,13 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
         .ConstRef(symbol) -> return ir_constant(m, p, b, expression_ty, symbol.key, span)
         .GlobalShared(initializer, lifetime) -> return ir_shared_site(m, p, b, expression_ty, initializer, lifetime, span)
         .TraitConst(owner, trait_short, name) -> return ir_trait_constant(m, p, b, expression_ty, owner, trait_short, name, span)
+        .NumberParam(param) -> {
+            // The instance binds the number parameter to its Type.Measure
+            // argument; a body built outside any instance has no number.
+            number: number_argument_value(ir_fact(p, b, param, span)) ?? return ir_fail_slot(b, span, "number parameter {ir_type_name(param)} has no number in this instance")
+            ty: ir_value_type(m, p, expression_ty) ?? return ir_type_fail(b, span, expression_ty)
+            return ir_int_constant(m, b, ty, number)
+        }
         .CtLit(value) -> return ir_comptime(m, p, b, expression_ty, value, span)
         .ListLit(values) -> return ir_list_literal(m, p, b, expression_ty, values, span)
         .List(values, coercion) -> {
@@ -2258,7 +2320,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .TaskJoin | .TaskDetach -> true
-        else -> false
+        .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONReaderNext | .JSONWriterWrite | .JSONWriterFlush | .JSONWriterFinish | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .CBORReaderNext | .CBORWriterWrite | .CBORWriterFlush | .CBORWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueTypeName | .ReflectValuePath | .ReflectValueDisplay | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPServerMethod(_, _) | .DynToText | .DynEqualUnordered | .SerdeEncode | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     if dedicated -> return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)}")
     // to_text and equal_unordered on a Dyn cross the encoding.dyn data route
@@ -2266,7 +2328,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     data_symbol: if operation == {
         .DynToText | .JSONToText -> "jet_dyn_to_text"
         .DynEqualUnordered | .JSONEqualUnordered -> "jet_dyn_equal_unordered"
-        else -> ""
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONReaderNext | .JSONWriterWrite | .JSONWriterFlush | .JSONWriterFinish | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .CBORReaderNext | .CBORWriterWrite | .CBORWriterFlush | .CBORWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueTypeName | .ReflectValuePath | .ReflectValueDisplay | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPClientMethod(_, _) | .HTTPServerMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynDecode(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> ""
     }
     if data_symbol != "" {
         operands := [Int]{}
@@ -2309,7 +2371,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(b, span, "{special} handle method {route.member}")
     static_call: if operation == {
         .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) | .GameBackendHeadless -> true
-        else -> false
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONReaderNext | .JSONWriterWrite | .JSONWriterFlush | .JSONWriterFinish | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .CBORReaderNext | .CBORWriterWrite | .CBORWriterFlush | .CBORWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueTypeName | .ReflectValuePath | .ReflectValueDisplay | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPClientMethod(_, _) | .HTTPServerMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     inputs := [Int]{}
     if !static_call {
@@ -2329,6 +2391,12 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     loop arg in args {
         slot: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
+        // A route writes a `&` List argument's buffer in place
+        // (`stream.read_into(buffer, limit)`): a buffer another holder
+        // shares is first the argument's own.
+        if ir_body_node(p, b, arg).kind == .Borrow(_, access) {
+            if access == .Write -> ir_make_unique(m, p, b, slot)
+        }
         inputs.push(slot)
     }
     if operation == .ReaderOver(_) || operation == .ReaderTake {
@@ -2383,7 +2451,7 @@ ir_plugin_value_kind: fn(descriptor: ComponentTypeDescriptor) -> String? Never! 
         .Float -> Val("float")
         .Bool -> Val("bool")
         .String -> Val("text")
-        else -> None
+        .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> None
     }
 }
 
@@ -2423,7 +2491,7 @@ ir_numeric_euclid: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     remainder: if operation == {
         .EuclideanDiv -> false
         .EuclideanRem -> true
-        else -> { return ir_fail_slot(b, span, "binary numeric operation other than div_euclid/rem_euclid") }
+        .Predicate(_) | .BitCount(_, _) | .CastAs(_) | .CheckedIntToFloat(_, _, _) | .CheckedIntToFixed(_, _) | .FixedNarrow(_, _) | .TryFrom(_) | .FloatToInt(_) | .FloatNarrow | .InlineRange(_, _, _) | .ToShow -> { return ir_fail_slot(b, span, "binary numeric operation other than div_euclid/rem_euclid") }
     }
     left: ir_expr(m, p, b, receiver)
     right: ir_expr(m, p, b, argument)
@@ -2806,14 +2874,16 @@ ir_branch_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], valu
 ir_loop_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, label: String?, body: [Int], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     result: ir_temp(m, b, row)
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     top: ir_open(b.f, IROp.Loop, b.line)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len(), value: result})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len(), value: result, edge: edge})
     ir_stmts(m, p, b, body)
     _: b.loops.pop()
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, false)
     b.fresh[result] = ir_has_drop(m, b, result)
     result
 }
@@ -2878,11 +2948,11 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
                 kernel: if format == {
                     .Fixed(_) -> "jet_fmt_decimal"
                     .Grouped(_) -> "jet_fmt_grouped"
-                    else -> ""
+                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> ""
                 }
                 precision: if format == {
                     .Fixed(digits) | .Grouped(digits) -> digits
-                    else -> 0
+                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) -> 0
                 }
                 if kernel != "" && ir_untag(ir_ty(p, b, value)) == .Float {
                     slot: ir_expr(m, p, b, value)
@@ -2939,7 +3009,7 @@ ir_self_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding
     node: ir_body_node(p, b, value)
     parts: if node.kind == {
         .StrLit(text_parts) -> text_parts
-        else -> { return false }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> { return false }
     }
     if parts.len() < 2 -> return false
     if parts[0] == .Interpolation(_, format) {
@@ -2947,13 +3017,13 @@ ir_self_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding
     }
     head: if parts[0] == {
         .Interpolation(first, _) -> first
-        else -> { return false }
+        .Literal(_) -> { return false }
     }
     if ir_ty(p, b, head) != Type.String -> return false
     head_node: ir_body_node(p, b, head)
     head_local: if head_node.kind == {
         .Local(local) -> local
-        else -> { return false }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> { return false }
     }
     head_binding: ir_lookup_local(b, head_local) ?? return false
     if head_binding.slot != binding.slot -> return false
@@ -3006,7 +3076,7 @@ ir_empty_string_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Neve
     node: ir_body_node(p, b, value)
     parts: if node.kind == {
         .StrLit(text_parts) -> text_parts
-        else -> { return false }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> { return false }
     }
     loop part in parts {
         if part == .Literal(text) {
@@ -3022,13 +3092,13 @@ ir_empty_string_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Neve
 ir_empty_list_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
     if ir_untag(ir_ty(p, b, value)) == {
         .List(_) -> {}
-        else -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     node: ir_body_node(p, b, value)
     if node.kind == {
         .ListLit(values) -> return values.len() == 0
         .List(values, _) -> return values.len() == 0
-        else -> return false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return false
     }
 }
 
@@ -3043,7 +3113,7 @@ ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding,
     if ir_kind_of(m, b, binding.slot) != .Aggregate -> return false
     if ir_untag(m.types[b.f.slot_type[binding.slot]].ty) == {
         .List(_) -> {}
-        else -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     element: ir_list_element(m, p, b, binding.slot) ?? return false
     if !binding.write && (!ir_owned_binding(b, binding.slot) || ir_live_flag(b, binding.slot) >= 0) -> return false
@@ -3080,7 +3150,7 @@ ir_clear_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
     if m.types[member.ty].kind != .Aggregate -> return false
     if ir_untag(m.types[member.ty].ty) == {
         .List(_) -> {}
-        else -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     element: ir_list_element_of(m, p, member.ty) ?? return false
     // The old value closes before it ends, as any field write closes it.
@@ -3449,7 +3519,7 @@ ir_tag_order_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, negate: Bool, l
             left_expr = args[0].value
             right_expr = args[1].value
         }
-        else -> return None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return None
     }
     if row < 0 -> return None
     left_row: ir_value_type(m, p, ir_ty(p, b, left_expr)) ?? return None
@@ -3606,7 +3676,7 @@ ir_place_needs_address: fn(m: &IRModule, p: IRProgram, b: IRBuilder, place: Int)
         .Field(receiver, field) -> return ir_place_boxed_member(m, p, b, receiver, field.name) || ir_place_needs_address(m, p, b, receiver)
         .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
         .PoolSlot(_, _, _, _, _, _) -> return true
-        else -> return false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return false
     }
 }
 
@@ -3700,7 +3770,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     // place (sema admits only `#Persist` module state as a write place).
     if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
         at: p.constants.get(symbol.key) ?? return ir_fail_slot(b, span, "constant {symbol.key} without a declaration")
-        if p.constant_defs[at].is_storage && p.constant_defs[at].init == None {
+        if p.constant_defs[at].is_storage {
             definition: p.constant_defs[at]
             return ir_storage_address(m, p, b, definition, span)
         }
@@ -3720,7 +3790,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     temporary: if ir_body_node(p, b, place).kind == {
         .Call(_, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> true
         .List(_, _) | .ListLit(_) | .Tuple(_) | .Map(_) | .MapLit(_) -> true
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
     if temporary {
         value: ir_expr(m, p, b, place)
@@ -3780,7 +3850,7 @@ ir_err_abi_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
     if plain == {
         .Option(inner) -> "{ir_err_abi_spelling(p, inner)}?"
         .List(element) -> "[{ir_err_abi_spelling(p, element)}]"
-        else -> ir_error_spelling(p, plain)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ir_error_spelling(p, plain)
     }
 }
 
@@ -3792,7 +3862,7 @@ ir_err_abi_record_row: fn(p: IRProgram, ty: Type) -> Int? Never! {
         .Option(inner) -> ir_err_abi_record_row(p, inner)
         .List(element) -> ir_err_abi_record_row(p, element)
         .Named(name) -> ir_type_def(p, name)
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -3810,7 +3880,7 @@ ir_default_err_drift: fn(p: IRProgram, ty: Type) -> String? Never! {
         fields := [TField]{}
         if definition.kind == {
             .Struct(declared, _) -> fields = declared.copy()
-            else -> return Val("{record.name} is no struct")
+            .Enum(_, _) | .Distinct(_, _) | .Alias(_) | .UnitFamily(_, _) -> return Val("{record.name} is no struct")
         }
         spelled: loop field in fields -> "{field.name}: {ir_err_abi_spelling(p, field.ty)}"
         if spelled != record.fields -> return Val("{record.name} declares ({spelled.join(", ")}), the native layout stores ({record.fields.join(", ")})")
@@ -3840,7 +3910,7 @@ ir_default_err_fresh_metadata: fn(p: IRProgram, b: IRBuilder, value: Int) -> Boo
                 .Absent -> true
                 .ListLit(values) -> values.len() == 0
                 .List(values, _) -> values.len() == 0
-                else -> false
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
             }
             if !empty -> return false
         }
@@ -4092,7 +4162,7 @@ ir_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, sha
                                 b.pending.push(IRPending{name: name, slot: slot, subject: subject, offset: member.offset, selector: index, boxed: member.boxed})
                             }
                         }
-                        else -> {
+                        .Range(_, _) | .Nested(_) | .Value(_) -> {
                             ir_open_if(b.f, result, b.line)
                             payload: ir_member_value(m, b, subject, member)
                             ir_close_note(m, p, b, payload, subject, IRPartStep{selector: index, offset: member.offset})
@@ -4351,7 +4421,7 @@ ir_map_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
                         b.pending.push(IRPending{name: name, slot: slot, subject: window, offset: 0, loaded: true})
                     }
                 }
-                else -> {
+                .Range(_, _) | .Nested(_) | .Value(_) -> {
                     ir_open_if(b.f, result, b.line)
                     test: ir_binding_test(m, p, b, window, entry.slot, span)
                     if ir_failed(b) -> return -1
@@ -4372,7 +4442,7 @@ ir_map_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
                     b.pending.push(IRPending{name: name, slot: slot, subject: address, offset: value_member.offset, boxed: value_member.boxed})
                 }
             }
-            else -> {
+            .Range(_, _) | .Nested(_) | .Value(_) -> {
                 ir_open_if(b.f, result, b.line)
                 value: ir_member_value(m, b, address, value_member)
                 test: ir_binding_test(m, p, b, value, entry.slot, span)
@@ -4641,7 +4711,7 @@ ir_take_pattern: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     ok_ty := Type.Named{name: "Unit"}
     if ir_untag(ty) == {
         .Result(ok, _) -> ok_ty = ok.copy()
-        else -> return ir_fail_slot(b, span, "take_pattern as {ir_type_name(ty)}")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern as {ir_type_name(ty)}")
     }
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -4686,7 +4756,7 @@ ir_take_pattern: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         members := [IRMember]{}
         if ir_untag(ok_ty) == {
             .Tuple(fields) -> members = ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ok_ty)
-            else -> return ir_fail_slot(b, span, "take_pattern captures as {ir_type_name(ok_ty)}")
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern captures as {ir_type_name(ok_ty)}")
         }
         loop field in canonical {
             member := IRMember?{None}
@@ -4759,7 +4829,7 @@ ir_binding_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, bin
             ir_release(m, b, expected)
             return test
         }
-        else -> return ir_fail_slot(b, span, "payload pattern {ir_binding_name(binding)}")
+        .Wildcard | .Bind(_, _) -> return ir_fail_slot(b, span, "payload pattern {ir_binding_name(binding)}")
     }
 }
 
@@ -4871,7 +4941,7 @@ ir_carrier_shape_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int,
             }
             // Either shape: each alternative's test in turn.
             .Or(_, _) -> return ir_pattern_test(m, p, b, value, shape, span)
-            else -> return ir_fail_slot(b, span, "pattern {ir_shape_name(shape)} on an Option")
+            .Variant(_, _, _, _) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> return ir_fail_slot(b, span, "pattern {ir_shape_name(shape)} on an Option")
         }
         return test
     }
@@ -4891,7 +4961,7 @@ ir_carrier_shape_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int,
                 return test
             }
             .Or(_, _) -> return ir_pattern_test(m, p, b, value, shape, span)
-            else -> return ir_fail_slot(b, span, "pattern {ir_shape_name(shape)} on a Result")
+            .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Range(_, _, _) | .Struct(_, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> return ir_fail_slot(b, span, "pattern {ir_shape_name(shape)} on a Result")
         }
     }
     ir_fail_slot(b, span, "pattern {ir_shape_name(shape)} on {ir_type_name(carrier)}")
@@ -4979,7 +5049,7 @@ ir_json_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, variant
     value := argument
     map_entries: if ir_body_node(p, b, value).kind == {
         .MapLit(entries) | .Map(entries) -> Val(entries)
-        else -> None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> None
     }
     if variant == "Object" && map_entries == .Val(entries) {
         pair_ty: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: ty}}}
@@ -5095,7 +5165,7 @@ ir_present_wrap: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, inner_r
 ir_lent_carrier_arg: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
     if ir_body_node(p, b, value).kind == {
         .Present(_) | .Ok(_) | .Tuple(_) -> true
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Absent | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
 }
 
@@ -5113,7 +5183,7 @@ ir_carrier_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: 
         .Present(inner) -> ir_present_lent(m, p, b, ty, inner, lends, span)
         .Ok(inner) -> ir_ok_lent(m, p, b, ty, inner, lends, span)
         .Tuple(values) -> ir_tuple_lent(m, p, b, ty, values, lends, span)
-        else -> ir_fail_slot(b, span, "lent carrier argument")
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Absent | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> ir_fail_slot(b, span, "lent carrier argument")
     }
 }
 
@@ -5232,7 +5302,7 @@ ir_names_place: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
     if ir_body_node(p, b, value).kind == {
         .Borrow(inner, _) -> return ir_names_place(p, b, inner)
         .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
-        else -> return false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return false
     }
 }
 
@@ -5253,6 +5323,7 @@ ir_result_ctor: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
 // return hands back the value as the executable return type. A returned
 // `Err(...)` is where its failure starts: the journey's origin.
 ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span) Never! {
+    if b.mask >= 0 -> return ir_masked_return(m, p, b, value, span)
     returned: value ?? return ir_return_fallthrough(m, p, b)
     if b.f.result < 0 {
         payload := returned
@@ -5292,6 +5363,10 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     // or Result box, a part of a variable that drops): Return reads it only
     // after those drops, so it leaves as a copy in this frame.
     if owned == slot && !b.fresh[slot] && m.types[b.f.slot_type[slot]].kind == .Aggregate && !ir_has_drop(m, b, slot) -> owned = ir_copy_value(m, p, b, slot, span)
+    // After a masked early return the function gives the value it chose
+    // (BuildMask.jet).
+    owned = ir_masked_result(m, b, owned, span)
+    if ir_failed(b) -> return
     ir_return_slot(m, p, b, owned, span)
 }
 
@@ -5316,11 +5391,11 @@ ir_return_propagated: fn(m: &IRModule, p: IRProgram, b: IRBuilder, returned: Int
             if note != None || ir_try_converts(conversion) -> return None
             inner = value
         }
-        else -> return None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return None
     }
     if ir_body_node(p, b, inner).kind == {
         .Call(_, _, _) -> {}
-        else -> return None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> return None
     }
     row: ir_value_type(m, p, ir_ty(p, b, inner)) ?? return None
     if row != result_row -> return None
@@ -5330,7 +5405,7 @@ ir_return_propagated: fn(m: &IRModule, p: IRProgram, b: IRBuilder, returned: Int
 ir_try_converts: fn(conversion: TTryConvert) -> Bool Never! {
     if conversion == {
         .NoConversion -> false
-        else -> true
+        .Never | .DefaultErr | .Typed(_, _, _) | .WidenUnion(_, _) | .RewidenUnion(_) -> true
     }
 }
 
@@ -5348,7 +5423,7 @@ ir_tail_errs: fn(p: IRProgram, b: &IRBuilder, expression: Int) Never! {
             if body.len() == 0 -> return
             if ir_body_stmt(p, b, body[body.len() - 1]) == .ExprStmt(tail, _) -> ir_tail_errs(p, b, tail)
         }
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -5535,7 +5610,7 @@ ir_core_reraise: fn(p: IRProgram, b: IRBuilder, error: Int) -> Bool Never! {
     if ir_body_node(p, b, error).kind == {
         .Local(_) -> true
         .Move(value) -> ir_body_node(p, b, value).kind == .Local(_)
-        else -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> false
     }
 }
 
@@ -5949,11 +6024,22 @@ ir_fallback_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, fallback: BodyO
     }
 }
 
+// A `break` sets its loop's edge word to its own id first and records the
+// ownership it leaves with (IRLoopEdge), which meets that of the loop's
+// other exits after it (ir_loop_join).
 ir_loop_jump: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
     frame: ir_loop_frame(b, label) ?? return ir_fail(b, span, "break or next outside a loop")
     ir_tx_unwind_loop(m, p, b, frame.exit, span)
     ir_exit_statement_guards(b, frame.guards)
     ir_drop_bindings(m, b, frame.mark)
+    if exit && frame.edge >= 0 {
+        id := 1
+        loop row in b.loop_edges {
+            if row.edge == frame.edge -> id += 1
+        }
+        ir_emit(b.f, IROp.Const, frame.edge, id, -1, -1, b.line)
+        b.loop_edges.push(IRLoopEdge{edge: frame.edge, id: id, states: ir_own_states(b, frame.mark)})
+    }
     depth: ir_depth(b.f, if exit -> frame.exit else -> frame.next)
     ir_emit(b.f, IROp.Br, -1, depth, -1, -1, b.line)
 }
@@ -5974,7 +6060,7 @@ ir_list_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, values:
     // A `[T#N]` literal is the List of its N elements.
     if ir_untag(ty) == {
         .List(element) | .FixedList(element, _) -> element_row = ir_value_type(m, p, element) ?? -1
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if element_row < 0 -> return ir_fail_slot(b, span, "list literal of {ir_type_name(ty)}")
     elements := [Int]{}
@@ -6116,6 +6202,7 @@ ir_list_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     data: ir_list_data(m, b, walked)
     index: ir_word_const(m, b, 0)
     countdown: ir_walk_countdown(m, b, walk_stride)
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     more: ir_bool_op(m, b, IROp.Lt, index, length)
@@ -6124,7 +6211,7 @@ ir_list_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     // A step of a walk that takes the Map's entries owns the one it binds:
     // the body may move its parts out, and the step's scope ends the rest.
     if takes_parts -> ir_scope_open(b)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
     address: if takes_parts -> ir_map_walk_entry(m, b, walked, data, length, index, stride) else -> ir_element_address(m, b, data, index, stride)
     item: ir_load_at(m, b, address, 0, row)
     map_shape := IRMapShape?{None}
@@ -6168,6 +6255,7 @@ ir_list_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, true)
     ir_scope_close(m, b)
     if ends_after {
         b.fresh[list] = true
@@ -6188,7 +6276,7 @@ ir_slice_walk_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ba
     if ir_body_node(p, b, base).kind == .Clone(inner, _) -> receiver = inner
     local: if ir_body_node(p, b, receiver).kind == {
         .Local(read) -> read
-        else -> { return -1 }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> { return -1 }
     }
     id: local.symbol_id ?? return -1
     if local.mutable || local.deref || local.generated || local.address_lifetime != None || local.persist_key != None -> return -1
@@ -6232,6 +6320,7 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
     iterator_ty: m.types[b.f.slot_type[iterator]].ty
     next_args: ir_owner_args(p, p.functions[next_row], iterator_ty) ?? return ir_fail(b, span, "iterator {ir_type_name(iterator_ty)}, which does not spell its owner's type arguments")
     countdown: ir_walk_countdown(m, b, stride)
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     backs := [IRWriteBack]{}
@@ -6250,7 +6339,7 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
     ir_exit_unless(m, b, present, exit)
     step_block: ir_open(b.f, IROp.Block, b.line)
     ir_scope_open(b)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
     item: ir_box_take(m, p, b, option, 0, item_row)
     if item >= 0 {
         b.fresh[item] = false
@@ -6267,6 +6356,7 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, true)
     ir_scope_close(m, b)
 }
 
@@ -6292,6 +6382,7 @@ ir_encoding_reader_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: St
         b.bindings.push(IRBinding{name: "", slot: source, owned: true})
     }
     countdown: ir_walk_countdown(m, b, stride)
+    edge: ir_loop_edge(m, b)
     exit: ir_open(b.f, IROp.Block, b.line)
     _: ir_open(b.f, IROp.Loop, b.line)
     backs := [IRWriteBack]{}
@@ -6341,7 +6432,7 @@ ir_encoding_reader_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: St
     ir_exit_unless(m, b, present, exit)
     step_block: ir_open(b.f, IROp.Block, b.line)
     ir_scope_open(b)
-    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
+    b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
     item: ir_box_take(m, p, b, option, 0, item_row)
     if item >= 0 {
         b.fresh[item] = false
@@ -6358,6 +6449,7 @@ ir_encoding_reader_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: St
     ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
+    ir_loop_join(m, b, edge, true)
     ir_scope_close(m, b)
 }
 
@@ -6634,7 +6726,7 @@ ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, a
         if ir_window_box(m, p, value_ty) {
             if ir_body_node(p, b, value).kind == {
                 .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .SharedGuardValue(_) -> return ir_window_subject(m, p, b, value, value_ty, span)
-                else -> {}
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
             }
         }
         place: ir_write_base(m, p, b, value, span)
@@ -6846,6 +6938,7 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
         }
     }
     b.ret = returned
+    ir_effect_scope_frame(m, b, lambda.effect_scope)
     if lambda.executable == {
         .Expr(value) -> ir_return(m, p, b, Val(value), span)
         .Block(body) -> {
@@ -6856,14 +6949,18 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
 }
 
 // A call through a closure box: its code with the box as the hidden first
-// argument.
+// argument. A written parameter (`fn(&[Int])`) gets its place's address, as
+// a direct call's does (ir_call_row); a taken one is lent as a read one is,
+// and the code behind the box owns its own copy (ir_function_value).
 ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args: [BodyCallArg], signature: Type, span: Span) -> Int Never! {
     params := [Type]{}
     returned := Type?{None}
+    metadata := FunctionCallMetadata?{None}
     fact: ir_untag(ir_fact(p, b, signature, span))
-    if fact == .Fn(fn_params, fn_ret, _, _, _, _) {
+    if fact == .Fn(fn_params, fn_ret, _, _, fn_metadata, _) {
         params = fn_params
         returned = fn_ret
+        metadata = fn_metadata
     } else {
         return ir_fail_slot(b, span, "indirect call through {ir_type_name(signature)}")
     }
@@ -6871,9 +6968,25 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
     boxed: ir_expr(m, p, b, callee)
     if ir_failed(b) || boxed < 0 -> return -1
     slots := [Int]{boxed}
+    backs := [IRWriteBack]{}
+    bridges := [IRWriteBack]{}
     loop (index, arg) in args {
-        if arg.mut_borrow || arg.spread -> return ir_fail_slot(b, span, "write or spread argument of an indirect call")
+        if arg.spread -> return ir_fail_slot(b, span, "spread argument of an indirect call")
         row: ir_value_type(m, p, params[index]) ?? return ir_fail_slot(b, span, "argument type {params[index]}")
+        if function_param_writes(metadata, index) || arg.mut_borrow {
+            address: ir_place_address(m, p, b, arg.value, backs, span)
+            if ir_failed(b) -> return -1
+            // An inline `[T#N]` written as a `[T]` goes through a List copy
+            // of it, whose elements are put back after the call.
+            if ir_fixed_count(m, b.f.slot_type[address]) != None && ir_fixed_count(m, row) == None && ir_list_element_of(m, p, row) != None {
+                bridge: ir_fixed_bridge(m, p, b, address, row, span)
+                bridges.push(IRWriteBack{cell: bridge, slot: address})
+                slots.push(bridge)
+                next
+            }
+            slots.push(address)
+            next
+        }
         slot: ir_value_as(m, p, b, arg.value, row, span)
         if ir_failed(b) -> return -1
         if slot < 0 -> return ir_fail_slot(b, span, "Unit argument of an indirect call")
@@ -6891,6 +7004,8 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
     }
     start: ir_args(b.f, slots)
     ir_emit(b.f, IROp.CallIndirect, dst, code, start, slots.len(), b.line)
+    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)
     // The call only lends its box and its arguments.
     loop slot in slots -> ir_release(m, b, slot)
     ir_stop_check(m, b)
@@ -6900,13 +7015,13 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // A checked constant read: a borrow of its static object (BuildStatic.jet)
 // when its value freezes, else its compile-time value built in place; a
 // value holding a compiler value, the compiler answers (ir_host_constant).
-// A read of module storage loads its cell, and a read of a constant computed
-// at startup borrows the value its cell holds (ir_startup_read).
+// A read of module storage loads its cell, and a read of a module `Shared`
+// holder shares its process cell (ir_shared_holder_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(m, p, b, ty, key, span)
     at: p.constants.get(key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
     definition: p.constant_defs[at]
-    if definition.init != None -> return ir_startup_read(m, p, b, definition, span)
+    if definition.shared_holder -> return ir_shared_holder_read(m, p, b, definition, span)
     if definition.is_storage {
         address: ir_storage_address(m, p, b, definition, span)
         if address < 0 -> return -1
@@ -6917,82 +7032,6 @@ ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String
     borrowed: ir_static_read(m, p, b, ty, key, definition.value)
     if borrowed >= 0 -> return borrowed
     ir_comptime(m, p, b, ty, definition.value, span)
-}
-
-// A read of a constant computed at startup: the entry computes every one
-// before the program runs (ir_entry_function), so a read is one load of
-// the cell's state word and one branch that only a read from another
-// startup function can take, to compute the constant first through its
-// guard. The value is borrowed: the cell owns it.
-ir_startup_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
-    row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
-    guard: ir_startup_guard(m, p, definition)
-    if guard < 0 -> return ir_fail_slot(b, span, "the startup function of constant {definition.name}")
-    cell: ir_startup_cell(m, b, definition, row)
-    state: ir_load_word(m, b, cell, 0)
-    computed: ir_word_const(m, b, 2)
-    pending: ir_bool_op(m, b, IROp.Ne, state, computed)
-    ir_open_if(b.f, pending, b.line)
-    operands: ir_args(b.f, [Int]{})
-    ir_emit(b.f, IROp.Call, -1, guard, operands, 0, b.line)
-    ir_end(b.f, b.line)
-    ir_load_at(m, b, cell, 8, row)
-}
-
-// The guard of a constant computed at startup, built on first use: it
-// returns at once when the cell holds the value; otherwise it marks the cell
-// computing, calls the constant's startup function, stores the value and
-// marks the cell computed. A guard entered while its constant is computing
-// (a startup function that reads its own constant through a call the
-// checker does not follow) panics with "NAME reads itself during startup".
-// -1 when the constant's startup function is not among the checked functions.
-ir_startup_guard: fn(m: &IRModule, p: IRProgram, definition: TConstantDef) -> Int Never! {
-    key: "{definition.key}#startup"
-    known: name_rows_value(m.function_rows, key) ?? -1
-    if known >= 0 -> return known
-    init_key: definition.init ?? return -1
-    init_row: ir_function_row(p, init_key) ?? return -1
-    init_function: p.functions[init_row]
-    row: ir_value_type(m, p, definition.ty) ?? return -1
-    callee_return: ir_executable_return(init_function) ?? return -1
-    callee_row: ir_value_type(m, p, callee_return) ?? return -1
-    init: ir_function_id(m, p, init_key, [Type]{}) ?? return -1
-    id: m.functions.len()
-    m.functions.push(ir_function_new("{definition.name}.startup", key, "{ir_symbol_name(init_function)}__guard", init_function.source_file, init_function.line))
-    name_rows_set(m.function_rows, key, id)
-    g := ir_builder_new(m.functions[id].copy())
-    g.line = init_function.line
-    span: Span{start: 0, end: 0}
-    cell: ir_startup_cell(m, g, definition, row)
-    state: ir_load_word(m, g, cell, 0)
-    computed: ir_word_const(m, g, 2)
-    done: ir_bool_op(m, g, IROp.Eq, state, computed)
-    ir_open_if(g.f, done, g.line)
-    ir_emit(g.f, IROp.Return, -1, -1, -1, -1, g.line)
-    ir_end(g.f, g.line)
-    computing: ir_word_const(m, g, 1)
-    cycle: ir_bool_op(m, g, IROp.Eq, state, computing)
-    ir_open_if(g.f, cycle, g.line)
-    message: ir_static_text(m, g, "{definition.name} reads itself during startup")
-    _: ir_runtime(m, g, "jet_rt_panic_message", message, -1)
-    ir_emit(g.f, IROp.Unreachable, -1, -1, -1, -1, g.line)
-    ir_end(g.f, g.line)
-    ir_emit(g.f, IROp.Store, -1, cell, 0, computing, g.line)
-    value: ir_fresh_temp(m, g, callee_row)
-    operands: ir_args(g.f, [Int]{})
-    ir_emit(g.f, IROp.Call, value, init, operands, 0, g.line)
-    adapted: ir_adapt(m, p, g, value, row, span)
-    ir_store_at(m, p, g, cell, 8, adapted)
-    ir_emit(g.f, IROp.Store, -1, cell, 0, computed, g.line)
-    ir_emit(g.f, IROp.Return, -1, -1, -1, -1, g.line)
-    if g.error != "" {
-        ir_emit(g.f, IROp.Unreachable, -1, -1, -1, -1, g.line)
-        m.functions[id] = g.f.move()
-        return -1
-    }
-    ir_resolve_deferred(m, p, g)
-    m.functions[id] = g.f.move()
-    id
 }
 
 // A named function used as a value of the function type `ty`: a closure box
@@ -7019,14 +7058,17 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         if function.params.len() != params.len() -> return ir_fail_slot(b, span, "named function {function.name} as a value of {params.len()} parameters")
         // Every row is known before the adapter is registered, so a value
         // the builder cannot make leaves no half-built function behind.
+        // A written parameter's value slot is what the caller passes for it
+        // (ir_indirect_call): the address of a non-aggregate, as the callee's
+        // own parameter slot is (ir_param_slot).
         value_rows := [Int]{}
-        loop param in params {
+        loop (index, param) in params {
             value_row: ir_value_type(m, p, param) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param)}")
-            value_rows.push(value_row)
+            writes: function.params[index].convention == .Write
+            value_rows.push(if writes && m.types[value_row].kind != .Aggregate -> ir_pointer_row(m) else -> value_row)
         }
         param_rows := [Int]{}
         loop param in function.params {
-            if param.convention == .Write -> return ir_fail_slot(b, span, "named function {function.name} with a write parameter as a value")
             param_row: ir_value_type(m, p, param.ty) ?? return ir_fail_slot(b, span, "named function value parameter type {ir_type_name(param.ty)}")
             param_rows.push(param_row)
         }
@@ -7054,9 +7096,14 @@ ir_function_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
         loop (index, value_row) in value_rows -> values.push(ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, function.params[index].local.name)))
         a.f.result = result_row
         // The value's caller keeps its arguments: a move parameter of the
-        // function gets its own copy.
+        // function gets its own copy, and a written one passes the address
+        // (or aggregate) the caller lent straight through.
         arguments := [Int]{}
         loop (index, param) in function.params {
+            if param.convention == .Write {
+                arguments.push(values[index])
+                next
+            }
             value: ir_adapt(m, p, a, values[index], param_rows[index], span)
             arguments.push(if param.convention == .Move -> ir_own(m, p, a, value) else -> value)
         }
@@ -7171,7 +7218,7 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
             }
             return ir_fail_slot(b, span, "failed constant of {ir_type_name(ty)}")
         }
-        else -> return ir_fail_slot(b, span, "constant value {ir_comptime_name(value)}")
+        .Unit -> return ir_fail_slot(b, span, "constant value {ir_comptime_name(value)}")
     }
 }
 
@@ -7284,7 +7331,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
     metadata_value: ir_comptime_field(fields, "__jet___memo_error_metadata") ?? return error
     metadata: if metadata_value == {
         .Struct(_, rows) -> rows
-        else -> { return ir_fail_slot(b, span, "default Err metadata constant {ir_comptime_name(metadata_value)}") }
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail_slot(b, span, "default Err metadata constant {ir_comptime_name(metadata_value)}") }
     }
     if ir_comptime_field(metadata, "typed_identity") == .Val(.Present(identity)) {
         ir_comptime_err_text(m, p, b, error, Int.from_i64(ERR_IDENTITY), identity, span)
@@ -7296,7 +7343,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
     if ir_comptime_field(metadata, "details") == .Val(.Present(details_value)) {
         details: if details_value == {
             .Struct(_, rows) -> rows
-            else -> { return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}") }
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}") }
         }
         holder: ir_list_buffer_alloc(m, b, Int.from_i64(ERR_DETAILS_BYTES))
         variant: ir_comptime_field(details, "variant") ?? absent_text.copy()
@@ -7346,14 +7393,14 @@ ir_comptime_err_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
 ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, at: Int, stride: Int, items: TComptimeValue, texts: [String], number: String?, span: Span) Never! {
     rows: if items == {
         .List(values) -> values
-        else -> { return ir_fail(b, span, "default Err metadata rows {ir_comptime_name(items)}") }
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail(b, span, "default Err metadata rows {ir_comptime_name(items)}") }
     }
     count: rows.len()
     buffer: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride)
     loop (index, item) in rows {
         fields: if item == {
             .Struct(_, values) -> values
-            else -> { return ir_fail(b, span, "default Err metadata row {ir_comptime_name(item)}") }
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail(b, span, "default Err metadata row {ir_comptime_name(item)}") }
         }
         loop (position, name) in texts {
             text: ir_comptime_field(fields, name) ?? return ir_fail(b, span, "default Err metadata row without {name}")
@@ -7362,7 +7409,7 @@ ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
         if number == .Val(name) {
             word: if ir_comptime_field(fields, name) == {
                 .Val(.Int(value)) -> value
-                else -> { return ir_fail(b, span, "default Err metadata row without {name}") }
+                .Val(_) | .None -> { return ir_fail(b, span, "default Err metadata row without {name}") }
             }
             ir_comptime_err_word(m, p, b, buffer, index * stride + texts.len() * 8, word)
         }

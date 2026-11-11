@@ -180,7 +180,16 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_optional("disambiguation", ParamZone.Either, CoreCallDefault.String{value: "compatible"}),
         })
         module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_files"}) -> Val([CoreCallParameterContract]{
-            core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent),
+            core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent), core_param_optional("skip", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "list_dir" -> Val([CoreCallParameterContract]{
+            core_param_required("path"), core_param_optional("matching", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "canonicalize" -> Val([CoreCallParameterContract]{
+            core_param_required("path"), core_param_optional("missing_last", ParamZone.Either, absent),
+        })
+        module_name == "core.files" && member == "symlink" -> Val([CoreCallParameterContract]{
+            core_param_required("original"), core_param_required("link"), core_param_optional("replace", ParamZone.Either, absent),
         })
         module_name == "core.http.server" && core_sig_one_of(member, [String]{"bind", "serve"}) -> Val([CoreCallParameterContract]{
             core_param_required("address"), core_param_required("mux"),
@@ -563,14 +572,6 @@ core_sig_encoding_backing: fn(request: CoreCallSignatureRequest) -> CoreTypedCal
     if module_name != "core.encoding" -> return None
     if member == "__coerce_now" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     if member == "__coerce_emit" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(unit)))
-    // The runtime's thread-local text-cell decode scope (DynCodec.jet): enter
-    // answers the previous state, which leave restores.
-    if member == "__text_cells_enter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Bool)))
-    if member == "__text_cells_leave" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read)}, Val(unit)))
-    // The runtime's thread-local ETF string decode scope (DynCodec.jet): enter
-    // takes the mode (1 binary, 2 byte list) and answers the previous one.
-    if member == "__etf_strings_enter" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.Int)))
-    if member == "__etf_strings_leave" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(unit)))
     if member == "__read_byte" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write)}, Val(core_sig_result(Type.Option{inner: byte}, cause))))
     if member == "__read_into" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write), core_sig_positional(bytes, write), core_sig_positional(Type.Int, read)}, Val(core_sig_result(Type.Int, cause))))
     if member == "__write_bytes" || member == "__write_text" {
@@ -724,17 +725,4 @@ core_call_native_return_labels: fn(module_name: String, member: String) -> [Stri
     signature: core_sig_fixed(request) ?? return [String]{}
     if signature.module_name != module_name || signature.member != member -> return [String]{}
     signature.native_return_labels
-}
-
-core_call_label_requirements: fn(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] Never! {
-    if module_name == "core.net.tls" && member == "client" && actual_arity == 3 -> return [CoreCallLabelRequirement]{
-        CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "deadline"},
-    }
-    if module_name == "core.net.tls" && member == "client" && actual_arity == 4 -> return [CoreCallLabelRequirement]{
-        CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "config"}, CoreCallLabelRequirement{argument_index: 3, label: "deadline"},
-    }
-    if module_name == "core.net" && member == "unix_connect" && actual_arity == 2 -> return [CoreCallLabelRequirement]{
-        CoreCallLabelRequirement{argument_index: 1, label: "deadline"},
-    }
-    [CoreCallLabelRequirement]{}
 }

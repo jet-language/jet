@@ -33,7 +33,7 @@ use {
 ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
     if kind == {
         .TopLevel -> true
-        else -> false
+        .Method(_, _) | .TraitMethod(_, _, _, _, _) -> false
     }
 }
 
@@ -127,7 +127,7 @@ ir_args_helper: fn(operation: BodyHandleOp) -> String? Never! {
         .ParsedArgsOptions -> Val("__parsed_options")
         .ParsedArgsPositional -> Val("__parsed_positional")
         .ParsedArgsSubcommand -> Val("__parsed_subcommand")
-        else -> None
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONReaderNext | .JSONWriterWrite | .JSONWriterFlush | .JSONWriterFinish | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .CBORReaderNext | .CBORWriterWrite | .CBORWriterFlush | .CBORWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueTypeName | .ReflectValuePath | .ReflectValueDisplay | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPClientMethod(_, _) | .HTTPServerMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> None
     }
 }
 
@@ -169,14 +169,13 @@ ir_precise_source_function: fn(module_identity: String, source_file: String, nam
 // Whether a top-level Core function with these header fields is one lowering
 // keeps by name, with no keyed call in a kept caller's checked body: a
 // Fmt.jet selector helper, an Encoding.jet decode helper, an Args.jet
-// helper, a precise-operation source helper, a core.process line reader
-// (ir_process_line_reader) or a startup function. A compile that lowers
+// helper, a precise-operation source helper or a core.process line reader
+// (ir_process_line_reader). A compile that lowers
 // checks each up front under Core demand (driver
 // jet_driver_core_lowering_roots), since no checked body names it.
 ir_core_lowered_by_name: fn(module_identity: String, source_file: String, name: String) -> Bool Never! {
     top: TFuncKind.TopLevel
     if ir_string_format_source(module_identity, source_file, top) || ir_codec_decode_source(module_identity, source_file, top, name) || ir_args_source(module_identity, source_file, top, name) || ir_precise_source_function(module_identity, source_file, name) -> return true
-    if name.starts_with(IR_STARTUP_FUNCTION_PREFIX) -> return true
     core_identity_in_module(module_identity, "core.process") && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
 }
 
@@ -225,7 +224,7 @@ ir_core_reach_add: fn(keys: &[String], key: String) Never! {
 ir_core_reach_lambda_keys: fn(tree: BodyTree, value: BodyLambda, functions: [FnBody], keys: &[String]) Never! {
     if value.executable == {
         .Block(body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-        else -> {}
+        .Expr(_) -> {}
     }
 }
 
@@ -313,7 +312,7 @@ ir_core_reach_one_stmt_keys: fn(tree: BodyTree, statement: Int, functions: [FnBo
             }
             .Reactive(value, _) -> ir_core_reach_lambda_keys(tree, value, functions, keys)
             .GCEdit(_, _, _, _, _, edited, _) -> ir_core_reach_one_stmt_keys(tree, edited, functions, keys)
-            else -> {}
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
         }
 }
 
@@ -403,7 +402,7 @@ ir_core_reach_expr_keys: fn(tree: BodyTree, expression: Int, functions: [FnBody]
         // by key, with no call node.
         .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
 }
 
@@ -455,7 +454,7 @@ ir_precise_expr_helper: fn(expression: BodyNode) -> String? Never! {
             if canonical.member == "decimal" -> return ir_precise_source_helper("Decimal", "from_str")
             None
         }
-        else -> None
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> None
     }
 }
 
@@ -511,7 +510,7 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
         }
         .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     body_each_expr_child(tree, node, (child: Int) -> ir_named_function_tree(tree, child, keys, decls))
 }
@@ -557,7 +556,7 @@ ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptim
         }
         .Call(_, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
         .MethodCall(_, _, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
-        else -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     body_each_expr_child(tree, node, (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
 }
@@ -619,7 +618,7 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> ir_precise_rendered_owners(field.ty, owners)
         .Union(members) -> loop member in members -> ir_precise_rendered_owners(member, owners)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -644,9 +643,12 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 
 // Which checked functions to lower: one flag per row of `functions`, read in
 // place (never copied). Only rows flagged in `candidates` take part: every
-// candidate outside `core_module_identities` (user code) is a root, and a
-// top-level Core source candidate, including a compiler-private part's
-// receiver function, is kept only when a kept body names it. Authored Core
+// candidate outside `core_module_identities` is a root, and a top-level
+// candidate of a listed module (Core source, including a compiler-private
+// part's receiver function, a dependency package, or under `dead_code:
+// remove` the entry package's own) is kept only when a kept body names it or
+// its key is in `rooted_keys` (the entry package's entry, jobs and exports;
+// Pipeline.jet jet_driver_entry_root_keys). Authored Core
 // methods stay rooted because Codegen resolves their implicit uses (`close`,
 // `display`, index hooks, trait dispatch) by owner type rather than by a key
 // in the caller's body. The closed precise-operation source registry
@@ -666,7 +668,7 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // Reachability is a closure, so the flags are the same for any thread
 // count. `functions` leaves for the threads and comes back unchanged.
 // `decls` is the run's declaration table the direct calls name.
-ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [String], threads: CompilerThreads) -> [Bool] {
+ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [String], rooted_keys: [String:Bool], threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [String:Bool]{}
     loop identity in core_module_identities -> core_modules[identity] = true
@@ -691,15 +693,14 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
         if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) || ir_args_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
-        // A startup function runs before the entry (ir_entry_function), read or not.
-        rooted: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
+        rooted: !core_modules.has_key(function.module_identity) || rooted_keys.has_key(function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
         reachable.push(rooted)
         if rooted {
             roots.push(index)
             weights.push(function.source_span.end - function.source_span.start)
         }
     }
-    slot: shared IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, by_key: [NameRows]{by_key.move()}, source_keys: [[String:String]]{source_keys.move()}, decl_rows: decl_rows.move(), roots: roots.move()}
+    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, by_key: [NameRows]{by_key.move()}, source_keys: [[String:String]]{source_keys.move()}, decl_rows: decl_rows.move(), roots: roots.move()}}
     pending := [Int]{}
     loop target in ir_core_reach_root_targets(slot, weights, threads) {
         if !reachable[target] {
@@ -759,7 +760,7 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, weights: [Int], thre
     if count > weights.len() -> count = weights.len()
     if workers <= 1 || count <= 1 -> return ir_core_reach_part_targets(slot, 0, weights.len())
     bounds: compiler_threads_partition(weights, count)
-    queue: shared IRPartQueue{next: 0}
+    queue: Shared{IRPartQueue{next: 0}}
     parts := [[Int]]{}
     loop _ in 0..<count -> parts.push([Int]{})
     ir_core_reach_claimers(slot, bounds, queue, 0, workers, parts)

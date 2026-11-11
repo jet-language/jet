@@ -158,7 +158,7 @@ publication_index_read_or_empty: fn(path: String) -[FS]> String IOError! {
         .Ok(text) -> Ok(text)
         .Err(error) -> if error == {
             .NotFound(_) -> Ok("")
-            else -> Err(error)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(error)
         }
     }
 }
@@ -179,7 +179,7 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
         info: files.stat(path) ?? {
             if err == {
                 .NotFound(_) -> {}
-                else -> return Err(err)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
             }
             next
         }
@@ -215,7 +215,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
         writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(err)
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(err)
             }
             if files.stat(path) == .Ok(metadata) {
                 if time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {

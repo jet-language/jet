@@ -70,7 +70,7 @@ sema_expression_unit_literal_time_fact: fn(suffix: String, graph: SemaRegistrati
                         }
                     }
                 }
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -109,7 +109,7 @@ sema_expression_unit_literal_fact: fn(suffix: String, graph: SemaRegistrationGra
                         }
                     }
                 }
-                else -> {}
+                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }
@@ -186,9 +186,9 @@ sema_expression_list_trait_coercion: fn(ty: Type) -> Type? {
     if ty == {
         .List(element) | .FixedList(element, _) -> if element == {
             .TraitObject(bounds) -> if bounds.len() == 1 -> Val(element) else -> None
-            else -> None
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -203,14 +203,14 @@ sema_expression_list_element_needs_expected_type: fn(element: Expr) -> Bool Neve
         .TypedLit(head, _, _, _) -> head == None
         .Paren(inner, _, _) -> sema_expression_list_element_needs_expected_type(inner)
         .Unary(op, inner, _, _) -> op == UnOp.Neg && sema_expression_list_element_needs_expected_type(inner)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
 sema_expression_list_element_is_inferred_struct: fn(element: Expr) -> Bool Never! {
     if element == {
         .StructLit(_, _, _, _, _, inferred, _, _) -> inferred
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -219,7 +219,7 @@ sema_expression_list_element_is_empty_list: fn(element: Expr) -> Bool Never! {
     if element == {
         .ListLit(elements, _, _) -> elements.len() == 0
         .Paren(inner, _, _) -> sema_expression_list_element_is_empty_list(inner)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -264,7 +264,7 @@ sema_expression_list_mark_owned_value: fn(value: Expr, state: &SemaOwnershipStat
             true
         }
         .Paren(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) -> sema_expression_list_mark_owned_value(inner, state, scopes, diagnostics)
-        else -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> true
     }
 }
 
@@ -328,7 +328,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
                 normalized: sema_expr_expected_type(sema_expr_unwrap_tag(checked.ty), environment, program)
                 spread_element := if normalized == {
                     .List(inner) -> inner
-                    else -> {
+                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                         diagnostics.push(sema_error("E1311", spread_span, "spread needs a list, not `{type_name(normalized)}`", "list spread `[...xs, y]` expands a list's elements in place", "spread a `[T]` value here"))
                         return None
                     }
@@ -343,7 +343,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
                 checked_parts.push(Val(TListSpreadPart.Spread{value: checked}))
                 element_types.push(Val(spread_element))
             }
-            else -> {
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
                 // A `[View<str>]` item reads a string view as itself, as a
                 // `View<str>` field does.
                 string_view: if expected_element == .Val(required) -> sema_stmt_string_view_type(required) else -> false
@@ -469,7 +469,7 @@ sema_expression_list_member_spreads: fn(elements: [Expr]) -> [Expr] Never! {
             .MemberSpread(base, members, span, _) -> {
                 loop field in sema_expression_member_spread_fields(base, members, span) -> expanded.push(field)
             }
-            else -> expanded.push(element.copy())
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> expanded.push(element.copy())
         }
     }
     expanded
@@ -481,7 +481,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     loop element in elements {
         if element == {
             .Spread(_, _, _) -> has_spread = true
-            else -> {}
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
         }
     }
     expected_element := Type?{None}
@@ -524,7 +524,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
             .Map(_, _, _) -> {
                 if elements.len() == 0 -> return sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, [ExprPair]{}, span, Val(normalized), environment, program, scopes, state, tail_store, context, diagnostics)
             }
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
     }
     // `ViewMut` elements coexist in the list: their overlap is the list's
@@ -533,7 +533,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     mutable_view_elements: if expected_element == {
         .Val(element_ty) -> if element_ty == {
             .Apply(name, _) -> name == "ViewMut"
-            else -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
         }
         .None -> false
     }
@@ -545,7 +545,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     checked: checked_elements ?? return None
     if result_ty == None {
         if checked.parts.len() == 0 {
-            diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal, such as `[Int]{{}}`"))
+            diagnostics.push(sema_error("E0501", span, "an empty list needs a type", "write `[]` only where the list type is already known from around it", "name the element type on the literal: `[T]{{}}` for a list of `T`"))
             return None
         }
         result_ty = Val(Type.List{element: checked.element_types[0]})
@@ -555,7 +555,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     if has_spread {
         element_type: if ty == {
             .List(element) -> element
-            else -> panic("checked list spread result is not a growable list")
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("checked list spread result is not a growable list")
         }
         if !sema_expression_list_check_clone(element_type, span, environment, program, context, diagnostics) -> return None
         return sema_expr_expected_owned(sema_tree_node(ty, TExprKind.ListSpread{parts: checked.parts}, span), expected, environment, program, diagnostics)
@@ -564,7 +564,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     loop part in checked.parts {
         if part == {
             .Element(value) -> values.push(value)
-            else -> panic("list without spread contains a spread part")
+            .Spread(_) -> panic("list without spread contains a spread part")
         }
     }
     trait_coercion: sema_expression_list_trait_coercion(ty)
@@ -592,12 +592,12 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
                 result_ty = Val(normalized)
                 if entries.len() == 0 && !sema_type_map_key_eligible(environment, program, key) -> diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type", key_span ?? span))
             }
-            else -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
         }
     }
     if entries.len() == 0 {
         if result_ty == None {
-            diagnostics.push(sema_error("E0501", span, "an empty map needs a type", "write `[]` only where the map type is already known from around it", "name the key and value types on the literal: `[String:Int].{{}}`"))
+            diagnostics.push(sema_error("E0501", span, "an empty map needs a type", "write `[]` only where the map type is already known from around it", "name the key and value types on the literal: `[K:V]{{}}` for a map from `K` to `V`"))
             return None
         }
         ty: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
@@ -770,7 +770,7 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
         .Map(key, _, _) -> Val(key)
         .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else if name == "Pool" && args.len() == 1 -> Val(Type.Apply{name: "ID", args: [Type]{args[0]}}) else -> None
         .Named(_) -> if sema_call_math_lane_name(base_ty) != None -> Val(Type.Int) else -> None
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
     // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
     // named or written-type index (`i`, `U8{1}`) keeps its own type when it
@@ -792,6 +792,10 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
     distinct_range: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, environment, program) else -> None
     index_bounds := tree_expr_known_bounds(inferred_index)
     if index_bounds == None && distinct_range == .Val(range) -> index_bounds = Val(TIntegerBounds{lo: range.lo, hi: range.hi})
+    // An index with no bounds of its own reads its interval off
+    // its parts (`faces[roll.raw() - 1]` over a `distinct Int(1..6)`); one that
+    // fits the list proves the read, and any other keeps the runtime check.
+    derived_range: if index_bounds == None && base_ty == .FixedList(_, _) -> sema_contract_index_interval(inferred_index, environment, program) else -> None
     named_mismatch: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
     // copy: the named position keeps its own type for the report below.
     named_ty: inferred_index.ty.copy()
@@ -823,7 +827,7 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
         }
         element: if base_ty == {
             .List(item) | .FixedList(item, _) -> Val(item)
-            else -> None
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
         }
         if element == .Val(item) {
             // L0501 (Rust `infer` Index arm): a list window copies its range,
@@ -886,8 +890,12 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
                     // The claim is the whole `base[index]`, as the source shows it.
                     context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: bounds.lo, hi: bounds.hi, len: length})
                 }
-                else -> {
+                .None -> {
                     resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
+                    if derived_range == .Val(range) && range.lo >= 0 && range.hi < length {
+                        resolved_kind = IndexKind.FixedListProof
+                        context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: range.lo, hi: range.hi, len: length})
+                    }
                 }
             }
             result_ty = Val(element)
@@ -935,7 +943,7 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
             diagnostics.push(sema_error("E0503", span, "strings aren't indexed with `[ ]`", "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`", "e.g. `loop c in s.chars() {{ }}` or `s.slice(0..2)`"))
             return None
         }
-        else -> {}
+        .Int | .Float | .Bool | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     // A type with an `Index` impl reads `base[key]` as its `get(key)`, and a
     // key it has no value for stops the program like a missing map key.
@@ -969,7 +977,7 @@ sema_expression_index_mismatch: fn(base_ty: Type, offered: Type, span: Span) -> 
             if (name == "View" || name == "ViewMut") && args.len() == 1 -> return list_index
             if name == "Pool" && args.len() == 1 -> return Val(sema_error("E0112", span, "`Pool` indexes need a matching `ID<T>`, not {sema_type_show(offered)}", "a pool slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if sema_call_math_lane_name(base_ty) != None -> return Val(sema_error("E0505", span, "lane indexes must be {sema_type_show(Type.Int)}, not {sema_type_show(offered)}", "a SIMD lane is read by position with a whole-number index starting at 0", "use an Int index, like `v[0]`"))
     None
@@ -981,7 +989,7 @@ sema_expression_index_mismatch: fn(base_ty: Type, offered: Type, span: Span) -> 
 sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {}
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
     }
     graph: program.registration_graph ?? return false
     row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
@@ -990,6 +998,15 @@ sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaP
         loop implementation in module_row.impls {
             if implementation.trait_name != (Val(trait_name)) || implementation.target_identity_key != identity -> next
             if implementation.trait_symbol != None || sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name) != None -> next
+            return true
+        }
+    }
+    // An `impl Index { … }` block in the type's own body is the hook the
+    // same way, unless the name is a user trait of the type's module.
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != trait_name -> next
+            if sema_type_graph_trait_symbol(graph, graph.modules[row.module_index].module_identity, trait_name) != None -> next
             return true
         }
     }
@@ -1012,7 +1029,7 @@ sema_expression_index_self_typed: fn(index: Expr) -> Bool Never! {
     if index == {
         .Ident(_, _, _) | .StructLit(_, _, _, _, _, _, _, _) -> true
         .TypedLit(head, _, _, _) -> head != None
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -1075,10 +1092,10 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
                 .List(element) -> result_ty = Val(Type.List{element: element})
                 .FixedList(element, _) -> result_ty = Val(Type.List{element: element})
                 .String -> result_ty = Val(Type.String)
-                else -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
+                .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
             }
         }
-        else -> {
+        .None -> {
             start_checked: sema_check_expression(start, Val(Type.Int), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             end_checked: sema_check_expression(end, Val(Type.Int), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             if !sema_expr_is_integer(start_checked.ty) || !sema_expr_is_integer(end_checked.ty) -> return None
@@ -1088,7 +1105,7 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
                 .List(element) -> result_ty = Val(Type.List{element: element})
                 .FixedList(element, _) -> result_ty = Val(Type.List{element: element})
                 .String -> result_ty = Val(Type.String)
-                else -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
+                .Int | .Float | .Bool | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> result_ty = sema_expression_view_subrange_type(checked_base.ty)
             }
         }
     }
@@ -1163,7 +1180,7 @@ sema_expression_interpolation_auto_printable: fn(ty: Type, environment: SemaScop
         if item == {
             .Struct(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
             .Enum(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
-            else -> return false
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return false
         }
     }
     }
@@ -1210,7 +1227,7 @@ sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, pro
             }
             return true
         }
-        else -> return sema_call_reflection_is_displayable(ty, environment, program)
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> return sema_call_reflection_is_displayable(ty, environment, program)
     }
 }
 
@@ -1238,7 +1255,7 @@ sema_expression_one_pass_fix: fn(ty: Type) -> String Never! {
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Body" -> return "materialize it first: add `.text(limit)` before the interpolation"
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     "consume it with a `loop` and show each item instead"
 }

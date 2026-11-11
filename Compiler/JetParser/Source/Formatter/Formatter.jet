@@ -215,7 +215,7 @@ jfmt_bin_op_method: fn(op: BinOp) -> String? Never! {
     if op == {
         .Pow -> Val("pow")
         .BitXor -> Val("bit_xor")
-        else -> None
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .BitAnd | .BitOr | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> None
     }
 }
 
@@ -232,7 +232,7 @@ jfmt_compound_spell: fn(op: BinOp) -> String Never! {
         .BitOr -> "|="
         .Shl -> "<<="
         .Shr -> ">>="
-        else -> ""
+        .Pow | .BitXor | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> ""
     }
 }
 
@@ -312,22 +312,11 @@ jfmt_bytes_have_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-jfmt_is_space_byte: fn(byte: U8) -> Bool Never! {
-    byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 11 || byte == 12
-}
-
 // Rust `char::is_whitespace` over a source range. Non-ASCII whitespace
 // (NBSP, U+2028, …) is checked by its UTF-8 lead bytes.
 jfmt_src_all_whitespace: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     text: jfmt_src_text(f, start, end)
     text.trim().len() == 0
-}
-
-jfmt_text_has_newline: fn(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        if byte == 10 -> return true
-    }
-    false
 }
 
 // The number of chars in `text` (Rust `s.chars().count()`).
@@ -411,7 +400,7 @@ jfmt_is_simple_stmt: fn(stmt: Stmt) -> Bool Never! {
         .Continue(_) -> true
         .BreakLabel(_, _) -> true
         .ContinueLabel(_, _) -> true
-        else -> false
+        .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .BreakValue(_, _) | .BreakLabelValue(_, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
     }
 }
 
@@ -1029,7 +1018,7 @@ jfmt_span_has_comment: fn(f: JetFmt, open: Int, close: Int) -> Bool Never! {
 jfmt_statement_source_end: fn(f: JetFmt, stmt: Stmt) -> Int Never! {
     scanned: if stmt == {
         .Expr(_) | .DeferClose(_, _) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Yield(_, _) -> true
-        else -> false
+        .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> false
     }
     if !scanned -> return jfmt_stmt_end(stmt)
     start: jfmt_stmt_start(stmt)
@@ -1369,7 +1358,7 @@ jfmt_self_typed: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .Ident(_, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> true
         .Field(base, _, _, _) -> jfmt_self_typed(base)
-        else -> false
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
 }
 
@@ -1425,7 +1414,7 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
                 if else_body == .Val(inner) -> stripped_else = Val(jfmt_strip_optional_returns_in_body(inner))
                 out.push(Stmt.Switch{subject: subject, arms: stripped_arms.move(), else_body: stripped_else.move(), span: span})
             }
-            else -> out.push(stmt.copy())
+            .Val(_) | .Assign(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> out.push(stmt.copy())
         }
     }
     out
@@ -1494,7 +1483,7 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
                 updated.body = jfmt_strip_redundant_optional_returns(decl.body)
                 out.push(Item.GenericModule{value: updated})
             }
-            else -> out.push(item.copy())
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> out.push(item.copy())
         }
     }
     out
@@ -1536,19 +1525,12 @@ jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     Val(String.from_bytes(out) ?? src)
 }
 
-jfmt_sort_edits_by_start: fn(edits: [TextEdit]) -> [TextEdit] Never! {
-    sorted := edits
-    sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by((left: TextEdit, right: TextEdit) -> left.span.start <=> right.span.start)
-    sorted
-}
-
 // ---- parse acceptance (Rust parse_for_check_with_source / parse_for_fmt) ----
 
 // Live current-rule diagnostics that recover in the AST; fmt may rewrite to canon.
 jfmt_is_teaching_parse_diag: fn(code: String) -> Bool Never! {
     if code == {
-        "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0413" | "E0414" | "E0415" | "E0417" -> true
+        "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0414" | "E0415" | "E0417" -> true
         else -> false
     }
 }
@@ -1586,7 +1568,7 @@ jfmt_web_bucket_name: fn(bucket: WebBucket) -> String Never! {
 jfmt_is_module_policy: fn(declaration: PolicyDeclaration) -> Bool Never! {
     if declaration.scope == {
         .Module -> true
-        else -> false
+        .Organization | .Package | .Function | .Block -> false
     }
 }
 

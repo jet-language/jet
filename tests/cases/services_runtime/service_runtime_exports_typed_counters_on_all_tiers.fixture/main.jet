@@ -30,7 +30,7 @@ outcome_label: fn(outcome: TaskOutcome) -> String {
 status_is_paused: fn(status: TaskStatus) -> Bool {
     if status == {
         .Paused -> { return true }
-        else -> {}
+        .Running | .CancelRequested -> {}
     }
     return false
 }
@@ -38,7 +38,7 @@ status_is_paused: fn(status: TaskStatus) -> Bool {
 outcome_is_finished: fn(outcome: TaskOutcome) -> Bool {
     if outcome == {
         .Finished -> { return true }
-        else -> {}
+        .Panicked(_) | .Cancelled | .DeadlineBlown -> {}
     }
     return false
 }

@@ -540,6 +540,15 @@ jet_target_environment_identity: fn(machine: TargetMachine) -> String Never! {
     }
 }
 
+// The effects code built for a hosted `machine` is denied, the row the
+// machine's `core.target` facts derive: a web build's host starts no
+// processes and makes no C foreign calls; a native or WASI host lacks none.
+// A machine with no OS is checked by its own policies instead.
+jet_target_machine_denied_effects: fn(machine: TargetMachine) -> [String] Never! {
+    if jet_target_environment_identity(machine) == "browser" -> return [String]{"Exec", "FFI.C"}
+    [String]{}
+}
+
 jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
     bytes := [U8]{}
     jet_target_append_frame(bytes, "environment", jet_target_environment_identity(machine))
@@ -566,7 +575,7 @@ jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
 jet_target_allocator_provides_heap: fn(policy: AllocatorPolicy) -> Bool Never! {
     if policy == {
         .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true
-        else -> false
+        .Unspecified | .NoAllocator -> false
     }
 }
 
@@ -651,20 +660,27 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
     Val(build_parts[0])
 }
 
-// The OS `$build.os` folds on: Freestanding for a machine with no OS (a
-// bare-metal or no-OS Wasm machine), Web for the browser's Wasm triple, Wasm
-// for any other Wasm triple, else the triple's native OS, else the host's
-// (`host_os` is a key such as `macos`), else Linux.
+// The OS `#build.target.os` folds on: Freestanding for a machine with no OS (a
+// bare-metal or no-OS Wasm machine), else the OS its triple names
+// (jet_target_triple_os), else the host's (`host_os` is a key such as
+// `macos`), else Linux.
 jet_target_active_os_name: fn(machine: TargetMachine, host_os: String) -> String Never! {
-    triple: machine.triple
+    if machine.no_os -> return target_os_name(TTargetOS.Freestanding)
+    if jet_target_triple_os(machine.triple) == .Val(os) -> return target_os_name(os)
+    target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
+}
+
+// The OS a target triple names: Web for the browser's Wasm triple, Wasm for
+// any other Wasm triple, else the triple's native OS; None when it names
+// none.
+jet_target_triple_os: fn(triple: String) -> TTargetOS? Never! {
     if {
-        machine.no_os -> target_os_name(TTargetOS.Freestanding)
-        triple == "wasm32-unknown-unknown" -> target_os_name(TTargetOS.Web)
-        triple.starts_with("wasm") -> target_os_name(TTargetOS.Wasm)
-        triple.contains("windows") -> target_os_name(TTargetOS.Windows)
-        triple.contains("apple") || triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
-        triple.contains("linux") -> target_os_name(TTargetOS.Linux)
-        else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
+        triple == "wasm32-unknown-unknown" -> Val(TTargetOS.Web)
+        triple.starts_with("wasm") -> Val(TTargetOS.Wasm)
+        triple.contains("windows") -> Val(TTargetOS.Windows)
+        triple.contains("apple") || triple.contains("darwin") -> Val(TTargetOS.MacOS)
+        triple.contains("linux") -> Val(TTargetOS.Linux)
+        else -> None
     }
 }
 
@@ -816,13 +832,13 @@ jet_target_memory_declares_ram: fn(regions: [MemoryRegion]) -> Bool Never! {
 jet_target_clock_provider: fn(policy: ClockPolicy) -> ProviderContract? Never! {
     if policy == {
         .Provider(provider) -> Val(provider)
-        else -> None
+        .HostedDefault | .Unspecified | .NoClock -> None
     }
 }
 jet_target_scheduler_provider: fn(policy: SchedulerPolicy) -> ProviderContract? Never! {
     if policy == {
         .Cooperative(provider) | .InterruptDriven(provider) | .BoardRuntime(provider) -> Val(provider)
-        else -> None
+        .HostedDefault | .Unspecified | .NoScheduler -> None
     }
 }
 jet_target_sink_provider: fn(policy: ByteSinkPolicy, capability: TargetCapability) -> ProviderContract? Never! {
@@ -830,9 +846,9 @@ jet_target_sink_provider: fn(policy: ByteSinkPolicy, capability: TargetCapabilit
         .Provider(read, write, report) -> if capability == {
             .IORead -> read
             .IOWrite -> write
-            else -> report
+            .Allocator | .Memory | .Atomic64 | .MMIO | .Hardware | .TimeWall | .TimeMonotonic | .TimeZoneData | .TimeSleep | .Entropy | .Scheduler | .Panic | .PanicReport | .Startup -> report
         }
-        else -> None
+        .HostedDefault | .Unspecified | .NoByteSink -> None
     }
 }
 // Rust TargetMachine::provides_capability.
@@ -842,14 +858,14 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
         .Allocator -> if machine.allocator == {
             .HostedDefault | .Counting(_) -> hosted
             .Provider(_) | .Fixed(_, _) -> true
-            else -> false
+            .Unspecified | .NoAllocator -> false
         }
         .Memory -> hosted || jet_target_memory_declares_ram(machine.memory)
         .Atomic64 -> jet_target_atomic_word_supported(machine.triple)
         .MMIO -> if machine.mmio == {
             .HostedDefault -> hosted
             .Provider(_) -> true
-            else -> false
+            .Unspecified | .NoMMIO -> false
         }
         .Hardware -> !machine.hardware.register_blocks.is_empty() || !machine.hardware.interrupts.is_empty() || !machine.hardware.dma_channels.is_empty()
         .TimeWall -> (hosted && machine.wall_clock == .HostedDefault) || jet_target_clock_provider(machine.wall_clock) != None
@@ -859,19 +875,19 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
         .Entropy -> if machine.entropy == {
             .HostedDefault -> hosted
             .Provider(_) -> true
-            else -> false
+            .Unspecified | .NoEntropy -> false
         }
         .Scheduler -> (hosted && machine.scheduler == .HostedDefault) || jet_target_scheduler_provider(machine.scheduler) != None
         .Panic -> if machine.panic == {
             .HostedDefault -> hosted
             .Abort | .Report(_) -> true
-            else -> false
+            .Unspecified -> false
         }
         .IORead | .IOWrite | .PanicReport -> (hosted && machine.byte_sink == .HostedDefault) || jet_target_sink_provider(machine.byte_sink, capability) != None
         .Startup -> if machine.startup == {
             .HostedDefault -> hosted
             .Generated(_) -> true
-            else -> false
+            .Unspecified -> false
         }
     }
 }
@@ -925,7 +941,7 @@ jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: &[Targe
             if path.trim().is_empty() -> errors.push(.LinkerFileMissingPath)
             if !sha256.starts_with("sha256:") || sha256.bytes().len() <= 7 -> errors.push(.LinkerFileMissingHash{path: path})
         }
-        else -> {}
+        .HostedDefault | .Generated -> {}
     }
 }
 // Rust validate_allocator.
@@ -946,7 +962,7 @@ jet_target_validate_allocator: fn(machine: TargetMachine, errors: &[TargetMachin
             }
             errors.push(.AllocatorRegionUnknown{region: region})
         }
-        else -> {}
+        .NoAllocator -> {}
     }
 }
 // Rust validate_panic.
@@ -968,7 +984,10 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
     // retain Rust's saturation below. Integration also fixes Rust to u128.
     ram := 0
     loop region in machine.memory { if region.kind == .Ram -> ram += region.size.bytes }
-    fixed: if machine.allocator == { .Fixed(_, size) -> size.bytes else -> 0 }
+    fixed: if machine.allocator == {
+        .Fixed(_, size) -> size.bytes
+        .HostedDefault | .Unspecified | .NoAllocator | .Provider(_) | .Counting(_) -> 0
+    }
     sum: usage.stack_bytes + usage.static_ram_bytes + fixed
     used: if sum > 18446744073709551615 -> 18446744073709551615 else -> sum
     if ram > 0 && used > ram -> errors.push(.RamOverflow{used_bytes: used, ram_bytes: ram})
@@ -984,16 +1003,25 @@ jet_target_validate_core_usage: fn(machine: TargetMachine, usage: TargetMachineU
 
 // Rust validate_target_capabilities.
 jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
-    mmio_provider: if machine.mmio == { .Provider(provider) -> Val(provider) else -> None }
+    mmio_provider: if machine.mmio == {
+        .Provider(provider) -> Val(provider)
+        .HostedDefault | .Unspecified | .NoMMIO -> None
+    }
     jet_target_validate_simple_capability(machine, .MMIO, machine.mmio != .Unspecified, machine.mmio == .HostedDefault, mmio_provider, errors)
     jet_target_validate_simple_capability(machine, .TimeWall, machine.wall_clock != .Unspecified, machine.wall_clock == .HostedDefault, jet_target_clock_provider(machine.wall_clock), errors)
     jet_target_validate_simple_capability(machine, .TimeMonotonic, machine.monotonic_clock != .Unspecified, machine.monotonic_clock == .HostedDefault, jet_target_clock_provider(machine.monotonic_clock), errors)
     jet_target_validate_simple_capability(machine, .TimeZoneData, machine.zone_data != .Unspecified, machine.zone_data == .HostedDefault, jet_target_clock_provider(machine.zone_data), errors)
     jet_target_validate_simple_capability(machine, .TimeSleep, machine.sleep != .Unspecified, machine.sleep == .HostedDefault, jet_target_clock_provider(machine.sleep), errors)
-    entropy_provider: if machine.entropy == { .Provider(provider) -> Val(provider) else -> None }
+    entropy_provider: if machine.entropy == {
+        .Provider(provider) -> Val(provider)
+        .HostedDefault | .Unspecified | .NoEntropy -> None
+    }
     jet_target_validate_simple_capability(machine, .Entropy, machine.entropy != .Unspecified, machine.entropy == .HostedDefault, entropy_provider, errors)
     jet_target_validate_simple_capability(machine, .Scheduler, machine.scheduler != .Unspecified, machine.scheduler == .HostedDefault, jet_target_scheduler_provider(machine.scheduler), errors)
-    startup_provider: if machine.startup == { .Generated(provider) -> Val(provider) else -> None }
+    startup_provider: if machine.startup == {
+        .Generated(provider) -> Val(provider)
+        .HostedDefault | .Unspecified -> None
+    }
     jet_target_validate_simple_capability(machine, .Startup, machine.startup != .Unspecified, machine.startup == .HostedDefault, startup_provider, errors)
     sinks: [TargetCapability]{.IORead, .IOWrite, .PanicReport}
     if machine.byte_sink == {
@@ -1008,7 +1036,7 @@ jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: Targe
             if write == Val(provider) -> jet_target_validate_provider_contract(.IOWrite, provider, errors)
             if report == Val(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, errors)
         }
-        else -> {}
+        .NoByteSink -> {}
     }
     if machine.panic == .Report(_) && !jet_target_machine_provides_capability(machine, .PanicReport) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Panic.Report"})
     if !usage.mmio.is_empty() && !jet_target_machine_provides_capability(machine, .MMIO) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Target.MMIO"})
@@ -1024,7 +1052,7 @@ jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: &[TargetMa
             if machine.startup_entry.trim().is_empty() || machine.startup_vectors.trim().is_empty() || machine.startup_placement.trim().is_empty() -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Target.Startup"})
             if !jet_target_abi_valid(machine.startup_abi) -> jet_target_push_unique(errors, .InvalidProviderContract{capability: "Target.Startup", provider: provider.provider, sha256: provider.sha256})
         }
-        else -> {}
+        .HostedDefault | .Unspecified -> {}
     }
 }
 // Rust validate_mmio.
@@ -1402,7 +1430,7 @@ jet_target_machine_error_diagnostic: fn(machine: TargetMachine, error: TargetMac
         .MMIOOutsideRegion(address, size_bytes) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} ({size_bytes} bytes) is outside a declared MMIO region")
         .MMIOMissingUnsafeGate(address) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} has no #Unsafe gate")
         .MMIOEmptyUnsafeReason(address) -> jet_target_mmio_diagnostic(target, "address {jet_target_address_hex(address)} has an empty #Unsafe reason")
-        else -> jet_target_registry_diagnostic("E3314", [String]{"target", "fact", "detail"}, [String]{target, jet_target_fact_name(error), jet_target_fact_detail(error)})
+        .MissingTargetTriple | .MissingMemoryKind(_) | .DuplicateMemoryRegion(_) | .EmptyMemoryRegion(_) | .MemoryAddressOverflow(_) | .OverlappingMemoryRegions(_, _) | .MissingLinkerInput | .LinkerFileMissingPath | .LinkerFileMissingHash(_) | .AllocatorRegionUnknown(_) | .AllocatorRegionNotRam(_) | .AllocatorRegionTooSmall(_, _, _) | .HostedAllocatorRequiresOS | .MissingPanicPolicy | .RamOverflow(_, _) | .HostedHasNoLinkerScript | .HostedHasNoStartup | .UnsupportedStartupTriple(_) | .ExecutionTierUnsupported(_, _) | .FirmwareToolchainMissing(_) | .FirmwareBuildFailed(_) | .SizeBudgetExceeded(_) | .HardwareFactsMissingSVD | .InvalidHardwareSVD(_, _) | .HardwareFactEmptyName(_) | .DuplicateRegisterBlock(_) | .RegisterBlockEmpty(_) | .RegisterBlockAddressOverflow(_) | .RegisterBlockOutsideRegion(_, _, _) | .DuplicateRegister(_, _) | .RegisterAddressOverflow(_, _) | .RegisterOutsideBlock(_, _) | .UnknownRegisterBlock(_) | .UnknownRegister(_, _) | .RegisterWidthMismatch(_, _, _, _) | .RegisterReadDenied(_, _) | .RegisterWriteDenied(_, _) | .DuplicateInterrupt(_) | .DuplicateInterruptVector(_) | .InvalidInterruptEffect(_, _) | .UnknownInterrupt(_) | .InterruptEffectForbidden(_, _, _) | .InterruptHandlerUnbounded(_, _) | .DuplicateDMAChannel(_) | .DuplicateDMAChannelNumber(_) | .DMATransferSizeZero(_) | .UnknownDMAChannel(_) | .DMAOwnershipMismatch(_, _, _, _) | .DMAStartWhileInFlight(_, _) | .DMAWaitWithoutTransfer(_, _) | .DMABufferUnavailable(_, _) | .DMAWaitChannelMismatch(_, _) -> jet_target_registry_diagnostic("E3314", [String]{"target", "fact", "detail"}, [String]{target, jet_target_fact_name(error), jet_target_fact_detail(error)})
     }
 }
 
@@ -1440,7 +1468,7 @@ jet_target_fact_name: fn(error: TargetMachineError) -> String Never! {
         .DuplicateRegisterBlock(_) | .RegisterBlockEmpty(_) | .RegisterBlockAddressOverflow(_) | .RegisterBlockOutsideRegion(_, _, _) | .DuplicateRegister(_, _) | .RegisterAddressOverflow(_, _) | .RegisterOutsideBlock(_, _) | .UnknownRegisterBlock(_) | .UnknownRegister(_, _) | .RegisterWidthMismatch(_, _, _, _) | .RegisterReadDenied(_, _) | .RegisterWriteDenied(_, _) -> "registers"
         .DuplicateInterrupt(_) | .DuplicateInterruptVector(_) | .InvalidInterruptEffect(_, _) | .UnknownInterrupt(_) | .InterruptEffectForbidden(_, _, _) | .InterruptHandlerUnbounded(_, _) -> "interrupts"
         .DuplicateDMAChannel(_) | .DuplicateDMAChannelNumber(_) | .DMATransferSizeZero(_) | .UnknownDMAChannel(_) | .DMAOwnershipMismatch(_, _, _, _) | .DMAStartWhileInFlight(_, _) | .DMAWaitWithoutTransfer(_, _) | .DMABufferUnavailable(_, _) | .DMAWaitChannelMismatch(_, _) -> "DMA"
-        else -> "target"
+        .MissingAllocatorPolicy | .MissingTargetCapability(_) | .HostedCapabilityRequiresOS(_) | .InvalidProviderContract(_, _, _) | .HeapRequiresAllocator | .CoreAPIUnavailable(_, _, _) | .MMIOOutsideRegion(_, _) | .MMIOMissingUnsafeGate(_) | .MMIOEmptyUnsafeReason(_) -> "target"
     }
 }
 
@@ -1500,6 +1528,6 @@ jet_target_fact_detail: fn(error: TargetMachineError) -> String Never! {
         .DMAWaitWithoutTransfer(channel, buffer) -> "DMA `{channel}` cannot wait for buffer `{buffer}` before start"
         .DMABufferUnavailable(channel, buffer) -> "buffer `{buffer}` is unavailable while DMA `{channel}` owns it"
         .DMAWaitChannelMismatch(channel, buffer) -> "DMA `{channel}` does not own in-flight buffer `{buffer}`"
-        else -> "the selected target fact is invalid"
+        .MissingAllocatorPolicy | .MissingTargetCapability(_) | .HostedCapabilityRequiresOS(_) | .InvalidProviderContract(_, _, _) | .HeapRequiresAllocator | .CoreAPIUnavailable(_, _, _) | .MMIOOutsideRegion(_, _) | .MMIOMissingUnsafeGate(_) | .MMIOEmptyUnsafeReason(_) -> "the selected target fact is invalid"
     }
 }

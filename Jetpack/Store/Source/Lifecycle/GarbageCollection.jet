@@ -208,7 +208,7 @@ store_gc_io_context: fn(error: IOError, message: String) -> StoreError Never! {
     if error == {
         .NotFound(_) -> StoreError.NotFound(message)
         .PermissionDenied(_) -> StoreError.PermissionDenied(message)
-        else -> StoreError.Other(message)
+        .InvalidInput(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> StoreError.Other(message)
     }
 }
 
@@ -598,7 +598,7 @@ store_gc_reserved_name: fn(name: String) -> Bool Never! {
     if name.starts_with(".") -> return true
     if name == {
         STORE_BUILD_SCRATCH_DIR | STORE_FAILED_SCRATCH_DIR | STORE_STAGE_DIR | STORE_OBJECTS_DIR | STORE_CAS_DIR | STORE_REFERRERS_DIR | STORE_RECEIPTS_DIR | STORE_SEALS_DIR -> true
-        "reproducibility-staging" | "lifecycle-db" | "closure-db" | "quarantine" -> true
+        "reproducibility-staging" | "lifecycle-db" | "closure-db" | "quarantine" | HANGAR_TOOLS_DIR -> true
         else -> false
     }
 }

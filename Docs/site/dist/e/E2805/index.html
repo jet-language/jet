@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use `:name` or final `*name` with a matching decodable handler parameter; fix the path or handler signature before registration.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2805</code>: <code>tests/ui/http_route_invalid_literal.stderr</code>.</p>
-<pre class="diag">Error [jet.InvalidRoute]: Invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns
-  --&gt; http_route_invalid_literal.jet:11:16
+<p>First UI snapshot mentioning <code>E2805</code>: <code>tests/ui/http_route_constant_path.stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidRoute]: HTTPRouter route path must be a static String or Path
+  --&gt; http_route_constant_path.jet:13:16
     |
- 11 |     router.get(&quot;/users/{id}&quot;, handle)
-    |                ^^^^^^^^^^^^^
- Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
- Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
-More: jet-lang.dev/e/E2805
-
-Error [jet.InvalidRoute]: Invalid HTTP route `/teams/{name}`: use `:name` or final `*name`; braces are not route markers
-  --&gt; http_route_invalid_literal.jet:13:16
-    |
- 13 |     router.get(doubled, handle)
-    |                ^^^^^^^
- Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
- Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+ 13 |     router.get(path, handle)
+    |                ^^^^
+ Why: Router endpoint contracts are fully checked while building; mux value routes may be computed at runtime
+ Fix: Use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a mux
 More: jet-lang.dev/e/E2805
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

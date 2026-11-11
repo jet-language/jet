@@ -1,0 +1,16 @@
+// @web_target
+// A web build's host starts no processes, so code its entry reaches cannot
+// use Exec. Reading the program's own arguments and ending it act on its own
+// process, which the web host supplies, so `run` may still do both.
+use process: core.process
+
+lister: fn() {
+    _: process.cmd(["ls"])
+}
+
+run: fn() {
+    count: process.args().len()
+    if count > 99 -> process.exit(3)
+    print("{count} arguments")
+    lister()
+}

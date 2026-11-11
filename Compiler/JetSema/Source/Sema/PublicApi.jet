@@ -146,7 +146,7 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                     sema_public_api_cap(module_value.cap, path, rows)
                 }
             }
-            else -> {}
+            .Tag(_) | .EffectDecl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -218,7 +218,7 @@ sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: 
             .Distinct(definition) -> local.push(definition.name.copy())
             .TypeAlias(definition) -> local.push(definition.name.copy())
             .Trait(definition) -> local.push(definition.name.copy())
-            else -> {}
+            .Func(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     units := [String:String]{}
@@ -265,7 +265,7 @@ sema_public_api_unit_types: fn(ty: Type, units: [String:String]) -> Type Never! 
             if ret == .Val(value) -> shown = Val(sema_public_api_unit_types(value, units))
             Type.Fn{params: loop param in params -> sema_public_api_unit_types(param, units), ret: shown, effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
         }
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty.copy()
     }
 }
 
@@ -277,7 +277,7 @@ sema_public_api_type_is_pub: fn(items: [Item], name: String) -> Bool Never! {
             .Struct(definition) -> { if definition.name == name -> return definition.is_pub }
             .Enum(definition) -> { if definition.name == name -> return definition.is_pub }
             .Distinct(definition) -> { if definition.name == name -> return definition.is_pub }
-            else -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false

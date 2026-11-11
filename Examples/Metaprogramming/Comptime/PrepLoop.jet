@@ -2,9 +2,9 @@
 // declarations while building. One typed loop reaches derive bodies, marker
 // bodies, root impl items, and test declarations over closed lists.
 derive T.FieldNames {
-    comptime loop field in T.$fields {
-        method: "field_{field.$name}"
-        $method: fn(self) -> String { field.$name }
+    comptime loop field in T.reflect().fields {
+        method: "field_{field.reflect().name}"
+        #{method}: fn(self) -> String { field.reflect().name }
     }
 }
 
@@ -13,11 +13,11 @@ AddMarkerFields: struct {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
-            type_name: target.$name
-            comptime loop field in target.$fields {
-                method: "marked_{field.$name}"
-                impl $type_name {
-                    $method: fn(self) -> String { field.$name }
+            type_name: target.reflect().name
+            comptime loop field in target.reflect().fields {
+                method: "marked_{field.reflect().name}"
+                impl #{type_name} {
+                    #{method}: fn(self) -> String { field.reflect().name }
                 }
             }
         }

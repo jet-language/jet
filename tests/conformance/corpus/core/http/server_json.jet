@@ -29,6 +29,6 @@ run: fn() {
     oversized: server.response(200, "{{\"a\":1}}")
     if oversized.json<Number>(2) == {
         .Err(.BodyTooLarge(limit)) -> assert(limit == 2)
-        else -> panic("typed JSON read must enforce the body cap")
+        .Ok(_) | .Err(_) -> panic("typed JSON read must enforce the body cap")
     }
 }

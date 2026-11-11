@@ -1,6 +1,6 @@
 // The fact sigil:
 // compiler facts carry `$`. A fact is a `$` member of the thing it describes,
-// build and package facts hang off the `$build` and `$package` roots, and a
+// build and package facts hang off the `#build` and `#package` roots, and a
 // marker declaration marks its compiler metadata with `$`.
 #Numeric
 Severity: distinct Int(0..10)
@@ -18,18 +18,18 @@ Order: struct {
     id: Int
 }
 
-RANGE: comptime { Severity.$range }
+RANGE: comptime { Severity.reflect().range }
 
-STATES: comptime { Order.$states }
+STATES: comptime { Order.reflect().states }
 
-PACKAGE_NAME: comptime { $package.name }
+PACKAGE_NAME: comptime { #package.name }
 
-PACKAGE_VERSION: comptime { $package.version }
+PACKAGE_VERSION: comptime { #package.version }
 
-PROFILE: comptime { $build.profile }
+PROFILE: comptime { #build.profile }
 
 run: fn() {
-    comptime if $build.os == {
+    comptime if #build.target.os == {
         .Linux -> { print("linux") }
         .MacOS -> { print("macos") }
         .Windows -> { print("windows") }
@@ -43,8 +43,8 @@ run: fn() {
     fields_count_lesson()
 }
 
-// `T.$fields` is the compile-time list of a struct's fields, so
-// `P.$fields.len()` inside `comptime` folds to the field count while the
+// `T.reflect().fields` is the compile-time list of a struct's fields, so
+// `P.reflect().fields.len()` inside `comptime` folds to the field count while the
 // program compiles. The count follows the declaration: adding a field to
 // `Point` changes the printed number with no other edit.
 Point: struct {
@@ -54,6 +54,6 @@ Point: struct {
 }
 
 fields_count_lesson: fn() {
-    count: comptime { Point.$fields.len() }
+    count: comptime { Point.reflect().fields.len() }
     print("Point has {count} fields")
 }

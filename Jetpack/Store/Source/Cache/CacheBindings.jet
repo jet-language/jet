@@ -167,7 +167,7 @@ store_list_cache_bindings: fn(roots: HangarRoots) -> [CacheBinding] StoreError! 
     entries: files.list_dir(directory) ?? {
         if err == {
             .NotFound(_) -> return Ok([CacheBinding]{})
-            else -> return Err(StoreError.IO(err))
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
         }
     }
     bindings := [CacheBinding]{}

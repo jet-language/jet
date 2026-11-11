@@ -522,7 +522,7 @@ CBORPush: struct {
             // A Number lexeme may hold more precision than CBOR Int or float64,
             // so the writer refuses it instead of rounding; write Int or Float.
             .Number(_) -> return Err(error(.Unsupported, self.total, "$", "CBOR writer cannot write a DataEvent.Number lexeme exactly; write Int or Float"))
-            else -> return Err(error(.State, self.total, "$", "CBOR container event reached scalar encoder"))
+            .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> return Err(error(.State, self.total, "$", "CBOR container event reached scalar encoder"))
         }
         size: header + payload
         self.replacement(0, size) ?? return Err(err)
@@ -540,7 +540,7 @@ CBORPush: struct {
                 length(out, 2, bytes.len())
                 loop byte in bytes -> out.push(byte)
             }
-            else -> panic("checked CBOR scalar")
+            .Number(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> panic("checked CBOR scalar")
         }
         Ok(out)
     }
@@ -676,7 +676,7 @@ CBORPush: struct {
                 frame: self.frames.pop() ?? panic("checked CBOR object")
                 self.close_frame(frame) ?? return Err(err)
             }
-            else -> {
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) -> {
                 bytes: self.scalar(event) ?? return Err(err)
                 self.accept(bytes) ?? return Err(err)
             }

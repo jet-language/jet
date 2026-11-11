@@ -18,15 +18,15 @@ run: fn() {
     loop k in 0..<4 {
         if node == {
             .Leaf(blob) -> total += blob.data.len()
-            else -> total += 100
+            .Other(_) | .Empty -> total += 100
         }
         if node == {
             .Other(blob) -> total += blob.data.len() * 1000
-            else -> total += 1
+            .Leaf(_) | .Empty -> total += 1
         }
     }
     if node == {
         .Leaf(blob) -> print("after {blob.text} {total}")
-        else -> print("empty {total}")
+        .Other(_) | .Empty -> print("empty {total}")
     }
 }

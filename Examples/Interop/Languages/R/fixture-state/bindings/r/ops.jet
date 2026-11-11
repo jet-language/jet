@@ -31,6 +31,10 @@ use {
 
 Session: struct {
     priv value: Int
+
+    impl Close {
+        close: fn(&&self) { abi.close(self.value) }
+    }
 }
 
 #Error
@@ -41,10 +45,6 @@ RError: enum {
     Protocol
     CommandFailed
     Limit
-}
-
-impl Session.Close {
-    close: fn(&&self) { abi.close(self.value) }
 }
 
 close: fn(session: &&Session) { abi.close(session.value) }

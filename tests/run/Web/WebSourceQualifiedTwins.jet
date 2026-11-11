@@ -1,0 +1,33 @@
+// Source-qualified Core web/browser types are their builtin twins: `forms.WebForm` is `WebForm`,
+// `browser.BrowserProfile` is `BrowserProfile`, `table.WebTable<T>` is `WebTable<T>`, in either direction,
+// and WebFormActionError is an #Error that a fallible returns, by either name.
+use {
+    forms: core.web.forms
+    browser: core.web.browser
+    table: core.web.table
+}
+
+takes_form: fn(form: WebForm) -> Int { form.fields.len() }
+
+takes_qualified: fn(form: forms.WebForm) -> Int { form.fields.len() }
+
+gives_qualified: fn() -> forms.WebForm { forms.new("jet") }
+
+takes_profile: fn(profile: browser.BrowserProfile) -> String { profile.name }
+
+gives_table: fn() -> table.WebTable<String> { table.new<String>("rows", [String]{"jet"}) }
+
+takes_table: fn(rows: WebTable<String>) -> String { rows.name }
+
+failing: fn() WebFormActionError! { Err(forms.action_error()) }
+
+failing_qualified: fn() forms.WebFormActionError! { Err(forms.action_error()) }
+
+run: fn() {
+    print(takes_form(gives_qualified()))
+    print(takes_qualified(forms.new("jet")))
+    print(takes_profile(BrowserProfile{name: "bidi", version: "1"}))
+    print(takes_table(gives_table()))
+    print(failing() == .Err(_))
+    print(failing_qualified() == .Err(_))
+}

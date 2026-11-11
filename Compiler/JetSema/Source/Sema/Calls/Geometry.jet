@@ -35,7 +35,10 @@ sema_geometry_nominal_leaf: fn(name: String) -> String Never! {
 sema_geometry_restore_owner: fn(ty: Type, source: Type) -> Type Never! {
     // copy: the restored type is a new owned Type. For a non-named source it equals `ty`, the
     // caller's checked type (a read parameter), which stays on its node.
-    name: if source == { .Named(owner) | .Apply(owner, _) -> owner else -> { return ty.copy() } }
+    name: if source == {
+        .Named(owner) | .Apply(owner, _) -> owner
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return ty.copy() }
+    }
     leaf: sema_geometry_nominal_leaf(name)
     // copy: the restored type is a new owned Type. When the leaf already matches it equals `ty`,
     // the caller's checked type (a read parameter), which stays on its node.
@@ -59,13 +62,16 @@ sema_geometry_restore_owner: fn(ty: Type, source: Type) -> Type Never! {
         }
         // copy: the restored type is a new owned Type. For other kinds it equals `ty`, the caller's
         // checked type (a read parameter), which stays on its node.
-        else -> return ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ty.copy()
     }
 }
 
 sema_call_geometry_intrinsic_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        name: if ty == { .Named(owner) | .Apply(owner, _) -> owner else -> "" }
+        name: if ty == {
+            .Named(owner) | .Apply(owner, _) -> owner
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+        }
         if sema_geometry_nominal_leaf(name) != name -> return true
         return sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
     } else {
@@ -77,7 +83,7 @@ sema_call_geometry_transform_parts: fn(ty: Type, environment: SemaScopeEnvironme
     resolved: sema_call_resolved_type(ty, environment, program)
     matches := if resolved == {
         .Apply(name, args) -> (sema_geometry_nominal_leaf(name) == "Transform" && args.len() == 2) || (sema_geometry_nominal_leaf(name) == "Transform2" && args.len() == 3)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !matches {
         return None
@@ -93,7 +99,7 @@ sema_call_geometry_transform_parts: fn(ty: Type, environment: SemaScopeEnvironme
             }
             return None
         }
-        else -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
 }
 
@@ -101,7 +107,7 @@ sema_call_geometry_is_point: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> sema_geometry_nominal_leaf(name) == "ScreenPoint" || sema_geometry_nominal_leaf(name) == "WorldPoint" || sema_geometry_nominal_leaf(name) == "ViewPoint" || sema_geometry_nominal_leaf(name) == "CameraPoint" || sema_geometry_nominal_leaf(name) == "DevicePoint"
         .Apply(name, args) -> sema_geometry_nominal_leaf(name) == "Point2" && args.len() == 2
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -132,7 +138,7 @@ sema_call_geometry_space: fn(ty: Type) -> Type? {
             }
             None
         }
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -200,7 +206,7 @@ sema_geometry_diagnostic_type: fn(ty: Type) -> Type Never! {
         .Apply(name, args) -> Type.Apply{name: sema_geometry_nominal_leaf(name), args: args.copy()}
         // copy: the diagnostic type is a new owned Type. For other kinds it equals `ty`, the
         // caller's checked type (a read parameter), which stays on its node.
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty.copy()
     }
 }
 
@@ -252,7 +258,10 @@ sema_call_geometry_method_arg_count: fn(method: String) -> Int? {
 }
 
 sema_call_geometry_call_facts: fn(result_type: Type) -> SemaCallFacts Never! {
-    failure_carrier: if result_type == {.Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err} else -> TFailureCarrier.Infallible}
+    failure_carrier: if result_type == {
+        .Result(ok, err) -> TFailureCarrier.Result{success: ok, error: err}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
+    }
     SemaCallFacts{return_type: result_type, failure_carrier: failure_carrier, effect_bound: Val([EffectRowEntry]{}), type_args: [Type]{}, default_refs: [FunctionDefaultRef]{}}
 }
 
@@ -288,7 +297,7 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
                 values.push(value.copy())
                 types.push(value.ty)
             }
-            else -> {
+            .None -> {
                 valid = false
                 types.push(Type.Named{name: "Unknown"})
             }

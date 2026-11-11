@@ -1,0 +1,4 @@
+Error [jet.CcProjectInputsTooLarge]: `jet cc` would declare at least 1.0 G of files under `<work>` as compile inputs, over the 512.0 M cap
+ Why: `jet cc` declares every file under the project root as an input of the compile, so a change to any of them reruns it. The project root is `--project-root` when it is given and the current directory otherwise; only `.git`, `.jet`, `target`, `build`, `CMakeFiles` and the build root are left out.
+ Fix: Run `jet cc` from the directory that holds the sources, or pass `--project-root <dir>` naming it, so the input set holds only the files the compile reads.
+More: jet-lang.dev/e/E2118

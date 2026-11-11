@@ -5,6 +5,7 @@ use {
     base64: core.encoding.base64
     stream: __core_encoding_stream
     encoding: core.encoding
+    rt: jet.runtime.encoding
     core.files.[FileReader, FileWriter]
     files: core.files
     mem: core.mem
@@ -81,7 +82,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
     header: rows[0]
     values := [T]{}
     errors := [FieldError]{}
-    previous: encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     loop index in 1..<rows.len() {
         row: rows[index]
         if row.len() != header.len() {
@@ -102,7 +103,7 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
             }
         }
     }
-    encoding.__text_cells_leave(previous)
+    rt.text_cells_leave(previous)
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 
@@ -313,7 +314,7 @@ to_string: fn<T: Encode>(rows: T) -> String Never! {
     encoded: rows.encode()
     items: if encoded == {
         .Array(values) -> values
-        else -> panic("csv.to_string needs rows or records")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("csv.to_string needs rows or records")
     }
     if items.len() == 0 -> return ""
     out := ""
@@ -345,7 +346,7 @@ to_string: fn<T: Encode>(rows: T) -> String Never! {
                     if i > 0 -> out = "{out}\n"
                     out = "{out}{encode_row(fields)}"
                 }
-                else -> panic("csv.to_string needs rows or records")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> panic("csv.to_string needs rows or records")
             }
         }
     }
@@ -363,7 +364,7 @@ csv_cell: fn(value: Dyn) -> String Never! {
         .Null -> ""
         .Bytes(bytes) -> base64.encode(bytes)
         .DateTime(_) -> value.to_text() ?? ""
-        else -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
+        .Number(_) | .Array(_) | .Object(_) -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
     }
 }
 
@@ -1164,11 +1165,11 @@ reader: fn(source: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, 
     assert_eq(records[2], [String]{""})
     if typed_records("é\"") == {
         .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 2 — quote inside an unquoted field")
-        else -> panic("unquoted quote must fail")
+        .Ok(_) -> panic("unquoted quote must fail")
     }
     if typed_records("\"x") == {
         .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
-        else -> panic("unfinished quoted field must fail")
+        .Ok(_) -> panic("unfinished quoted field must fail")
     }
 }
 

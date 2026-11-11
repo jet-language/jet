@@ -43,6 +43,7 @@ use {
     TOKEN_FALSE,
     TOKEN_HASH,
     TOKEN_IDENT,
+    TOKEN_KW_FN,
     TOKEN_KW_MODULE,
     TOKEN_KW_USE,
     TOKEN_LBRACE,
@@ -501,97 +502,64 @@ jet_cli_inline_carrier: fn(root: String) -[FS]> String? Never! {
 }
 
 // `top_level_function_lines`: the lines where a top-level `<wanted>: fn` is
-// declared, by the brace-depth text scan the Rust package model runs (comments
-// and strings skipped).
+// declared, read from the lexed tokens, so no string form, comment or method
+// counts.
 jet_cli_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never! {
-    depth := 0
-    token := ""
-    token_line := 1
-    candidate := false
-    candidate_line := 1
-    colon_seen := false
-    in_string := false
-    escaped := false
-    line_comment := false
-    block_comment := false
-    previous := 0
-    line := 1
-    matches := [Int]{}
-    bytes := source.bytes()
-    bytes.push(U8{32})
-    loop byte in bytes {
-        ch: Int.from_u8(byte)
-        if line_comment {
-            if ch == 10 {
-                line_comment = false
-                line += 1
-            }
-            next
-        }
-        if block_comment {
-            if {
-                previous == 47 && ch == 42 -> previous = 0
-                previous == 42 && ch == 47 -> {
-                    block_comment = false
-                    previous = 0
-                }
-                else -> previous = ch
-            }
-            if ch == 10 -> line += 1
-            next
-        }
-        if in_string {
-            if {
-                escaped -> escaped = false
-                ch == 92 -> escaped = true
-                ch == 34 -> in_string = false
-                else -> {}
-            }
-            if ch == 10 -> line += 1
-            next
-        }
-        if previous == 47 && ch == 47 {
-            line_comment = true
-            previous = 0
-            next
-        }
-        if previous == 47 && ch == 42 {
-            block_comment = true
-            previous = 0
-            next
-        }
-        if ch == 34 {
-            in_string = true
-            token = ""
-            previous = 0
-            next
-        }
-        if ch == 123 -> depth += 1
-        if ch == 125 -> depth -= 1
-        word: (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95
-        if word {
-            if token.len() == 0 -> token_line = line
-            token = "{token}{String.from_bytes([U8]{byte}) ?? ""}"
-            next
-        }
-        if token.len() > 0 {
-            if depth == 0 && candidate && colon_seen && token == "fn" -> matches.push(candidate_line)
-            candidate = depth == 0 && token == wanted && previous != 46
-            candidate_line = token_line
-            colon_seen = false
-            token = ""
-        }
-        if candidate && ch != 32 && ch != 9 {
-            if ch == 58 && !colon_seen {
-                colon_seen = true
-            } else {
-                candidate = false
-            }
-        }
-        previous = ch
-        if ch == 10 -> line += 1
+    bytes: source.bytes()
+    lexed: lex(bytes)
+    tokens: jet_cli_significant_tokens(lexed.tokens)
+    starts := [Int]{}
+    loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, wanted) -> starts.push(tokens[index].span.start)
+    jet_cli_offset_lines(bytes, starts)
+}
+
+// The lines where `source` declares the build entry `build: fn(b: Build)`,
+// the one parameter of type `Build` the Driver's build query selects
+// (BuildQueries.jet jet_driver_item_is_build_entry); any other top-level
+// `build: fn` is ordinary code.
+jet_cli_build_entry_lines: fn(source: String) -> [Int] Never! {
+    bytes: source.bytes()
+    lexed: lex(bytes)
+    tokens: jet_cli_significant_tokens(lexed.tokens)
+    starts := [Int]{}
+    loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, "build") {
+        open: index + 3
+        if open + 4 >= tokens.len() || tokens[open].kind != TOKEN_LPAREN || tokens[open + 1].kind != TOKEN_IDENT || tokens[open + 2].kind != TOKEN_COLON -> next
+        if tokens[open + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[open + 3]) == "Build" && tokens[open + 4].kind == TOKEN_RPAREN -> starts.push(tokens[index].span.start)
     }
-    matches
+    jet_cli_offset_lines(bytes, starts)
+}
+
+// The index of each `<wanted>: fn` head in `tokens` at brace depth 0 and not
+// after a `.`.
+jet_cli_top_level_function_heads: fn(tokens: [Token], tables: TokenTables, wanted: String) -> [Int] Never! {
+    heads := [Int]{}
+    depth := 0
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE -> depth -= 1
+        if depth != 0 || kind != TOKEN_IDENT || index + 2 >= tokens.len() -> next
+        if index > 0 && tokens[index - 1].kind == TOKEN_DOT -> next
+        if tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && token_decoded(tables, tokens[index]) == wanted -> heads.push(index)
+    }
+    heads
+}
+
+// The 1-based line of each byte offset in `starts` (ascending) of `bytes`.
+jet_cli_offset_lines: fn(bytes: [U8], starts: [Int]) -> [Int] Never! {
+    lines := [Int]{}
+    line := 1
+    at := 0
+    loop start in starts {
+        loop {
+            if at >= start || at >= bytes.len() -> break
+            if bytes[at] == (U8{10}) -> line += 1
+            at += 1
+        }
+        lines.push(line)
+    }
+    lines
 }
 
 // A source that lexes and parses with no error, read as Rust
@@ -879,9 +847,11 @@ jet_cli_command_override: fn(root_path: String, command: String, color: Bool) -[
 }
 
 // Each top-level `fn <command>` of `file`: its path, and its location as the
-// package-relative `file:line`.
+// package-relative `file:line`. For `build` that is the build entry
+// `build: fn(b: Build)`: the build query runs no other `build: fn`.
 jet_cli_command_override_lines: fn(file: JetDriverAuthorizedSourceFile, command: String, paths: &[String], locations: &[String]) Never! {
-    loop line in jet_cli_top_level_function_lines(file.source, command) {
+    lines: if command == "build" -> jet_cli_build_entry_lines(file.source) else -> jet_cli_top_level_function_lines(file.source, command)
+    loop line in lines {
         paths.push(file.path.copy())
         locations.push("`{file.relative_path}:{line}`")
     }
@@ -891,7 +861,7 @@ jet_cli_find_command_entry: fn(root: String, command: String, use_override: Bool
     stock: jet_cli_find_project_entry(root, command, color, notices)
     if stock == {
         .Refused(_) -> return stock
-        else -> {}
+        .Entry(_) | .Absent -> {}
     }
     if !use_override -> return stock
     if jet_cli_command_override(root, command, color) == {
@@ -975,7 +945,7 @@ jet_cli_no_workspace_module: fn(color: Bool) -> JetCLIPlan Never! {
 jet_cli_workspace_present: fn(source: JetCLIWorkspaceSource) -> Bool Never! {
     if source == {
         .Absent -> return false
-        else -> {}
+        .Index(_) | .Authority(_) | .Failed(_) -> {}
     }
     true
 }
@@ -1290,7 +1260,7 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]
     index_path := ""
     if source == {
         .Index(path) -> index_path = path
-        else -> return JetCLIWorkspaceCheck.Absent
+        .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceCheck.Absent
     }
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "check", color) == {
@@ -1345,7 +1315,7 @@ jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool,
     index_path := ""
     if jet_cli_workspace_source(root, color) == {
         .Index(path) -> index_path = path
-        else -> return JetCLIWorkspaceTest.Absent
+        .Absent | .Authority(_) | .Failed(_) -> return JetCLIWorkspaceTest.Absent
     }
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(root, index_path, "test", color) == {
@@ -1421,7 +1391,7 @@ jet_cli_with_notices: fn(notices: [String], plan: &&JetCLIPlan) -> JetCLIPlan Ne
         .Done(output) -> return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
         .Refused(report, color, exit_code, notice) -> return JetCLIPlan.Refused{report: report.move(), color: color, exit_code: exit_code, notice: "{notices.join("")}{notice}"}
         .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Diagnostics{file: file.move(), source: source.move(), report: report.move(), color: color, notice: "{notices.join("")}{notice}"}
-        else -> {}
+        .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
@@ -1437,7 +1407,7 @@ jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileRes
     root := ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
-        else -> return false
+        .Absent | .Refused(_) -> return false
     }
     facts: jet_cli_root_manifest(root) ?? return false
     if facts.outputs.len() > 0 {
@@ -1448,13 +1418,6 @@ jet_cli_package_is_library_only: fn(entry: String, compiled: JetDriverCompileRes
     }
     if jet_cli_errors(compiled.diagnostics).len() == 0 -> return compiled.run_member_paths.len() == 0
     jet_cli_package_run_member(root) == .None
-}
-
-// Under `CompileMode::Run`: a project check of a program needs `run: fn` in its
-// entry file (E0101). Only a cleanly parsed entry is judged; a parse error is
-// reported by the compile itself.
-jet_cli_entry_lacks_run: fn(source: String) -> Bool Never! {
-    jet_cli_entry_lacks_callable(source, "run")
 }
 
 jet_cli_entry_lacks_callable: fn(source: String, callable: String) -> Bool Never! {
@@ -1472,7 +1435,7 @@ jet_cli_project_entry_callable: fn(file: String) -[FS, Env]> String Never! {
     root := ""
     if jet_cli_find_package_root(folder, false) == {
         .Root(found) -> root = found
-        else -> return "run"
+        .Absent | .Refused(_) -> return "run"
     }
     facts: jet_cli_root_manifest(root) ?? return "run"
     notices := [String]{}
@@ -1503,7 +1466,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
                 .Unqualified(module_alias, _, _, _, import_span) -> {
                     if module_alias.starts_with("project.") -> span = Val(import_span)
                 }
-                else -> {}
+                .File(_, _) -> {}
             }
             if span != None -> break
         }
@@ -1522,7 +1485,7 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
     parent: jet_cli_parent(file) ?? "."
     if jet_cli_find_package_root(parent, false) == {
         .Root(_) -> return None
-        else -> {}
+        .Absent | .Refused(_) -> {}
     }
     dir := cli_files.realpath(parent) ?? parent
     loop {
@@ -1542,6 +1505,8 @@ jet_cli_missing_project_context: fn(file: String, source: String) -[FS, Env]> Di
     assert(!jet_cli_declares_workspace_module("dev: module {{ }}\n"))
     assert_eq((jet_cli_workspace_module_members("workspace: module {{ members: [] }}\n") ?? panic("members")).len(), 0)
     assert_eq(jet_cli_top_level_function_lines("run: fn() {{}}\nShape.run: fn(self) {{}}\nm: module {{ run: fn() {{}} }}\n", "run"), [Int]{1})
+    // A raw string's brace and a string's `run: fn` open no scope and declare nothing.
+    assert_eq(jet_cli_top_level_function_lines("NOTE: ```}}```\nimpl Shape {{ run: fn(self) {{}} }}\nTEXT: \"run: fn\"\n\nrun: fn() {{}}\n", "run"), [Int]{5})
     assert(jet_cli_repl_declares_run("run: fn() {{}}\n"))
     assert(!jet_cli_repl_declares_run("Shape.run: fn(self) {{}}\n"))
 }

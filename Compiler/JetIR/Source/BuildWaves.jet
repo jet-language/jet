@@ -97,18 +97,18 @@ ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool,
     own := [[Int]]{}
     own_claimed := [Int]{}
     loop _ in 0..<count {
-        slot: shared IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}, preps: [IRMergePrep]{}}
+        slot: Shared{IRWaveWorker{modules: [IRModule]{ir_module_for(p)}, built: [IRWaveBuilt]{}, preps: [IRMergePrep]{}}}
         slots.push(slot)
         own.push([Int]{})
         own_claimed.push(0)
     }
     row_jobs := [Int]{}
     loop _ in 0..<p.functions.len() -> row_jobs.push(-1)
-    queue: shared IRBuildQueue{jobs: [IRWaveJob]{}, claimable: [Int]{}, claimed: 0, own: own.move(), own_claimed: own_claimed.move(), waiting: 0, busy: 0, row_jobs: row_jobs.move(), keyed_jobs: [String:Int]{}}
-    bell: shared IRBuildBell{rings: 0}
+    queue: Shared{IRBuildQueue{jobs: [IRWaveJob]{}, claimable: [Int]{}, claimed: 0, own: own.move(), own_claimed: own_claimed.move(), waiting: 0, busy: 0, row_jobs: row_jobs.move(), keyed_jobs: [String:Int]{}}}
+    bell: Shared{IRBuildBell{rings: 0}}
     ir_build_queue_add(queue, roots)
     rooted: ir_build_queue_count(queue)
-    inputs: shared IRWaveInputs{programs: [IRProgram]{p.move()}}
+    inputs: Shared{IRWaveInputs{programs: [IRProgram]{p.move()}}}
     _ := ir_build_parts(inputs, slots, queue, bell, 0) ?? panic("the IR build threads failed")
     entry_root := IRMergeRoot{part: -1, local: -1}
     entry_failures := [IRBuildFailure]{}

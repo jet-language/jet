@@ -53,7 +53,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert_eq(at.column, U64{2})
     if jet_cli_perf_source_position("é", 1) == {
         .Err(_) -> {}
-        else -> panic("accepted mid-scalar source span")
+        .Ok(_) -> panic("accepted mid-scalar source span")
     }
 }
 #Test("perf profile counts snapshots, never guessed invocations") {
@@ -112,7 +112,7 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
     if jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "test", None) == {
         .Err(_) -> {}
-        else -> panic("accepted mixed observation revisions")
+        .Ok(_) -> panic("accepted mixed observation revisions")
     }
 }
 #Test("perf browser decode uses compiler source carrier and refuses unknown symbols") {
@@ -126,6 +126,6 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     invalid: "{header}\n{row.replace("\"symbol\":\"run\"", "\"symbol\":\"missing\"")}\n"
     if jet_cli_perf_browser_decode(invalid, 12, "123") == {
         .Err(_) -> {}
-        else -> panic("accepted un-attributed browser observation")
+        .Ok(_) -> panic("accepted un-attributed browser observation")
     }
 }

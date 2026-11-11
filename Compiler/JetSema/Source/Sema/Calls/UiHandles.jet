@@ -22,14 +22,6 @@ sema_ui_handle_unit: fn() -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-sema_ui_handle_result: fn(ok: Type, error: Type) -> Type Never! {
-    Type.Result{ok: ok, err: error}
-}
-
-sema_ui_handle_positional: fn(name: String, ty: Type, convention: AccessConvention) -> SemaCallParam Never! {
-    SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
-}
-
 sema_ui_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
     values := [TExpr]{}
     loop arg in args {
@@ -58,12 +50,12 @@ sema_ui_handle_literal_string: fn(expr: Expr) -> String? {
             loop part in parts {
                 if part == {
                     .Lit(text) -> { value += text }
-                    else -> { return None }
+                    .Interp(_, _) | .Byte(_) -> { return None }
                 }
             }
             Val(value)
         }
-        else -> None
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -82,10 +74,10 @@ sema_ui_handle_interactive_role: fn(expr: Expr, environment: SemaScopeEnvironmen
                     if method == "aria_role_button" -> return Val("button")
                     if method == "aria_role_text_input" -> return Val("text input")
                 }
-                else -> {}
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     None
 }
@@ -106,7 +98,10 @@ sema_call_core_ui_focus_group_lint: fn(args: [CallArg], span: Span, environment:
                 if item == {
                     .MethodCall(receiver, method, _, _, _, call_args, _) -> {
                         if method != "node_role" || call_args.len() != 4 -> next
-                        alias: if receiver == {.Ident(name, _, _) -> Val(name) else -> None} ?? next
+                        alias: if receiver == {
+                            .Ident(name, _, _) -> Val(name)
+                            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+                        } ?? next
                         if !sema_ui_handle_imported_ui_alias(alias, environment, program, scopes) -> next
                         if sema_ui_handle_interactive_role(call_args[3].expr, environment, program, scopes) == None -> next
                         label: sema_ui_handle_literal_string(call_args[0].expr) ?? next
@@ -124,11 +119,11 @@ sema_call_core_ui_focus_group_lint: fn(args: [CallArg], span: Span, environment:
                         }
                         labels.push(label)
                     }
-                    else -> {}
+                    .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
                 }
             }
         }
-        else -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -136,7 +131,7 @@ sema_ui_handle_callback_source_arity: fn(expr: Expr) -> Int? {
     if expr == {
         .Lambda(lambda, _) -> Val(lambda.params.len())
         .Paren(value, _, _) -> sema_ui_handle_callback_source_arity(value)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -157,19 +152,27 @@ sema_ui_handle_stored_callback: fn(kind: String, argument: CallArg, params: [Typ
         return None
     }
     checked: sema_expression_lambda_host_callback_stored(argument.expr, Val(sema_ui_handle_callback_type(params)), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    if checked.kind == {.Lambda(lambda) -> Val(lambda) else -> None}
+    if checked.kind == {
+        .Lambda(lambda) -> Val(lambda)
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
+    }
 }
 
 sema_ui_handle_callback_param: fn(name: String, label: String, ty: Type, span: Span, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
     SemaCallParam{label: label, name: name, zone: zone, default: default, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
+// The callback is an ordinary `() -> { … }` argument; an
+// unlabeled lambda after the positional params fills the callback slot.
 sema_ui_handle_bind_callback_args: fn(member: String, args: [CallArg], span: Span, callback_label: String, params: [SemaCallParam], diagnostics: &[Diagnostic]) -> [CallArg]? {
     normalized := args
-    loop index in 0..<normalized.len() {
-        if normalized[index].flags.is_trailing_block && normalized[index].label == None {
-            normalized[index].label = Val(CallLabel{name: callback_label, span: normalized[index].span})
-        }
+    positional := 0
+    loop param in params {
+        if param.zone == .PositionalOnly -> positional += 1
+    }
+    last: normalized.len() - 1
+    if last >= positional && normalized[last].label == None && normalized[last].expr == .Lambda(_, _) {
+        normalized[last].label = Val(CallLabel{name: callback_label, span: normalized[last].span})
     }
     _ := sema_call_bind_args("core.ui.{member}", params, normalized, span, diagnostics) ?? return None
     Val(normalized)
@@ -185,12 +188,12 @@ sema_ui_handle_optional_arg: fn(arg: CallArg, ty: Type, environment: SemaScopeEn
     return Val(sema_tree_node(Type.Option{inner: ty}, TExprKind.Present{value: value}, value.span))
 }
 
-// `ui.button(display)` is the Core source function `button`; the trailing
-// callback form registers its click handler as a retained closure (a click
-// slot Int) and builds the node with the Core source `__button_click`.
-// Neither has a Core registry row.
+// `ui.button(display)` is the Core source function `button`; the callback
+// form `ui.button(display, () -> { … })` registers its click handler as a
+// retained closure (a click slot Int) and builds the node with the Core source
+// `__button_click`. Neither has a Core registry row.
 sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if args.len() == 1 && !args[0].flags.is_trailing_block && args[0].label == None {
+    if args.len() == 1 && args[0].label == None {
         label: sema_ui_handle_typed_arg(args[0], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         value: sema_call_core_source("core.ui", "button", [TExpr]{label}, Type.Named{name: "UINode"}, false, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
@@ -206,10 +209,11 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environm
         _ := sema_ui_handle_infer_args(bound, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    callback_absent: sema_expression_absent_none(bound[3].expr)
-    if !bound[3].flags.is_trailing_block || callback_absent {
-        diagnostics.push(sema_error("E0335", bound[3].span, "button callbacks use a trailing block", "the callback is the button's trailing closure, after its labeled metadata", "write `button(\"Save\") {{ save() }}`"))
-        _ := sema_ui_handle_infer_args(bound, environment, program, scopes, state, tail_store, context, diagnostics)
+    if sema_expression_absent_none(bound[3].expr) {
+        diagnostics.push(sema_error("E2910", span, "`button` with a shortcut or label needs its click lambda", "the shortcut and accessible label belong to the click form, whose handler is the `() -> {{ … }}` argument after them", "write `ui.button(\"Save\", shortcut: …, () -> {{ save() }})`"))
+        // Check only the written arguments: the bound row's absent defaults
+        // would report a follow-on untyped `None`.
+        _ := sema_ui_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     label: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}

@@ -50,7 +50,7 @@ jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, j
         if pkg_inline_deps_resolve(dep, script_dir) == .Err(reason) {
             if reason == {
                 .UnknownPackage -> { missing = true }
-                else -> {}
+                .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> {}
             }
         }
     }

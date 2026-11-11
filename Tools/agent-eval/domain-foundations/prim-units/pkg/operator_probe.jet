@@ -1,14 +1,16 @@
-Meter: struct { value: Float }
+Meter: struct {
+    value: Float
+
+    impl Add {
+        add: fn(self, rhs: Meter) -> Meter { Meter{ value: self.value + rhs.value } }
+    }
+
+    impl Div {
+        div: fn(self, rhs: Second) -> Speed { Speed{ value: self.value / rhs.value } }
+    }
+}
 Second: struct { value: Float }
 Speed: struct { value: Float }
-
-impl Meter.Add {
-    add: fn(self, rhs: Meter) -> Meter { Meter{ value: self.value + rhs.value } }
-}
-
-impl Meter.Div {
-    div: fn(self, rhs: Second) -> Speed { Speed{ value: self.value / rhs.value } }
-}
 
 run: fn() {
     a: Meter{ value: 1.0 }

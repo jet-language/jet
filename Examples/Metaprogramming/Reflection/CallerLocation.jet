@@ -1,21 +1,21 @@
-// Code-site facts (D-JAI-SITE1): a parameter whose default is `$caller`
-// receives the place of each call that leaves it out, and `$here` is the place
+// Code-site facts (D-JAI-SITE1): a parameter whose default is `#caller`
+// receives the place of each call that leaves it out, and `#here` is the place
 // where it is written. Both are a `SourceLocation` (file, line, column, the
 // enclosing function and its dotted module) that displays as `file:line:column`.
 
 // A logger: every line names its caller, not this helper.
-log: fn(message: String, at: SourceLocation{$caller}) {
+log: fn(message: String, at: SourceLocation{#caller}) {
     print("{at}: {message}")
 }
 
 // An assert that records instead of stopping: a failed claim names the line
 // and function that made it.
-check: fn(ok: Bool, claim: String, at: SourceLocation{$caller}) {
+check: fn(ok: Bool, claim: String, at: SourceLocation{#caller}) {
     if !ok -> print("check failed at {at.file}:{at.line} in {at.function}: {claim}")
 }
 
 // A wrapper forwards its own caller by declaring the same default.
-warn: fn(message: String, at: SourceLocation{$caller}) {
+warn: fn(message: String, at: SourceLocation{#caller}) {
     log("warning: {message}", at: at)
 }
 
@@ -30,6 +30,6 @@ run: fn() {
     check(count == 3, "three items")
     warn("low stock")
     log("restocked to {restock(count)}")
-    here: $here
+    here: #here
     print("written at line {here.line} in {here.function}")
 }

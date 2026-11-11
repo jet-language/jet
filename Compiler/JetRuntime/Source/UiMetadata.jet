@@ -20,11 +20,6 @@ ui_optional_text_get: fn(value: I64, some: I64) -> I64 {
 }
 // Bool occupies a byte, not the uninitialized rest of its carrier word.
 ui_carrier_bool: fn(address: I64) -> I64 { if ((ui_carrier_word(address).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1} }
-ui_borrow_text: fn(value: I64, out: I64) {
-    ui_carrier_store(out, ui_carrier_word(value))
-    ui_carrier_store(wrapping(out + I64{8}), ui_carrier_word(wrapping(value + I64{8})))
-    ui_carrier_store(wrapping(out + I64{16}), ui_carrier_word(wrapping(value + I64{16})))
-}
 
 // UIAccessibilityState: a UI_STATE_BYTES state, inline in its accessibility's
 // states or boxed alone (a constructed record, before the sequence adopts it).

@@ -849,7 +849,7 @@ truthy: fn(value: Dyn) -> Bool Never! {
         .Number(lexeme) -> (Float.parse(lexeme) ?? 1.0) != 0.0
         .Float(number) -> number != 0.0
         .Text(content) -> content != ""
-        else -> true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 
@@ -2395,15 +2395,15 @@ source_files: fn(root: String, bindings: [Binding]) -[FS]> Dyn LedgerError! {
 // One frozen TSV manifest: each row by its header's column names.
 tsv_records: fn(root: String, path: String) -[FS]> [[String: String]] LedgerError! {
     source: read_source(root, path) ?? return Err(err)
-    lines := [String]{}
-    loop line in split_lines(source) {
-        if line != "" -> lines.push(line)
+    rows := [[String]]{}
+    loop row in source.tsv_records() {
+        if row.len() > 1 || row[0] != "" -> rows.push(row.copy())
     }
-    if lines.len() < 2 -> return Err(fail("empty frozen TSV manifest: {path}"))
-    header: lines[0].split("\t").to_list()
+    if rows.len() < 2 -> return Err(fail("empty frozen TSV manifest: {path}"))
+    header: rows[0]
     records := [[String: String]]{}
-    loop index in 1..<lines.len() {
-        cells: lines[index].split("\t").to_list()
+    loop index in 1..<rows.len() {
+        cells: rows[index]
         if cells.len() != header.len() -> return Err(fail("malformed frozen TSV row {path}:{index + 1}"))
         record := [String: String]{}
         loop (at, name) in header -> record[name] = cells[at].copy()
@@ -3475,7 +3475,7 @@ spelled: fn(value: Dyn) -> String Never! {
         .Int(number) -> "{number}"
         .Number(lexeme) -> lexeme.copy()
         .Bool(flag) -> if flag -> "true" else -> "false"
-        else -> json.to_string(value) ?? ""
+        .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json.to_string(value) ?? ""
     }
 }
 

@@ -64,7 +64,7 @@ publication_read_registry_package_metadata: fn(artifact: String, expected_name: 
                 if context.cause == Val("file authority input is not a regular file") -> return Err(publication_invalid_registry_metadata("registry.json is not a regular file"))
                 return Err(error)
             }
-            else -> { return Err(error) }
+            .InvalidInput(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
         }
     }
     bytes: if held.read_bounded(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES) == {
@@ -74,7 +74,7 @@ publication_read_registry_package_metadata: fn(artifact: String, expected_name: 
                 if context.cause == Val("file exceeds its read bound") -> return Err(publication_invalid_registry_metadata("registry.json exceeds its size limit"))
                 return Err(error)
             }
-            else -> { return Err(error) }
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> { return Err(error) }
         }
     }
     text: String.from_bytes(bytes) ?? return Err(publication_invalid_registry_metadata("stream did not contain valid UTF-8"))
@@ -215,7 +215,7 @@ publication_parse_registry_dependency_descriptor: fn(descriptor: Dyn) -> Publica
                 }
             }
         }
-        else -> return Err(publication_invalid_registry_metadata("registry dependency values must be strings or objects"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(publication_invalid_registry_metadata("registry dependency values must be strings or objects"))
     }
     loop requirement in requirements {
         if publication_parse_version_req(requirement) == None -> return Err(publication_invalid_registry_metadata("registry dependency constraints must be valid SemVer requirements"))

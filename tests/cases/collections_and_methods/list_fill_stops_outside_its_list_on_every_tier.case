@@ -1,0 +1,64 @@
+# `fill` and `fill_repeat` never clamp: a range outside the list stops as `xs[range]` does, and an empty pattern stops as `pattern[0]` does, on the release and run tiers alike; spans past the runtime fill's chunk, and the web build, give the same lists.
+fixture: list_fill_stops_outside_its_list_on_every_tier.fixture
+step: jet build --release whole.jet
+exit: 0
+step whole: built
+exit: 0
+stdout: = "[1, 2, 3, 1, 2, 3, 9]\n"
+step: jet run whole.jet
+exit: == whole
+stdout: == whole
+step: jet build --release big.jet
+exit: 0
+step big: built
+exit: 0
+stdout: = "200001 0 1 1 2 0\n240005 5\n-90000\n"
+step: jet run big.jet
+exit: == big
+stdout: == big
+step: jet build --release past_end.jet
+exit: 0
+step past_end: built
+exit: nonzero
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 4 items from 2 to 6 (exclusive)`" # the slice stop line without the source suffix
+step: jet run past_end.jet
+exit: == past_end
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == past_end # the slice stop line without the source suffix
+step: jet build --release negative_start.jet
+exit: 0
+step negative_start: built
+exit: nonzero
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 3 items from -1 to 2 (exclusive)`" # the slice stop line without the source suffix
+step: jet run negative_start.jet
+exit: == negative_start
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == negative_start # the slice stop line without the source suffix
+step: jet build --release empty_pattern.jet
+exit: 0
+step empty_pattern: built
+exit: nonzero
+stdout: empty
+stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): = "Stop [E3010]: `the list has 0 items, so position 0 doesn't exist`" # the list bounds stop line without the source suffix
+step: jet run empty_pattern.jet
+exit: == empty_pattern
+stdout: empty
+stderr.filter(~ "Stop [E3010]:").line(0).split(" — ", 0): == empty_pattern # the list bounds stop line without the source suffix
+when tool node
+step: jet build --target web whole.jet
+env: JET_STORE_DIR={work}/cache/web
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: == whole
+stdout: == whole
+step: jet build --target web big.jet
+env: JET_STORE_DIR={work}/cache/web
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: == big
+stdout: == big
+end when

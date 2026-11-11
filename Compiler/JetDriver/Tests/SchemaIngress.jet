@@ -17,7 +17,7 @@ use {
     assert(missing.cache_dir == cache && missing.path == schema_test_files.join(cache, "Missing.snapshot") && missing.name == "Missing")
     if missing.outcome == {
         .Missing(_) -> {}
-        else -> panic("missing schema input was not retained")
+        .IO(_, _) | .Invalid(_, _) | .Parsed(_, _) -> panic("missing schema input was not retained")
     }
     raw: "schema_version = 1\ntype = DifferentEmbeddedLabel\npublished_version = 1.0.0\nfield name: String\n"
     path: schema_test_files.join(cache, "Account.snapshot")
@@ -28,14 +28,14 @@ use {
             assert(actual == raw && parsed.name == "Account" && snapshot.type_name == "DifferentEmbeddedLabel")
             assert(snapshot.fields.len() == 1 && snapshot.fields[0].name == "name")
         }
-        else -> panic("valid schema same-read bytes were lost")
+        .Missing(_) | .IO(_, _) | .Invalid(_, _) -> panic("valid schema same-read bytes were lost")
     }
     malformed: "schema_version = bad\n"
     schema_test_files.write(path, malformed) ?? panic("malformed schema fixture write")
     invalid: jet_driver_read_schema_dependency(root, "Account")
     if invalid.outcome == {
         .Invalid(actual, _) -> assert(actual == malformed)
-        else -> panic("schema parse failure was not retained")
+        .Missing(_) | .IO(_, _) | .Parsed(_, _) -> panic("schema parse failure was not retained")
     }
     assert(load_snapshot(root, "Account") == None)
     bytes: [U8]{U8{255}, U8{254}}
@@ -46,10 +46,10 @@ use {
             assert(actual == Val((bytes)))
             if error == {
                 .InvalidInput(context) -> assert(context.operation == .Read && (context.resource ?? "") == path && context.os_code == None && context.cause == Val("stream did not contain valid UTF-8"))
-                else -> panic("schema UTF-8 failure was not an invalid-input read")
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> panic("schema UTF-8 failure was not an invalid-input read")
             }
         }
-        else -> panic("schema UTF-8 failure lost actual bytes or read classification")
+        .Missing(_) | .Invalid(_, _) | .Parsed(_, _) -> panic("schema UTF-8 failure lost actual bytes or read classification")
     }
     assert(load_snapshot(root, "Account") == None)
     schema_test_files.remove(path) ?? panic("remove schema fixture file")
@@ -57,7 +57,7 @@ use {
     unreadable: jet_driver_read_schema_dependency(root, "Account")
     if unreadable.outcome == {
         .IO(_, unread) -> assert(unread == None)
-        else -> panic("schema IO failure was not retained")
+        .Missing(_) | .Invalid(_, _) | .Parsed(_, _) -> panic("schema IO failure was not retained")
     }
     schema_test_files.remove_all(root) ?? panic("schema fixture cleanup")
 }

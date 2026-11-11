@@ -102,7 +102,7 @@ ir_opt_inverse: fn(op: IROp) -> IROp Never! {
         .Lt -> IROp.Ge
         .Le -> IROp.Gt
         .Gt -> IROp.Le
-        else -> IROp.Lt
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> IROp.Lt
     }
 }
 
@@ -129,7 +129,7 @@ ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
                 opener: open.pop() ?? panic("ir_opt_nesting: End without an open construct")
                 end[opener] = at
             }
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
     OptNesting{end: end, els: els}
@@ -167,7 +167,7 @@ ir_opt_fold_value: fn(ty: IRX64Shape, op: IROp, left: Int, right: Int, trap: Boo
             .Lt -> left < right
             .Le -> left <= right
             .Gt -> left > right
-            else -> left >= right
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> left >= right
         }
         return Val(if holds -> 1 else -> 0)
     }
@@ -175,7 +175,7 @@ ir_opt_fold_value: fn(ty: IRX64Shape, op: IROp, left: Int, right: Int, trap: Boo
     exact: if op == {
         .Add -> left + right
         .Sub -> left - right
-        else -> left * right
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> left * right
     }
     if ty.kind == .Int {
         if ir_int_inline(exact) -> return Val(exact)
@@ -270,7 +270,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         l: left ?? 0
         r: right ?? 0
         if has_l && has_r && !bitwise && !identity_only {
-            value: ir_opt_fold_value(ty, op, l, r, f.c[at] != IR_OVERFLOW_WRAP) ?? next
+            value: ir_opt_fold_value(ty, op, l, r, !ir_overflow_wraps(f.c[at])) ?? next
             ir_opt_set_const(f, at, value)
             report.folded += 1
             changed += 1
@@ -956,7 +956,7 @@ ir_opt_rename_reads: fn(f: &IRFunction, at: Int, replace: [Int]) Never! {
             if op == .CallIndirect -> f.a[at] = ir_opt_renamed(replace, f.a[at])
             loop index in f.b[at]..<(f.b[at] + f.c[at]) -> f.args[index] = ir_opt_renamed(replace, f.args[index])
         }
-        else -> {}
+        .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .Else | .End | .Br | .Unreachable -> {}
     }
 }
 
@@ -1037,7 +1037,7 @@ ir_opt_common_code: fn(op: IROp) -> Int Never! {
         .Neg -> 13
         .Sqrt -> 14
         .Offset -> 15
-        else -> 0
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .IntBig | .StreamStore -> 0
     }
 }
 
@@ -1263,7 +1263,7 @@ ir_opt_removable: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
             }
             return false
         }
-        else -> return false
+        .Nop | .Drop | .Close | .Rem | .FloorDiv | .Mod | .Call | .CallRuntime | .CallIndirect | .Store | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .StreamStore -> return false
     }
 }
 
@@ -1365,7 +1365,7 @@ ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
                     }
                 }
             }
-            else -> {}
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
         at += 1
     }

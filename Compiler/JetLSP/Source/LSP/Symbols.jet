@@ -118,7 +118,7 @@ lsp_selection_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     positions: if (lsp_param(params, "positions") ?? return lsp_response(id, "null")) == {
         .Array(rows) -> rows
-        else -> { return lsp_error_response(id, -32602, "positions is not an array") }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return lsp_error_response(id, -32602, "positions is not an array") }
     }
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
@@ -141,7 +141,7 @@ lsp_document_link_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Stri
         span: if import.kind == {
             .File(_, path_span) -> path_span
             .Module(_, name_span) -> name_span
-            else -> { next }
+            .Unqualified(_, _, _, _, _) -> { next }
         }
         imported: semindex_symbol_imported_module(view.checked.modules, doc_module, [ImportDecl]{}, import.alias) ?? next
         location: lsp_location(view.checked, imported, Span{start: 0, end: 0}) ?? next

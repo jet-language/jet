@@ -155,7 +155,7 @@ impl WebHost {
         self.status.activate()
     }
     mark_building: fn(self: Self) -> Unit { self.status.mark_building(); self.session.mark_building() }
-    mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
+    mark_ready: fn(self: Self, elapsed_ms: U64, is_rebuild: Bool) -> Unit {
         _: self.hot_swap_decision.lock().unwrap().take()
         if self.web_swap_enabled && Canvas.read_source_without_symlinks(OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
         self.status.mark_ready(elapsed_ms, is_rebuild)
@@ -215,7 +215,7 @@ start_terminal_controls: fn(status: Arc<DevStatus>, shutdown: Arc<AtomicBool>) -
         }
     }))
 }
-header_words: fn(state: String, file: String, code: String, port: U16, clients: U64, last_build_ms: U128) -> (String, String) {
+header_words: fn(state: String, file: String, code: String, port: U16, clients: U64, last_build_ms: U64) -> (String, String) {
     plural: if clients == 1 -> "" else -> "s"
     if state == {
         "building" -> { return (_0: "building", _1: "{file} · {clients} client{plural}") }
@@ -227,7 +227,7 @@ header_words: fn(state: String, file: String, code: String, port: U16, clients: 
         }
     }
 }
-format_build_time: fn(ms: U128) -> String { return "{ms as F64 / 1000.0:.1}s" }
+format_build_time: fn(ms: U64) -> String { return "{ms as F64 / 1000.0:.1}s" }
 format_line_colored: fn(word: String, rest: String) -> String {
     sgr: if word == {
         "ready" -> "32"

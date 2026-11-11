@@ -1,0 +1,33 @@
+use {
+    http: core.http
+    server: core.http.server
+}
+
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+
+Purges: struct {
+    #Server.Custom("PURGE", "/marked")
+    purge: fn(self) -> HTTPResponse HTTPError! { Ok(server.response(200, "purge")) }
+
+    #Server.Custom("PURGE", "/marked")
+    again: fn(self) -> HTTPResponse HTTPError! { Ok(server.response(200, "again")) }
+}
+
+BAN: "BAN"
+
+run: fn() {
+    mux: server.mux()
+    // Kept in its exact case: `get` and `Purge` are custom methods, distinct from GET and PURGE.
+    mux.get("/cache", handle)
+    mux.custom("get", "/cache", handle)
+    mux.custom("PURGE", "/cache", handle)
+    mux.custom("Purge", "/cache", handle)
+    mux.custom(BAN, "/cache", handle)
+    // The same exact method twice is one duplicate route.
+    mux.custom("PURGE", "/cache", handle)
+    mux.mount(Purges{})
+    // Only a mux takes a method known when the program runs.
+    router: http.router()
+    names: ["LINK"]
+    router.custom(names[0], "/cache", handle)
+}

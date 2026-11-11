@@ -18,7 +18,7 @@ run: fn() {
         os.set_user_ids(effective: ids.effective) ?? panic("set_user_ids(effective:)")
         refused: os.set_user_ids(real: 4294967295) ? ok -> "accepted" ! error -> (if error == {
             .InvalidInput(_) -> "InvalidInput"
-            else -> "another error"
+            .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
         })
         print("set_user_ids(real: 4294967295): {refused}")
     }

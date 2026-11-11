@@ -111,7 +111,7 @@ byte_if: fn(c: CtCond, if1: U8, if0: U8) -> U8 Never! {
 }
 
 /// t when low <= c <= high, else zero (mbedtls_ct_uchar_in_range_if).
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 uchar_in_range_if: fn(low: U8, high: U8, c: U8, t: U8) -> U8 Never! {
     co: U32{c}
     // All ones in the byte above bit 7 when the subtraction borrows.
@@ -137,11 +137,13 @@ zeroize_if: fn(c: CtCond, buf: &[U8], off: Int, len: Int) Never! {
 /// and zero the vacated tail, touching every byte the same way whatever the
 /// offset: total passes, each a whole-window one-byte shift that the first
 /// total - offset passes discard.
-memmove_left: fn(buf: &[U8], start: Int, total: Int, offset: Int) Never! {
+#Policy(arithmetic: .Wrapping)
+memmove_left: fn(buf: &[U8], start: Int, total: Int, offset: U64) Never! {
     if total == 0 -> return
     last: start + total - 1
+    kept: U64{total} - offset
     loop i in 0..<total {
-        no_op: size_gt(total - offset, i)
+        no_op: uint_gt(kept, U64{i})
         loop n in start..<last {
             current: buf[n]
             following: buf[n + 1]
@@ -201,7 +203,7 @@ memcmp_partial: fn(a: [U8], b: [U8], n: Int, skip_head: Int, skip_tail: Int) -> 
 /// with masks, so no address or branch depends on x. The S-box lookups of
 /// the table-driven ciphers (DES, ARIA, Camellia) run through it; per_log is
 /// 3 for byte entries and 1 for 32-bit ones.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 table_entry: fn(packed: [U64], per_log: Int, x: U64) -> U64 Never! {
     per: 1 << per_log
     width: 64 >> per_log
@@ -244,7 +246,7 @@ table_entry: fn(packed: [U64], per_log: Int, x: U64) -> U64 Never! {
 
 #Test("The memory operations move, copy, zero and compare as their plain forms do") {
     buf := [U8]{1, 2, 3, 4, 5}
-    memmove_left(buf, 0, 5, 2)
+    memmove_left(buf, 0, 5, U64{2})
     assert(buf == [U8]{3, 4, 5, 0, 0})
     dst := [U8]{0, 0}
     memcpy_offset(dst, 0, [U8]{9, 8, 7, 6}, 0, U64{1}, 0, 2, 2)

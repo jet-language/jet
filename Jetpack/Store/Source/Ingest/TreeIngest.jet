@@ -417,7 +417,7 @@ MovedPathMode: struct {
     mode: Int
 }
 
-STORE_QUARANTINE_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_QUARANTINE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 // Remove an invalid local cache candidate so provider realization cannot
 // mistake the same tampered directory for a fresh hit. Never removes external
@@ -675,7 +675,7 @@ store_ingest_scrub_failed_stage: fn(hangar: String, stage: String, stamp: String
     if !files.lexists(stage) -> return
     quota_rejected: if error == {
         .IO(message) -> message.starts_with("Hangar quota admission failed:")
-        else -> false
+        .PathLaw(_) | .Mutated(_) | .Invalid(_) -> false
     }
     if quota_rejected {
         store_make_tree_writable_for_removal(stage).drop("removal proceeds even if a mode cannot be relaxed")
@@ -735,7 +735,7 @@ store_ingest_stage_and_commit: fn(verification: &StoreVerification, roots: Hanga
     producer.bind_cache_provenance(request.reference, primary, request.cache_identity, request.references)
     realized_at: if store_read_meta(record_dir) == {
         .Val(meta) -> meta.realized_at ?? now
-        else -> now
+        .None -> now
     }
     entry := StoreEntry{
         id: id,

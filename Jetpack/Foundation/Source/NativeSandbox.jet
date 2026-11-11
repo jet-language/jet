@@ -12,6 +12,9 @@ use {
     time: core.time
     files: core.files
     foundation_paths: core.files.path
+    crypto: core.crypto
+    term: core.term
+    http_client: core.http.client
 }
 
 
@@ -25,6 +28,42 @@ NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS: 30000
 // The backend status probe runs one trivial child; it gets a short fixed
 // budget so a wedged backend reports unavailable instead of hanging.
 NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS: 5000
+// Jet's pinned Bubblewrap: one static, stripped `bwrap` per Linux host,
+// published with every jet release as its own asset and built by
+// Tools/agent/bwrap.nix. Tools/release `admit` refuses a release whose
+// binary differs from the hash here, so updating jet updates the binary.
+NATIVE_SANDBOX_BWRAP_ASSETS: comptime { [NativeSandboxBwrapAsset]{
+    {
+        arch: "x86_64",
+        file: "jet-bwrap-x86_64-linux",
+        sha256: "0a0c6389f605169e916aa9b9f424fc1128fc318a539948986cdc639cb183107a",
+        size: 186304
+    }
+} }
+// The pinned Bubblewrap's name in its Hangar directory
+// (`<hangar>/tools/<sha256>/bwrap`).
+NATIVE_SANDBOX_BWRAP_NAME: "bwrap"
+// Where a missing pinned Bubblewrap may come from besides the copy beside the
+// running jet: `JET_BWRAP_URL` (`https://` or `file://`), else the release
+// the seed's one-line RELEASE file names.
+NATIVE_SANDBOX_BWRAP_URL_ENV: "JET_BWRAP_URL"
+NATIVE_SANDBOX_RELEASE_BASE: "https://github.com/jet-language/jet/releases/download"
+NATIVE_SANDBOX_RELEASE_FILE: "RELEASE"
+NATIVE_SANDBOX_MAX_RELEASE_BYTES: 256
+NATIVE_SANDBOX_DENY_NETWORK_ENV: "JETPACK_DENY_NETWORK"
+NATIVE_SANDBOX_FETCH_TIMEOUT_MS: 120000
+NATIVE_SANDBOX_FETCH_MAX_REDIRECTS: 5
+// How a user makes the sandbox usable, for every missing-sandbox diagnostic.
+NATIVE_SANDBOX_FIX: "install bubblewrap (`bwrap`) with user namespaces enabled, or let jet fetch its pinned bubblewrap (online, or with `JET_BWRAP_URL` naming a copy)"
+
+// One pinned Bubblewrap: the host architecture it runs on, its release asset
+// name, and the exact bytes jet accepts.
+NativeSandboxBwrapAsset: struct {
+    arch: String
+    file: String
+    sha256: String
+    size: Int
+}
 
 NativeSandboxStatus: struct {
     available: Bool
@@ -92,17 +131,189 @@ foundation_native_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandbo
     }
 }
 
+// The Bubblewrap the Linux backend runs, the first that passes one isolated
+// probe, in this one order for every sandboxed action:
+//   1. the `bwrap` on PATH. A host may confine unprivileged user namespaces
+//      to profiled binaries (Ubuntu's AppArmor profile for /usr/bin/bwrap);
+//      there only the host's own copy can make the sandbox, so it comes first.
+//   2. Jet's pinned Bubblewrap (NATIVE_SANDBOX_BWRAP_ASSETS) in the Hangar,
+//      installed from the copy beside jet when the Hangar has none. A command
+//      that runs build actions fetches it first (foundation_native_sandbox_prepare).
+// Unsupported names why each one failed. Nothing ever runs unsandboxed.
+foundation_linux_bwrap: fn() -[FS, Env, Exec, Time.Wait]> String NativeSandboxError! {
+    host := "bubblewrap (`bwrap`) is not available on PATH"
+    if foundation_sandbox_program("bwrap") == .Val(path) {
+        failed: foundation_linux_bwrap_probe(path, false) ?? return Ok(path)
+        host = "the `bwrap` on PATH (`{path}`) failed its probe: {failed}"
+    }
+    pinned := ""
+    if foundation_pinned_bwrap() == {
+        .Ok(path) -> {
+            failed: foundation_linux_bwrap_probe(path, true) ?? return Ok(path)
+            pinned = "Jet's pinned bubblewrap (`{path}`) failed its probe: {failed}"
+        }
+        .Err(error) -> pinned = error.message()
+    }
+    Err(NativeSandboxError.Unsupported("{host}; {pinned}"))
+}
+
+// Why `bwrap` failed the isolated backend probe, or None when it passed. The
+// probe runs `sh -c 'exit 0'` from PATH under it; the pinned copy is static,
+// so it runs itself (`bwrap --version`, from its read-only Hangar directory)
+// and needs no shell on the host.
+foundation_linux_bwrap_probe: fn(bwrap: String, pinned: Bool) -[FS, Env, Exec, Time.Wait]> String? Never! {
+    mounts := [NativeSandboxMount]{}
+    command := [String]{}
+    if pinned {
+        mounts.push(NativeSandboxMount{source: files.dirname(bwrap), destination: "/jet-bwrap"})
+        command = [String]{"/jet-bwrap/{NATIVE_SANDBOX_BWRAP_NAME}", "--version"}
+    } else {
+        shell: foundation_sandbox_program("sh") ?? return Val("no immutable shell probe is available")
+        command = [String]{shell, "-c", "exit 0"}
+    }
+    argv := foundation_linux_sandbox_argv(bwrap, None, None, [String: String]{}, false, false, false, mounts, None)
+    loop part in command -> argv.push(part)
+    receipt: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return Val("bubblewrap backend probe failed: {err}")
+    if receipt.timed_out -> return Val("bubblewrap backend probe timed out after {NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS}ms")
+    if !receipt.success -> return Val("bubblewrap backend probe exited with exit status: {receipt.code}")
+    None
+}
+
 foundation_linux_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
-    bwrap: foundation_sandbox_program("bwrap") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap (`bwrap`) is not available on PATH")
-    probe: foundation_sandbox_program("sh") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap is present but no immutable shell probe is available")
-    argv := foundation_linux_sandbox_argv(bwrap, None, None, [String: String]{}, false, false, false, [NativeSandboxMount]{}, None)
-    argv.push(probe)
-    argv.push("-c")
-    argv.push("exit 0")
-    receipt: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe failed: {err}")
-    if receipt.timed_out -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe timed out after {NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS}ms")
-    if !receipt.success -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe exited with exit status: {receipt.code}")
+    if foundation_linux_bwrap() == .Err(error) -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", error.message())
     NativeSandboxStatus{available: true, mechanism: "linux-bwrap", policy: foundation_native_sandbox_policy(false, false), reason: "bubblewrap completed the isolated backend probe"}
+}
+
+// Make the Linux sandbox usable before a command runs build actions: when
+// neither the PATH `bwrap` nor a pinned copy already in the Hangar or beside
+// jet passes its probe, fetch Jet's pinned Bubblewrap into the Hangar (from
+// `JET_BWRAP_URL`, else this jet's release) and resolve again. Elsewhere, and
+// when a sandbox is already usable, it does nothing; an error says why no
+// sandbox is usable.
+foundation_native_sandbox_prepare: fn() NativeSandboxError! -[FS, Env, Exec, IO, Net, Time.Wait]> {
+    if !sys.is_linux() || sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Ok()
+    if foundation_linux_bwrap() == .Err(first) {
+        why: first.message()
+        asset: foundation_pinned_bwrap_asset() ?? return Err(NativeSandboxError.Unsupported(why))
+        // A pinned copy that is present and failed its probe is not fetched
+        // again: the same bytes would fail the same way.
+        if files.is_file(foundation_pinned_bwrap_path(asset)) -> return Err(NativeSandboxError.Unsupported(why))
+        foundation_fetch_pinned_bwrap(asset) ?? return Err(NativeSandboxError.Unsupported("{why}; fetching it failed: {err.message()}"))
+        if foundation_linux_bwrap() == .Err(error) -> return Err(NativeSandboxError.Unsupported(error.message()))
+    }
+}
+
+// The pinned Bubblewrap for this host's architecture.
+foundation_pinned_bwrap_asset: fn() -[Env]> NativeSandboxBwrapAsset NativeSandboxError! {
+    arch: sys.arch()
+    loop asset in NATIVE_SANDBOX_BWRAP_ASSETS {
+        if asset.arch == arch -> return Ok(asset)
+    }
+    Err(NativeSandboxError.Unsupported("Jet pins no bubblewrap for Linux `{arch}`"))
+}
+
+// The pinned Bubblewrap's Hangar path: `<hangar>/tools/<sha256>/bwrap`.
+foundation_pinned_bwrap_path: fn(asset: NativeSandboxBwrapAsset) -[Env]> String Never! {
+    files.join(files.join(files.join(foundation_hangar_dir(), HANGAR_TOOLS_DIR), asset.sha256), NATIVE_SANDBOX_BWRAP_NAME)
+}
+
+// The verified pinned Bubblewrap in the Hangar, installed first from the copy
+// beside the running jet (a release archive carries it there) when the
+// Hangar has none. Every use re-hashes it; a copy with the wrong bytes is
+// deleted. It never touches the network (foundation_native_sandbox_prepare does).
+foundation_pinned_bwrap: fn() -[FS, Env]> String NativeSandboxError! {
+    asset: foundation_pinned_bwrap_asset() ?? return Err(err)
+    path: foundation_pinned_bwrap_path(asset)
+    if files.is_file(path) {
+        if files.read_bytes(path) == {
+            .Ok(bytes) -> {
+                if foundation_pinned_bwrap_problem(bytes, asset) == .Val(problem) {
+                    files.remove_all(files.dirname(path)).drop("a pinned bubblewrap with the wrong bytes is removed best-effort; it is reported")
+                    return Err(NativeSandboxError.Unsupported("Jet's pinned bubblewrap in the Hangar (`{path}`) {problem} and was removed"))
+                }
+                return Ok(path)
+            }
+            .Err(error) -> return Err(NativeSandboxError.IO("read Jet's pinned bubblewrap `{path}`: {error}"))
+        }
+    }
+    beside: foundation_beside_jet(asset.file) ?? {
+        return Err(NativeSandboxError.Unsupported("Jet's pinned bubblewrap `{asset.file}` is not in the Hangar (`{path}`) or beside jet"))
+    }
+    bytes: files.read_bytes(beside) ?? return Err(NativeSandboxError.IO("read Jet's pinned bubblewrap `{beside}`: {err}"))
+    foundation_install_pinned_bwrap(bytes, asset, "`{beside}`") ?? return Err(err)
+    Ok(path)
+}
+
+// The regular file `name` in the running jet's directory, if there is one.
+foundation_beside_jet: fn(name: String) -[FS, Env]> String? Never! {
+    executable: sys.executable()
+    if executable == "" -> return None
+    path: files.join(files.dirname(executable), name)
+    if !files.is_file(path) -> return None
+    Val(path)
+}
+
+// Why `bytes` are not the pinned Bubblewrap, or None when they are.
+foundation_pinned_bwrap_problem: fn(bytes: [U8], asset: NativeSandboxBwrapAsset) -> String? Never! {
+    if bytes.len() != asset.size -> return Val("has {bytes.len()} bytes, not the {asset.size} this jet pins")
+    actual: crypto.sha256(bytes).hex()
+    if actual != asset.sha256 -> return Val("has SHA-256 {actual}, not the {asset.sha256} this jet pins")
+    None
+}
+
+// Verify `bytes` from `origin` and publish them read-only and executable at
+// the pinned path, through a private staging file renamed into place.
+foundation_install_pinned_bwrap: fn(bytes: [U8], asset: NativeSandboxBwrapAsset, origin: String) NativeSandboxError! -[FS, Env]> {
+    if foundation_pinned_bwrap_problem(bytes, asset) == .Val(problem) {
+        return Err(NativeSandboxError.Unsupported("the bubblewrap from {origin} {problem}"))
+    }
+    path: foundation_pinned_bwrap_path(asset)
+    directory: files.dirname(path)
+    files.create_dir_all(directory) ?? return Err(NativeSandboxError.IO("create `{directory}`: {err}"))
+    staging: files.join(directory, ".{NATIVE_SANDBOX_BWRAP_NAME}.partial-{process.current_pid()}")
+    files.write_bytes(staging, bytes) ?? return Err(NativeSandboxError.IO("write `{staging}`: {err}"))
+    files.set_mode(staging, 0o555) ?? return Err(NativeSandboxError.IO("set the mode of `{staging}`: {err}"))
+    files.rename(staging, path) ?? return Err(NativeSandboxError.IO("install Jet's pinned bubblewrap at `{path}`: {err}"))
+}
+
+// Download the pinned Bubblewrap into the Hangar from `JET_BWRAP_URL`, else
+// from the release this jet came from (the RELEASE file beside it). A
+// `file://` URL is read where it lies, so it also works offline.
+foundation_fetch_pinned_bwrap: fn(asset: NativeSandboxBwrapAsset) NativeSandboxError! -[FS, Env, IO, Net, Time.Wait]> {
+    url := sys.get(NATIVE_SANDBOX_BWRAP_URL_ENV) ?? ""
+    if url == "" {
+        release: foundation_jet_release_name() ?? {
+            return Err(NativeSandboxError.Unsupported("this jet does not name the release it came from, so `{asset.file}` cannot be downloaded; put it beside jet or set `{NATIVE_SANDBOX_BWRAP_URL_ENV}` to its URL"))
+        }
+        url = "{NATIVE_SANDBOX_RELEASE_BASE}/{release}/{asset.file}"
+    }
+    if url.starts_with("file://") {
+        local: url.removeprefix("file://")
+        bytes: files.read_bytes(local) ?? return Err(NativeSandboxError.IO("read `{local}`: {err}"))
+        foundation_install_pinned_bwrap(bytes, asset, url) ?? return Err(err)
+        return Ok()
+    }
+    if (sys.get(NATIVE_SANDBOX_DENY_NETWORK_ENV) ?? "") != "" {
+        return Err(NativeSandboxError.Unsupported("network disabled by {NATIVE_SANDBOX_DENY_NETWORK_ENV}, so {url} cannot be downloaded"))
+    }
+    term.eprint("first use: fetching Jet's sandbox, bubblewrap ({terminal_human_size(asset.size)})")
+    request: http_client.request("GET", url).total_timeout(NATIVE_SANDBOX_FETCH_TIMEOUT_MS).redirects(NATIVE_SANDBOX_FETCH_MAX_REDIRECTS).header("Accept-Encoding", "identity")
+    response: http_client.send(request) ?? return Err(NativeSandboxError.IO("could not fetch {url}: {err}"))
+    status: response.status()
+    if status < 200 || status >= 300 -> return Err(NativeSandboxError.IO("{url} returned HTTP {status}"))
+    bytes: response.body().bytes(asset.size + 1) ?? return Err(NativeSandboxError.IO("download {url}: {err}"))
+    foundation_install_pinned_bwrap(bytes, asset, url) ?? return Err(err)
+}
+
+// The release this jet came from: the seed's one-line RELEASE file beside it.
+foundation_jet_release_name: fn() -[FS, Env]> String? Never! {
+    path: foundation_beside_jet(NATIVE_SANDBOX_RELEASE_FILE) ?? return None
+    info: files.stat(path) ?? return None
+    if info.size > NATIVE_SANDBOX_MAX_RELEASE_BYTES -> return None
+    text: files.read(path) ?? return None
+    name: text.trim()
+    if name == "" || name.contains("/") || name.contains(" ") -> return None
+    Val(name)
 }
 
 foundation_macos_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
@@ -170,8 +381,14 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))
-    status: foundation_native_sandbox_status()
-    if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
+    // Linux resolves (and so probes) its Bubblewrap once for the action.
+    bwrap := ""
+    if sys.is_linux() {
+        bwrap = foundation_linux_bwrap() ?? return Err(err)
+    } else {
+        status: foundation_macos_sandbox_status()
+        if !status.available -> return Err(NativeSandboxError.Unsupported(status.reason))
+    }
     program: foundation_sandbox_executable(executable) ?? return Err(err)
     passed := [String]{}
     loop path in programs -> passed.push(foundation_sandbox_executable(path) ?? return Err(err))
@@ -179,14 +396,14 @@ foundation_native_sandbox_command: fn(executable: String, args: [String], source
     output := String?{None}
     if output_dir == {
         .Val(path) -> output = Val(foundation_sandbox_real_directory(path))
-        else -> {}
+        .None -> {}
     }
     checked_mounts: foundation_validate_read_only_mounts(mounts)
     output_is_separate: output != None
     // The source is always readable, and writable only as the private tree.
     source_writable: !output_is_separate
 
-    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, passed, args)
+    spec := if sys.is_linux() -> foundation_linux_sandbox_spec(bwrap, source, output, env, share_network, source_writable, checked_mounts, program, args) else -> foundation_macos_sandbox_spec(source, output, env, share_network, source_writable, checked_mounts, program, passed, args)
     if timeout == .Val(limit) -> spec = spec.timeout(limit)
     mechanism: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
     Ok(NativeSandboxCommand{spec: spec.stdout(.Capture).stderr(.Capture).output_limit(NATIVE_SANDBOX_MAX_OUTPUT_BYTES), timeout, mechanism, policy: foundation_native_sandbox_policy(output_is_separate, share_network)})
@@ -216,8 +433,8 @@ foundation_native_sandbox_finish: fn(command: NativeSandboxCommand, receipt: Pro
     Ok(NativeSandboxOutput{receipt, mechanism: command.mechanism, policy: command.policy})
 }
 
-foundation_linux_sandbox_spec: fn(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {
-    bwrap: foundation_sandbox_program("bwrap") ?? return Err(NativeSandboxError.Unsupported("bubblewrap (`bwrap`) is not available on PATH"))
+// `bwrap` is the Bubblewrap foundation_linux_bwrap resolved for the action.
+foundation_linux_sandbox_spec: fn(bwrap: String, source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {
     argv := foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, mounts, Val(files.basename(program)))
     argv.push(foundation_mounted_executable_path(program, mounts))
     loop arg in args -> argv.push(arg.copy())
@@ -235,7 +452,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
         .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
-        else -> {}
+        .None -> {}
     }
     loop name in foundation_sandbox_sorted_names(env) -> spec = spec.env(name, env[name])
     Ok(spec)
@@ -272,7 +489,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                     output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
                     loop part in output_args -> argv.push(part)
                 }
-                else -> {
+                .None -> {
                     if source_bind == "" {
                         argv.push("--dir")
                         argv.push("/work")
@@ -286,13 +503,13 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                 }
             }
         }
-        else -> {
+        .None -> {
             if output == {
                 .Val(output_path) -> {
                     output_args: [String]{"--bind", output_path, "/work", "--chdir", "/work"}
                     loop part in output_args -> argv.push(part)
                 }
-                else -> {
+                .None -> {
                     work_args: [String]{"--dir", "/work", "--chdir", "/work"}
                     loop part in work_args -> argv.push(part)
                 }
@@ -324,7 +541,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
             argv.push("--argv0")
             argv.push(name.copy())
         }
-        else -> {}
+        .None -> {}
     }
     // Options end here, so an executable or argument starting with a dash
     // stays in the command position.
@@ -342,7 +559,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     output_path := String?{None}
     if output == {
         .Val(path) -> output_path = Val(foundation_sbpl_path(path))
-        else -> {}
+        .None -> {}
     }
     lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
     loop line in passed -> lines.push(line)
@@ -352,7 +569,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     if source_readable -> lines.push("  (subpath \"{source_path}\")")
     if output_path == {
         .Val(path) -> lines.push("  (subpath \"{path}\")")
-        else -> {}
+        .None -> {}
     }
     read_paths: [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"}
     loop line in read_paths -> lines.push(line)
@@ -365,7 +582,7 @@ foundation_seatbelt_profile: fn(executable: String, programs: [String], source: 
     profile := "{lines.join("\n")}\n)"
     if output_path == {
         .Val(path) -> profile = "{profile}(allow file-write* (subpath \"{path}\"))\n"
-        else -> {
+        .None -> {
             if source_writable -> profile = "{profile}(allow file-write* (subpath \"{source_path}\"))\n"
         }
     }

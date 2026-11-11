@@ -180,7 +180,7 @@ ssl_srv13_offered_psks_check_identity_match_ticket: fn(ssl: &ssldefs.SSLContext,
             // authenticate, or any other failure, is not ours.
             if e == {
                 .SessionTicketExpired -> return SSL_SRV13_PSK_IDENTITY_MATCH_BUT_PSK_NOT_USABLE
-                else -> return SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH
+                .CryptoInProgress | .FeatureUnavailable | .BadInputData | .InvalidMac | .InvalidRecord | .ConnEOF | .DecodeError | .NoRNG | .NoClientCertificate | .UnsupportedExtension | .NoApplicationProtocol | .PrivateKeyRequired | .CAChainRequired | .UnexpectedMessage | .FatalAlertMessage | .UnrecognizedName | .PeerCloseNotify | .BadCertificate | .ReceivedNewSessionTicket | .CannotReadEarlyData | .ReceivedEarlyData | .CannotWriteEarlyData | .CacheEntryNotFound | .AllocFailed | .HwAccelFailed | .HwAccelFallthrough | .BadProtocolVersion | .HandshakeFailure | .PKTypeMismatch | .UnknownIdentity | .InternalError | .CounterWrapping | .WaitingServerHelloRenego | .HelloVerifyRequired | .BufferTooSmall | .WantRead | .WantWrite | .Timeout | .ClientReconnect | .UnexpectedRecord | .NonFatal | .IllegalParameter | .ContinueProcessing | .AsyncInProgress | .EarlyMessage | .UnexpectedCID | .VersionMismatch | .BadConfig | .CertificateVerificationWithoutHostname | .CorruptionDetected | .GenericError | .RandomFailed | .Cipher(_) | .PK(_) | .X509(_) | .ECP(_) | .DHM(_) | .Mpi(_) | .Callback(_) -> return SSL_SRV13_PSK_IDENTITY_DOES_NOT_MATCH
             }
         }
     }
@@ -519,11 +519,11 @@ ssl_srv13_key_cert_suits: fn(kc: ssldefs.SSLKeyCert, sig_alg: Int) -> Bool Never
     if kc.cert.len() == 0 -> return false
     if x509crt.x509_crt_check_key_usage(kc.cert[0], x509.X509_KU_DIGITAL_SIGNATURE) == {
         .Err(_) -> return false
-        else -> {}
+        .Ok(_) -> {}
     }
     if x509crt.x509_crt_check_extended_key_usage(kc.cert[0], oids.OID_SERVER_AUTH) == {
         .Err(_) -> return false
-        else -> {}
+        .Ok(_) -> {}
     }
     gen13.ssl_tls13_check_sig_alg_cert_key_match(sig_alg, kc.cert[0].pk)
 }
@@ -1023,7 +1023,7 @@ ssl_srv13_write_server_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) s
             sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, .HandshakeFailure)
             return Err(e)
         }
-        else -> {}
+        .Ok(_) -> {}
     }
     sslmsg.ssl_set_inbound_transform(ssl, ssl.handshake.transform_handshake)
     // ssl_tls13_prepare_for_second_flight.

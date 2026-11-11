@@ -127,7 +127,7 @@ nix_fallback_authorize_from_environment: fn(offline: Bool) -[Env, IO]> NixFallba
 nix_fallback_allowed_from_environment: fn(offline: Bool) -[Env, IO]> Bool Never! {
     if nix_fallback_authorize_from_environment(offline) == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
 }
 
@@ -189,7 +189,7 @@ nix_fallback_discover_executable: fn() -[FS, Env]> String NixError! {
             if path == "" -> return Err(NixError.Fallback("{NIX_FALLBACK_BIN_ENV} is empty"))
             return Ok(path)
         }
-        else -> {}
+        .None -> {}
     }
     found: files.which("nix") ?? return Err(NixError.Fallback("local Nix fallback requires an installed `nix` executable on PATH"))
     Ok(found)

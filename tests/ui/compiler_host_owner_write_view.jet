@@ -1,9 +1,12 @@
 Owner: trait {
     identity: fn(self) -> Int Never!
 }
-TokenOwner: struct { token: Int }
-impl TokenOwner.Owner {
-    identity: fn(self) -> Int Never! { self.token }
+TokenOwner: struct {
+    token: Int
+
+    impl Owner {
+        identity: fn(self) -> Int Never! { self.token }
+    }
 }
 Carrier: struct { owner: Owner, adopted: Bool }
 HostValue: enum {
@@ -45,9 +48,9 @@ run: fn() {
                 .List(children) -> {
                     if !adopted(children[0], 20) || adopted(children[1], 30) -> panic("nested owner identity changed")
                 }
-                else -> panic("nested aggregate changed")
+                .Leaf(_) -> panic("nested aggregate changed")
             }
         }
-        else -> panic("root aggregate changed")
+        .Leaf(_) -> panic("root aggregate changed")
     }
 }

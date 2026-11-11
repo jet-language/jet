@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E1318 — Jet diagnostic</title>
-<meta name="description" content="`#Short(&quot;name&quot;)` is not a one-letter option `` or `` `#Short(&quot;n&quot;)` is used by both `first` and `second`">
+<meta name="description" content="`#Arg(short: &quot;name&quot;)` is not a one-letter option `` or `` `#Arg(short: &quot;n&quot;)` is used by both `first` and `second`">
 <meta property="og:title" content="E1318 — Jet diagnostic">
-<meta property="og:description" content="`#Short(&quot;name&quot;)` is not a one-letter option `` or `` `#Short(&quot;n&quot;)` is used by both `first` and `second`">
+<meta property="og:description" content="`#Arg(short: &quot;name&quot;)` is not a one-letter option `` or `` `#Arg(short: &quot;n&quot;)` is used by both `first` and `second`">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,43 +25,43 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E1318</h1>
-<p>`#Short(&quot;name&quot;)` is not a one-letter option `` or `` `#Short(&quot;n&quot;)` is used by both `first` and `second`</p>
+<p>`#Arg(short: &quot;name&quot;)` is not a one-letter option `` or `` `#Arg(short: &quot;n&quot;)` is used by both `first` and `second`</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`#Short(&quot;name&quot;)` is not a one-letter option `` or `` `#Short(&quot;n&quot;)` is used by both `first` and `second`</p>
+<p class="diag-copy what" data-registry-field="what">`#Arg(short: &quot;name&quot;)` is not a one-letter option `` or `` `#Arg(short: &quot;n&quot;)` is used by both `first` and `second`</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The shared command parser treats a short option as one ASCII letter, and each spelling must select only one `#CLI` field.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use one letter and give colliding fields different values.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use one letter and give colliding fields different `short:` values.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1318</code>: <code>tests/ui/cli_field_marker_misuse.stderr</code>.</p>
-<pre class="diag">Error [jet.UnmappedCliMarker]: `#Short` has no CLI mapping for field `port`
+<pre class="diag">Error [jet.UnmappedCliMarker]: `#Arg` has no CLI mapping for field `port`
   --&gt; tests/ui/cli_field_marker_misuse.jet:2:6
     |
-  2 |     #Short(&quot;p&quot;) port: Int
-    |      ^^^^^
- Why: `#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.
+  2 |     #Arg(short: &quot;p&quot;) port: Int
+    |      ^^^
+ Why: `#Arg` describes a generated command input, but this struct is not `#CLI`.
  Fix: Remove the marker, or mark the command-input struct `#CLI`
 More: jet-lang.dev/e/E1319
 
-Error [jet.InvalidShortName]: `#Short(&quot;port&quot;)` is not a one-letter option
-  --&gt; tests/ui/cli_field_marker_misuse.jet:7:6
+Error [jet.InvalidShortName]: `#Arg(short: &quot;port&quot;)` is not a one-letter option
+  --&gt; tests/ui/cli_field_marker_misuse.jet:7:17
     |
-  7 |     #Short(&quot;port&quot;) port: Int
-    |      ^^^^^
+  7 |     #Arg(short: &quot;port&quot;) port: Int
+    |                 ^^^^^^
  Why: The shared command parser treats a short option as one ASCII letter.
- Fix: Use one letter, such as `#Short(&quot;p&quot;)`
+ Fix: Use one letter, such as `#Arg(short: &quot;p&quot;)`
 More: jet-lang.dev/e/E1318
 
-Error [jet.UnmappedCliMarker]: `#Env` has no CLI mapping for field `verbose`
-  --&gt; tests/ui/cli_field_marker_misuse.jet:8:6
+Error [jet.UnmappedCliMarker]: `#Arg(env:)` has no CLI mapping for field `verbose`
+  --&gt; tests/ui/cli_field_marker_misuse.jet:8:15
     |
-  8 |     #Env(&quot;VERBOSE&quot;) verbose: Bool
-    |      ^^^
- Why: A `Bool` command field is a presence flag, while `#Env` lowers to a value option.
- Fix: Remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
+  8 |     #Arg(env: &quot;VERBOSE&quot;) verbose: Bool
+    |               ^^^^^^^^^
+ Why: A `Bool` command field is a presence flag, while `env:` lowers to a value option.
+ Fix: Remove `env:`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
 More: jet-lang.dev/e/E1319
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -192,7 +192,7 @@ EnvFile: struct {
         source: env_file_published_source(spec.source.label())
         is_default: if spec.source == {
             .Named(_) -> false
-            else -> source == self.source_label()
+            .Jetpack | .Nixpkgs | .Github | .Path | .Cran | .LuaRocks | .RubyGems | .Cpan | .Packagist | .JetRegistry | .Npm | .Cargo | .PyPI | .SwiftPM | .Releases | .Maven | .NuGet | .Conan | .Vcpkg | .Homebrew | .Binary -> source == self.source_label()
         }
         if is_default -> return spec.package
         "{spec.package}{REF_PROVIDER_AT}{source}"

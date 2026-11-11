@@ -30,7 +30,7 @@ nix_test_hex_value: fn(code: Int) -> Int {
 nix_test_is_parse_error: fn(error: NixError) -> Bool {
     if error == {
         .DrvParse(_) -> true
-        else -> false
+        .DrvPath(_) | .DrvUnsupported(_) | .Divergence(_, _, _) | .DrvIO(_) | .ImportPath | .ImportNotRegularFile | .ImportTooLarge | .ImportSymlink | .ImportIO(_) | .FallbackFieldConflict(_) | .FallbackFieldMissing(_) | .FallbackNotObject | .FallbackNonFinite | .Fallback(_) -> false
     }
 }
 

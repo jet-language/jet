@@ -116,7 +116,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
         .Err(error) -> {
             if error == {
                 .NoCommonRevision(_, _) -> {}
-                else -> panic("expected NoCommonRevision")
+                .InvalidPolicy(_) | .PreviewRequiresOptIn | .PeerVersionListTooLarge(_, _) | .PeerVersionTooLong(_) | .DowngradeRefused(_, _) | .AlreadyNegotiated -> panic("expected NoCommonRevision")
             }
         }
     }
@@ -142,7 +142,7 @@ pkg_test_mcp_json_number: fn(text: String) -> Bool {
                         .Err(_) -> return false
                     }
                 }
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Err(_) -> return false

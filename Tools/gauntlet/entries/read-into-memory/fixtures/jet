@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stand-in for `jet build --optimize=full --quiet --output-dir=OUT main.jet`:
+# OUT/main is a program that prints the pair's expected output and, on
+# stderr, its read count, as each arm of the pair does.
+for arg in "$@"; do
+  case $arg in
+    --output-dir=*) out=${arg#--output-dir=} ;;
+  esac
+done
+[ -n "$out" ] && [ -f main.jet ] || exit 2
+mkdir -p "$out"
+cat >"$out/main" <<'PROGRAM'
+#!/bin/sh
+echo "performance-surface:net_read_into_vs_read:67108864"
+echo "reads=16384" >&2
+PROGRAM
+chmod +x "$out/main"

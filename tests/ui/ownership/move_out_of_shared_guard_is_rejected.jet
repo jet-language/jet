@@ -1,8 +1,10 @@
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Box: struct { res: Res }
 
 keep: fn(res: &&Res) -> Res { res }
@@ -15,6 +17,6 @@ steal: fn(storage: Shared<Box>) -> Res {
 }
 
 run: fn() {
-    storage: shared Box{res: Res{name: "kept"}}
+    storage: Shared{Box{res: Res{name: "kept"}}}
     _: steal(storage)
 }

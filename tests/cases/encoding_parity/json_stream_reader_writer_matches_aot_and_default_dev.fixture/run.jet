@@ -43,7 +43,7 @@ run: fn() (EncodingError | IOError)! {
             .ObjectEnd -> { print("event:ObjectEnd") }
             // The writer above emits only the five events handled here. Keep
             // the reader total if the event contract gains another variant.
-            else -> { print("event:unexpected") }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .Key(_) -> { print("event:unexpected") }
         }
         read_count += 1
     }

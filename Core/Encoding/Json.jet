@@ -152,7 +152,7 @@ coerce_tree: fn(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never!
             }
             return stream.object_from_entries(out)
         }
-        else -> return value.copy()
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> return value.copy()
     }
 }
 
@@ -332,13 +332,7 @@ Parser: struct {
     names: [[String: Bool]]
     names_frame: [Int]
     key: String
-}
 
-// An Object's keys are scanned for a repeat up to this many; past it they
-// are looked up in a map.
-JSON_SEEN_SCAN: 16
-
-impl Parser {
     new: fn(bytes: [U8], allow_duplicates: Bool) -> Parser Never! {
         Parser{
             bytes: bytes,
@@ -914,207 +908,211 @@ impl Parser {
             if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("trailing commas are not allowed in JSON"))
         }
     }
-}
 
-// A failed read's result never surfaces: the decode fails with the latched
-// syntax error instead.
-impl Parser.__DecodeSource {
-    begin_object: fn(&self) -> Bool Never! {
-        if !self.__cursor_value() || self.bytes[self.index] != (U8{123}) -> return false
-        self.__cursor_open(true)
-    }
+    // A failed read's result never surfaces: the decode fails with the latched
+    // syntax error instead.
+    impl __DecodeSource {
+        begin_object: fn(&self) -> Bool Never! {
+            if !self.__cursor_value() || self.bytes[self.index] != (U8{123}) -> return false
+            self.__cursor_open(true)
+        }
 
-    next_key: fn(&self) -> Bool Never! {
-        if !self.__cursor_ws() -> return false
-        top: self.open.len() - 1
-        if top < 0 -> return false
-        if self.fresh[top] {
-            self.fresh[top] = false
-            if (self.peek() ?? (U8{0})) == (U8{125}) {
+        next_key: fn(&self) -> Bool Never! {
+            if !self.__cursor_ws() -> return false
+            top: self.open.len() - 1
+            if top < 0 -> return false
+            if self.fresh[top] {
+                self.fresh[top] = false
+                if (self.peek() ?? (U8{0})) == (U8{125}) {
+                    _: self.bump()
+                    self.__cursor_close()
+                    return false
+                }
+            } else {
+                if self.eof() {
+                    self.__cursor_fail(self.err("unterminated object"))
+                    return false
+                }
+                b: self.bytes[self.index]
+                if b == (U8{125}) {
+                    _: self.bump()
+                    self.__cursor_close()
+                    return false
+                }
+                if b != (U8{44}) {
+                    self.__cursor_fail(self.err("expected ',' or '}}' after an object member"))
+                    return false
+                }
                 _: self.bump()
-                self.__cursor_close()
+                if !self.__cursor_ws() -> return false
+                if (self.peek() ?? (U8{0})) == (U8{125}) {
+                    self.__cursor_fail(self.err("trailing commas are not allowed in JSON"))
+                    return false
+                }
+            }
+            if (self.peek() ?? (U8{0})) != (U8{34}) {
+                self.__cursor_fail(self.err("object keys must be strings"))
                 return false
             }
-        } else {
+            key := ""
+            if self.__plain_string() == .Val(plain) {
+                key = plain
+            } else {
+                if self.parse_string() == {
+                    .Ok(text) -> key = text
+                    .Err(error) -> {
+                        self.__cursor_fail(error)
+                        return false
+                    }
+                }
+            }
+            if !self.__cursor_ws() -> return false
+            if !self.expect(U8{58}) {
+                self.__cursor_fail(self.err("expected ':' after an object key"))
+                return false
+            }
+            if self.__cursor_repeated(key) {
+                self.__cursor_fail(self.err("duplicate object key `{key}`"))
+                return false
+            }
+            self.key = key
+            true
+        }
+
+        key_is: fn(self, name: String) -> Bool Never! { self.key == name }
+
+        key_text: fn(self) -> String Never! { self.key.copy() }
+
+        begin_array: fn(&self) -> Bool Never! {
+            if !self.__cursor_value() || self.bytes[self.index] != (U8{91}) -> return false
+            self.__cursor_open(false)
+        }
+
+        next_item: fn(&self) -> Bool Never! {
+            if !self.__cursor_ws() -> return false
+            top: self.open.len() - 1
+            if top < 0 -> return false
+            if self.fresh[top] {
+                self.fresh[top] = false
+                if (self.peek() ?? (U8{0})) == (U8{93}) {
+                    _: self.bump()
+                    self.__cursor_close()
+                    return false
+                }
+                return true
+            }
             if self.eof() {
-                self.__cursor_fail(self.err("unterminated object"))
+                self.__cursor_fail(self.err("unterminated array"))
                 return false
             }
             b: self.bytes[self.index]
-            if b == (U8{125}) {
+            if b == (U8{93}) {
                 _: self.bump()
                 self.__cursor_close()
                 return false
             }
             if b != (U8{44}) {
-                self.__cursor_fail(self.err("expected ',' or '}}' after an object member"))
+                self.__cursor_fail(self.err("expected ',' or ']' after an array element"))
                 return false
             }
             _: self.bump()
             if !self.__cursor_ws() -> return false
-            if (self.peek() ?? (U8{0})) == (U8{125}) {
+            if (self.peek() ?? (U8{0})) == (U8{93}) {
                 self.__cursor_fail(self.err("trailing commas are not allowed in JSON"))
                 return false
             }
+            true
         }
-        if (self.peek() ?? (U8{0})) != (U8{34}) {
-            self.__cursor_fail(self.err("object keys must be strings"))
-            return false
+
+        take_null: fn(&self) -> Bool Never! {
+            if !self.__cursor_value() -> return true
+            if self.bytes[self.index] != (U8{110}) -> return false
+            if self.parse_literal("null", Dyn.Null) == {
+                .Ok(_) -> {}
+                .Err(error) -> self.__cursor_fail(error)
+            }
+            true
         }
-        key := ""
-        if self.__plain_string() == .Val(plain) {
-            key = plain
-        } else {
-            if self.parse_string() == {
-                .Ok(text) -> key = text
+
+        skip: fn(&self) Never! {
+            if self.failure != None -> return
+            if self.__cursor_skip() == {
+                .Ok(_) -> {}
+                .Err(error) -> self.__cursor_fail(error)
+            }
+        }
+
+        capture: fn(&self) -> Dyn Never! {
+            value := Dyn.Null
+            if self.failure != None -> return value
+            if self.parse_value() == {
+                .Ok(parsed) -> value = parsed
+                .Err(error) -> self.__cursor_fail(error)
+            }
+            value
+        }
+
+        // An integer lexeme of at most 18 digits reads in place; any other value
+        // decodes as its tree.
+        read_int: fn(&self) -> Int [FieldError]! {
+            if !self.__cursor_value() -> return Err([FieldError]{})
+            start: self.index
+            at := start
+            negative: self.bytes[at] == (U8{45})
+            if negative -> at += 1
+            digits: at
+            value := 0
+            loop at < self.bytes.len() && at - digits < 18 {
+                d: Int.from_u8(self.bytes[at])
+                if d < 48 || d > 57 -> break
+                value = value * 10 + (d - 48)
+                at += 1
+            }
+            count: at - digits
+            plain := count > 0 && (count == 1 || self.bytes[digits] != (U8{48})) && !(negative && value == 0)
+            if plain && at < self.bytes.len() {
+                n: Int.from_u8(self.bytes[at])
+                if (n >= 48 && n <= 57) || n == 46 || n == 101 || n == 69 -> plain = false
+            }
+            if !plain -> return self.__cursor_decode<Int>()
+            self.column += at - start
+            self.index = at
+            Ok(if negative -> 0 - value else -> value)
+        }
+
+        read_bool: fn(&self) -> Bool [FieldError]! {
+            if !self.__cursor_value() -> return Err([FieldError]{})
+            n: self.bytes[self.index]
+            if n != (U8{116}) && n != (U8{102}) -> return self.__cursor_decode<Bool>()
+            truth: n == (U8{116})
+            if self.parse_literal(if truth -> "true" else -> "false", Dyn.Bool(truth)) == {
+                .Ok(_) -> {}
                 .Err(error) -> {
                     self.__cursor_fail(error)
-                    return false
+                    return Err([FieldError]{})
                 }
             }
+            Ok(truth)
         }
-        if !self.__cursor_ws() -> return false
-        if !self.expect(U8{58}) {
-            self.__cursor_fail(self.err("expected ':' after an object key"))
-            return false
-        }
-        if self.__cursor_repeated(key) {
-            self.__cursor_fail(self.err("duplicate object key `{key}`"))
-            return false
-        }
-        self.key = key
-        true
-    }
 
-    key_is: fn(self, name: String) -> Bool Never! { self.key == name }
+        read_float: fn(&self) -> Float [FieldError]! { self.__cursor_decode<Float>() }
 
-    key_text: fn(self) -> String Never! { self.key.copy() }
-
-    begin_array: fn(&self) -> Bool Never! {
-        if !self.__cursor_value() || self.bytes[self.index] != (U8{91}) -> return false
-        self.__cursor_open(false)
-    }
-
-    next_item: fn(&self) -> Bool Never! {
-        if !self.__cursor_ws() -> return false
-        top: self.open.len() - 1
-        if top < 0 -> return false
-        if self.fresh[top] {
-            self.fresh[top] = false
-            if (self.peek() ?? (U8{0})) == (U8{93}) {
-                _: self.bump()
-                self.__cursor_close()
-                return false
+        read_string: fn(&self) -> String [FieldError]! {
+            if !self.__cursor_value() -> return Err([FieldError]{})
+            if self.bytes[self.index] != (U8{34}) -> return self.__cursor_decode<String>()
+            if self.__plain_string() == .Val(plain) -> return Ok(plain)
+            if self.parse_string() == {
+                .Ok(text) -> return Ok(text)
+                .Err(error) -> self.__cursor_fail(error)
             }
-            return true
+            Err([FieldError]{})
         }
-        if self.eof() {
-            self.__cursor_fail(self.err("unterminated array"))
-            return false
-        }
-        b: self.bytes[self.index]
-        if b == (U8{93}) {
-            _: self.bump()
-            self.__cursor_close()
-            return false
-        }
-        if b != (U8{44}) {
-            self.__cursor_fail(self.err("expected ',' or ']' after an array element"))
-            return false
-        }
-        _: self.bump()
-        if !self.__cursor_ws() -> return false
-        if (self.peek() ?? (U8{0})) == (U8{93}) {
-            self.__cursor_fail(self.err("trailing commas are not allowed in JSON"))
-            return false
-        }
-        true
-    }
-
-    take_null: fn(&self) -> Bool Never! {
-        if !self.__cursor_value() -> return true
-        if self.bytes[self.index] != (U8{110}) -> return false
-        if self.parse_literal("null", Dyn.Null) == {
-            .Ok(_) -> {}
-            .Err(error) -> self.__cursor_fail(error)
-        }
-        true
-    }
-
-    skip: fn(&self) Never! {
-        if self.failure != None -> return
-        if self.__cursor_skip() == {
-            .Ok(_) -> {}
-            .Err(error) -> self.__cursor_fail(error)
-        }
-    }
-
-    capture: fn(&self) -> Dyn Never! {
-        value := Dyn.Null
-        if self.failure != None -> return value
-        if self.parse_value() == {
-            .Ok(parsed) -> value = parsed
-            .Err(error) -> self.__cursor_fail(error)
-        }
-        value
-    }
-
-    // An integer lexeme of at most 18 digits reads in place; any other value
-    // decodes as its tree.
-    read_int: fn(&self) -> Int [FieldError]! {
-        if !self.__cursor_value() -> return Err([FieldError]{})
-        start: self.index
-        at := start
-        negative: self.bytes[at] == (U8{45})
-        if negative -> at += 1
-        digits: at
-        value := 0
-        loop at < self.bytes.len() && at - digits < 18 {
-            d: Int.from_u8(self.bytes[at])
-            if d < 48 || d > 57 -> break
-            value = value * 10 + (d - 48)
-            at += 1
-        }
-        count: at - digits
-        plain := count > 0 && (count == 1 || self.bytes[digits] != (U8{48})) && !(negative && value == 0)
-        if plain && at < self.bytes.len() {
-            n: Int.from_u8(self.bytes[at])
-            if (n >= 48 && n <= 57) || n == 46 || n == 101 || n == 69 -> plain = false
-        }
-        if !plain -> return self.__cursor_decode<Int>()
-        self.column += at - start
-        self.index = at
-        Ok(if negative -> 0 - value else -> value)
-    }
-
-    read_bool: fn(&self) -> Bool [FieldError]! {
-        if !self.__cursor_value() -> return Err([FieldError]{})
-        n: self.bytes[self.index]
-        if n != (U8{116}) && n != (U8{102}) -> return self.__cursor_decode<Bool>()
-        truth: n == (U8{116})
-        if self.parse_literal(if truth -> "true" else -> "false", Dyn.Bool(truth)) == {
-            .Ok(_) -> {}
-            .Err(error) -> {
-                self.__cursor_fail(error)
-                return Err([FieldError]{})
-            }
-        }
-        Ok(truth)
-    }
-
-    read_float: fn(&self) -> Float [FieldError]! { self.__cursor_decode<Float>() }
-
-    read_string: fn(&self) -> String [FieldError]! {
-        if !self.__cursor_value() -> return Err([FieldError]{})
-        if self.bytes[self.index] != (U8{34}) -> return self.__cursor_decode<String>()
-        if self.__plain_string() == .Val(plain) -> return Ok(plain)
-        if self.parse_string() == {
-            .Ok(text) -> return Ok(text)
-            .Err(error) -> self.__cursor_fail(error)
-        }
-        Err([FieldError]{})
     }
 }
+
+// An Object's keys are scanned for a repeat up to this many; past it they
+// are looked up in a map.
+JSON_SEEN_SCAN: 16
 
 parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> Dyn EncodingError! {
     raw: text.bytes()
@@ -1653,7 +1651,7 @@ pointer_select: fn(node: Dyn, segments: [String], depth: Int) -> Dyn EncodingErr
             if index >= items.len() -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
             return pointer_select(items[index], segments, depth + 1)
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     Err(value_error(EncodingErrorKind.Syntax, at, "cannot select `{segment}` inside a scalar value"))
 }
@@ -1713,7 +1711,7 @@ patch_pointer_field: fn(members: [(key: String, value: Dyn)], index: Int, name: 
             text = s
             valid = true
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { _ := 0 }
     }
     if !valid -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}` must be a JSON Pointer string"))
     segments: pointer_segments(text) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}`: {err.reason}"))
@@ -1730,7 +1728,7 @@ patch_operations: fn(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingErro
             items = values
             is_array = true
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { _ := 0 }
     }
     if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
     list := [PatchOp]{}
@@ -1742,14 +1740,14 @@ patch_operations: fn(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingErro
                 members = fields
                 is_object = true
             }
-            else -> { _ := 0 }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> { _ := 0 }
         }
         if !is_object -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} must be an object"))
         name := ""
         op_value: patch_field(members, index, "op")
         if op_value == {
             .Text(s) -> name = s
-            else -> { _ := 0 }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { _ := 0 }
         }
         kind := -1
         if name == "add" -> kind = PATCH_ADD
@@ -1833,7 +1831,7 @@ patch_edit: fn(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn)
             if last && kind == PATCH_ADD && index == items.len() -> out.push(value.copy())
             return Ok(Dyn.Array(out))
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     Err(value_error(EncodingErrorKind.Syntax, at, "cannot address `{segment}` inside a scalar value"))
 }
@@ -1845,13 +1843,13 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
         .Null -> {
             if right == {
                 .Null -> return true
-                else -> return false
+                .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Bool(a) -> {
             if right == {
                 .Bool(b) -> return a == b
-                else -> return false
+                .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Int(a) -> {
@@ -1859,7 +1857,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Int(b) -> return a == b
                 .Float(b) -> return Float{a} == b
                 .Number(b) -> return Float{a} == (Float.parse(b) ?? return false)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Float(a) -> {
@@ -1867,7 +1865,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Float(b) -> return a == b
                 .Int(b) -> return a == Float{b}
                 .Number(b) -> return a == (Float.parse(b) ?? return false)
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Number(a) -> {
@@ -1875,20 +1873,20 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                 .Number(b) -> return a == b || (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
                 .Int(b) -> return (Float.parse(a) ?? return false) == Float{b}
                 .Float(b) -> return (Float.parse(a) ?? return false) == b
-                else -> return false
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Text(a) -> {
             if right == {
                 .Text(b) -> return a == b
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .DateTime(_) -> return left == right
         .Bytes(a) -> {
             if right == {
                 .Bytes(b) -> return a == b
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
             }
         }
         .Array(a) -> {
@@ -1900,7 +1898,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> return false
             }
         }
         .Object(a) -> {
@@ -1913,7 +1911,7 @@ json_equal: fn(left: Dyn, right: Dyn) -> Bool Never! {
                     }
                     return true
                 }
-                else -> return false
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
             }
         }
     }
@@ -1937,7 +1935,7 @@ tree_depth: fn(value: Dyn) -> Int Never! {
             }
             return deepest + 1
         }
-        else -> { _ := 0 }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> { _ := 0 }
     }
     0
 }

@@ -6,12 +6,14 @@
 // remains a declared tool in the Hangar descriptor.
 
 // The normalized compiler invocation: the forwarded argv plus the declared
-// sources, inputs, and outputs, all project-relative.
+// sources, inputs, and outputs, all project-relative. `ignored_root` is the
+// explicit build root the project input walk leaves out.
 CcInvocation: struct {
     argv: [String]
     sources: [String]
     inputs: [String]
     outputs: [String]
+    ignored_root: String?
 }
 
 // `jet cc` / `jet c++` entry, reached from the CLI before flag parsing.
@@ -55,16 +57,19 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
         }
     }
     roots: pkg_resolve_roots()
-    descriptor: cli_cc_resolve_toolchain(verification, roots, spec, fixtures, options.offline, project_root) ?? {
-        cli_cc_report_provider_error(err)
-        return EXIT_USER_ERROR
-    }
-    if options.version {
-        print("jet {verb} {descriptor.version} (target {descriptor.target}; ABI {descriptor.abi})")
-        return EXIT_OK
-    }
-    if options.probe == {
-        .Val(probe) -> {
+    // `--version`, a metadata probe and a bare `-v` only report toolchain
+    // facts. A compile checks its own invocation and project input set first,
+    // so a local mistake is reported before any toolchain is fetched.
+    if options.version || options.probe != None || (options.verbose && options.sources.len() == 0) {
+        descriptor: cli_cc_resolve_toolchain(verification, roots, spec, fixtures, options.offline, project_root) ?? {
+            cli_cc_report_provider_error(err)
+            return EXIT_USER_ERROR
+        }
+        if options.version {
+            print("jet {verb} {descriptor.version} (target {descriptor.target}; ABI {descriptor.abi})")
+            return EXIT_OK
+        }
+        if options.probe == .Val(probe) {
             if probe == {
                 .DumpMachine -> print(descriptor.target)
                 .PrintSysroot -> print(descriptor.sysroot_path())
@@ -72,16 +77,22 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
             }
             return EXIT_OK
         }
-        .None -> {}
-    }
-    if options.verbose && options.sources.len() == 0 {
         print("jet {verb} {descriptor.version} (target {descriptor.target}; sysroot {descriptor.sysroot_path()})")
         return EXIT_OK
     }
 
-    invocation: cli_cc_build_invocation(project_root, verb, options) ?? {
+    invocation := cli_cc_build_invocation(project_root, verb, options) ?? {
         cli_cc_report_usage_error(verb, err.message)
         return EXIT_USAGE
+    }
+    project_inputs: cli_cc_collect_project_inputs(project_root, invocation.outputs, invocation.ignored_root) ?? {
+        cli_cc_report_project_input_error(verb, project_root, err)
+        return EXIT_USAGE
+    }
+    invocation.inputs = cli_cc_declared_inputs(project_inputs, invocation.sources)
+    descriptor: cli_cc_resolve_toolchain(verification, roots, spec, fixtures, options.offline, project_root) ?? {
+        cli_cc_report_provider_error(err)
+        return EXIT_USER_ERROR
     }
     build := HermeticBuildContext.new()
     toolchain: build.toolchain("cc-toolchain", cli_cc_toolchain_spec(descriptor)) ?? {
@@ -127,6 +138,12 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
         cli_cc_report_operational_error("C/C++ invocation could not open the artifact store", "{err}", "check JET_STORE_DIR and retry")
         return EXIT_USER_ERROR
     }
+    // The action runs only in the native sandbox; fetch Jet's pinned
+    // Bubblewrap first when the host has no usable one.
+    if foundation_native_sandbox_prepare() == .Err(error) {
+        cli_cc_report_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()})
+        return EXIT_USER_ERROR
+    }
     if build_execute_build_plan(plan, project_root, artifact_store, grants) == {
         .Ok(_) -> {
             if !options.compile_only {
@@ -148,7 +165,8 @@ cli_cc_main: fn(verification: &StoreVerification, verb: String, args: [String]) 
 }
 
 // Normalize sources, outputs, dependency files, and path operands to
-// project-relative paths and declare every project input.
+// project-relative paths. The declared inputs are the sources until
+// `cli_cc_declared_inputs` adds the project input set.
 cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverOptions) -[FS, Env]> CcInvocation CLIToolError! {
     build_root: cli_cc_resolve_build_root(project_root, options)
     explicit_build_root: options.build_root != None
@@ -205,13 +223,6 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
         .None -> None
     }
     ignored_build_root: if explicit_build_root && build_root != project_root -> Val(build_root) else -> None
-    inputs := cli_cc_collect_project_inputs(project_root, outputs, ignored_build_root)
-    inputs.extend(sources.copy())
-    inputs.sort()
-    deduplicated := [String]{}
-    loop input in inputs {
-        if deduplicated.len() == 0 || deduplicated[deduplicated.len() - 1] != input -> deduplicated.push(input)
-    }
 
     normalized_argv := options.argv
     loop i in 0..<sources.len() {
@@ -258,7 +269,20 @@ cli_cc_build_invocation: fn(project_root: String, verb: String, options: DriverO
         argv.push("-MT")
         argv.push(object)
     }
-    Ok(CcInvocation{argv: argv, sources: sources, inputs: deduplicated, outputs: outputs})
+    declared: cli_cc_declared_inputs([String]{}, sources)
+    Ok(CcInvocation{argv: argv, sources: sources, inputs: declared, outputs: outputs, ignored_root: ignored_build_root})
+}
+
+// The project input set and the sources, sorted and without duplicates.
+cli_cc_declared_inputs: fn(project_inputs: [String], sources: [String]) -> [String] Never! {
+    inputs := project_inputs.copy()
+    inputs.extend(sources.copy())
+    inputs.sort()
+    deduplicated := [String]{}
+    loop input in inputs {
+        if deduplicated.len() == 0 || deduplicated[deduplicated.len() - 1] != input -> deduplicated.push(input)
+    }
+    deduplicated
 }
 
 // The verified Hangar C toolchain for the requested target, provisioned
@@ -285,7 +309,7 @@ cli_cc_resolve_toolchain: fn(verification: &StoreVerification, roots: HangarRoot
     realized: provider_realize(verification, spec, table, ctx)
     if realized.source_state == {
         .Downloaded | .Substituted -> store_record_realized_mode(verification, roots, realized) ?? return Err(ProviderError.BadOutput(err.message()))
-        else -> {}
+        .Built | .Cached -> {}
     }
     provider_cc_toolchain_resolve_for_target(verification, hangar, target, fixtures != None) ?? return Err(ProviderError.BadOutput(err.message()))
 }
@@ -343,9 +367,26 @@ cli_cc_validate_source: fn(root: String, working_dir: String, raw: String) -[FS]
     Ok(source)
 }
 
+// Why the project input walk stopped: `reason` when a path under the root
+// could not be read, else what the set holds (`size`) against its `cap`.
+#Error
+CcProjectInputError: struct {
+    reason: String
+    size: String?
+    cap: String
+
+    unreadable: fn(reason: String) -> CcProjectInputError Never! {
+        CcProjectInputError{reason: reason, size: None, cap: ""}
+    }
+
+    over_cap: fn(size: String, cap: String) -> CcProjectInputError Never! {
+        CcProjectInputError{reason: "", size: Val(size), cap: cap}
+    }
+}
+
 // Every regular project file except declared outputs, VCS/build directories
 // and the explicit build root, in name order, within the input bounds.
-cli_cc_collect_project_inputs: fn(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CLIToolError! {
+cli_cc_collect_project_inputs: fn(root: String, excluded: [String], ignored_root: String?) -[FS]> [String] CcProjectInputError! {
     walk := CcProjectInputWalk{root: root, excluded: excluded, ignored_root: ignored_root, inputs: [String]{}, bytes: 0}
     walk.visit(root)
     Ok(walk.inputs)
@@ -358,14 +399,14 @@ CcProjectInputWalk: struct {
     inputs: [String]
     bytes: Int
 
-    visit: fn(&self, directory: String) CLIToolError! -[FS]> {
-        entries := files.list_dir(directory) ?? return Err(CLIToolError.new("read project inputs in `{directory}`: {err}"))
+    visit: fn(&self, directory: String) CcProjectInputError! -[FS]> {
+        entries := files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))
         entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
         loop entry in entries {
             path: entry.path
-            relative_parts: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CLIToolError.new("project input `{path}` escaped the project root"))
+            relative_parts: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CcProjectInputError.unreadable("project input `{path}` escaped the project root"))
             relative: relative_parts.join("/")
-            metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect project input `{relative}`: {err}"))
+            metadata: files.stat(path) ?? return Err(CcProjectInputError.unreadable("inspect project input `{relative}`: {err}"))
             if metadata.is_symlink -> next
             if metadata.is_dir {
                 if (self.ignored_root ?? "") == path -> next
@@ -377,9 +418,9 @@ CcProjectInputWalk: struct {
                 next
             }
             if !metadata.is_file || self.excluded.contains(relative) -> next
-            if self.inputs.len() >= CC_MAX_INPUT_FILES -> return Err(CLIToolError.new("project input set exceeds {CC_MAX_INPUT_FILES} files"))
+            if self.inputs.len() >= CC_MAX_INPUT_FILES -> return Err(CcProjectInputError.over_cap("more than {CC_MAX_INPUT_FILES} files", "{CC_MAX_INPUT_FILES}-file"))
             self.bytes = self.bytes + metadata.size
-            if self.bytes > CC_MAX_INPUT_BYTES -> return Err(CLIToolError.new("project input set exceeds {CC_MAX_INPUT_BYTES} bytes"))
+            if self.bytes > CC_MAX_INPUT_BYTES -> return Err(CcProjectInputError.over_cap("at least {cli_human_bytes(self.bytes)} of files", cli_human_bytes(CC_MAX_INPUT_BYTES)))
             self.inputs.push(relative)
         }
     }
@@ -462,21 +503,36 @@ cli_cc_report_usage_error: fn(verb: String, reason: String) -[IO, Env, Time.Wait
     theme.error_coded("E2102", "invalid arguments for `jet {verb}`", reason, cli_cc_usage(verb))
 }
 
+cli_cc_report_project_input_error: fn(verb: String, root: String, error: CcProjectInputError) -[IO, Env, Time.Wait]> {
+    if error.size == .Val(size) -> return cli_cc_report_project_inputs_too_large(verb, root, size, error.cap)
+    cli_cc_report_usage_error(verb, error.reason)
+}
+
+// E2118, the registry's CcProjectInputsTooLarge row.
+cli_cc_report_project_inputs_too_large: fn(verb: String, root: String, size: String, cap: String) -[IO, Env, Time.Wait]> {
+    Theme.resolve_choice(ColorChoice.Auto).error_coded(
+        "E2118",
+        "`jet {verb}` would declare {size} under `{root}` as compile inputs, over the {cap} cap",
+        "`jet {verb}` declares every file under the project root as an input of the compile, so a change to any of them reruns it. The project root is `--project-root` when it is given and the current directory otherwise; only `.git`, `.jet`, `target`, `build`, `CMakeFiles` and the build root are left out.",
+        "Run `jet {verb}` from the directory that holds the sources, or pass `--project-root <dir>` naming it, so the input set holds only the files the compile reads."
+    )
+}
+
 cli_cc_report_provider_error: fn(error: ProviderError) -[IO, Env, Time.Wait]> {
     theme: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
         .Offline(reason) -> theme.error_coded("E1276", "C/C++ toolchain is unavailable offline", reason, "run `jet env fetch-toolchain` while online, or install jet from the release archive that carries the C toolchain pack")
-        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
+        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "{NATIVE_SANDBOX_FIX}; Jet will not run the compiler unsandboxed")
         .Unsupported(reason) -> theme.error_coded("E1340", "no pinned C/C++ toolchain is available", reason, "use a covered target, or install jet from a release that publishes the C toolchain pack for this machine; Jet will not use a host or PATH compiler")
         .BadOutput(reason) -> theme.error_coded("E1340", "the pinned C/C++ toolchain failed integrity checks", reason, "run `jet env fetch-toolchain` with a pack whose SHA-256 matches (the release's, or the copy beside jet); a refused copy never enters the Hangar, and a corrupt Hangar object must be removed first")
-        else -> error.report(theme)
+        .BuildFailed(_) | .Ingest(_) | .FixtureMissing(_) | .ForeignProjection(_) | .CoreBuild(_) | .Cran(_) | .LuaRocks(_) | .Registry(_, _) | .MonorepoFetch(_) | .MemberOutsideWorkspace(_) | .Adapter(_) | .BuildDebug(_) | .Channel(_) | .NixIndex(_) | .NixCache(_) -> error.report(theme)
     }
 }
 
 cli_cc_report_execution_error: fn(error: BuildExecutionError) -[IO, Env, Time.Wait]> {
     theme: Theme.resolve_choice(ColorChoice.Auto)
     if error == {
-        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "install the native sandbox backend and retry; Jet will not run the compiler unsandboxed")
+        .SandboxUnavailable(reason) -> theme.error_coded("E1275", "C/C++ build sandbox is unavailable", reason, "{NATIVE_SANDBOX_FIX}; Jet will not run the compiler unsandboxed")
         .Reported(report) -> theme.error_coded(report.code ?? "E3505", "C/C++ compiler action failed", build_report_render(report), "fix the reported compiler or linker error; no artifact was accepted")
         .MissingGrant(action, capability) -> theme.error_coded("E1340", "C/C++ action lacked its required build grant", "action `{action}` requested `{capability.name()}`", "retry through the canonical `jet cc` or `jet c++` entry point")
         .IO(action, detail) -> theme.error_coded("E1340", "C/C++ build action could not complete", "action `{action}`: {detail}", "check the project paths and declared toolchain object, then retry")

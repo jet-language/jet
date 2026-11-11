@@ -139,6 +139,10 @@ sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules:
         loop edge in modules[position.module_index].functions[position.row_index].effects.call_edges {
             if edge == "__jet_panic__" -> next
             target_position: sema_compute_function_position(index, edge, work) ?? next
+            // A core.compute operation is the compute capability itself (see
+            // sema_compute_autodiff_reach): its own index and invariant stops
+            // are not the differentiated function's panic sites.
+            if modules[target_position.module_index].functions[target_position.row_index].module_name == "core.compute" -> next
             if !sema_compute_effects_have_root(modules[target_position.module_index].functions[target_position.row_index].effects.solved, "Panic") -> next
             if !sema_compute_panic_sites_are_compute_failures(edge, modules, index, visiting, memo, work) {
                 safe = false

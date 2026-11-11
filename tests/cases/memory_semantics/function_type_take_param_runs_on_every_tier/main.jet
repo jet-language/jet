@@ -1,0 +1,26 @@
+// D-MOVE-SIGIL1=A (#6586 c10): a function type marks a taken parameter `&&`, as
+// a declaration does; a named function that takes its parameter fills a slot
+// that takes the same parameter, and the call through the value takes it.
+Words: struct {
+    names: [String]
+}
+
+count: fn(words: &&Words) -> Int {
+    kept: words
+    kept.names.len()
+}
+
+apply: fn(f: fn(&&Words) -> Int, words: &&Words) -> Int { f(words) }
+
+Counter: struct {
+    run: fn(&&Words) -> Int
+}
+
+run: fn() {
+    first: Words{names: ["ada", "grace"]}
+    print(apply(count, first))
+    counter: Counter{run: count}
+    second: Words{names: ["linus"]}
+    print(counter.run(second))
+    print(apply(words -> words.names.len() * 10, Words{names: ["x", "y", "z"]}))
+}

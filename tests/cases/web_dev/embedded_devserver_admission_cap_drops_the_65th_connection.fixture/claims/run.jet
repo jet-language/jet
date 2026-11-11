@@ -1,7 +1,10 @@
 use tasks: core.tasks
 
 s5_reset: fn(error: NetError) -> Bool {
-    if error == { .ConnectionReset(_) -> true else -> false }
+    if error == {
+        .ConnectionReset(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
 }
 S5ReadEnd: struct { bytes: Int, closed: Bool }
 s5_read_end: fn(stream: net.TCPStream) -> S5ReadEnd {

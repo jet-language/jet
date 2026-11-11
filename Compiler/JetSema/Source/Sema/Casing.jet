@@ -116,7 +116,7 @@ sema_casing_alias_number_zero: fn(definition: TypeAliasDef) -> String? {
     if definition.target == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> Val("0")
         .Float | .Float32 -> Val("0.0")
-        else -> None
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -137,13 +137,12 @@ sema_casing_alias_number_diagnostic: fn(definition: TypeAliasDef, zero: String) 
 
 // Every generic declaration site (functions and methods, structs, enums,
 // aliases) reaches its parameters through this one walk. A `<comptime N: Int>`
-// number parameter parses into `TypeParam.prep`, but number-parameter
-// substitution, instance identity and layout belong to card #3505, so it is
-// rejected here, once per written parameter, and registration never treats
-// `N` as a type.
+// number parameter parses into `TypeParam.prep` and registers as a generic
+// parameter whose arguments are numbers; one of any other value type is
+// rejected here, once per written parameter, and never registered.
 sema_casing_type_parameter: fn(parameter: TypeParam, diagnostics: &[Diagnostic]) {
-    if parameter.prep != None {
-        diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet.", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented.", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship."))
+    if parameter.prep == .Val(prep) {
+        if prep.value_type != "Int" -> diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time `{prep.value_type}` parameter, and only `Int` number parameters exist.", "An instance of the declaration is named by its number arguments (`Packet<4>`), which are whole numbers known while compiling.", "Declare it `comptime {parameter.name}: Int`, or make it a type parameter or an ordinary argument."))
         return
     }
     sema_casing_pascal(parameter.name, parameter.name_span, "type parameter", diagnostics)
@@ -283,7 +282,7 @@ sema_casing_item: fn(item: Item, diagnostics: &[Diagnostic]) {
         }
         // Foreign declarations are exempt zones. Other
         // declaration families carry no user-defined identifier category.
-        else -> {}
+        .EffectDecl(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
 }
 
@@ -432,7 +431,7 @@ sema_casing_stmts: fn(statements: [Stmt], diagnostics: &[Diagnostic]) {
             .Reactive(body, _) | .Shield(body, _) | .Live(body, _) -> sema_casing_stmts(body, diagnostics)
             .Switched(_, body, _) | .Policy(_, body, _) | .ComptimeBlock(body, _, _) -> sema_casing_stmts(body, diagnostics)
             .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_casing_expr(value, diagnostics)
-            else -> {}
+            .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
         }
     }
 }
@@ -483,7 +482,7 @@ sema_casing_pattern: fn(pattern: Pattern, diagnostics: &[Diagnostic]) {
         }
         .StrMatch(parts, _) -> sema_casing_str_match_holes(parts, diagnostics)
         .BinMatch(parts, _) -> sema_casing_bin_match_holes(parts, diagnostics)
-        else -> {}
+        .Absent(_) | .Range(_, _, _) -> {}
     }
 }
 
@@ -517,7 +516,7 @@ sema_casing_typed_literal: fn(body: TypedLitBody, diagnostics: &[Diagnostic]) {
             }
         }
         .Value(value) -> sema_casing_expr(value, diagnostics)
-        else -> {}
+        .ByteText(_) | .Empty -> {}
     }
 }
 
@@ -565,7 +564,7 @@ sema_casing_expr: fn(expr: Expr, diagnostics: &[Diagnostic]) {
                     if result == .Val(other) -> sema_casing_expr(other, diagnostics)
                 }
                 .Panic(_, args) -> sema_casing_call_args(args, diagnostics)
-                else -> {}
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
             }
         }
         .PatternTest(subject, tested, _, _) -> {
@@ -626,7 +625,7 @@ sema_casing_expr: fn(expr: Expr, diagnostics: &[Diagnostic]) {
             sema_casing_expr(head, diagnostics)
             loop step in steps -> sema_casing_expr(step.value, diagnostics)
         }
-        else -> {}
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 

@@ -113,10 +113,10 @@ process_authority_check: fn(spec: I64, err: I64) -> Bool {
     at := I64{0}
     loop at < fd_word(rights, I64{0}) {
         right: process_authority_at(rights, at)
-        supported: jet_rt_string_eq(right, rt_static_text("FS.Read:repo")) || jet_rt_string_eq(right, rt_static_text("FS.Write:.jet/build")) || jet_rt_string_eq(right, rt_static_text("Net")) || jet_rt_string_eq(right, rt_static_text("Exec")) || jet_rt_string_eq(right, rt_static_text("IO")) || jet_rt_string_eq(right, rt_static_text("Time.Wait")) || (jet_string_starts_with(right, rt_static_text("Exec:")) && rt_text_len(right) > I64{5})
+        supported: jet_rt_string_eq(right, rt_static_text("FS.Read(\"repo\")")) || jet_rt_string_eq(right, rt_static_text("FS.Write(\".jet/build\")")) || jet_rt_string_eq(right, rt_static_text("Net")) || jet_rt_string_eq(right, rt_static_text("Exec")) || jet_rt_string_eq(right, rt_static_text("IO")) || jet_rt_string_eq(right, rt_static_text("Time.Wait")) || (authority_scope_open(right) == I64{4} && jet_string_starts_with(right, rt_static_text("Exec(\"")) && rt_text_len(right) > I64{8})
         if !supported {
             name := I64{0}
-            loop name < rt_text_len(right) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{58}) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{61}) { name += I64{1} }
+            loop name < rt_text_len(right) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{40}) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{61}) { name += I64{1} }
             cause: jet_rt_string_builder_new()
             jet_rt_string_builder_push(cause, rt_static_text("authority grant `"))
             rt_text_append(cause, rt_text_data(right), name)
@@ -192,7 +192,7 @@ process_authority_executable: fn(spec: I64, err: I64) -> I64 {
     if (found == I64{0}) -> return process_authority_refuse(spec, rt_static_text("executable was not found in the captured PATH"), err)
     found
 }
-// `Exec:<path>` grants, when present, must name the resolved executable.
+// `Exec("<path>")` grants, when present, must name the resolved executable.
 process_authority_check_executable: fn(spec: I64, identity: I64, err: I64) -> Bool {
     rights: process_authority_rights(spec)
     named := false
@@ -200,9 +200,9 @@ process_authority_check_executable: fn(spec: I64, identity: I64, err: I64) -> Bo
     at := I64{0}
     loop at < fd_word(rights, I64{0}) {
         right: process_authority_at(rights, at)
-        if jet_string_starts_with(right, rt_static_text("Exec:")) {
+        if (authority_scope_open(right) == I64{4} && jet_string_starts_with(right, rt_static_text("Exec(\""))) {
             named = true
-            if (rt_text_len(right) == rt_text_len(identity) + I64{5} && rt_text_equal_bytes(wrapping(rt_text_data(right) + I64{5}), rt_text_data(identity), rt_text_len(identity))) -> granted = true
+            if (rt_text_len(right) == rt_text_len(identity) + I64{8} && rt_text_equal_bytes(wrapping(rt_text_data(right) + I64{6}), rt_text_data(identity), rt_text_len(identity))) -> granted = true
         }
         at += I64{1}
     }
@@ -462,7 +462,7 @@ process_authority_child_directory: fn(spec: I64, parent: I64, name: I64, err: I6
     jet_rt_string_drop(path)
     real
 }
-// `FS.Write:.jet/build` exposes `<cwd>/.jet/build` as the writable output.
+// `FS.Write(".jet/build")` exposes `<cwd>/.jet/build` as the writable output.
 process_authority_output_directory: fn(spec: I64, source: I64, err: I64) -> I64 {
     jet: process_authority_child_directory(spec, source, rt_static_text(".jet"), err)
     if (jet == I64{0}) -> return I64{0}
@@ -506,8 +506,8 @@ process_authority_sandbox: fn(spec: I64, err: I64) -> I64 {
     jet_rt_free(slot, I64{8}, I64{8})
     if (plan == I64{0}) -> return I64{0}
     rights: process_authority_rights(spec)
-    readable: process_authority_has(rights, rt_static_text("FS.Read:repo"))
-    writable: process_authority_has(rights, rt_static_text("FS.Write:.jet/build"))
+    readable: process_authority_has(rights, rt_static_text("FS.Read(\"repo\")"))
+    writable: process_authority_has(rights, rt_static_text("FS.Write(\".jet/build\")"))
     shared: process_authority_has(rights, rt_static_text("Net"))
     process_text_list_drop(rights, false)
     source: process_authority_real_directory(spec, process_authority_cwd(spec, err), err)

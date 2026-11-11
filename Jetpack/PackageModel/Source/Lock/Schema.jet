@@ -47,9 +47,9 @@ LockError: enum {
         if self == {
             .IO(error) -> if error == {
                 .NotFound(_) -> true
-                else -> false
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
             }
-            else -> false
+            .Invalid(_) | .UnsupportedVersion(_) | .Incomplete(_) | .Reported(_) -> false
         }
     }
 }
@@ -124,42 +124,42 @@ LockedPackage: struct {
             .Cran(_, _, source_hash, _, _) -> Val(source_hash)
             .LuaRocks(_, _, source_hash, _, _) -> Val(source_hash)
             .Registry(_, _, _, source_hash, _, _, _, _) -> Val(source_hash)
-            else -> None
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Foreign(_, _, _) -> None
         }
     }
 
     is_root: fn(self) -> Bool Never! {
         if self.source == {
             .Root -> true
-            else -> false
+            .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
     }
 
     is_nix: fn(self) -> Bool Never! {
         if self.source == {
             .Nix(_, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
     }
 
     is_foreign: fn(self) -> Bool Never! {
         if self.source == {
             .Foreign(_, _, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) -> false
         }
     }
 
     is_cran: fn(self) -> Bool Never! {
         if self.source == {
             .Cran(_, _, _, _, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
     }
 
     is_luarocks: fn(self) -> Bool Never! {
         if self.source == {
             .LuaRocks(_, _, _, _, _) -> true
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
         }
     }
 
@@ -167,7 +167,7 @@ LockedPackage: struct {
     is_registry: fn(self, registry: String) -> Bool Never! {
         if self.source == {
             .Registry(value, _, _, _, _, _, _, _) -> value == registry
-            else -> false
+            .Root | .Path(_) | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Foreign(_, _, _) -> false
         }
     }
 

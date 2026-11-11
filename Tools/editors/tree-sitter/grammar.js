@@ -15,13 +15,13 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Unsafe", "add", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
-const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$caller", "$here", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "comptime", "it", "self", "shared"];
+const JET_HIGHLIGHT_KEYWORD_OTHER = ["#caller", "#here", "@SOURCE", "@TYPES", "comptime", "it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arg", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Equatable", "Error", "FFI", "FX", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "SingleUse", "Skip", "Specified", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Undo", "UnitFamily", "Unsafe", "Untagged"];
 const JET_HIGHLIGHT_TAKE_MARK = ["&&"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "<>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "|>", "||"];
@@ -263,7 +263,11 @@ module.exports = grammar({
         ),
       )),
 
-    _head_name: ($) => choice($.type_identifier, $.primitive_type, $.identifier, $.meta_name),
+    _head_name: ($) => choice($.type_identifier, $.primitive_type, $.identifier, $.meta_name, $.template_paste),
+
+    // `#{name}`: a derive or marker template pastes a binding as the name
+    // (`impl #{type_name} { … }`). Elsewhere `#` and the block are loose elements.
+    template_paste: ($) => seq("#", $.block),
 
     _head_part: ($) =>
       choice($.type_parameters, $.paren_expr, $.bracket_expr, $.identifier, $.type_identifier, $.primitive_type, $.attribute, ".", ":", ",", "|", "+", "="),
@@ -401,8 +405,8 @@ module.exports = grammar({
 
 
     // ── Markers (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────────────
-    // `#Test`, `#Transition(A, B)` (arguments are the following group),
-    // `#!Rule`, `#[Rule, Rule(args)]`, lowercase `@allow`, and `$holds` facts.
+    // `#Test`, `#State(A -> B)` (arguments are the following group),
+    // `#!Rule`, `#[Rule, Rule(args)]`, lowercase `@allow`, and `#package`.
     attribute: (_) =>
       token(seq("#", optional("!"), /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/)),
 

@@ -15,8 +15,11 @@ use {
 
 AUDIT_DIR: "audit"
 STAGE_DIR: "release"
-// The release-asset prefix of a C toolchain pack (jet's CC_PACK_ASSETS).
+// The release-asset prefixes of the pinned assets beside jet: a C toolchain
+// pack (jet's CC_PACK_ASSETS) and the sandbox's bubblewrap
+// (NATIVE_SANDBOX_BWRAP_ASSETS).
 CC_PACK_PREFIX: "jet-cc-pack-"
+BWRAP_PREFIX: "jet-bwrap-"
 RECEIPTS_DIR: "receipts"
 
 // The key that signs a candidate and the public key publish trusts.
@@ -127,16 +130,18 @@ candidate_audited: fn(dir: String, digest: String) -[FS]> Bool Never! {
     false
 }
 
-// The seed archive of `dir` at `out`: the seed files and SHA256SUMS, with
-// names, owners and times fixed so the same inputs give the same bytes. The
-// combined archive (`with_packs`) also carries the C toolchain packs, which
-// stay outside SHA256SUMS because jet checks them against its own hash.
+// The seed archive of `dir` at `out`: the seed files, SHA256SUMS and the
+// pinned bubblewrap, with names, owners and times fixed so the same inputs
+// give the same bytes. The combined archive (`with_packs`) also carries the
+// C toolchain packs. The pinned assets stay outside SHA256SUMS because jet
+// checks them against its own hash.
 pack_archive: fn(dir: String, out: String, with_packs: Bool{false}) -[FS, Exec, Time.Wait]> Problem? Never! {
     argv := [String]{"tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0", "--use-compress-program=gzip -n", "-cf", out.copy()}
     loop name in SEED_FILES {
         if files.exists(files.join(dir, name)) -> argv.push(name.copy())
     }
     argv.push("SHA256SUMS")
+    argv.extend(bwrap_names(dir))
     if with_packs -> argv.extend(cc_pack_names(dir))
     ran: run_argv(argv, dir)
     if ran.code != 0 -> return Val(problem(INPUT, "packing {files.basename(out)} failed (exit {ran.code}): {ran.errors.trim()}"))
@@ -256,13 +261,77 @@ shipped_names: fn(dir: String) -[FS]> [String] Never! {
 // The C toolchain packs in `dir`: `admit` puts this host's
 // `jet-cc-pack-<system>.tar.zst` beside jet, where jet looks for it first.
 cc_pack_names: fn(dir: String) -[FS]> [String] Never! {
+    prefixed_names(dir, CC_PACK_PREFIX, ".tar.zst")
+}
+
+// The pinned bubblewraps in `dir`: `admit` puts this host's
+// `jet-bwrap-<arch>-linux` beside jet, where jet looks before the release.
+bwrap_names: fn(dir: String) -[FS]> [String] Never! {
+    prefixed_names(dir, BWRAP_PREFIX, "")
+}
+
+prefixed_names: fn(dir: String, prefix: String, suffix: String) -[FS]> [String] Never! {
     names := [String]{}
     entries: files.list_dir(dir) ?? return names
     loop entry in entries {
-        if entry.name.starts_with(CC_PACK_PREFIX) && entry.name.ends_with(".tar.zst") -> names.push(entry.name.copy())
+        if entry.name.starts_with(prefix) && entry.name.ends_with(suffix) -> names.push(entry.name.copy())
     }
     names.sort()
     names
+}
+
+// The staged pinned assets that are not the bytes the release's jet embeds,
+// by `pack_source` (CC_PACK_SOURCE) and `bwrap_source` (BWRAP_SOURCE) at the
+// release's commit: jet refuses an asset whose SHA-256 and size differ from
+// its row, so such an asset would ship a release that cannot fetch its C
+// toolchain or its sandbox. An embedded bubblewrap the stage lacks is one
+// too: jet would fetch it from this release and find nothing.
+pinned_hash_problems: fn(pack_source: String, bwrap_source: String, staged: [Artifact]) -> [Problem] Never! {
+    problems := [Problem]{}
+    packs: pinned_assets(pack_source, CC_PACK_TABLE)
+    bwraps: pinned_assets(bwrap_source, BWRAP_TABLE)
+    loop artifact in staged {
+        bwrap: artifact.path.starts_with(BWRAP_PREFIX)
+        if !bwrap && !(artifact.path.starts_with(CC_PACK_PREFIX) && artifact.path.ends_with(".tar.zst")) -> next
+        table: if bwrap -> "{BWRAP_TABLE} in {BWRAP_SOURCE}" else -> "{CC_PACK_TABLE} in {CC_PACK_SOURCE}"
+        expected := PinnedAsset?{None}
+        rows: if bwrap -> bwraps.copy() else -> packs.copy()
+        loop row in rows {
+            if row.file == artifact.path -> expected = Val(row.copy())
+        }
+        asset: expected ?? {
+            problems.push(problem(MISMATCH, "the staged {artifact.path} is no asset the release's jet embeds ({table})"))
+            next
+        }
+        if artifact.sha256 != asset.sha256 || artifact.size != asset.size -> problems.push(problem(MISMATCH, "the staged {artifact.path} is sha256 {artifact.sha256} ({artifact.size} bytes), but the release's jet embeds {asset.sha256} ({asset.size} bytes) in {table} and refuses any other bytes"))
+    }
+    loop row in bwraps {
+        held := false
+        loop artifact in staged {
+            if artifact.path == row.file -> held = true
+        }
+        if !held -> problems.push(problem(MISMATCH, "the release's jet embeds the bubblewrap {row.file} ({BWRAP_TABLE} in {BWRAP_SOURCE}), but the stage lacks it: jet fetches it from this release"))
+    }
+    problems
+}
+
+// pinned_hash_problems of `staged` against CC_PACK_SOURCE and BWRAP_SOURCE at
+// `commit`, the commit the release's jet is built from. A stage with no
+// pinned asset at all (a seed from before admit shipped them) is not read.
+staged_pinned_problems: fn(root: String, commit: String, staged: [Artifact]) -[Exec, Time.Wait]> [Problem] Never! {
+    pinned := 0
+    loop artifact in staged {
+        if artifact.path.starts_with(CC_PACK_PREFIX) || artifact.path.starts_with(BWRAP_PREFIX) -> pinned += 1
+    }
+    if pinned == 0 -> return [Problem]{}
+    sources := [String]{}
+    paths: [String]{CC_PACK_SOURCE, BWRAP_SOURCE}
+    loop path in paths {
+        shown: run_argv([String]{"git", "-C", root, "show", "{commit}:{path}"}, root)
+        if shown.code != 0 -> return [Problem]{problem(STALE, "cannot read {path} at {commit} to check the staged pinned assets against the hashes jet embeds: {shown.errors.trim()}")}
+        sources.push(shown.output.copy())
+    }
+    pinned_hash_problems(sources[0], sources[1], staged)
 }
 
 // The combined jet+pack archive beside seed asset `asset`
@@ -272,11 +341,12 @@ combined_asset_name: fn(asset: String) -> String Never! {
 }
 
 // The staged assets in upload order, as they are on disk now: the seed
-// archive, its .sha256, jet, IDENTITY and SHA256SUMS, then the combined
-// archive and the packs when the seed carries a pack.
+// archive, its .sha256, jet, IDENTITY and SHA256SUMS, the pinned bubblewraps,
+// then the combined archive and the packs when the seed carries a pack.
 staged_artifacts: fn(stage: String, asset: String) -[FS]> [Artifact] Problem! {
     out := [Artifact]{}
     names := [String]{asset, "{asset}.sha256", "jet", "IDENTITY", "SHA256SUMS"}
+    names.extend(bwrap_names(stage))
     packs: cc_pack_names(stage)
     if packs.len() > 0 {
         names.push(combined_asset_name(asset))
@@ -289,9 +359,10 @@ staged_artifacts: fn(stage: String, asset: String) -[FS]> [Artifact] Problem! {
     Ok(out)
 }
 
-// Stages DIR/release/: the seed archive and its .sha256, jet, IDENTITY, and
-// when the seed carries a C toolchain pack, the pack and the combined archive
-// of jet and the pack; SHA256SUMS of those, and NOTES.md.
+// Stages DIR/release/: the seed archive and its .sha256, jet, IDENTITY, the
+// pinned bubblewrap jet fetches when the host has no usable one, and when the
+// seed carries a C toolchain pack, the pack and the combined archive of jet
+// and the pack; SHA256SUMS of those, and NOTES.md.
 stage_assets: fn(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Never! {
     stage: files.join(dir, STAGE_DIR)
     files.create_dir_all(stage) ?? return Val(problem(INPUT, "cannot create {stage}: {err}"))
@@ -303,6 +374,11 @@ stage_assets: fn(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Ne
     files.set_mode(files.join(stage, "jet"), 493) ?? return Val(problem(INPUT, "cannot make the staged jet executable: {err}"))
     files.copy(files.join(dir, "IDENTITY"), files.join(stage, "IDENTITY")) ?? return Val(problem(INPUT, "cannot copy IDENTITY: {err}"))
     summed := [String]{asset, "jet", "IDENTITY"}
+    loop name in bwrap_names(dir) {
+        files.copy(files.join(dir, name), files.join(stage, name)) ?? return Val(problem(INPUT, "cannot copy {name}: {err}"))
+        files.set_mode(files.join(stage, name), 365) ?? return Val(problem(INPUT, "cannot make the staged {name} executable: {err}"))
+        summed.push(name.copy())
+    }
     packs: cc_pack_names(dir)
     if packs.len() > 0 {
         combined: combined_asset_name(asset)
@@ -414,6 +490,7 @@ candidate_step: fn(dir: String, root: String, evidence: [String], signer: Signer
                     .Err(failed) -> problems.push(failed)
                 }
                 problems.extend(repack_problems(dir, files.join(stage, asset), number))
+                problems.extend(staged_pinned_problems(root, release.commit, staged))
             }
         }
     }
@@ -579,6 +656,7 @@ publish_step: fn(dir: String, root: String, trusted: String, remote: Remote, pro
     problems.extend(remote_problems(release, remote, name))
     if release.problems.len() == 0 && staged.len() > 0 {
         problems.extend(repack_problems(dir, files.join(stage, asset), number))
+        problems.extend(staged_pinned_problems(root, release.commit, staged))
         problems.extend(personal_problems(root, stage, [String]{"."}, [String]{root, dir}, programs))
     }
     expected: record_assets(dir, stored)

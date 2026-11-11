@@ -27,14 +27,15 @@ env: JET_OPT_DUMP=local_fold
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
 stdout: ~ "const s5 <- 70" # O2 folds the use site too
-# C2: a module-level constant folds while building; one that reads the
-# environment is computed at startup, with no error.
+# C2: a module-level value is computed while building and stored in the
+# program, the same on every tier: no code runs before `run: fn`.
 step: jet emit --ir main.jet --fn module_read
 exit: 0
 stdout: ~ "const s0 <- 43" # LIMIT: 6 * 7 + 1
 step: jet emit --ir main.jet --fn run
 exit: 0
-stdout: ~ "GREETING#startup" # GREETING runs its startup function before `run: fn`
+stdout: !~ "greet" # GREETING: greet("tiers") was computed while building
+stdout: !~ "startup" # nothing computes a module value at startup
 step: jet run --optimize=none main.jet
 exit: 0
 stdout: = immutable_constants_fold_at_build_time_on_every_tier.out
@@ -44,10 +45,3 @@ stdout: = immutable_constants_fold_at_build_time_on_every_tier.out
 step: jet run --optimize=full main.jet
 exit: 0
 stdout: = immutable_constants_fold_at_build_time_on_every_tier.out
-step: jet build main.jet
-exit: 0
-step: built
-env: JET_FOLD_TIERS_GREETING=startup
-exit: 0
-stdout: ~ "startup" # the built program reads the environment when it starts
-stdout: !~ "hello" # not the value the build saw

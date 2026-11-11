@@ -18,6 +18,7 @@ use {
     cipher: __core_crypto_cipher
     bn: __core_crypto_bignum
     __core_crypto_bignum.[RNG]
+    ctime: __core_crypto_ctime
     hashes: __core_crypto_md
     asn1: __core_crypto_asn1
     oids: __core_crypto_oid
@@ -152,7 +153,7 @@ pk_info_from_type: fn(kind: oids.PKType) -> oids.PKType? Never! {
         .ECKey -> Val(kind)
         .ECKeyDH -> Val(kind)
         .ECDSA -> Val(kind)
-        else -> None
+        .RSAAlt | .RSASSAPSS | .Opaque -> None
     }
 }
 
@@ -186,7 +187,7 @@ pk_can_do: fn(ctx: PKContext, kind: oids.PKType) -> Bool Never! {
         .ECKeyDH -> kind == .ECKey || kind == .ECKeyDH
         .ECDSA -> kind == .ECDSA
         .RSAAlt -> kind == .RSA
-        else -> false
+        .RSASSAPSS | .Opaque -> false
     }
 }
 
@@ -202,7 +203,7 @@ pk_get_name: fn(ctx: PKContext) -> String Never! {
         .ECKeyDH -> "EC_DH"
         .ECDSA -> "ECDSA"
         .RSAAlt -> "RSA-alt"
-        else -> "invalid PK"
+        .RSASSAPSS | .Opaque -> "invalid PK"
     }
 }
 
@@ -214,7 +215,7 @@ pk_get_bitlen: fn(ctx: PKContext) -> Int Never! {
     if own == {
         .RSA -> rsa.rsa_get_bitlen(ctx.rsa)
         .RSAAlt -> 8 * alt_key_len(ctx)
-        else -> ctx.ec.grp.pbits
+        .ECKey | .ECKeyDH | .ECDSA | .RSASSAPSS | .Opaque -> ctx.ec.grp.pbits
     }
 }
 
@@ -229,7 +230,7 @@ pk_get_ec_group_id: fn(ctx: PKContext) -> ecp.GroupID Never! {
         .ECKey -> ctx.ec.grp.id
         .ECKeyDH -> ctx.ec.grp.id
         .ECDSA -> ctx.ec.grp.id
-        else -> .Unknown
+        .RSA | .RSAAlt | .RSASSAPSS | .Opaque -> .Unknown
     }
 }
 
@@ -255,7 +256,7 @@ pk_verify: fn(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig: [U8]) PKError! {
     if own == {
         .RSA -> rsa_verify_wrap(ctx.rsa, md, hash, sig)
         .ECKey | .ECDSA -> ecdsa_verify_wrap(ctx.ec, hash, sig)
-        else -> return Err(.TypeMismatch)
+        .ECKeyDH | .RSAAlt | .RSASSAPSS | .Opaque -> return Err(.TypeMismatch)
     }
 }
 
@@ -295,7 +296,7 @@ pk_verify_ext: fn(kind: oids.PKType, options: PSSOptions?, ctx: &PKContext, md: 
             rsa.rsa_rsassa_pss_verify_ext(ctx.rsa, md, hash, opts.mgf1_hash_id, opts.expected_salt_len, cipher.bytes_of(sig, 0, rsa_len)) ?? return Err(.RSA(err))
             if sig.len() > len -> return Err(.SigLenMismatch)
         }
-        else -> {
+        .RSA | .ECKey | .ECKeyDH | .ECDSA | .RSAAlt | .Opaque -> {
             if options == {
                 .Val(_) -> return Err(.BadInput)
                 .None -> {}
@@ -315,7 +316,7 @@ pk_sign: fn<R: RNG>(ctx: &PKContext, md: hashes.Md?, hash: [U8], sig_size: Int, 
         .ECKey -> ecdsa_sign_wrap(ctx.ec, md, hash, sig_size, rng)
         .ECDSA -> ecdsa_sign_wrap(ctx.ec, md, hash, sig_size, rng)
         .RSAAlt -> rsa_alt_sign_wrap(ctx, md, hash, sig_size)
-        else -> Err(.TypeMismatch)
+        .ECKeyDH | .RSASSAPSS | .Opaque -> Err(.TypeMismatch)
     }
 }
 
@@ -359,22 +360,40 @@ pk_sign_ext: fn<R: RNG>(kind: oids.PKType, ctx: &PKContext, md: hashes.Md?, hash
     Ok(sig)
 }
 
-/// Decrypt `input`, the plaintext at most osize bytes (mbedtls_pk_decrypt).
-pk_decrypt: fn<R: RNG>(ctx: &PKContext, input: [U8], osize: Int, rng: &R) -> [U8] PKError! {
+/// Decrypt `input` to a message of exactly `len` bytes, such as a TLS 1.2
+/// premaster secret, with implicit rejection
+/// (rsa.rsa_rsaes_pkcs1_v15_decrypt_fixed): a bad padding or another
+/// length shows only in `bad`, never in the time or the Result. An RSA-alt
+/// key decrypts with its own function, whose failure or other length is
+/// folded into `bad` the same way, though the time is the function's.
+pk_decrypt_fixed: fn<R: RNG>(ctx: &PKContext, input: [U8], len: Int, rng: &R) -> rsa.V15Fixed PKError! {
     own: ctx.kind ?? return Err(.BadInput)
     if own == .RSA {
         if input.len() != ctx.rsa.len -> return Err(.RSA(.BadInput(None)))
-        out: rsa.rsa_pkcs1_decrypt(ctx.rsa, rng, input, osize) ?? return Err(.RSA(err))
+        out: rsa.rsa_rsaes_pkcs1_v15_decrypt_fixed(ctx.rsa, rng, input, len) ?? return Err(.RSA(err))
         return Ok(out)
     }
     if own == .RSAAlt {
         alt: ctx.alt ?? return Err(.BadInput)
         if input.len() != alt_key_len(ctx) -> return Err(.RSA(.BadInput(None)))
-        decrypt: alt.decrypt
-        out: decrypt(input, osize)
-        return Ok(out)
+        return Ok(pk_alt_decrypt_fixed(alt.decrypt, input, len))
     }
     Err(.TypeMismatch)
+}
+
+/// pk_decrypt_fixed through an RSA-alt key's own decrypt function: its
+/// failure or a message of another length is `bad`, with zeros.
+pk_alt_decrypt_fixed: fn(decrypt: fn([U8], Int) -[]> [U8] PKError!, input: [U8], len: Int) -> rsa.V15Fixed Never! {
+    fixed := cipher.zero_bytes(len)
+    bad := ctime.ct_true()
+    if decrypt(input, len) == {
+        .Ok(out) -> {
+            bad = ctime.size_ne(out.len(), len)
+            if out.len() == len -> fixed = out.copy()
+        }
+        .Err(_) -> {}
+    }
+    rsa.V15Fixed{out: fixed, bad: bad}
 }
 
 /// Encrypt `input` under the key; the ciphertext, a modulus long, must fit
@@ -402,7 +421,7 @@ pk_check_pair: fn<R: RNG>(public: &PKContext, prv: &PKContext, rng: &R) PKError!
             if pub_kind != .RSA -> return Err(.TypeMismatch)
             rsa_alt_check_pair(public, prv) ?? return Err(err)
         }
-        else -> {
+        .ECKey | .ECKeyDH | .ECDSA | .RSASSAPSS | .Opaque -> {
             if pub_kind != prv_kind -> return Err(.TypeMismatch)
             ecp.check_pub_priv(public.ec, prv.ec, rng) ?? return Err(.Ecp(err))
         }

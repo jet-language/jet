@@ -38,9 +38,10 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     declaration: resolved.declaration ?? return None
     module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return None
     if graph.modules[module_index].module_name != "core.http.server" -> return None
-    // A route marker is named for its `Method` case: `#Get` registers `get`.
+    // A route marker is named for its `Method` case: `#Get` registers `get`,
+    // and `#Custom(token, path)` the custom method `token`.
     verb: declaration.name.lower()
-    if !sema_http_route_verbs().contains(verb) -> return None
+    if verb != sema_http_route_custom_verb() && !sema_http_route_verbs().contains(verb) -> return None
     Val(verb)
 }
 
@@ -85,27 +86,37 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                         diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `{method.name}: fn(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
                         next
                     }
-                    if marker.args.len() != 1 -> next
-                    if marker.args[0] == .Expr(path) {
-                        params := [LambdaParam]{}
-                        call_args := [CallArg]{}
-                        loop index in 1..<method.params.len() {
-                            parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
-                            params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
-                            argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
-                            argument.convention = method.params[index].convention
-                            call_args.push(argument)
-                        }
-                        invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
-                        meta := ast_empty_lambda_meta()
-                        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-                        loop registered in nominal.methods {
-                            if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
-                        }
-                        handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
-                        registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, expr_span(path)), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
-                        if registration.value == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                    // `#Custom` takes its method token before the path.
+                    marked := [CallArg]{}
+                    loop mark_arg in marker.args {
+                        if mark_arg == .Expr(mark_value) -> marked.push(sema_http_mount_arg(mark_value, expr_span(mark_value)))
                     }
+                    custom: verb == sema_http_route_custom_verb()
+                    marked_count: if custom -> 2 else -> 1
+                    if marker.args.len() != marked_count || marked.len() != marked_count -> next
+                    if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
+                        diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only a mux takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route on a mux"))
+                        next
+                    }
+                    params := [LambdaParam]{}
+                    call_args := [CallArg]{}
+                    loop index in 1..<method.params.len() {
+                        parameter_ty: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
+                        params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None, convention: AccessConvention.Read})
+                        argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
+                        argument.convention = method.params[index].convention
+                        call_args.push(argument)
+                    }
+                    invocation: Expr.MethodCall{receiver: Expr.Ident{name: value_name, span: span, id: AST_NODE_GENERATED}, method: method.name, method_span: method.name_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
+                    meta := ast_empty_lambda_meta()
+                    nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                    loop registered in nominal.methods {
+                        if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
+                    }
+                    handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
+                    marked.push(sema_http_mount_arg(handler, marker.span))
+                    registration: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, marked, marker.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                    if registration.value == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: marker.span})
                 }
             }
             } else {

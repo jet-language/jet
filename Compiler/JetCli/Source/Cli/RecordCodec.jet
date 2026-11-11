@@ -142,7 +142,7 @@ jet_cli_record_links_parse: fn(value: JetCLIStatusValue, field: String) -> [JetC
     loop item in values {
         fields: if item == {
             .Object(fields) -> fields
-            else -> {
+            .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) | .Array(_) -> {
                 return Err(jet_cli_read_error("record index {field} link must be an object"))
 
             }
@@ -169,7 +169,7 @@ jet_cli_record_index_parse_line: fn(line: String) -> JetCLIRecordIndexEntry JetC
     value: jet_cli_status_from_tree(tree)
     fields: if value == {
         .Object(fields) -> fields
-        else -> {
+        .Null | .Bool(_) | .Integer(_) | .Float(_) | .Text(_) | .Array(_) -> {
             return Err(jet_cli_read_error("record index line must be a JSON object"))
 
         }

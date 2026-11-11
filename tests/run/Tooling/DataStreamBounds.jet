@@ -28,8 +28,9 @@ run: fn() {
     reader := data.csv_reader<Event>(input, limits) ?? panic("reader")
     first: stream.next(reader) ?? panic("next")
     print("first: {first.service} {first.latency_ms}")
-    rows: stream.collect(reader) ?? panic("collect")
-    if data.query(rows)
+    // The query reads the rest of the stream under the reader's limits, so
+    // grouping two services past `max_groups 1` refuses.
+    if data.query(reader)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)
         .collect() == {

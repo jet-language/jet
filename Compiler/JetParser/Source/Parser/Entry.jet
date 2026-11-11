@@ -95,18 +95,6 @@ parse_generated_source: fn(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
-parse_source_with_marker_groups: fn(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, lexed.tables, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
-}
-
-parse_generated_source_with_marker_groups: fn(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
-    lexed := lex_generated(source)
-    lexed.tokens = expand_named_marker_groups(lexed.tokens, lexed.tables, groups)
-    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
-}
-
 // The parse entry points take the caller's tokens: they move into the parser
 // instead of being copied.
 parse_lexed: fn(lexed: &&Lexed) -> ParseResult {
@@ -472,9 +460,9 @@ parser_chunk_bounds_runs: fn(input: &&[Token], tables: TokenTables, source: [U8]
         bounds: if scan.whole || workers <= 1 -> [Int]{0, count} else -> parser_chunk_bounds_of(scan.candidates, count, workers)
         return ParserRunBounds{tokens: tokens.move(), bounds: bounds, fences: scan.fences}
     }
-    inputs: shared ParserRunShared{tokens: [[Token]]{tokens.move()}, source: source, file_rules: parser_chunk_file_rules(tables)}
+    inputs: Shared{ParserRunShared{tokens: [[Token]]{tokens.move()}, source: source, file_rules: parser_chunk_file_rules(tables)}}
     parts := [Shared<ParserRunPart>]{}
-    loop part in 0..<scanners -> parts.push(shared ParserRunPart{start: part * run_count /% scanners, end: (part + 1) * run_count /% scanners, outputs: [ParserChunkScan]{}})
+    loop part in 0..<scanners -> parts.push(Shared{ParserRunPart{start: part * run_count /% scanners, end: (part + 1) * run_count /% scanners, outputs: [ParserChunkScan]{}}})
     _ := parser_scan_run_parts(inputs, parts, runs, 0)
     whole := false
     fences := false
@@ -548,9 +536,9 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     prepared := input.move()
     tokens := prepared.tokens.move()
     prepared.tokens = [Token]{}
-    inputs: shared ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads}
+    inputs: Shared{ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads}}
     parts := [Shared<ParserChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) -> parts.push(shared ParserChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [ParserChunkOutput]{}})
+    loop chunk in 0..<(bounds.len() - 1) -> parts.push(Shared{ParserChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [ParserChunkOutput]{}}})
     _ := parser_parse_chunk_parts(inputs, parts, 0)
     outputs := [ParserChunkOutput]{}
     failed := false
@@ -667,7 +655,7 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
                     candidates.push(item.alias ?? parts[parts.len() - 1])
                 }
             }
-            else -> candidates.push(declaration.alias)
+            .File(_, _) | .Module(_, _) -> candidates.push(declaration.alias)
         }
     }
     loop item in program_items {
@@ -1328,16 +1316,23 @@ parser_constant_name: fn(name: String) -> Bool Never! {
     has_upper
 }
 
-// The subjectless compiler fact roots; `$here` and `$caller` are source
-// locations, and sema decides where `$caller` is legal.
-parser_fact_root: fn(name: String) -> Bool Never! {
-    name == "$build" || name == "$package" || name == "$phase" || name == "$program" || name == "$here" || name == "$caller"
+// At `#`: the compiler values `#build`, `#phase` and `#program` and the site
+// values `#package`, `#here` and `#caller` written as one word, which is no
+// marker path (`#here.Name`); sema decides where `#caller` is legal.
+parser_site_value_ahead: fn(state: &JetParserState) -> Bool Never! {
+    word: parser_value_at(state, 1)
+    if word != "build" && word != "phase" && word != "program" && word != "package" && word != "here" && word != "caller" -> return false
+    if parser_lookahead(state, 0).span.end != parser_lookahead(state, 1).span.start -> return false
+    if parser_kind_at(state, 2) == TOKEN_DOT && parser_kind_at(state, 3) == TOKEN_IDENT {
+        next: parser_value_at(state, 3)
+        if next != "" && next.bytes()[0] >= (U8{65}) && next.bytes()[0] <= (U8{90}) -> return false
+    }
+    true
 }
 
-// Rust `Parser::unknown_fact_root` a `$`
-// word in ordinary expression position that is no fact root. An ALL_CAPS
-// `$NAME` is the config-only environment read any other
-// `$word` is not a compiler fact. Both report the whole word. Fatal, as Rust
+// Rust `Parser::unknown_fact_root`: a `$` word in ordinary expression
+// position. An ALL_CAPS `$NAME` is the config-only environment read; any
+// other `$word` is no name. Both report the whole word. Fatal, as Rust
 // returns it as the expression's `Err`.
 parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: Span) {
     body: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
@@ -1345,7 +1340,7 @@ parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: 
         parser_add_error(state, span, "`$NAME` is an environment read for config surfaces only", "Jet reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
         return
     }
-    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase`, `$program`, `$here` and `$caller`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+    parser_add_error(state, span, "`{name}` is not a name", "Jet program source has no `$` words; only config surfaces read `$NAME` from the environment", "write the name without the `$`")
 }
 
 // After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.

@@ -1,17 +1,17 @@
 Error [jet.TraitMethodMismatch]: `encode` doesn't match the `Encode` contract
-  --> tests/ui/hand_serde_bad_signature.jet:12:5
+  --> tests/ui/hand_serde_bad_signature.jet:11:9
     |
- 12 |     encode: fn(self) -> String { self.addr.copy() }
-    |     ^^^^^^
+ 11 |         encode: fn(self) -> String { self.addr.copy() }
+    |         ^^^^^^
  Why: A trait implementation must use the trait method's receiver, parameters, return type, and effects
  Fix: Write `encode: fn(self) -> Dyn`, matching the `Encode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 
 Error [jet.TraitMethodMismatch]: `decode` doesn't match the `Decode` contract
-  --> tests/ui/hand_serde_bad_signature.jet:17:5
+  --> tests/ui/hand_serde_bad_signature.jet:16:9
     |
- 17 |     decode: fn(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
-    |     ^^^^^^
+ 16 |         decode: fn(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
+    |         ^^^^^^
  Why: A trait implementation must use the trait method's receiver, parameters, return type, and effects
  Fix: Write `decode: fn(tree: Dyn) -> Email [FieldError]!`, matching the `Decode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907

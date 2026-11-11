@@ -1,13 +1,13 @@
 // The JS/WASM web partition. Every checked function gets a web
-// bucket by one precedence: its `#Target(JS|Wasm)` or `#WasmExport` marker, the
+// bucket by one precedence: its `#Target(JS|Wasm)` or `#Export(wasm)` marker, the
 // `Browser` effect, the inline-module or file `#Target` ceiling, a `Stream`
 // result, then the Wasm default. Unpinned functions follow their call edges
 // until the graph is closed: a Wasm caller of a JS function becomes JS, and so
 // does an unpinned Wasm callee of a JS caller. Once a program opts in (a web
-// marker or a `#Target` ceiling), a `#WasmExport` signature must be ABI-safe
+// marker or a `#Target` ceiling), a `#Export(wasm)` signature must be ABI-safe
 // (E-WEB-ABI-TYPE), a Wasm function must not use `Browser`
 // (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
-// JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
+// JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`).
 use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
 
@@ -80,10 +80,10 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         found := [Diagnostic]{}
         if meta.marker == .Val(.WasmExport) {
             loop param in meta.params {
-                if !sema_web_abi_safe(param, types) -> found.push(sema_web_abi_type(param, "on a `#WasmExport` parameter", meta.name_span))
+                if !sema_web_abi_safe(param, types) -> found.push(sema_web_abi_type(param, "on a `#Export(wasm)` parameter", meta.name_span))
             }
             if meta.ret == .Val(ret) {
-                if !sema_web_abi_safe(ret, types) -> found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
+                if !sema_web_abi_safe(ret, types) -> found.push(sema_web_abi_type(ret, "as a `#Export(wasm)` return type", meta.name_span))
             }
         }
         uses_browser: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
@@ -94,7 +94,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
             loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
                 callee: rows.get(edge) ?? next
                 if buckets[at] == buckets[callee] -> next
-                // The one sanctioned crossing: JS calling a `#WasmExport`.
+                // The one sanctioned crossing: JS calling a `#Export(wasm)`.
                 if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
                 // A Core browser API reached from a Wasm pin is the E-WEB-TARGET-BROWSER
                 // above (Rust partitioned user functions only).
@@ -146,7 +146,7 @@ sema_web_items_marked: fn(items: [Item]) -> Bool Never! {
                     if sema_web_items_marked(body) -> return true
                 }
             }
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -186,7 +186,7 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
                     sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, modules, metas, types)
                 }
             }
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -267,7 +267,7 @@ sema_web_abi_safe: fn(ty: Type, types: SemaWebTypes) -> Bool Never! {
         .Map(key, _, value) -> key == Type.String && sema_web_abi_safe(value, types)
         .Named(name) -> name == "String" || sema_web_codable_named(name, [Type]{}, types)
         .Apply(name, args) -> sema_web_codable_named(name, args, types)
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -341,7 +341,7 @@ sema_web_type_show: fn(ty: Type) -> String Never! {
         .List(inner) -> "[{sema_web_type_show(inner)}]"
         .Map(_, _, value) -> "Map<String, {sema_web_type_show(value)}>"
         .Fn(params, ret, effect_bound, _, _, _) -> sema_web_fn_debug(params, ret, effect_bound)
-        else -> sema_web_type_debug(ty)
+        .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_web_type_debug(ty)
     }
 }
 
@@ -374,7 +374,7 @@ sema_web_type_debug: fn(ty: Type) -> String Never! {
         .Apply(name, args) -> "Apply {{ name: \"{name}\", args: {sema_web_type_debug_list(args)} }}"
         .IntN(signed, bits) -> "IntN {{ signed: {signed}, bits: {bits} }}"
         .Fn(params, ret, effect_bound, _, _, _) -> sema_web_fn_debug(params, ret, effect_bound)
-        else -> type_name(ty)
+        .Map(_, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 

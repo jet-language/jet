@@ -109,7 +109,7 @@ watch_set: fn(paths: [OSPath]) -> WatchSet {
 ChangeKind: enum { Created; Modified; Deleted; Renamed; Stale }
 InvalidationReceipt: struct {
     generation: U64; changed: [OSPath]; closure: [OSPath]; kinds: [String]; change_kinds: [String]
-    content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U128?
+    content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U64?
     render: fn(self) -> String {
         elapsed: self.edit_to_visible_ms.map((ms) -> "{ms}").unwrap_or("null")
         "{{\"generation\":{self.generation},\"changed\":[{join_paths(self.changed)}],\"closure\":[{join_paths(self.closure)}],\"kinds\":[{join_quoted(self.kinds)}],\"change_kinds\":[{join_quoted(self.change_kinds)}],\"content_digests\":[{join_optional_quoted(self.content_digests)}],\"dev_entries\":[{join_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
@@ -716,9 +716,8 @@ HotReplaceTxn: struct {
 WATCH_POLL_INTERVAL_MS: U64{5}
 WATCH_COALESCE_MS: U64{4}
 WATCH_SETTLE_MAX_MS: U64{250}
-EDIT_TO_VISIBLE_BUDGET_MS: U128{2000}
+EDIT_TO_VISIBLE_BUDGET_MS: U64{2000}
 within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
-any_stamp_changed: fn(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { now: PathStamp.capture(node.path); node.stamp.changed_since(now) }) }
 SessionBroker: struct {
     source_transactions: Mutex<()>
     default: fn() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }

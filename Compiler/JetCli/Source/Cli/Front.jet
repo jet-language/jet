@@ -90,12 +90,14 @@ JetCLIPlan: enum {
     // (`--verbose`/`-v` on an explicit-file `jet check`) adds the check's scope
     // and proof rows on stdout (first-hour.md lesson 3). `settings` are the
     // `--set name=value` writers the compile folds (BuildFactChain.jet);
-    // `profile` is the `--profile` it compiles under ("" for the default).
-    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String)
+    // `profile` is the `--profile` it compiles under ("" for the default);
+    // `style` (`--style`) adds the opt-in style checks (StyleCheck.jet).
+    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool)
     // `jet check` of a workspace root (no `-p`): the entry and bytes of each
     // member no other member depends on (Host.jet `jet_cli_check_workspace`),
-    // each compiled under the `--set` writers and the `--profile`.
-    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String)
+    // each compiled under the `--set` writers and the `--profile`, and with
+    // the style checks under `style`.
+    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String, style: Bool)
     // `jet check --prelude <file>`: one Compiler/Prelude source and its bytes,
     // checked as the compiler embeds it (Host.jet
     // `jet_cli_compile_prelude_check`).
@@ -210,7 +212,8 @@ JetCLIPlan: enum {
     FmtLang(argv: [String], color: Bool)
     // Normal diagnostic fixes use the shared edit engine and a held codemod
     // transaction. Memory fixes retain their independent witness consumer.
-    Fix(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool, notice: String)
+    // `style`: `--style`, the moves the opt-in style checks name (StyleCheck.jet).
+    Fix(file: String, dry_run: Bool, all: Bool, markers: String, style: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
@@ -285,6 +288,9 @@ JetCLIPlan: enum {
     // `jet audit copies [<entry.jet>]` / `jet audit <file.jet>`
     // (AuditCopies.jet): the implicit copies of `file`'s checked package.
     AuditCopies(file: String, source: String, color: Bool, json: Bool, notice: String)
+    // `jet audit writes [<entry.jet>]` (AuditWrites.jet): the calls of
+    // `file`'s checked package that change or take a named value.
+    AuditWrites(file: String, source: String, color: Bool, json: Bool, notice: String)
     // `jet audit foreign [<entry.jet>]` (AuditForeign.jet): the foreign code
     // of `file`'s program and the loader needs of its linked image.
     AuditForeign(file: String, source: String, color: Bool, json: Bool, notice: String)
@@ -940,7 +946,7 @@ JetCLIThreads: enum {
 jet_cli_threads_refused: fn(jet_argv: [String], command: String) -> Bool Never! {
     if jet_cli_threads(jet_argv, command, false) == {
         .Refused(_) -> return true
-        else -> {}
+        .Cap(_) -> {}
     }
     false
 }
@@ -1041,7 +1047,7 @@ jet_cli_jobs: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
     if jet_cli_resolve_bare_entry("jobs", directory, jet_cli_option_value(jet_argv, "-p"), false, color, notices) == {
         .Entry(entry) -> {
             planned: jet_cli_read_entry(entry.path, "jobs", color, quiet, threads, true, notices.join(""), json, false)
-            if planned == .Check(file, _, _, _, _, _, notice, _, _, _, _) -> return JetCLIPlan.Jobs{file: file, color: color, json: json, notice: notice}
+            if planned == .Check(file, _, _, _, _, _, notice, _, _, _, _, _) -> return JetCLIPlan.Jobs{file: file, color: color, json: json, notice: notice}
             return planned
         }
         .Refused(plan) -> return jet_cli_with_notices(notices, plan)
@@ -1099,15 +1105,15 @@ jet_cli_check_workspace_plan: fn(directory: String, color: Bool, quiet: Bool, th
     sources := [String]{}
     loop entry in entries {
         planned: jet_cli_read_entry(entry, "check", color, quiet, threads, true, notice, json, false)
-        if planned == .Check(file, source, _, _, _, _, _, _, _, _, _) {
+        if planned == .Check(file, source, _, _, _, _, _, _, _, _, _, _) {
             files.push(file)
             sources.push(source)
         } else {
             return Val(planned)
         }
     }
-    if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json, verbose: false, settings: [BuildSettingOverride]{}, profile: ""})
-    Val(JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: [BuildSettingOverride]{}, profile: ""})
+    if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json, verbose: false, settings: [BuildSettingOverride]{}, profile: "", style: false})
+    Val(JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: [BuildSettingOverride]{}, profile: "", style: false})
 }
 
 // Read the entry `jet_cli_check` chose (`run_native_execution` source read): an
@@ -1122,7 +1128,7 @@ jet_cli_read_entry: fn(file: String, command: String, color: Bool, quiet: Bool, 
         fix: if default_entry && jet_cli_has_manifest_above(parent) -> "create `run.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
         return jet_cli_report_done(notice, "E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}, profile: ""}
+    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}, profile: "", style: false}
 }
 
 // `jet check --prelude <file>`: the one Compiler/Prelude source it names. A
@@ -1134,33 +1140,35 @@ jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int
     JetCLIPlan.CheckPrelude{file: file, source: source, color: color, quiet: quiet, threads: threads, json: json}
 }
 
-// `jet check` under its `--set name=value` writers (jet_cli_setting_flags)
-// and its `--profile`: the check compiles what `jet run` with the same
-// writers and profile would, so an undeclared or conflicting writer, or a
-// profile no member declares, is refused here too (jet_cli_build_options).
+// `jet check` under its `--set name=value` writers (jet_cli_setting_flags),
+// its `--profile` and its `--style`: the check compiles what `jet run` with
+// the same writers and profile would, so an undeclared or conflicting writer,
+// or a profile no member declares, is refused here too
+// (jet_cli_build_options). `--style` adds the opt-in style checks.
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
         .Refused(plan) -> return plan
         .Given(given) -> settings = given.copy()
     }
+    style: jet_argv.contains("--style")
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
-        .Check(file, source, _, _, _, project, notice, _, verbose, _, _) -> {
+        .Check(file, source, _, _, _, project, notice, _, verbose, _, _, _) -> {
             if jet_cli_check_profile(jet_argv, [String]{file}, [String]{source}, color) == {
                 .Refused(refusal) -> refusal.move()
                 // copy: `profile` is a payload view of the resolved name.
-                .Given(profile) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings, profile: profile.copy()}
+                .Given(profile) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings, profile: profile.copy(), style: style}
             }
         }
-        .CheckWorkspace(files, sources, _, _, _, notice, _, _, _) -> {
+        .CheckWorkspace(files, sources, _, _, _, notice, _, _, _, _) -> {
             if jet_cli_check_profile(jet_argv, files, sources, color) == {
                 .Refused(refusal) -> refusal.move()
                 // copy: `profile` is a payload view of the resolved name.
-                .Given(profile) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings, profile: profile.copy()}
+                .Given(profile) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings, profile: profile.copy(), style: style}
             }
         }
-        else -> planned
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> planned
     }
 }
 
@@ -1189,8 +1197,8 @@ jet_cli_check_profile: fn(jet_argv: [String], files: [String], sources: [String]
 jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
     entry: jet_cli_check(jet_argv, args, "doc", color, quiet, None, json)
     if entry == {
-        .Check(file, source, _, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
-        else -> {}
+        .Check(file, source, _, _, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     entry
 }
@@ -1443,7 +1451,7 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
                 .Selected(options, notes) -> return JetCLIPlan.DevWeb{file: file.move(), source: source.move(), color: color, options: options.move(), threads: threads, invocation: invocation.move(), notice: "{notice}{notes}", port: port}
             }
         }
-        else -> {}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
@@ -1563,7 +1571,7 @@ jet_cli_locked_build: fn(raw: [String], jet_argv: [String], args: [String], pass
             }
             return JetCLIPlan.BuildPackage{file: file.copy(), color: color, options: options.copy(), build_args: build_args.copy(), threads: threads, invocation: invocation.copy(), notice: notice.copy(), locked: Val(check)}
         }
-        else -> return planned
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .LockedBuild(_, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> return planned
     }
 }
 
@@ -1616,7 +1624,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
                 if (found.callable ?? "") == "build" || jet_cli_package_declares_build_entry(found.path) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join(""), locked: None}
                 if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), json, false)
-                if planned == .Check(file, source, _, _, _, _, notice, _, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet, verbose: jet_cli_build_verbose(jet_argv)}
+                if planned == .Check(file, source, _, _, _, _, notice, _, _, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet, verbose: jet_cli_build_verbose(jet_argv)}
                 return planned
             }
             .Refused(plan) -> return jet_cli_with_notices(notices, plan)
@@ -1631,14 +1639,14 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
     }
     entry: jet_cli_check(jet_argv, args, "build", color, quiet, threads, json)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _, _, _, _) -> {
+        .Check(file, source, _, _, _, _, notice, _, _, _, _, _) -> {
             // A file whose package declares `build: fn(b: Build)`, in it, in another
             // source file or in `package.jet`, builds through it.
             if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice, locked: None}
             if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(file, color)
             return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet, verbose: jet_cli_build_verbose(jet_argv)}
         }
-        else -> {}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     entry
 }
@@ -1784,7 +1792,7 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     command: if watch -> "dev" else -> "run"
     entry: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _, _, _, _) -> {
+        .Check(file, source, _, _, _, _, notice, _, _, _, _, _) -> {
             // `jet dev` of a browser program serves its web build.
             if watch && jet_cli_dev_web_selected(jet_argv, source) {
                 port: jet_cli_dev_web_port(jet_argv) ?? return jet_cli_fail("E2104", "`--port` needs a TCP port number from 0 to 65535", jet_cli_why("E2104"), "write `--port=8080`, or leave it out to let the preview listener choose a port", color, JET_DRIVER_EXIT_USAGE)
@@ -1801,7 +1809,7 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
             function: if selects_dev -> String?{Val("dev")} else -> String?{None}
             return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, json: jet_argv.contains("--json"), threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: keep_watching, entry: function}
         }
-        else -> {}
+        .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     entry
 }
@@ -2345,7 +2353,7 @@ jet_cli_front: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]
             if jet_cli_wants_json(jet_cli_owned_flags(raw)) -> return jet_cli_done(jet_cli_report_status_json(report), notice, exit_code)
         }
         .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Done{output: jet_cli_diagnostics_output(file, source, report, color, jet_cli_wants_json(jet_cli_owned_flags(raw)), notice)}
-        else -> {}
+        .Done(_) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan
 }
@@ -2698,6 +2706,8 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
                 if word == "--edition" || word.starts_with("--edition=") -> asked_edition = true
             }
             if asked_markers && markers != "inside" && markers != "above" -> return jet_cli_fail("E2104", "`{markers}` is not a `jet fix --markers` placement", jet_cli_why("E2104"), "write `jet fix --markers inside <file>` or `jet fix --markers above <file>`", color, JET_DRIVER_EXIT_USAGE)
+            style: jet_argv.contains("--style")
+            if asked_markers && style -> return jet_cli_fail("E2104", "`jet fix` takes `--markers` or `--style`, not both", jet_cli_why("E2104"), "run `jet fix --markers {markers} <file>`, then `jet fix --style <file>`", color, JET_DRIVER_EXIT_USAGE)
             // `--edition` names the edition to migrate to. This jet migrates
             // to its own edition only (the ordinary fix pass); any other is
             // refused rather than run as a plain fix.
@@ -2716,7 +2726,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
                 file = "{target}.jet"
             }
-            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), markers: markers, color: color, quiet: quiet, json: json, notice: notice}
+            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), all: jet_argv.contains("--all"), markers: markers, style: style, color: color, quiet: quiet, json: json, notice: notice}
         }
         "gc" -> return jet_cli_gc(argv, args, color, json)
         "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}

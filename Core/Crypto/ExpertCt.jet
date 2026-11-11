@@ -21,7 +21,7 @@ store: fn(w: &[I64], at: Int, value: I64) Never! { w[at /% 8] = value }
 byte: fn(w: [I64], at: Int) -> I64 Never! {
     (w[at /% 8] >> ((at %% 8) * 8)).bit_and(I64{255})
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 put: fn(w: &[I64], at: Int, value: I64) Never! {
     shift: (at %% 8) * 8
     mask: I64{255} << shift
@@ -53,7 +53,7 @@ copy_field: fn(w: &[I64], out: Int, input: Int) Never! {
         store(w, out + i * 8, value)
     }
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 carry: fn(w: &[I64], a: Int) Never! {
     loop i in 0..<16 {
         v: word(w, a + i * 8) + I64{65536}
@@ -68,7 +68,7 @@ carry: fn(w: &[I64], a: Int) Never! {
         }
     }
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
     mask: I64{0} - bit
     loop i in 0..<16 {
@@ -79,21 +79,21 @@ swap: fn(w: &[I64], a: Int, b: Int, bit: I64) Never! {
         store(w, b + i * 8, y.bit_xor(delta))
     }
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 add: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) + word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 sub: fn(w: &[I64], out: Int, a: Int, b: Int) Never! {
     loop i in 0..<16 {
         value: word(w, a + i * 8) - word(w, b + i * 8)
         store(w, out + i * 8, value)
     }
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     loop i in 0..<31 -> store(w, work + i * 8, I64{0})
     loop i in 0..<16 {
@@ -111,7 +111,7 @@ mul: fn(w: &[I64], out: Int, a: Int, b: Int, work: Int) Never! {
     carry(w, out)
     carry(w, out)
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 pack: fn(w: &[I64], out: Int, value: Int, reduced: Int) Never! {
     carry(w, value)
     carry(w, value)
@@ -273,7 +273,7 @@ point_pack: fn(w: &[I64], out: Int, p: Int) Never! {
     value: byte(w, out + 31).bit_or(((byte(w, 3328).bit_and(I64{1})) << 7))
     put(w, out + 31, value)
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 mod_l: fn(w: &[I64], out: Int, x: Int) Never! {
     i := 63
     loop {
@@ -353,7 +353,7 @@ ed_public: fn(seed: [U8]) -> [U8] Never! {
     wipe(w)
     out
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ed_sign: fn(seed: [U8], msg: [U8]) -> [U8] Never! {
     w := arena(696)
     expand(w, seed)
@@ -414,7 +414,7 @@ field_equal: fn(w: &[I64], a: Int, b: Int) -> Bool Never! {
     pack(w, 4992, b, 3200)
     equal(w, 4960, 4992, 32)
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 decode: fn(w: &[I64], p: Int, bytes: Int) -> Bool Never! {
     if !canonical_y(w, bytes) -> return false
     clear(w, p, 512)
@@ -548,7 +548,7 @@ ed_verify_strict: fn(pk: [U8], msg: [U8], sig: [U8]) -> Int Never! {
 le32: fn(w: [I64], at: Int) -> I64 Never! {
     byte(w, at).bit_or((byte(w, at + 1) << 8)).bit_or((byte(w, at + 2) << 16)).bit_or((byte(w, at + 3) << 24))
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 poly_block: fn(w: &[I64], length: Int) Never! {
     put(w, 96 + length, I64{1})
     t0: le32(w, 96)
@@ -586,7 +586,7 @@ poly_block: fn(w: &[I64], length: Int) Never! {
     next: word(w, 48) + (first >> 26)
     store(w, 48, next)
 }
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 poly_finish: fn(w: &[I64]) Never! {
     c := I64{0}
     loop i in 1..<5 {

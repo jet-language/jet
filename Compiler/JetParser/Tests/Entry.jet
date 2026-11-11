@@ -6,14 +6,14 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     program: result.program
     program.items[0] == .GenericModule(def) ?? panic("template")
     assert(if def.params[0] == { .Type(name, _, bound) -> name == "lower" && bound == None
- else -> false })
+ .Value(_, _, _) -> false })
     assert(if def.params[1] == { .Value(name, _, _) -> name == "UPPER"
- else -> false })
+ .Type(_, _, _) -> false })
     program.items[1] == .ModuleAlias(alias) ?? panic("alias")
     assert(if alias.args[0] == { .Type(_, _) -> true
- else -> false })
+ .Value(_, _) -> false })
     assert(if alias.args[1] == { .Value(_, _) -> true
- else -> false })
+ .Type(_, _) -> false })
 }
 
 #Test("generic_module_value_slots_parse_closed_identifier_led_expressions") {
@@ -23,7 +23,7 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
         item: result.program.items[index]
         item == .ModuleAlias(alias) ?? panic("alias")
         assert(if alias.args[0] == { .Value(_, _) -> true
- else -> false })
+ .Type(_, _) -> false })
     }
 }
 
@@ -41,13 +41,19 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
     result.program.items[0] == .GenericModule(def) ?? panic("template")
     def.body[0] == .Struct(data) ?? panic("struct")
-    assert(if data.fields[0].ty == { .FixedList(_, .Symbol(_, name)) -> name == "capacity" else -> false })
-    assert(if def.body[1] == { .CodeModule(child) -> child.name == "stats" else -> false })
+    assert(if data.fields[0].ty == {
+        .FixedList(_, .Symbol(_, name)) -> name == "capacity"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    assert(if def.body[1] == {
+        .CodeModule(child) -> child.name == "stats"
+        .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+    })
 }
 
-#Test("shared_prefix_accepts_inferred_brace_values") {
-    result: parser_test_result("run: fn() {{ value: shared {{ count: 1 }} }}\n")
-    assert(result.diagnostics.is_empty(), "shared must accept an inferred brace value: {result.diagnostics:Debug}")
+#Test("retired_shared_prefix_is_an_ordinary_parse_error") {
+    result: parser_test_result("run: fn() {{ value: shared 1 }}\n")
+    assert(!result.diagnostics.is_empty(), "`shared 1` must not parse as a shared cell")
 }
 
 #Test("script_statements_survive_items_and_formatter") {
@@ -79,20 +85,20 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     ok_cond == .PatternTest(ok_subject, ok_pattern, _, _) ?? panic("Result handler needs one success pattern")
     ok_pattern == .Ok(ok_binding, ok_binding_span, _, _) ?? panic("Result handler needs one success pattern")
     assert(if ok_subject == { .Ident(name, _, _) -> name == "value"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     assert_eq(ok_binding, "ok")
     assert(if ok_value == { .Ident(name, _, _) -> name == "ok"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     else_value == .If(err_cond, _, err_value, _, terminal, _, _) ?? panic("Result handler must retain its failure branch")
     err_cond == .PatternTest(err_subject, err_pattern, _, _) ?? panic("Result handler needs one failure pattern")
     err_pattern == .Err(err_binding, err_binding_span, _, _) ?? panic("Result handler needs one failure pattern")
     assert(if err_subject == { .Ident(name, _, _) -> name == "value"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     assert_eq(err_binding, "error")
     assert(if err_value == { .Ident(name, _, _) -> name == "error"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     assert(if terminal == { .NoElse(_, _) -> true
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     assert(ok_binding_span.end < err_binding_span.start)
     assert(expr_span(ok_cond).end < expr_span(err_cond).start)
 }
@@ -105,16 +111,16 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     handler == .If(cond, _, _, _, else_value, _, _) ?? panic("Result handler")
     cond == .PatternTest(subject, pattern, _, _) ?? panic("success pattern")
     assert(if subject == { .Ident(name, _, _) -> name == "value"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     assert(if pattern == { .Ok(binding, _, _, _) -> binding == "ok"
- else -> false })
+ .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
     else_value == .If(err_cond, then_body, then_value, _, _, _, _) ?? panic("failure branch")
     err_cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
     assert(if err_pattern == { .Err(binding, _, _, _) -> binding == "error"
- else -> false })
+ .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
     assert(then_body.is_empty())
     assert(if then_value == { .Call(call, _) -> call.name == "print"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
 }
 
 #Test("result_handler_allows_nested_value_handlers") {
@@ -141,7 +147,7 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(ok_name)
     assert(if ok_pattern == { .Ok(_, _, _, _) -> true
  .Variant(variant, _, _, _) -> variant == "Ok"
- else -> false })
+ .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
     function.body[1] == .Switch(_, err_arms, _, _) ?? panic("failure switch")
     assert(!err_arms.is_empty())
     err_arms[0].cond == .PatternTest(_, err_pattern, _, _) ?? panic("failure pattern")
@@ -150,25 +156,25 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(err_name)
     assert(if err_pattern == { .Err(_, _, _, _) -> true
  .Variant(variant, _, _, _) -> variant == "Err"
- else -> false })
+ .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
     function.body[2] == .Val(binding) ?? panic("fallback binding")
     binding.init == .OrFallback(value, fallback, _, _, _) ?? panic("value fallback")
     assert(if value == { .Ident(name, _, _) -> name == "maybe"
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     fallback == .Value(fallback_value) ?? panic("value fallback")
     assert(if fallback_value == { .Int(_, _, _, _, _) -> true
- else -> false })
+ .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false })
     function.body[3] == .Val(refutable) ?? panic("refutable binding")
     refutable.pattern == .Val(bind_pattern) ?? panic("refutable pattern")
     bind_pattern == .Refutable(pattern, return_fallback, _, _) ?? panic("refutable pattern")
     assert(if return_fallback == { .Return(returned, _) -> returned == None
- else -> false })
+ .Value(_) | .Block(_, _, _) | .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> false })
     other_name := false
     loop name in pattern_binding_names(pattern) { if name.name == "other" -> other_name = true }
     assert(other_name)
     assert(if pattern == { .Ok(_, _, _, _) -> true
  .Variant(variant, _, _, _) -> variant == "Ok"
- else -> false })
+ .Present(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false })
 }
 
 #Test("result_handler_reports_fixed_shape_errors_at_the_offending_token") {
@@ -206,8 +212,14 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     found := false
     loop marker in function.markers {
         if marker.name == "Policy" {
-            assert(if marker.args[0] == { .Expr(.Call(call, _)) -> call.name == "retry" else -> false })
-            assert(if marker.args[1] == { .Expr(.Call(call, _)) -> call.name == "trace" else -> false })
+            assert(if marker.args[0] == {
+                .Expr(.Call(call, _)) -> call.name == "retry"
+                .Expr(_) | .EffectRow(_, _) -> false
+            })
+            assert(if marker.args[1] == {
+                .Expr(.Call(call, _)) -> call.name == "trace"
+                .Expr(_) | .EffectRow(_, _) -> false
+            })
             found = true
             break
         }
@@ -255,15 +267,15 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             if typed_array {
                 def.value == .TypedLit(head, body, _, _) ?? panic("typed array")
                 assert(if head == { .Val(.List(_)) -> true
- else -> false })
+ .Val(_) | .None -> false })
                 assert(if body == { .Elements(elements) -> elements.len() == 1
- else -> false })
+ .Fields(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false })
             } else {
                 def.value == .TypedLit(head, body, _, _) ?? panic("typed struct literal")
                 assert(if head == { .Val(.Named(name)) -> name == "CoreModuleExportNames"
- else -> false })
+ .Val(_) | .None -> false })
                 assert(if body == { .Fields(fields) -> fields.len() == 1
- else -> false })
+ .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) | .Empty -> false })
             }
         }
     }
@@ -275,9 +287,9 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(result.diagnostics.is_empty(), "newline separates comptime declarations: {result.diagnostics:Debug}")
     assert(result.program.items.len() == 2, "{source:Debug}")
     assert(if result.program.items[0] == { .Const(def) -> def.name == "FIRST"
- else -> false })
+ .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false })
     assert(if result.program.items[1] == { .Const(def) -> def.name == "SECOND"
- else -> false })
+ .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false })
 }
 
 #Test("comptime_eof_termination_still_rejects_incomplete_initializers") {

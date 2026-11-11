@@ -73,7 +73,10 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
                 key_end: kit_steps_json_span_end(bytes, position)
                 key_text: String.from_bytes(bytes.slice(position, key_end)) ?? return Val("JSON normalization key decode failed")
                 key_tree: json.parse(key_text) ?? return Val("JSON normalization key parse failed")
-                key: if key_tree == { .Text(name) -> name else -> { return Val("JSON normalization key is not text") } }
+                key: if key_tree == {
+                    .Text(name) -> name
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Val("JSON normalization key is not text") }
+                }
                 child: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
                 if part == (".{key}") {
                     value: tree.get(key) ?? return Val("JSON normalization member missing: {part}")
@@ -99,7 +102,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
             }
             return None
         }
-        else -> return Val("JSON normalization cannot descend into a scalar")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Val("JSON normalization cannot descend into a scalar")
     }
 }
 

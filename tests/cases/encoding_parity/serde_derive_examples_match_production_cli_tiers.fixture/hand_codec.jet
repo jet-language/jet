@@ -4,19 +4,19 @@ use json: core.encoding.json
 
 Email: struct {
     address: String
-}
 
-impl Email.Encode {
-    encode: fn(self) -> Dyn { Dyn.Text(self.address.copy()) }
-}
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.Text(self.address.copy()) }
+    }
 
-impl Email.Decode {
-    decode: fn(tree: Dyn) -> Email [FieldError]! {
-        address: tree.text()
-        if !address.contains("@") {
-            return Err([FieldError{path: "", reason: "not a valid email: {address}"}])
+    impl Decode {
+        decode: fn(tree: Dyn) -> Email [FieldError]! {
+            address: tree.text()
+            if !address.contains("@") {
+                return Err([FieldError{path: "", reason: "not a valid email: {address}"}])
+            }
+            return Ok(Email{address: address})
         }
-        return Ok(Email{address: address})
     }
 }
 

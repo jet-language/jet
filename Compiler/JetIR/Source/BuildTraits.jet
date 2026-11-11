@@ -376,7 +376,7 @@ ir_trait_propagate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMetho
     carried: if ir_untag(returned) == {
         .Result(_, _) -> !(ir_untag(checked) == .Result(_, _))
         .Option(_) -> !(ir_untag(checked) == .Option(_))
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !carried -> return slot
     ir_try_slot(m, p, b, slot, returned, TTryConvert.NoConversion, None, span)

@@ -308,7 +308,7 @@ store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized,
 store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
     if request == {
         .Package(spec, _) -> store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
-        else -> {}
+        .Adapter(_, _, _) -> {}
     }
     // WAL is authority. Recover package projections before cache
     // verification; selected-candidate proofs run below so invalid bytes can
@@ -337,7 +337,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
                     .None -> {}
                 }
             }
-            else -> {}
+            .Adapter(_, _, _) -> {}
         }
     }
 
@@ -380,7 +380,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
                     failure := store_integrity_failure(verification, roots, found, wanted, proof)
                     if store_quarantine_invalid_entry(verification, roots, found, wanted) == {
                         .Err(error) -> failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
-                        else -> {}
+                        .Ok(_) -> {}
                     }
                     return Err(RealizeError.Integrity(failure))
                 }
@@ -390,7 +390,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
                         failure.actual = "{failure.actual}; quarantine failed: {error.message()}"
                         return Err(RealizeError.Integrity(failure))
                     }
-                    else -> {}
+                    .Ok(_) -> {}
                 }
             }
         }
@@ -456,7 +456,7 @@ store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots
         store_promote_shared_entry(verification, roots, entry) ?? return Err(RealizeError.Store(err))
         if realized.source_state == {
             .Built | .Downloaded -> store_publish_realized_to_bound_caches(verification, roots, entry)
-            else -> {}
+            .Cached | .Substituted -> {}
         }
     }
     store_progress_phase(ctx, "Activating")
@@ -495,7 +495,7 @@ store_project_has_locked_nix: fn(project_dir: String?, raw: String) -> Bool Neve
 store_validate_adapter_request_hook: fn(request: RealizeRequest, entry: StoreEntry, expectation: CacheExpectation) RealizeError! {
     if request == {
         .Adapter(plan, table, _) -> store_validate_cached_adapter_hook(entry, plan, table, expectation) ?? return Err(RealizeError.Store(err))
-        else -> {}
+        .Package(_, _) -> {}
     }
 }
 
@@ -510,7 +510,7 @@ store_certify_independent_root_build: fn(verification: &StoreVerification, roots
             store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
             provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
         }
-        else -> {}
+        .Adapter(_, _, _) -> {}
     }
     store_closure_graph_structure(verification, roots) ?? return Err(RealizeError.Store(err))
     prepared: store_build_for_cache(verification, roots, ctx, request, options, true)
@@ -687,7 +687,7 @@ store_try_substitute_invalid_candidate: fn(verification: &StoreVerification, roo
     result
 }
 
-STORE_SUBSTITUTE_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_SUBSTITUTE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 store_substitute_into_stage: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
     substituted := false

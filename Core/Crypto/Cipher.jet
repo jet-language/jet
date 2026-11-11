@@ -35,16 +35,22 @@ AESKey: struct {
     sk: [U64]
     rk: [U8]
     dk: [U8]
-}
 
-impl AESKey.Close {
-    close: fn(&&self) {
-        sk := self.sk.move()
-        loop i in 0..<sk.len() -> sk[i] = U64{0}
-        rk := self.rk.move()
-        core.crypto.wipe(rk)
-        dk := self.dk.move()
-        core.crypto.wipe(dk)
+    impl Close {
+        close: fn(&&self) {
+            sk := self.sk.move()
+            loop i in 0..<sk.len() -> sk[i] = U64{0}
+            rk := self.rk.move()
+            core.crypto.wipe(rk)
+            dk := self.dk.move()
+            core.crypto.wipe(dk)
+        }
+    }
+
+    impl ForwardBlock {
+        encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
+        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CTR32, ctr, src, off, count, out) }
+        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CBC_ENC, iv, src, off, count, out) }
     }
 }
 
@@ -488,7 +494,7 @@ sub_word: fn(q: &[U64], x: U64) -> U64 Never! {
 }
 
 // GF(2^8) doubling modulo x^8 + x^4 + x^3 + x + 1, without a branch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 xtime: fn(a: U8) -> U8 Never! {
     (a << 1).bit_xor(U8{0x1b}.bit_and(U8{0} - (a >> 7)))
 }
@@ -620,7 +626,7 @@ increment: fn(ctr: &[U8], width: Int) Never! {
 /// The tweak times x in GF(2^128), little-endian (IEEE 1619-2007 section
 /// 5.2): a one-bit left shift with x^128 = x^7 + x^2 + x + 1, without a
 /// branch on the secret carry.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 xts_double: fn(t: &[U8]) Never! {
     a := U64{0}
     b := U64{0}
@@ -761,12 +767,6 @@ ForwardBlock: trait {
     /// chaining value `iv`, appended to `out`; `iv` ends holding the last
     /// ciphertext block (the CBC_ENC operation of `blocks`).
     cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!
-}
-
-impl AESKey.ForwardBlock {
-    encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CTR32, ctr, src, off, count, out) }
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! { blocks(self, CBC_ENC, iv, src, off, count, out) }
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +962,7 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
 /// The 16-byte block doubled in GF(2^128), big-endian (SP 800-38B section
 /// 6.1): a one-bit left shift, then 0x87 into the last byte when the shifted
 /// out bit was set, without a branch on it.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 cmac_double: fn(b: &[U8]) Never! {
     carry: U8{0} - (b[0] >> 7)
     loop i in 0..<15 -> b[i] = (b[i] << 1).bit_or(b[i + 1] >> 7)
@@ -1167,7 +1167,7 @@ kw_unwrapped_len: fn(plen: U64) -> Int Never! { Int{wrapping(U32{plen})} }
 
 /// All ones when a > b, else zero, for a and b below 2^63, without a
 /// branch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_gt: fn(a: U64, b: U64) -> U64 Never! { U64{0} - ((b - a) >> 63) }
 
 // ---------------------------------------------------------------------------
@@ -1197,7 +1197,7 @@ cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never
             .PKCS7 -> U8{fill}
             .OneAndZeros -> if i == data_len -> U8{0x80} else -> U8{0}
             .ZerosAndLen -> if i == len - 1 -> U8{fill} else -> U8{0}
-            else -> U8{0}
+            .Zeros | .Unpadded -> U8{0}
         }
     }
 }
@@ -1213,7 +1213,7 @@ CBCPaddingCheck: struct {
 }
 
 /// All ones when x is not zero, else zero, without a branch.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x.bit_or(U64{0} - x)) >> 63) }
 
 /// The padding of the `len`-byte block at input[off] (mbedtls's
@@ -1224,7 +1224,7 @@ ct_nonzero: fn(x: U64) -> U64 Never! { U64{0} - ((x.bit_or(U64{0} - x)) >> 63) }
 /// - ZerosAndLen: the last byte n must be 1..len, after n - 1 zeros.
 /// - Zeros: the data ends at the last non-zero byte; never invalid.
 /// - Unpadded: all `len` bytes are data.
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPaddingCheck Never! {
     total: U64{len}
     if mode == {

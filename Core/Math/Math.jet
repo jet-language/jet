@@ -13,8 +13,12 @@ use {
     ambient_random: core.math.random
     core.prelude.[min, max, clamp]
 }
-abs: fn(n: Int) -> Int Never! {
-    if n < 0 -> return -n
+// One `abs` for every Numeric type: Int, every sized integer, a `#Numeric`
+// distinct type, or a struct that implements Numeric. `n - n` is the type's
+// zero. A Float, F32 or I64 argument takes the sign-bit builtin instead.
+abs: fn<T: Numeric>(n: T) -> T Never! {
+    zero: n - n
+    if n < zero -> return zero - n
     n
 }
 
@@ -14958,8 +14962,7 @@ __payload_bits: fn(payload: Float) -> Int? Never! {
 // The native carrier adapters are bootstrap paths, not the source policy.
 Vec2: struct {
     lanes: [Float#2]
-}
-impl Vec2 {
+
     new: fn(x: Float, y: Float) -> Vec2 Never! {
         Vec2{lanes: [Float#2]{x, y}}
     }
@@ -14992,30 +14995,35 @@ impl Vec2 {
         if length == 0.0 -> return self.copy()
         Vec2.new(self.lanes[0] / length, self.lanes[1] / length)
     }
-}
-impl Vec2.Add {
-    add: fn(self, rhs: Vec2) -> Vec2 Never! {
-        Vec2.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1])
+
+    impl Add {
+        add: fn(self, rhs: Vec2) -> Vec2 Never! {
+            Vec2.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1])
+        }
     }
-}
-impl Vec2.Sub {
-    sub: fn(self, rhs: Vec2) -> Vec2 Never! {
-        Vec2.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1])
+
+    impl Sub {
+        sub: fn(self, rhs: Vec2) -> Vec2 Never! {
+            Vec2.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1])
+        }
     }
-}
-impl Vec2.Mul {
-    mul: fn(self, rhs: Vec2) -> Vec2 Never! {
-        Vec2.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1])
+
+    impl Mul {
+        mul: fn(self, rhs: Vec2) -> Vec2 Never! {
+            Vec2.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1])
+        }
     }
-}
-impl Vec2.Mul(Float) {
-    mul: fn(self, rhs: Float) -> Vec2 Never! {
-        Vec2.new(self.lanes[0] * rhs, self.lanes[1] * rhs)
+
+    impl Mul(Float) {
+        mul: fn(self, rhs: Float) -> Vec2 Never! {
+            Vec2.new(self.lanes[0] * rhs, self.lanes[1] * rhs)
+        }
     }
-}
-impl Vec2.Div(Float) {
-    div: fn(self, rhs: Float) -> Vec2 Never! {
-        Vec2.new(self.lanes[0] / rhs, self.lanes[1] / rhs)
+
+    impl Div(Float) {
+        div: fn(self, rhs: Float) -> Vec2 Never! {
+            Vec2.new(self.lanes[0] / rhs, self.lanes[1] / rhs)
+        }
     }
 }
 impl Float.Mul(Vec2) {
@@ -15023,14 +15031,11 @@ impl Float.Mul(Vec2) {
 }
 Vec3: struct {
     lanes: [Float#3]
-}
-impl Vec3 {
+
     new: fn(x: Float, y: Float, z: Float) -> Vec3 Never! {
         Vec3{lanes: [Float#3]{x, y, z}}
     }
-}
 
-impl Vec3 {
     splat: fn(x: Float) -> Vec3 Never! { Vec3.new(x, x, x) }
     from_array: fn(lanes: [Float#3]) -> Vec3 Never! { Vec3{lanes: lanes} }
     to_array: fn(self) -> [Float#3] Never! { self.lanes.copy() }
@@ -15072,30 +15077,35 @@ impl Vec3 {
         if length == 0.0 -> return self.copy()
         Vec3.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length)
     }
-}
-impl Vec3.Add {
-    add: fn(self, rhs: Vec3) -> Vec3 Never! {
-        Vec3.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2])
+
+    impl Add {
+        add: fn(self, rhs: Vec3) -> Vec3 Never! {
+            Vec3.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2])
+        }
     }
-}
-impl Vec3.Sub {
-    sub: fn(self, rhs: Vec3) -> Vec3 Never! {
-        Vec3.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2])
+
+    impl Sub {
+        sub: fn(self, rhs: Vec3) -> Vec3 Never! {
+            Vec3.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2])
+        }
     }
-}
-impl Vec3.Mul {
-    mul: fn(self, rhs: Vec3) -> Vec3 Never! {
-        Vec3.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2])
+
+    impl Mul {
+        mul: fn(self, rhs: Vec3) -> Vec3 Never! {
+            Vec3.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2])
+        }
     }
-}
-impl Vec3.Mul(Float) {
-    mul: fn(self, rhs: Float) -> Vec3 Never! {
-        Vec3.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs)
+
+    impl Mul(Float) {
+        mul: fn(self, rhs: Float) -> Vec3 Never! {
+            Vec3.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs)
+        }
     }
-}
-impl Vec3.Div(Float) {
-    div: fn(self, rhs: Float) -> Vec3 Never! {
-        Vec3.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs)
+
+    impl Div(Float) {
+        div: fn(self, rhs: Float) -> Vec3 Never! {
+            Vec3.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs)
+        }
     }
 }
 impl Float.Mul(Vec3) {
@@ -15150,8 +15160,7 @@ impl Float.Div(Vec2) {
 
 Vec4: struct {
     lanes: [Float#4]
-}
-impl Vec4 {
+
     new: fn(x: Float, y: Float, z: Float, w: Float) -> Vec4 Never! {
         Vec4{lanes: [Float#4]{x, y, z, w}}
     }
@@ -15197,30 +15206,35 @@ impl Vec4 {
         if length == 0.0 -> return self.copy()
         Vec4.new(self.lanes[0] / length, self.lanes[1] / length, self.lanes[2] / length, self.lanes[3] / length)
     }
-}
-impl Vec4.Add {
-    add: fn(self, rhs: Vec4) -> Vec4 Never! {
-        Vec4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+
+    impl Add {
+        add: fn(self, rhs: Vec4) -> Vec4 Never! {
+            Vec4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+        }
     }
-}
-impl Vec4.Sub {
-    sub: fn(self, rhs: Vec4) -> Vec4 Never! {
-        Vec4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+
+    impl Sub {
+        sub: fn(self, rhs: Vec4) -> Vec4 Never! {
+            Vec4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+        }
     }
-}
-impl Vec4.Mul {
-    mul: fn(self, rhs: Vec4) -> Vec4 Never! {
-        Vec4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
+
+    impl Mul {
+        mul: fn(self, rhs: Vec4) -> Vec4 Never! {
+            Vec4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
+        }
     }
-}
-impl Vec4.Mul(Float) {
-    mul: fn(self, rhs: Float) -> Vec4 Never! {
-        Vec4.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs, self.lanes[3] * rhs)
+
+    impl Mul(Float) {
+        mul: fn(self, rhs: Float) -> Vec4 Never! {
+            Vec4.new(self.lanes[0] * rhs, self.lanes[1] * rhs, self.lanes[2] * rhs, self.lanes[3] * rhs)
+        }
     }
-}
-impl Vec4.Div(Float) {
-    div: fn(self, rhs: Float) -> Vec4 Never! {
-        Vec4.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs, self.lanes[3] / rhs)
+
+    impl Div(Float) {
+        div: fn(self, rhs: Float) -> Vec4 Never! {
+            Vec4.new(self.lanes[0] / rhs, self.lanes[1] / rhs, self.lanes[2] / rhs, self.lanes[3] / rhs)
+        }
     }
 }
 impl Float.Mul(Vec4) {
@@ -15252,8 +15266,7 @@ impl Float.Div(Vec4) {
 
 Mat3: struct {
     lanes: [Float#9]
-}
-impl Mat3 {
+
     new: fn(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float) -> Mat3 Never! {
         Mat3{lanes: [Float#9]{m0, m1, m2, m3, m4, m5, m6, m7, m8}}
     }
@@ -15286,50 +15299,94 @@ impl Mat3 {
         }
         Mat3{lanes: result}
     }
-}
-impl Mat3.Add {
-    add: fn(self, rhs: Mat3) -> Mat3 Never! {
-        result := self.lanes.copy()
-        loop i in 0..<9 -> result[i] = self.lanes[i] + rhs.lanes[i]
-        Mat3{lanes: result}
+
+    impl Add {
+        add: fn(self, rhs: Mat3) -> Mat3 Never! {
+            result := self.lanes.copy()
+            loop i in 0..<9 -> result[i] = self.lanes[i] + rhs.lanes[i]
+            Mat3{lanes: result}
+        }
     }
-}
-impl Mat3.Sub {
-    sub: fn(self, rhs: Mat3) -> Mat3 Never! {
-        result := self.lanes.copy()
-        loop i in 0..<9 -> result[i] = self.lanes[i] - rhs.lanes[i]
-        Mat3{lanes: result}
+
+    impl Sub {
+        sub: fn(self, rhs: Mat3) -> Mat3 Never! {
+            result := self.lanes.copy()
+            loop i in 0..<9 -> result[i] = self.lanes[i] - rhs.lanes[i]
+            Mat3{lanes: result}
+        }
     }
-}
-impl Mat3.Mul {
-    mul: fn(self, rhs: Mat3) -> Mat3 Never! { self.matmul(rhs) }
-}
-impl Mat3.Mul(Vec3) {
-    mul: fn(self, rhs: Vec3) -> Vec3 Never! { self.transform(rhs) }
+
+    impl Mul {
+        mul: fn(self, rhs: Mat3) -> Mat3 Never! { self.matmul(rhs) }
+    }
+
+    impl Mul(Vec3) {
+        mul: fn(self, rhs: Vec3) -> Vec3 Never! { self.transform(rhs) }
+    }
 }
 Mat4: struct {
     lanes: [Float#16]
-}
-impl Mat4 {
+
     new: fn(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float, m9: Float, m10: Float, m11: Float, m12: Float, m13: Float, m14: Float, m15: Float) -> Mat4 Never! {
         Mat4{lanes: [Float#16]{m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15}}
     }
-}
-impl Mat4.Add {
-    add: fn(self, rhs: Mat4) -> Mat4 Never! {
-        result := self.lanes.copy()
-        loop i in 0..<16 -> result[i] = self.lanes[i] + rhs.lanes[i]
-        Mat4{lanes: result}
-    }
-}
-impl Mat4.Sub {
-    sub: fn(self, rhs: Mat4) -> Mat4 Never! {
-        result := self.lanes.copy()
-        loop i in 0..<16 -> result[i] = self.lanes[i] - rhs.lanes[i]
-        Mat4{lanes: result}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: Mat4) -> Mat4 Never! {
+            result := self.lanes.copy()
+            loop i in 0..<16 -> result[i] = self.lanes[i] + rhs.lanes[i]
+            Mat4{lanes: result}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Mat4) -> Mat4 Never! {
+            result := self.lanes.copy()
+            loop i in 0..<16 -> result[i] = self.lanes[i] - rhs.lanes[i]
+            Mat4{lanes: result}
+        }
+    }
+
+    // Mat4 uses the same column-major, left-to-right products as the Rust seed.
+    from_array: fn(lanes: [Float#16]) -> Mat4 Never! { Mat4{lanes: lanes} }
+    to_array: fn(self) -> [Float#16] Never! { self.lanes.copy() }
+    matmul: fn(self, other: Mat4) -> Mat4 Never! {
+        result := [Float#16]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+        loop column in 0..<4 {
+            loop row in 0..<4 {
+                total := Float{0.0}
+                loop k in 0..<4 -> total = total + self.lanes[k * 4 + row] * other.lanes[column * 4 + k]
+                result[column * 4 + row] = total
+            }
+        }
+        Mat4{lanes: result}
+    }
+    transform: fn(self, value: Vec4) -> Vec4 Never! {
+        result := [Float#4]{0.0, 0.0, 0.0, 0.0}
+        loop row in 0..<4 {
+            total := Float{0.0}
+            loop k in 0..<4 -> total = total + self.lanes[k * 4 + row] * value.lanes[k]
+            result[row] = total
+        }
+        Vec4{lanes: result}
+    }
+    transpose: fn(self) -> Mat4 Never! {
+        Mat4.new(
+            self.lanes[0], self.lanes[4], self.lanes[8], self.lanes[12],
+            self.lanes[1], self.lanes[5], self.lanes[9], self.lanes[13],
+            self.lanes[2], self.lanes[6], self.lanes[10], self.lanes[14],
+            self.lanes[3], self.lanes[7], self.lanes[11], self.lanes[15],
+        )
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Mat4) -> Mat4 Never! { self.matmul(rhs) }
+    }
+
+    impl Mul(Vec4) {
+        mul: fn(self, rhs: Vec4) -> Vec4 Never! { self.transform(rhs) }
+    }
+}
 #Test("Mat3 source column-major products and transpose") {
     matrix: Mat3.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
     assert_eq(matrix.transpose().to_array()[1], 4.0)
@@ -15345,6 +15402,46 @@ impl Mat4.Sub {
 Fraction: struct {
     num_value: Int
     den_value: Int
+
+    numerator: fn(self) -> Int Never! { __fraction_numerator(self) }
+    denominator: fn(self) -> Int Never! { __fraction_denominator(self) }
+    to_string: fn(self) -> String Never! { __fraction_to_string(self) }
+    to_float: fn(self) -> Float Never! { __fraction_to_float(self) }
+    is_zero: fn(self) -> Bool Never! { __fraction_is_zero(self) }
+
+    impl Add {
+        add: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_add(self, rhs) }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_sub(self, rhs) }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_mul(self, rhs) }
+    }
+
+    impl Div {
+        div: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_div(self, rhs) }
+    }
+
+    impl Equatable {
+        equal: fn(self, rhs: Fraction) -> Bool { __fraction_equal(self, rhs) }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Fraction) -> Ordering {
+            left: self.num_value * rhs.den_value
+            right: rhs.num_value * self.den_value
+            if left < right -> return Ordering.Less
+            if left > right -> return Ordering.Greater
+            Ordering.Equal
+        }
+    }
+
+    impl Display {
+        display: fn(self) -> String { __fraction_to_string(self) }
+    }
 }
 __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     if denominator == 0 -> return None
@@ -15381,38 +15478,6 @@ __fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
 }
 __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
-impl Fraction {
-    numerator: fn(self) -> Int Never! { __fraction_numerator(self) }
-    denominator: fn(self) -> Int Never! { __fraction_denominator(self) }
-    to_string: fn(self) -> String Never! { __fraction_to_string(self) }
-    to_float: fn(self) -> Float Never! { __fraction_to_float(self) }
-    is_zero: fn(self) -> Bool Never! { __fraction_is_zero(self) }
-}
-impl Fraction.Add {
-    add: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_add(self, rhs) }
-}
-impl Fraction.Sub {
-    sub: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_sub(self, rhs) }
-}
-impl Fraction.Mul {
-    mul: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_mul(self, rhs) }
-}
-impl Fraction.Div {
-    div: fn(self, rhs: Fraction) -> Fraction Never! { __fraction_div(self, rhs) }
-}
-impl Fraction.Equatable {
-    equal: fn(self, rhs: Fraction) -> Bool { __fraction_equal(self, rhs) }
-}
-impl Fraction.Comparable {
-    compare: fn(self, rhs: Fraction) -> Ordering {
-        left: self.num_value * rhs.den_value
-        right: rhs.num_value * self.den_value
-        if left < right -> return Ordering.Less
-        if left > right -> return Ordering.Greater
-        Ordering.Equal
-    }
-}
-
 #Test("Fraction source construction reduces and fixes denominator sign") {
     positive: __fraction_from_parts(6, -8)
     assert_eq(positive.numerator(), -3)
@@ -15438,50 +15503,61 @@ Decimal: struct {
     negative: Bool
     magnitude: Int
     scale: Int
-}
-impl Decimal {
+
     round: fn(self) -> Decimal Never! { __decimal_round(self) }
     floor: fn(self) -> Decimal Never! { __decimal_floor(self) }
     ceil: fn(self) -> Decimal Never! { __decimal_ceil(self) }
     to_string: fn(self) -> String Never! { __decimal_to_string(self) }
-}
-// Decimal crosses Dyn exactly: it encodes as its scale-keeping text and
-// decodes from a number token, an Int, or that same text (a CSV cell or its
-// own encoding), as the web tier's typed decimal decode does.
-impl Decimal.Encode {
-    encode: fn(self) -> Dyn { Dyn.Text(__decimal_to_string(self)) }
-}
-impl Decimal.Decode {
-    decode: fn(tree: Dyn) -> Decimal [FieldError]! {
-        if tree == {
-            .Number(lexeme) -> __decimal_decoded(lexeme)
-            .Int(value) -> __decimal_decoded("{value}")
-            .Text(text) -> __decimal_decoded(text)
-            else -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
+
+    // Decimal crosses Dyn exactly: it encodes as its scale-keeping text and
+    // decodes from a number token, an Int, or that same text (a CSV cell or its
+    // own encoding), as the web tier's typed decimal decode does.
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.Text(__decimal_to_string(self)) }
+    }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> Decimal [FieldError]! {
+            if tree == {
+                .Number(lexeme) -> __decimal_decoded(lexeme)
+                .Int(value) -> __decimal_decoded("{value}")
+                .Text(text) -> __decimal_decoded(text)
+                .Null | .Bool(_) | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
+            }
         }
+    }
+
+    impl Add {
+        add: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_add(self, rhs) }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_sub(self, rhs) }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_mul(self, rhs) }
+    }
+
+    impl Div {
+        div: fn(self, rhs: Decimal) -> Fraction Never! { __decimal_div(self, rhs) }
+    }
+
+    impl Equatable {
+        equal: fn(self, rhs: Decimal) -> Bool { __decimal_equal(self, rhs) }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Decimal) -> Ordering { __decimal_compare(self, rhs) }
+    }
+
+    impl Display {
+        display: fn(self) -> String { __decimal_to_string(self) }
     }
 }
 __decimal_decoded: fn(text: String) -> Decimal [FieldError]! {
     value: __decimal_parse(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected Decimal: invalid Decimal string"}})
     Ok(value)
-}
-impl Decimal.Add {
-    add: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_add(self, rhs) }
-}
-impl Decimal.Sub {
-    sub: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_sub(self, rhs) }
-}
-impl Decimal.Mul {
-    mul: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_mul(self, rhs) }
-}
-impl Decimal.Div {
-    div: fn(self, rhs: Decimal) -> Fraction Never! { __decimal_div(self, rhs) }
-}
-impl Decimal.Equatable {
-    equal: fn(self, rhs: Decimal) -> Bool { __decimal_equal(self, rhs) }
-}
-impl Decimal.Comparable {
-    compare: fn(self, rhs: Decimal) -> Ordering { __decimal_compare(self, rhs) }
 }
 exact_power: fn(base: Int, exponent: Int) -> Int Never! {
     result := 1
@@ -16006,14 +16082,37 @@ __decimal_to_float: fn(value: Decimal) -> Float Never! {
 Complex: struct {
     real: Float
     imaginary: Float
+
+    impl Display {
+        display: fn(self) -> String { __complex_to_string(self) }
+    }
+
+    // Complex has no order; its arithmetic hooks and its
+    // magnitude are source methods like Fraction's and Decimal's.
+    abs: fn(self) -> Float Never! { __complex_abs(self) }
+
+    impl Add {
+        add: fn(self, rhs: Complex) -> Complex Never! { __complex_add(self, rhs) }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Complex) -> Complex Never! { __complex_sub(self, rhs) }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Complex) -> Complex Never! { __complex_mul(self, rhs) }
+    }
+
+    impl Div {
+        div: fn(self, rhs: Complex) -> Complex Never! { __complex_div(self, rhs) }
+    }
 }
 __complex_abs: fn(value: Complex) -> Float Never! {
     hypot(value.real, value.imaginary)
 }
 F64x4: struct {
     lanes: [F64#4]
-}
-impl F64x4 {
+
     new: fn(a: F64, b: F64, c: F64, d: F64) -> F64x4 Never! {
         F64x4{lanes: [F64#4]{a, b, c, d}}
     }
@@ -16026,67 +16125,7 @@ impl F64x4 {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F64x4 (4 lanes)")
         self.lanes[index]
     }
-}
 
-#Test("Exact conversion helper policies and fixed-width SIMD bridge") {
-    assert_eq(__decimal_to_int(__decimal_from_str("-2.00")), -2)
-    assert_eq(__decimal_to_fraction(__decimal_from_str(".125")).denominator(), 8)
-    assert_eq(__decimal_from_fraction(__fraction_from_parts(1, 8)).magnitude, 125)
-    assert_eq(__decimal_to_float(__decimal_from_str("1.25")), 1.25)
-    assert_eq(__complex_abs(Complex{real: 3.0, imaginary: 4.0}), 5.0)
-    assert_eq(F64x4.from_array(F64x4.splat(F64{2.0}).to_array()).lane(3), F64{2.0})
-}
-
-// Mat4 uses the same column-major, left-to-right products as the Rust seed.
-impl Mat4 {
-    from_array: fn(lanes: [Float#16]) -> Mat4 Never! { Mat4{lanes: lanes} }
-    to_array: fn(self) -> [Float#16] Never! { self.lanes.copy() }
-    matmul: fn(self, other: Mat4) -> Mat4 Never! {
-        result := [Float#16]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-        loop column in 0..<4 {
-            loop row in 0..<4 {
-                total := Float{0.0}
-                loop k in 0..<4 -> total = total + self.lanes[k * 4 + row] * other.lanes[column * 4 + k]
-                result[column * 4 + row] = total
-            }
-        }
-        Mat4{lanes: result}
-    }
-    transform: fn(self, value: Vec4) -> Vec4 Never! {
-        result := [Float#4]{0.0, 0.0, 0.0, 0.0}
-        loop row in 0..<4 {
-            total := Float{0.0}
-            loop k in 0..<4 -> total = total + self.lanes[k * 4 + row] * value.lanes[k]
-            result[row] = total
-        }
-        Vec4{lanes: result}
-    }
-    transpose: fn(self) -> Mat4 Never! {
-        Mat4.new(
-            self.lanes[0], self.lanes[4], self.lanes[8], self.lanes[12],
-            self.lanes[1], self.lanes[5], self.lanes[9], self.lanes[13],
-            self.lanes[2], self.lanes[6], self.lanes[10], self.lanes[14],
-            self.lanes[3], self.lanes[7], self.lanes[11], self.lanes[15],
-        )
-    }
-}
-impl Mat4.Mul {
-    mul: fn(self, rhs: Mat4) -> Mat4 Never! { self.matmul(rhs) }
-}
-impl Mat4.Mul(Vec4) {
-    mul: fn(self, rhs: Vec4) -> Vec4 Never! { self.transform(rhs) }
-}
-#Test("Mat4 source products preserve column-major order and fold from zero") {
-    matrix: Mat4.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
-    assert_eq(matrix.transpose().to_array()[1], 5.0)
-    assert_eq(matrix.transform(Vec4.new(1.0, 2.0, 3.0, 4.0)).lane(0), 90.0)
-    assert_eq((matrix * matrix).to_array()[0], 90.0)
-    assert_eq(matrix.matmul(matrix).to_array()[15], 600.0)
-    assert_eq((matrix * Vec4.new(1.0, 0.0, 0.0, 0.0)).lane(3), 4.0)
-    assert_eq(Mat4.from_array(matrix.to_array()).to_array()[14], 15.0)
-}
-
-impl F64x4 {
     // Every lane reduction is the scalar left-to-right fold.
     sum: fn(self) -> F64 Never! {
         value := F64{0.0}
@@ -16123,26 +16162,47 @@ impl F64x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl F64x4.Add {
-    add: fn(self, rhs: F64x4) -> F64x4 Never! {
-        F64x4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+
+    impl Add {
+        add: fn(self, rhs: F64x4) -> F64x4 Never! {
+            F64x4.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: F64x4) -> F64x4 Never! {
+            F64x4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: F64x4) -> F64x4 Never! {
+            F64x4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: F64x4) -> F64x4 Never! {
+            F64x4.new(self.lanes[0] / rhs.lanes[0], self.lanes[1] / rhs.lanes[1], self.lanes[2] / rhs.lanes[2], self.lanes[3] / rhs.lanes[3])
+        }
     }
 }
-impl F64x4.Sub {
-    sub: fn(self, rhs: F64x4) -> F64x4 Never! {
-        F64x4.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
-    }
+#Test("Exact conversion helper policies and fixed-width SIMD bridge") {
+    assert_eq(__decimal_to_int(__decimal_from_str("-2.00")), -2)
+    assert_eq(__decimal_to_fraction(__decimal_from_str(".125")).denominator(), 8)
+    assert_eq(__decimal_from_fraction(__fraction_from_parts(1, 8)).magnitude, 125)
+    assert_eq(__decimal_to_float(__decimal_from_str("1.25")), 1.25)
+    assert_eq(__complex_abs(Complex{real: 3.0, imaginary: 4.0}), 5.0)
+    assert_eq(F64x4.from_array(F64x4.splat(F64{2.0}).to_array()).lane(3), F64{2.0})
 }
-impl F64x4.Mul {
-    mul: fn(self, rhs: F64x4) -> F64x4 Never! {
-        F64x4.new(self.lanes[0] * rhs.lanes[0], self.lanes[1] * rhs.lanes[1], self.lanes[2] * rhs.lanes[2], self.lanes[3] * rhs.lanes[3])
-    }
-}
-impl F64x4.Div {
-    div: fn(self, rhs: F64x4) -> F64x4 Never! {
-        F64x4.new(self.lanes[0] / rhs.lanes[0], self.lanes[1] / rhs.lanes[1], self.lanes[2] / rhs.lanes[2], self.lanes[3] / rhs.lanes[3])
-    }
+#Test("Mat4 source products preserve column-major order and fold from zero") {
+    matrix: Mat4.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
+    assert_eq(matrix.transpose().to_array()[1], 5.0)
+    assert_eq(matrix.transform(Vec4.new(1.0, 2.0, 3.0, 4.0)).lane(0), 90.0)
+    assert_eq((matrix * matrix).to_array()[0], 90.0)
+    assert_eq(matrix.matmul(matrix).to_array()[15], 600.0)
+    assert_eq((matrix * Vec4.new(1.0, 0.0, 0.0, 0.0)).lane(3), 4.0)
+    assert_eq(Mat4.from_array(matrix.to_array()).to_array()[14], 15.0)
 }
 #Test("F64x4 source reduction identities and left-to-right fold") {
     value: F64x4.new(F64{1.0}, F64{2.0}, F64{3.0}, F64{4.0})
@@ -16182,8 +16242,7 @@ __f32_swizzle_lane: fn(value: Float) -> F32 Never! {
 // `max` fold from lane 0.
 F32x4: struct {
     lanes: [F32#4]
-}
-impl F32x4 {
+
     new: fn(l0: F32, l1: F32, l2: F32, l3: F32) -> F32x4 Never! { F32x4{lanes: [F32#4]{l0, l1, l2, l3}} }
     splat: fn(value: F32) -> F32x4 Never! { F32x4{lanes: [F32#4]{value, value, value, value}} }
     from_array: fn(lanes: [F32#4]) -> F32x4 Never! { F32x4{lanes: lanes} }
@@ -16251,40 +16310,42 @@ impl F32x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl F32x4.Add {
-    add: fn(self, rhs: F32x4) -> F32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        F32x4{lanes: lanes}
-    }
-}
-impl F32x4.Sub {
-    sub: fn(self, rhs: F32x4) -> F32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        F32x4{lanes: lanes}
-    }
-}
-impl F32x4.Mul {
-    mul: fn(self, rhs: F32x4) -> F32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        F32x4{lanes: lanes}
-    }
-}
-impl F32x4.Div {
-    div: fn(self, rhs: F32x4) -> F32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        F32x4{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: F32x4) -> F32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            F32x4{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: F32x4) -> F32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            F32x4{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: F32x4) -> F32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            F32x4{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: F32x4) -> F32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            F32x4{lanes: lanes}
+        }
+    }
+}
 F32x8: struct {
     lanes: [F32#8]
-}
-impl F32x8 {
+
     new: fn(l0: F32, l1: F32, l2: F32, l3: F32, l4: F32, l5: F32, l6: F32, l7: F32) -> F32x8 Never! { F32x8{lanes: [F32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
     splat: fn(value: F32) -> F32x8 Never! { F32x8{lanes: [F32#8]{value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [F32#8]) -> F32x8 Never! { F32x8{lanes: lanes} }
@@ -16331,40 +16392,42 @@ impl F32x8 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl F32x8.Add {
-    add: fn(self, rhs: F32x8) -> F32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        F32x8{lanes: lanes}
-    }
-}
-impl F32x8.Sub {
-    sub: fn(self, rhs: F32x8) -> F32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        F32x8{lanes: lanes}
-    }
-}
-impl F32x8.Mul {
-    mul: fn(self, rhs: F32x8) -> F32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        F32x8{lanes: lanes}
-    }
-}
-impl F32x8.Div {
-    div: fn(self, rhs: F32x8) -> F32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        F32x8{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: F32x8) -> F32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            F32x8{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: F32x8) -> F32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            F32x8{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: F32x8) -> F32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            F32x8{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: F32x8) -> F32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            F32x8{lanes: lanes}
+        }
+    }
+}
 F64x2: struct {
     lanes: [F64#2]
-}
-impl F64x2 {
+
     new: fn(l0: F64, l1: F64) -> F64x2 Never! { F64x2{lanes: [F64#2]{l0, l1}} }
     splat: fn(value: F64) -> F64x2 Never! { F64x2{lanes: [F64#2]{value, value}} }
     from_array: fn(lanes: [F64#2]) -> F64x2 Never! { F64x2{lanes: lanes} }
@@ -16412,40 +16475,42 @@ impl F64x2 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl F64x2.Add {
-    add: fn(self, rhs: F64x2) -> F64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        F64x2{lanes: lanes}
-    }
-}
-impl F64x2.Sub {
-    sub: fn(self, rhs: F64x2) -> F64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        F64x2{lanes: lanes}
-    }
-}
-impl F64x2.Mul {
-    mul: fn(self, rhs: F64x2) -> F64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        F64x2{lanes: lanes}
-    }
-}
-impl F64x2.Div {
-    div: fn(self, rhs: F64x2) -> F64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        F64x2{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: F64x2) -> F64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            F64x2{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: F64x2) -> F64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            F64x2{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: F64x2) -> F64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            F64x2{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: F64x2) -> F64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            F64x2{lanes: lanes}
+        }
+    }
+}
 I8x16: struct {
     lanes: [I8#16]
-}
-impl I8x16 {
+
     new: fn(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8) -> I8x16 Never! { I8x16{lanes: [I8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
     splat: fn(value: I8) -> I8x16 Never! { I8x16{lanes: [I8#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [I8#16]) -> I8x16 Never! { I8x16{lanes: lanes} }
@@ -16490,40 +16555,42 @@ impl I8x16 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I8x16.Add {
-    add: fn(self, rhs: I8x16) -> I8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I8x16{lanes: lanes}
-    }
-}
-impl I8x16.Sub {
-    sub: fn(self, rhs: I8x16) -> I8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I8x16{lanes: lanes}
-    }
-}
-impl I8x16.Mul {
-    mul: fn(self, rhs: I8x16) -> I8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I8x16{lanes: lanes}
-    }
-}
-impl I8x16.Div {
-    div: fn(self, rhs: I8x16) -> I8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I8x16{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I8x16) -> I8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I8x16{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I8x16) -> I8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I8x16{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I8x16) -> I8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I8x16{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I8x16) -> I8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I8x16{lanes: lanes}
+        }
+    }
+}
 U8x16: struct {
     lanes: [U8#16]
-}
-impl U8x16 {
+
     new: fn(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8) -> U8x16 Never! { U8x16{lanes: [U8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
     splat: fn(value: U8) -> U8x16 Never! { U8x16{lanes: [U8#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [U8#16]) -> U8x16 Never! { U8x16{lanes: lanes} }
@@ -16568,40 +16635,42 @@ impl U8x16 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U8x16.Add {
-    add: fn(self, rhs: U8x16) -> U8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U8x16{lanes: lanes}
-    }
-}
-impl U8x16.Sub {
-    sub: fn(self, rhs: U8x16) -> U8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U8x16{lanes: lanes}
-    }
-}
-impl U8x16.Mul {
-    mul: fn(self, rhs: U8x16) -> U8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U8x16{lanes: lanes}
-    }
-}
-impl U8x16.Div {
-    div: fn(self, rhs: U8x16) -> U8x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U8x16{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U8x16) -> U8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U8x16{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U8x16) -> U8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U8x16{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U8x16) -> U8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U8x16{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U8x16) -> U8x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U8x16{lanes: lanes}
+        }
+    }
+}
 I16x8: struct {
     lanes: [I16#8]
-}
-impl I16x8 {
+
     new: fn(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16) -> I16x8 Never! { I16x8{lanes: [I16#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
     splat: fn(value: I16) -> I16x8 Never! { I16x8{lanes: [I16#8]{value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [I16#8]) -> I16x8 Never! { I16x8{lanes: lanes} }
@@ -16646,40 +16715,42 @@ impl I16x8 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I16x8.Add {
-    add: fn(self, rhs: I16x8) -> I16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I16x8{lanes: lanes}
-    }
-}
-impl I16x8.Sub {
-    sub: fn(self, rhs: I16x8) -> I16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I16x8{lanes: lanes}
-    }
-}
-impl I16x8.Mul {
-    mul: fn(self, rhs: I16x8) -> I16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I16x8{lanes: lanes}
-    }
-}
-impl I16x8.Div {
-    div: fn(self, rhs: I16x8) -> I16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I16x8{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I16x8) -> I16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I16x8{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I16x8) -> I16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I16x8{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I16x8) -> I16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I16x8{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I16x8) -> I16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I16x8{lanes: lanes}
+        }
+    }
+}
 U16x8: struct {
     lanes: [U16#8]
-}
-impl U16x8 {
+
     new: fn(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16) -> U16x8 Never! { U16x8{lanes: [U16#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
     splat: fn(value: U16) -> U16x8 Never! { U16x8{lanes: [U16#8]{value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [U16#8]) -> U16x8 Never! { U16x8{lanes: lanes} }
@@ -16724,40 +16795,42 @@ impl U16x8 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U16x8.Add {
-    add: fn(self, rhs: U16x8) -> U16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U16x8{lanes: lanes}
-    }
-}
-impl U16x8.Sub {
-    sub: fn(self, rhs: U16x8) -> U16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U16x8{lanes: lanes}
-    }
-}
-impl U16x8.Mul {
-    mul: fn(self, rhs: U16x8) -> U16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U16x8{lanes: lanes}
-    }
-}
-impl U16x8.Div {
-    div: fn(self, rhs: U16x8) -> U16x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U16x8{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U16x8) -> U16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U16x8{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U16x8) -> U16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U16x8{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U16x8) -> U16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U16x8{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U16x8) -> U16x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U16x8{lanes: lanes}
+        }
+    }
+}
 I32x4: struct {
     lanes: [I32#4]
-}
-impl I32x4 {
+
     new: fn(l0: I32, l1: I32, l2: I32, l3: I32) -> I32x4 Never! { I32x4{lanes: [I32#4]{l0, l1, l2, l3}} }
     splat: fn(value: I32) -> I32x4 Never! { I32x4{lanes: [I32#4]{value, value, value, value}} }
     from_array: fn(lanes: [I32#4]) -> I32x4 Never! { I32x4{lanes: lanes} }
@@ -16802,40 +16875,42 @@ impl I32x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I32x4.Add {
-    add: fn(self, rhs: I32x4) -> I32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I32x4{lanes: lanes}
-    }
-}
-impl I32x4.Sub {
-    sub: fn(self, rhs: I32x4) -> I32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I32x4{lanes: lanes}
-    }
-}
-impl I32x4.Mul {
-    mul: fn(self, rhs: I32x4) -> I32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I32x4{lanes: lanes}
-    }
-}
-impl I32x4.Div {
-    div: fn(self, rhs: I32x4) -> I32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I32x4{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I32x4) -> I32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I32x4{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I32x4) -> I32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I32x4{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I32x4) -> I32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I32x4{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I32x4) -> I32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I32x4{lanes: lanes}
+        }
+    }
+}
 U32x4: struct {
     lanes: [U32#4]
-}
-impl U32x4 {
+
     new: fn(l0: U32, l1: U32, l2: U32, l3: U32) -> U32x4 Never! { U32x4{lanes: [U32#4]{l0, l1, l2, l3}} }
     splat: fn(value: U32) -> U32x4 Never! { U32x4{lanes: [U32#4]{value, value, value, value}} }
     from_array: fn(lanes: [U32#4]) -> U32x4 Never! { U32x4{lanes: lanes} }
@@ -16880,40 +16955,42 @@ impl U32x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U32x4.Add {
-    add: fn(self, rhs: U32x4) -> U32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U32x4{lanes: lanes}
-    }
-}
-impl U32x4.Sub {
-    sub: fn(self, rhs: U32x4) -> U32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U32x4{lanes: lanes}
-    }
-}
-impl U32x4.Mul {
-    mul: fn(self, rhs: U32x4) -> U32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U32x4{lanes: lanes}
-    }
-}
-impl U32x4.Div {
-    div: fn(self, rhs: U32x4) -> U32x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U32x4{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U32x4) -> U32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U32x4{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U32x4) -> U32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U32x4{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U32x4) -> U32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U32x4{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U32x4) -> U32x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U32x4{lanes: lanes}
+        }
+    }
+}
 I64x2: struct {
     lanes: [I64#2]
-}
-impl I64x2 {
+
     new: fn(l0: I64, l1: I64) -> I64x2 Never! { I64x2{lanes: [I64#2]{l0, l1}} }
     splat: fn(value: I64) -> I64x2 Never! { I64x2{lanes: [I64#2]{value, value}} }
     from_array: fn(lanes: [I64#2]) -> I64x2 Never! { I64x2{lanes: lanes} }
@@ -16958,40 +17035,42 @@ impl I64x2 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I64x2.Add {
-    add: fn(self, rhs: I64x2) -> I64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I64x2{lanes: lanes}
-    }
-}
-impl I64x2.Sub {
-    sub: fn(self, rhs: I64x2) -> I64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I64x2{lanes: lanes}
-    }
-}
-impl I64x2.Mul {
-    mul: fn(self, rhs: I64x2) -> I64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I64x2{lanes: lanes}
-    }
-}
-impl I64x2.Div {
-    div: fn(self, rhs: I64x2) -> I64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I64x2{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I64x2) -> I64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I64x2{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I64x2) -> I64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I64x2{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I64x2) -> I64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I64x2{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I64x2) -> I64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I64x2{lanes: lanes}
+        }
+    }
+}
 U64x2: struct {
     lanes: [U64#2]
-}
-impl U64x2 {
+
     new: fn(l0: U64, l1: U64) -> U64x2 Never! { U64x2{lanes: [U64#2]{l0, l1}} }
     splat: fn(value: U64) -> U64x2 Never! { U64x2{lanes: [U64#2]{value, value}} }
     from_array: fn(lanes: [U64#2]) -> U64x2 Never! { U64x2{lanes: lanes} }
@@ -17036,40 +17115,42 @@ impl U64x2 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U64x2.Add {
-    add: fn(self, rhs: U64x2) -> U64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U64x2{lanes: lanes}
-    }
-}
-impl U64x2.Sub {
-    sub: fn(self, rhs: U64x2) -> U64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U64x2{lanes: lanes}
-    }
-}
-impl U64x2.Mul {
-    mul: fn(self, rhs: U64x2) -> U64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U64x2{lanes: lanes}
-    }
-}
-impl U64x2.Div {
-    div: fn(self, rhs: U64x2) -> U64x2 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U64x2{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U64x2) -> U64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U64x2{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U64x2) -> U64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U64x2{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U64x2) -> U64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U64x2{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U64x2) -> U64x2 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U64x2{lanes: lanes}
+        }
+    }
+}
 I8x32: struct {
     lanes: [I8#32]
-}
-impl I8x32 {
+
     new: fn(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8, l16: I8, l17: I8, l18: I8, l19: I8, l20: I8, l21: I8, l22: I8, l23: I8, l24: I8, l25: I8, l26: I8, l27: I8, l28: I8, l29: I8, l30: I8, l31: I8) -> I8x32 Never! {
         I8x32{lanes: [I8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
     }
@@ -17118,40 +17199,42 @@ impl I8x32 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I8x32.Add {
-    add: fn(self, rhs: I8x32) -> I8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I8x32{lanes: lanes}
-    }
-}
-impl I8x32.Sub {
-    sub: fn(self, rhs: I8x32) -> I8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I8x32{lanes: lanes}
-    }
-}
-impl I8x32.Mul {
-    mul: fn(self, rhs: I8x32) -> I8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I8x32{lanes: lanes}
-    }
-}
-impl I8x32.Div {
-    div: fn(self, rhs: I8x32) -> I8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I8x32{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I8x32) -> I8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I8x32{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I8x32) -> I8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I8x32{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I8x32) -> I8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I8x32{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I8x32) -> I8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I8x32{lanes: lanes}
+        }
+    }
+}
 U8x32: struct {
     lanes: [U8#32]
-}
-impl U8x32 {
+
     new: fn(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8, l16: U8, l17: U8, l18: U8, l19: U8, l20: U8, l21: U8, l22: U8, l23: U8, l24: U8, l25: U8, l26: U8, l27: U8, l28: U8, l29: U8, l30: U8, l31: U8) -> U8x32 Never! {
         U8x32{lanes: [U8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
     }
@@ -17200,40 +17283,42 @@ impl U8x32 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U8x32.Add {
-    add: fn(self, rhs: U8x32) -> U8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U8x32{lanes: lanes}
-    }
-}
-impl U8x32.Sub {
-    sub: fn(self, rhs: U8x32) -> U8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U8x32{lanes: lanes}
-    }
-}
-impl U8x32.Mul {
-    mul: fn(self, rhs: U8x32) -> U8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U8x32{lanes: lanes}
-    }
-}
-impl U8x32.Div {
-    div: fn(self, rhs: U8x32) -> U8x32 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U8x32{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U8x32) -> U8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U8x32{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U8x32) -> U8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U8x32{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U8x32) -> U8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U8x32{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U8x32) -> U8x32 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U8x32{lanes: lanes}
+        }
+    }
+}
 I16x16: struct {
     lanes: [I16#16]
-}
-impl I16x16 {
+
     new: fn(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16, l8: I16, l9: I16, l10: I16, l11: I16, l12: I16, l13: I16, l14: I16, l15: I16) -> I16x16 Never! { I16x16{lanes: [I16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
     splat: fn(value: I16) -> I16x16 Never! { I16x16{lanes: [I16#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [I16#16]) -> I16x16 Never! { I16x16{lanes: lanes} }
@@ -17278,40 +17363,42 @@ impl I16x16 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I16x16.Add {
-    add: fn(self, rhs: I16x16) -> I16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I16x16{lanes: lanes}
-    }
-}
-impl I16x16.Sub {
-    sub: fn(self, rhs: I16x16) -> I16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I16x16{lanes: lanes}
-    }
-}
-impl I16x16.Mul {
-    mul: fn(self, rhs: I16x16) -> I16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I16x16{lanes: lanes}
-    }
-}
-impl I16x16.Div {
-    div: fn(self, rhs: I16x16) -> I16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I16x16{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I16x16) -> I16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I16x16{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I16x16) -> I16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I16x16{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I16x16) -> I16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I16x16{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I16x16) -> I16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I16x16{lanes: lanes}
+        }
+    }
+}
 U16x16: struct {
     lanes: [U16#16]
-}
-impl U16x16 {
+
     new: fn(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16, l8: U16, l9: U16, l10: U16, l11: U16, l12: U16, l13: U16, l14: U16, l15: U16) -> U16x16 Never! { U16x16{lanes: [U16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
     splat: fn(value: U16) -> U16x16 Never! { U16x16{lanes: [U16#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [U16#16]) -> U16x16 Never! { U16x16{lanes: lanes} }
@@ -17356,40 +17443,42 @@ impl U16x16 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U16x16.Add {
-    add: fn(self, rhs: U16x16) -> U16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U16x16{lanes: lanes}
-    }
-}
-impl U16x16.Sub {
-    sub: fn(self, rhs: U16x16) -> U16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U16x16{lanes: lanes}
-    }
-}
-impl U16x16.Mul {
-    mul: fn(self, rhs: U16x16) -> U16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U16x16{lanes: lanes}
-    }
-}
-impl U16x16.Div {
-    div: fn(self, rhs: U16x16) -> U16x16 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U16x16{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U16x16) -> U16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U16x16{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U16x16) -> U16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U16x16{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U16x16) -> U16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U16x16{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U16x16) -> U16x16 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U16x16{lanes: lanes}
+        }
+    }
+}
 I32x8: struct {
     lanes: [I32#8]
-}
-impl I32x8 {
+
     new: fn(l0: I32, l1: I32, l2: I32, l3: I32, l4: I32, l5: I32, l6: I32, l7: I32) -> I32x8 Never! { I32x8{lanes: [I32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
     splat: fn(value: I32) -> I32x8 Never! { I32x8{lanes: [I32#8]{value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [I32#8]) -> I32x8 Never! { I32x8{lanes: lanes} }
@@ -17434,40 +17523,42 @@ impl I32x8 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I32x8.Add {
-    add: fn(self, rhs: I32x8) -> I32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I32x8{lanes: lanes}
-    }
-}
-impl I32x8.Sub {
-    sub: fn(self, rhs: I32x8) -> I32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I32x8{lanes: lanes}
-    }
-}
-impl I32x8.Mul {
-    mul: fn(self, rhs: I32x8) -> I32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I32x8{lanes: lanes}
-    }
-}
-impl I32x8.Div {
-    div: fn(self, rhs: I32x8) -> I32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I32x8{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I32x8) -> I32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I32x8{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I32x8) -> I32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I32x8{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I32x8) -> I32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I32x8{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I32x8) -> I32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I32x8{lanes: lanes}
+        }
+    }
+}
 U32x8: struct {
     lanes: [U32#8]
-}
-impl U32x8 {
+
     new: fn(l0: U32, l1: U32, l2: U32, l3: U32, l4: U32, l5: U32, l6: U32, l7: U32) -> U32x8 Never! { U32x8{lanes: [U32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
     splat: fn(value: U32) -> U32x8 Never! { U32x8{lanes: [U32#8]{value, value, value, value, value, value, value, value}} }
     from_array: fn(lanes: [U32#8]) -> U32x8 Never! { U32x8{lanes: lanes} }
@@ -17512,40 +17603,42 @@ impl U32x8 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U32x8.Add {
-    add: fn(self, rhs: U32x8) -> U32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U32x8{lanes: lanes}
-    }
-}
-impl U32x8.Sub {
-    sub: fn(self, rhs: U32x8) -> U32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U32x8{lanes: lanes}
-    }
-}
-impl U32x8.Mul {
-    mul: fn(self, rhs: U32x8) -> U32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U32x8{lanes: lanes}
-    }
-}
-impl U32x8.Div {
-    div: fn(self, rhs: U32x8) -> U32x8 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U32x8{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U32x8) -> U32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U32x8{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U32x8) -> U32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U32x8{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U32x8) -> U32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U32x8{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U32x8) -> U32x8 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U32x8{lanes: lanes}
+        }
+    }
+}
 I64x4: struct {
     lanes: [I64#4]
-}
-impl I64x4 {
+
     new: fn(l0: I64, l1: I64, l2: I64, l3: I64) -> I64x4 Never! { I64x4{lanes: [I64#4]{l0, l1, l2, l3}} }
     splat: fn(value: I64) -> I64x4 Never! { I64x4{lanes: [I64#4]{value, value, value, value}} }
     from_array: fn(lanes: [I64#4]) -> I64x4 Never! { I64x4{lanes: lanes} }
@@ -17590,40 +17683,42 @@ impl I64x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl I64x4.Add {
-    add: fn(self, rhs: I64x4) -> I64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        I64x4{lanes: lanes}
-    }
-}
-impl I64x4.Sub {
-    sub: fn(self, rhs: I64x4) -> I64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        I64x4{lanes: lanes}
-    }
-}
-impl I64x4.Mul {
-    mul: fn(self, rhs: I64x4) -> I64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        I64x4{lanes: lanes}
-    }
-}
-impl I64x4.Div {
-    div: fn(self, rhs: I64x4) -> I64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        I64x4{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: I64x4) -> I64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            I64x4{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: I64x4) -> I64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            I64x4{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: I64x4) -> I64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            I64x4{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: I64x4) -> I64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            I64x4{lanes: lanes}
+        }
+    }
+}
 U64x4: struct {
     lanes: [U64#4]
-}
-impl U64x4 {
+
     new: fn(l0: U64, l1: U64, l2: U64, l3: U64) -> U64x4 Never! { U64x4{lanes: [U64#4]{l0, l1, l2, l3}} }
     splat: fn(value: U64) -> U64x4 Never! { U64x4{lanes: [U64#4]{value, value, value, value}} }
     from_array: fn(lanes: [U64#4]) -> U64x4 Never! { U64x4{lanes: lanes} }
@@ -17668,36 +17763,39 @@ impl U64x4 {
         if op == .Max -> return self.reduce_max()
         self.reduce_avg()
     }
-}
-impl U64x4.Add {
-    add: fn(self, rhs: U64x4) -> U64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
-        U64x4{lanes: lanes}
-    }
-}
-impl U64x4.Sub {
-    sub: fn(self, rhs: U64x4) -> U64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
-        U64x4{lanes: lanes}
-    }
-}
-impl U64x4.Mul {
-    mul: fn(self, rhs: U64x4) -> U64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
-        U64x4{lanes: lanes}
-    }
-}
-impl U64x4.Div {
-    div: fn(self, rhs: U64x4) -> U64x4 Never! {
-        lanes := self.lanes.copy()
-        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
-        U64x4{lanes: lanes}
-    }
-}
 
+    impl Add {
+        add: fn(self, rhs: U64x4) -> U64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+            U64x4{lanes: lanes}
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: U64x4) -> U64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+            U64x4{lanes: lanes}
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: U64x4) -> U64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+            U64x4{lanes: lanes}
+        }
+    }
+
+    impl Div {
+        div: fn(self, rhs: U64x4) -> U64x4 Never! {
+            lanes := self.lanes.copy()
+            loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+            U64x4{lanes: lanes}
+        }
+    }
+}
 #Test("SIMD lane types fold left to right and act lane by lane") {
     floats: F32x4.new(F32{1.0}, F32{2.0}, F32{3.0}, F32{4.0})
     assert_eq(floats.sum(), F32{10.0})
@@ -17713,57 +17811,89 @@ impl U64x4.Div {
 }
 
 // Stock coordinates retain the seed's frame-zero constructors and left frame.
-ScreenPoint: struct { x: Float, y: Float, frame_id: Int }
-ScreenDelta: struct { x: Float, y: Float, frame_id: Int }
-WorldPoint: struct { x: Float, y: Float, frame_id: Int }
-WorldDelta: struct { x: Float, y: Float, frame_id: Int }
-impl ScreenPoint {
+ScreenPoint: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> ScreenPoint Never! { ScreenPoint{x: x, y: y, frame_id: 0} }
+
+    impl Add(ScreenDelta) {
+        add: fn(self, rhs: ScreenDelta) -> ScreenPoint Never! { ScreenPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: ScreenPoint) -> ScreenDelta Never! { ScreenDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub(ScreenDelta) {
+        sub: fn(self, rhs: ScreenDelta) -> ScreenPoint Never! { ScreenPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl ScreenDelta {
+ScreenDelta: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> ScreenDelta Never! { ScreenDelta{x: x, y: y, frame_id: 0} }
+
+    impl Add {
+        add: fn(self, rhs: ScreenDelta) -> ScreenDelta Never! { ScreenDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Add(ScreenPoint) {
+        add: fn(self, rhs: ScreenPoint) -> ScreenPoint Never! { ScreenPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: ScreenDelta) -> ScreenDelta Never! { ScreenDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
 }
-impl WorldPoint {
+WorldPoint: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> WorldPoint Never! { WorldPoint{x: x, y: y, frame_id: 0} }
+
+    impl Add(WorldDelta) {
+        add: fn(self, rhs: WorldDelta) -> WorldPoint Never! { WorldPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: WorldPoint) -> WorldDelta Never! { WorldDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub(WorldDelta) {
+        sub: fn(self, rhs: WorldDelta) -> WorldPoint Never! { WorldPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl WorldDelta {
+WorldDelta: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> WorldDelta Never! { WorldDelta{x: x, y: y, frame_id: 0} }
-}
-impl ScreenPoint.Add(ScreenDelta) {
-    add: fn(self, rhs: ScreenDelta) -> ScreenPoint Never! { ScreenPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ScreenPoint.Sub {
-    sub: fn(self, rhs: ScreenPoint) -> ScreenDelta Never! { ScreenDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl ScreenPoint.Sub(ScreenDelta) {
-    sub: fn(self, rhs: ScreenDelta) -> ScreenPoint Never! { ScreenPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl ScreenDelta.Add {
-    add: fn(self, rhs: ScreenDelta) -> ScreenDelta Never! { ScreenDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ScreenDelta.Add(ScreenPoint) {
-    add: fn(self, rhs: ScreenPoint) -> ScreenPoint Never! { ScreenPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ScreenDelta.Sub {
-    sub: fn(self, rhs: ScreenDelta) -> ScreenDelta Never! { ScreenDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl WorldPoint.Add(WorldDelta) {
-    add: fn(self, rhs: WorldDelta) -> WorldPoint Never! { WorldPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl WorldPoint.Sub {
-    sub: fn(self, rhs: WorldPoint) -> WorldDelta Never! { WorldDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl WorldPoint.Sub(WorldDelta) {
-    sub: fn(self, rhs: WorldDelta) -> WorldPoint Never! { WorldPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl WorldDelta.Add {
-    add: fn(self, rhs: WorldDelta) -> WorldDelta Never! { WorldDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl WorldDelta.Add(WorldPoint) {
-    add: fn(self, rhs: WorldPoint) -> WorldPoint Never! { WorldPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl WorldDelta.Sub {
-    sub: fn(self, rhs: WorldDelta) -> WorldDelta Never! { WorldDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+
+    impl Add {
+        add: fn(self, rhs: WorldDelta) -> WorldDelta Never! { WorldDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Add(WorldPoint) {
+        add: fn(self, rhs: WorldPoint) -> WorldPoint Never! { WorldPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: WorldDelta) -> WorldDelta Never! { WorldDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
 }
 #Test("Stock screen and world coordinates keep nominal and frame semantics") {
     point: ScreenPoint.new(2.0, 3.0)
@@ -17783,57 +17913,89 @@ impl WorldDelta.Sub {
     assert_eq((left + delta).frame_id, 7)
 }
 
-ViewPoint: struct { x: Float, y: Float, frame_id: Int }
-ViewDelta: struct { x: Float, y: Float, frame_id: Int }
-CameraPoint: struct { x: Float, y: Float, frame_id: Int }
-CameraDelta: struct { x: Float, y: Float, frame_id: Int }
-impl ViewPoint {
+ViewPoint: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> ViewPoint Never! { ViewPoint{x: x, y: y, frame_id: 0} }
+
+    impl Add(ViewDelta) {
+        add: fn(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: ViewPoint) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub(ViewDelta) {
+        sub: fn(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl ViewDelta {
+ViewDelta: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> ViewDelta Never! { ViewDelta{x: x, y: y, frame_id: 0} }
+
+    impl Add {
+        add: fn(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Add(ViewPoint) {
+        add: fn(self, rhs: ViewPoint) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
 }
-impl CameraPoint {
+CameraPoint: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> CameraPoint Never! { CameraPoint{x: x, y: y, frame_id: 0} }
+
+    impl Add(CameraDelta) {
+        add: fn(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: CameraPoint) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub(CameraDelta) {
+        sub: fn(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl CameraDelta {
+CameraDelta: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> CameraDelta Never! { CameraDelta{x: x, y: y, frame_id: 0} }
-}
-impl ViewPoint.Add(ViewDelta) {
-    add: fn(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ViewPoint.Sub {
-    sub: fn(self, rhs: ViewPoint) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl ViewPoint.Sub(ViewDelta) {
-    sub: fn(self, rhs: ViewDelta) -> ViewPoint Never! { ViewPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl ViewDelta.Add {
-    add: fn(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ViewDelta.Add(ViewPoint) {
-    add: fn(self, rhs: ViewPoint) -> ViewPoint Never! { ViewPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl ViewDelta.Sub {
-    sub: fn(self, rhs: ViewDelta) -> ViewDelta Never! { ViewDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl CameraPoint.Add(CameraDelta) {
-    add: fn(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl CameraPoint.Sub {
-    sub: fn(self, rhs: CameraPoint) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl CameraPoint.Sub(CameraDelta) {
-    sub: fn(self, rhs: CameraDelta) -> CameraPoint Never! { CameraPoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl CameraDelta.Add {
-    add: fn(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl CameraDelta.Add(CameraPoint) {
-    add: fn(self, rhs: CameraPoint) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl CameraDelta.Sub {
-    sub: fn(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+
+    impl Add {
+        add: fn(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Add(CameraPoint) {
+        add: fn(self, rhs: CameraPoint) -> CameraPoint Never! { CameraPoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: CameraDelta) -> CameraDelta Never! { CameraDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
 }
 #Test("View and camera coordinate arithmetic retains left frame") {
     point: ViewPoint.new(2.0, 3.0)
@@ -17856,91 +18018,126 @@ impl CameraDelta.Sub {
     assert_eq((ViewDelta{x: 1.0, y: 2.0, frame_id: 9} + point).frame_id, 9)
 }
 
-DevicePoint: struct { x: Float, y: Float, frame_id: Int }
-DeviceDelta: struct { x: Float, y: Float, frame_id: Int }
-impl DevicePoint {
+DevicePoint: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> DevicePoint Never! { DevicePoint{x: x, y: y, frame_id: 0} }
+
+    impl Add(DeviceDelta) {
+        add: fn(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: DevicePoint) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub(DeviceDelta) {
+        sub: fn(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl DeviceDelta {
+DeviceDelta: struct {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float) -> DeviceDelta Never! { DeviceDelta{x: x, y: y, frame_id: 0} }
-}
-impl DevicePoint.Add(DeviceDelta) {
-    add: fn(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl DevicePoint.Sub {
-    sub: fn(self, rhs: DevicePoint) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl DevicePoint.Sub(DeviceDelta) {
-    sub: fn(self, rhs: DeviceDelta) -> DevicePoint Never! { DevicePoint{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
-}
-impl DeviceDelta.Add {
-    add: fn(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl DeviceDelta.Add(DevicePoint) {
-    add: fn(self, rhs: DevicePoint) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
-}
-impl DeviceDelta.Sub {
-    sub: fn(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+
+    impl Add {
+        add: fn(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Add(DevicePoint) {
+        add: fn(self, rhs: DevicePoint) -> DevicePoint Never! { DevicePoint{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: self.frame_id} }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: DeviceDelta) -> DeviceDelta Never! { DeviceDelta{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: self.frame_id} }
+    }
 }
 #Error
-TransformError: struct { message: String }
-impl TransformError.Display {
-    display: fn(self) -> String { self.message.copy() }
+TransformError: struct {
+    message: String
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
 }
 // Phantom params follow existing KeyRef<T>/DataTracked<T,K> source declarations.
 // The seed erases both params and keeps f64 payloads even for F32 spellings.
-Point2: struct<T, Space> { x: Float, y: Float, frame_id: Int }
-Delta2: struct<T, Space> { x: Float, y: Float, frame_id: Int }
-impl Point2 {
+Point2: struct<T, Space> {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float, frame_id: Int) -> Point2<T, Space> Never! {
         Point2<T, Space>{x: x, y: y, frame_id: frame_id}
     }
+
+    impl Add(Delta2<T, Space>) {
+        add: fn(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Point2<T, Space>) -> Delta2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+        }
+    }
+
+    impl Sub(Delta2<T, Space>) {
+        sub: fn(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Point2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+        }
+    }
+
+    impl GeometryPoint {
+        __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
+    }
 }
-impl Delta2 {
+Delta2: struct<T, Space> {
+    x: Float
+    y: Float
+    frame_id: Int
+
     new: fn(x: Float, y: Float, frame_id: Int) -> Delta2<T, Space> Never! {
         Delta2<T, Space>{x: x, y: y, frame_id: frame_id}
+    }
+
+    impl Add {
+        add: fn(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Delta2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+        }
+    }
+
+    impl Add(Point2<T, Space>) {
+        add: fn(self, rhs: Point2<T, Space>) -> Point2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
+            frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
+            Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
+        }
     }
 }
 __coordinate_frame: fn(left: Int, right: Int) -> Int TransformError! {
     if left != 0 && right != 0 && left != right -> return Err(TransformError{message: "coordinate values belong to different frames"})
     if left != 0 -> return Ok(left)
     Ok(right)
-}
-impl Point2.Add(Delta2<T, Space>) {
-    add: fn(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
-    }
-}
-impl Point2.Sub {
-    sub: fn(self, rhs: Point2<T, Space>) -> Delta2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
-    }
-}
-impl Point2.Sub(Delta2<T, Space>) {
-    sub: fn(self, rhs: Delta2<T, Space>) -> Point2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Point2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
-    }
-}
-impl Delta2.Add {
-    add: fn(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Delta2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
-    }
-}
-impl Delta2.Add(Point2<T, Space>) {
-    add: fn(self, rhs: Point2<T, Space>) -> Point2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Point2<T, Space>{x: self.x + rhs.x, y: self.y + rhs.y, frame_id: frame})
-    }
-}
-impl Delta2.Sub {
-    sub: fn(self, rhs: Delta2<T, Space>) -> Delta2<T, Space> TransformError! {
-        frame: __coordinate_frame(self.frame_id, rhs.frame_id) ?? return Err(TransformError{message: "coordinate values belong to different frames"})
-        Ok(Delta2<T, Space>{x: self.x - rhs.x, y: self.y - rhs.y, frame_id: frame})
-    }
 }
 #Test("Device and dynamic coordinates retain seed frame policy") {
     point: DevicePoint.new(7.0, 8.0)
@@ -17975,24 +18172,6 @@ impl Delta2.Sub {
 GeometryPoint: trait {
     __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never!
 }
-impl ScreenPoint.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
-impl WorldPoint.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
-impl ViewPoint.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
-impl CameraPoint.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
-impl DevicePoint.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
-impl Point2.GeometryPoint {
-    __coordinates: fn(self) -> (x: Float, y: Float, frame_id: Int) Never! { (x: self.x, y: self.y, frame_id: self.frame_id) }
-}
 Ray2: struct<T, From, To> {
     origin: Point2<T, To>
     direction: Delta2<T, To>
@@ -18000,8 +18179,7 @@ Ray2: struct<T, From, To> {
 Transform: struct<From, To> {
     m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float
     from_frame: Int, to_frame: Int
-}
-impl Transform {
+
     affine: fn(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform<From, To> Never! {
         Transform<From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}
     }
@@ -18051,8 +18229,7 @@ impl Transform {
 Transform2: struct<T, From, To> {
     m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float
     from_frame: Int, to_frame: Int
-}
-impl Transform2 {
+
     affine: fn(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform2<T, From, To> Never! {
         Transform2<T, From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}
     }
@@ -18203,33 +18380,6 @@ __complex_to_string: fn(value: Complex) -> String Never! {
     sign: if sign_bit(value.imaginary) -> "-" else -> "+"
     "{__complex_part_text(value.real)} {sign} {__complex_part_text(abs_float(value.imaginary))}i"
 }
-impl Decimal.Display {
-    display: fn(self) -> String { __decimal_to_string(self) }
-}
-impl Fraction.Display {
-    display: fn(self) -> String { __fraction_to_string(self) }
-}
-impl Complex.Display {
-    display: fn(self) -> String { __complex_to_string(self) }
-}
-// Complex has no order; its arithmetic hooks and its
-// magnitude are source methods like Fraction's and Decimal's.
-impl Complex {
-    abs: fn(self) -> Float Never! { __complex_abs(self) }
-}
-impl Complex.Add {
-    add: fn(self, rhs: Complex) -> Complex Never! { __complex_add(self, rhs) }
-}
-impl Complex.Sub {
-    sub: fn(self, rhs: Complex) -> Complex Never! { __complex_sub(self, rhs) }
-}
-impl Complex.Mul {
-    mul: fn(self, rhs: Complex) -> Complex Never! { __complex_mul(self, rhs) }
-}
-impl Complex.Div {
-    div: fn(self, rhs: Complex) -> Complex Never! { __complex_div(self, rhs) }
-}
-
 #Test("Source exact rendering preserves decimal scale and quotient form") {
     assert_eq(__decimal_to_string(__decimal_from_str("-0.00")), "0.00")
     assert_eq(__decimal_to_string(__decimal_from_str("-123.4500")), "-123.4500")

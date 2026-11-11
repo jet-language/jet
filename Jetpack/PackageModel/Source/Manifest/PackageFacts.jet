@@ -26,7 +26,7 @@ PackageOutputKind: enum {
     is_runnable: fn(self) -> Bool Never! {
         if self == {
             .Executable | .Service -> true
-            else -> false
+            .Library | .Check | .Environment | .Image | .Bundle | .System | .Fleet -> false
         }
     }
 
@@ -95,14 +95,14 @@ OutputFact: struct {
         out := [String]{}
         fields: if self.payload == {
             .Object(fields) -> fields
-            else -> {
+            .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> {
                 return out
             }
         }
         bindings: fields.get(OUTPUT_FIELD_BINDINGS) ?? return out
         values: if bindings == {
             .Array(values) -> values
-            else -> {
+            .Null | .Bool(_) | .Number(_) | .String(_) | .Object(_) -> {
                 return out
             }
         }
@@ -115,14 +115,14 @@ OutputFact: struct {
     payload_bool: fn(self, field: String) -> Bool Never! {
         fields: if self.payload == {
             .Object(fields) -> fields
-            else -> {
+            .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> {
                 return false
             }
         }
         value: fields.get(field) ?? return false
         if value == {
             .Bool(flag) -> flag
-            else -> false
+            .Null | .Number(_) | .String(_) | .Array(_) | .Object(_) -> false
         }
     }
 }
@@ -179,7 +179,7 @@ ClaimsGrade: enum {
         if self == {
             .Examples(count) -> "examples({count})"
             .Generated(count) -> "generated({count})"
-            else -> self.as_str()
+            .Unchecked | .Checked | .Proved -> self.as_str()
         }
     }
 
@@ -253,20 +253,20 @@ ClaimsProjection: struct {
             if record.kind == EvidenceKind.Property && record.count > 0 {
                 if record.outcome == {
                     .Generated | .Passed | .Failed -> generated_attempts += record.count
-                    else -> {}
+                    .Proved | .Checked | .Unchecked | .Unavailable | .Incomplete | .NotObserved | .Skipped | .Error -> {}
                 }
                 if record.outcome == {
                     .Generated | .Passed -> {
                         if !evidence_record_is_unexpected_pass(record) -> generated_successes += record.count
                     }
-                    else -> {}
+                    .Proved | .Failed | .Checked | .Unchecked | .Unavailable | .Incomplete | .NotObserved | .Skipped | .Error -> {}
                 }
             }
             if record.kind == {
                 .Unit | .Runtime | .Doctest -> {
                     if record.outcome == EvidenceOutcome.Passed && !evidence_record_is_unexpected_pass(record) -> examples_successes += 1
                 }
-                else -> {}
+                .Contract | .Property -> {}
             }
             if record.facet == EvidenceFacet.Solver && record.outcome == EvidenceOutcome.Proved -> solver_proved = true
             if record.outcome == EvidenceOutcome.Checked -> checked = true

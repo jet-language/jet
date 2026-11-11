@@ -9,6 +9,7 @@ use {
     files: core.files
     hex: core.encoding.hex
     json: core.encoding.json
+    sys: core.sys
 }
 
 COMMIT: "1111111111111111111111111111111111111111"
@@ -631,8 +632,8 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
 }
 
 #Test("the C toolchain pack hash the release checks is the one jet embeds") {
-    rows: cc_pack_assets(files.read(files.join(repo_root(), CC_PACK_SOURCE)) ?? panic("read {CC_PACK_SOURCE}: {err}"))
-    host := CcPack?{None}
+    rows: pinned_assets(files.read(files.join(repo_root(), CC_PACK_SOURCE)) ?? panic("read {CC_PACK_SOURCE}: {err}"), CC_PACK_TABLE)
+    host := PinnedAsset?{None}
     loop found in rows {
         if found.platform == "linux-x64" -> host = Val(found.copy())
     }
@@ -640,10 +641,42 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert(pack.file.starts_with("jet-cc-pack-") && pack.file.ends_with(".tar.zst"))
     assert(is_hex(pack.sha256, 64))
     assert(pack.size > 0)
-    assert_eq(cc_pack_problem(pack, pack.sha256, pack.size), "")
-    problem_text: cc_pack_problem(pack, "0".repeat(64), pack.size)
+    assert_eq(pinned_asset_problem(pack, pack.sha256, pack.size, CC_PACK_TABLE, CC_PACK_SOURCE), "")
+    problem_text: pinned_asset_problem(pack, "0".repeat(64), pack.size, CC_PACK_TABLE, CC_PACK_SOURCE)
     assert(problem_text.contains("jet embeds {pack.sha256}"))
     assert(problem_text.contains("update CC_PACK_ASSETS"))
+}
+
+#Test("the sandbox's bubblewrap hash the release checks is the one jet embeds") {
+    rows: pinned_assets(files.read(files.join(repo_root(), BWRAP_SOURCE)) ?? panic("read {BWRAP_SOURCE}: {err}"), BWRAP_TABLE)
+    host := PinnedAsset?{None}
+    loop found in rows {
+        if found.arch == "x86_64" -> host = Val(found.copy())
+    }
+    bwrap: host ?? panic("NATIVE_SANDBOX_BWRAP_ASSETS embeds no x86_64 bubblewrap")
+    assert_eq(bwrap.file, "jet-bwrap-x86_64-linux")
+    assert_eq(bwrap.platform, "")
+    assert(is_hex(bwrap.sha256, 64))
+    assert(bwrap.size > 0)
+    assert_eq(pinned_asset_problem(bwrap, bwrap.sha256, bwrap.size, BWRAP_TABLE, BWRAP_SOURCE), "")
+    assert(pinned_asset_problem(bwrap, bwrap.sha256, bwrap.size + 1, BWRAP_TABLE, BWRAP_SOURCE).contains("update NATIVE_SANDBOX_BWRAP_ASSETS"))
+}
+
+#Test("publish refuses a staged pinned asset whose bytes jet does not embed, and a missing bubblewrap") {
+    pack_source: files.read(files.join(repo_root(), CC_PACK_SOURCE)) ?? panic("read {CC_PACK_SOURCE}: {err}")
+    bwrap_source: files.read(files.join(repo_root(), BWRAP_SOURCE)) ?? panic("read {BWRAP_SOURCE}: {err}")
+    pack: pinned_assets(pack_source, CC_PACK_TABLE)[0]
+    bwrap: pinned_assets(bwrap_source, BWRAP_TABLE)[0]
+    good: [Artifact]{Artifact{path: "jet", sha256: "0".repeat(64), size: 1}, Artifact{path: pack.file.copy(), sha256: pack.sha256.copy(), size: pack.size}, Artifact{path: bwrap.file.copy(), sha256: bwrap.sha256.copy(), size: bwrap.size}}
+    assert_eq(pinned_hash_problems(pack_source, bwrap_source, good).len(), 0)
+    other: "f".repeat(64)
+    wrong: [Artifact]{Artifact{path: pack.file.copy(), sha256: pack.sha256.copy(), size: pack.size}, Artifact{path: bwrap.file.copy(), sha256: other.copy(), size: bwrap.size}}
+    refused: pinned_hash_problems(pack_source, bwrap_source, wrong)
+    assert_eq(refused.len(), 1)
+    assert(refused[0].text.contains("the staged {bwrap.file} is sha256 {other}"))
+    missing: pinned_hash_problems(pack_source, bwrap_source, [Artifact]{Artifact{path: pack.file.copy(), sha256: pack.sha256.copy(), size: pack.size}})
+    assert_eq(missing.len(), 1)
+    assert(missing[0].text.contains("the stage lacks it"))
 }
 
 #Test("the release ships jet-cc, jet-cxx and jet-c++ as hard links of jet") {
@@ -691,6 +724,47 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     bad: export_commit(repo, zeros, files.join(dir, "bad")) ?? panic("a missing commit exported")
     assert(bad.starts_with("git read-tree failed: "))
     assert(bad.ends_with(" ({zeros})"))
+    files.remove_all(dir) ?? ()
+}
+
+#Test("git runs on its -C repository whatever GIT_DIR and the other repository variables name") {
+    dir: files.mkdtemp("jet-release-git-env-") ?? panic("scratch: {err}")
+    decoy: files.join(dir, "decoy.git")
+    assert_eq(git_in(dir, [String]{"init", "--quiet", "--bare", decoy}).rc, 0)
+    redirect: [String: String]{
+        "GIT_DIR": decoy, "GIT_WORK_TREE": dir, "GIT_INDEX_FILE": files.join(decoy, "index"), "GIT_COMMON_DIR": decoy,
+        "GIT_OBJECT_DIRECTORY": files.join(decoy, "objects"), "GIT_ALTERNATE_OBJECT_DIRECTORIES": files.join(decoy, "objects"),
+    }
+    assert_eq(GIT_REPOSITORY_VARS.len(), redirect.len())
+    saved := [String: String?]{}
+    loop name in GIT_REPOSITORY_VARS {
+        saved[name] = sys.get(name)
+        sys.set(name, redirect[name])
+    }
+    repo: files.join(dir, "repo")
+    put(files.join(repo, "a.txt"), "one\n")
+    git_args := [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
+    git_args.extend([String]{"commit", "--quiet", "-m", "fixture"})
+    inited: git_in(repo, [String]{"init", "--quiet"}).rc
+    added: git_in(repo, [String]{"add", "--all"}).rc
+    committed: git_in(repo, git_args).rc
+    sha: git_in(repo, [String]{"rev-parse", "HEAD"}).out
+    exported: export_commit(repo, sha, files.join(dir, "out"))
+    loop name in GIT_REPOSITORY_VARS {
+        if saved[name] == .Val(value) {
+            sys.set(name, value)
+            next
+        }
+        sys.unset(name) ?? false
+    }
+    assert_eq(inited, 0)
+    assert_eq(added, 0)
+    assert_eq(committed, 0)
+    assert_eq(exported, None)
+    assert_eq(files.read(files.join(dir, "out/a.txt")) ?? panic("read: {err}"), "one\n")
+    assert(files.is_dir(files.join(repo, ".git")))
+    assert_eq(git_in(decoy, [String]{"rev-list", "--all", "--count"}).out, "0")
+    assert(!files.exists(files.join(decoy, "index")))
     files.remove_all(dir) ?? ()
 }
 

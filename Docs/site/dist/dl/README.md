@@ -24,12 +24,12 @@ safe handoff rather than replacing a running file in place.
 
 ## Stage a channel
 
-[`stage-toolchain.mjs`](../../../../Tools/jetpack-infra/stage-toolchain.mjs)
+[`StageToolchain.jet`](../../../../Tools/jetpack-infra/StageToolchain.jet)
 creates immutable unsigned files and domain-prefixed signing requests. Private
 keys stay with the external release signer:
 
 ```sh
-node Tools/jetpack-infra/stage-toolchain.mjs \
+jet Tools/jetpack-infra/StageToolchain.jet \
   --version <version> \
   --sequence <n> \
   --output <dir> \

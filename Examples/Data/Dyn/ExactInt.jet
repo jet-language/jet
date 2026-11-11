@@ -23,7 +23,7 @@ kind: fn(tree: Dyn) -> String {
         .Int(value) -> "Int {value}"
         .Float(value) -> "Float {value}"
         .Number(text) -> "Number {text}"
-        else -> "other"
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> "other"
     }
 }
 
@@ -88,7 +88,7 @@ run: fn() {
                 event: next ?? break
                 if event == {
                     .Int(value) -> print("streamed Int {value}")
-                    else -> {}
+                    .Null | .Bool(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .Key(_) | .ObjectEnd -> {}
                 }
             }
             .Err(failure) -> panic("stream: {failure.reason}")

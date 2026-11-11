@@ -1424,7 +1424,7 @@
     ];
     if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add Pattern Arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
     if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append Input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
-    const stateBadge = ((node.badges || []).find((badge) => badge === "#Off" || badge === "#DebugOnly")) || "";
+    const stateBadge = ((node.badges || []).find((badge) => badge === "#Off" || badge === "#Off(.Release)")) || "";
     if (!node.staged && node.source_span && node.kind !== "entry") {
       actions.unshift({
         title: stateBadge ? "Turn on" : "Turn off",

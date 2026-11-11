@@ -36,7 +36,6 @@ use jet_foundation.[
     Item,
     LValue,
     MARKER_RENAME,
-    MARKER_RENAME_ALL,
     Marker,
     MigrationDecl,
     NamedSpan,
@@ -121,7 +120,7 @@ sema_serde_expand_builtin_items: fn(items: &[Item]) {
                     generated.push(sema_serde_items_distinct_codec(definition, trait_name, span))
                 }
             }
-            else -> {}
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in generated -> items.push(item)
@@ -186,7 +185,7 @@ sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type
             }
             true
         }
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -204,7 +203,7 @@ sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, 
         .Distinct(definition) -> {
             if sema_derive_has_name(definition.derives, trait_name) -> return true
         }
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     auto.get(name) != None || sema_serde_items_impl_flags(facts, name, trait_name) != 0
 }
@@ -223,7 +222,7 @@ sema_serde_items_wire_params: fn(items: [Item], facts: SemaDeriveItemIndex, name
             .Enum(definition) -> {
                 if definition.name == name -> return sema_serde_items_param_flags(definition.type_params, sema_serde_items_enum_wire(definition))
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         position += 1
     }
@@ -482,7 +481,7 @@ sema_serde_items_codec_body: fn(items: [Item], position: Int, trait_name: String
             if encode -> return Val(SemaSerdeCodecBody{body: sema_serde_items_distinct_body(definition, true, span), read: [Stmt]{}, wire: wire})
             return Val(SemaSerdeCodecBody{body: sema_serde_items_tree_read_body(definition.name, [TypeParam]{}, span), read: sema_serde_items_distinct_body(definition, false, span), wire: wire})
         }
-        else -> {}
+        .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     None
 }
@@ -719,7 +718,7 @@ sema_serde_items_zero_expr: fn(ty: Type, span: Span) -> Expr Never! {
         .List(_) | .Map(_, _, _) -> Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
         .Apply(name, args) -> sema_serde_items_struct_literal(name, args.copy(), [ExprField]{}, span)
         .Named(name) -> sema_serde_items_struct_literal(name, [Type]{}, [ExprField]{}, span)
-        else -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
+        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
     }
 }
 
@@ -1020,7 +1019,7 @@ sema_serde_items_migration_helpers: fn(definition: StructDef, items: [Item], spa
                         helpers.push(Item.Func{value: function})
                     }
                 }
-                else -> {}
+                .Rename(_, _, _, _) | .Remove(_, _) -> {}
             }
         }
     }
@@ -1065,7 +1064,7 @@ sema_serde_items_migration_decode_body: fn(definition: StructDef, span: Span) ->
 // Err([]) when no historical shape matches.
 sema_serde_items_migration_walk_body: fn(definition: StructDef, blocks: [MigrationDecl], span: Span) -> [Stmt] Never! {
     entries: "jet_serde_entries"
-    style: sema_migration_rename_all(definition)
+    style: sema_checked_rename_case(definition.serde_markers)
     steps := [[Stmt]]{}
     loop (block_index, block) in blocks {
         ops := [Stmt]{}
@@ -1122,7 +1121,7 @@ sema_serde_items_migration_unmatched: fn(span: Span) -> Stmt Never! {
 sema_serde_items_pair_type: fn() -> Type Never! {
     if sema_data_object_pairs_type() == {
         .List(element) -> element
-        else -> panic("the ordered Object payload is a list")
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("the ordered Object payload is a list")
     }
 }
 
@@ -1199,19 +1198,6 @@ sema_serde_items_enum_tag: fn(markers: [Marker]) -> String? Never! {
     None
 }
 
-// Rust `serde_rename_all_style`: the identifier argument of `#RenameAll`.
-sema_serde_items_rename_all_style: fn(markers: [Marker]) -> String? Never! {
-    loop marker in markers {
-        if marker.name != MARKER_RENAME_ALL -> next
-        if marker.args.len() == 0 -> return None
-        if marker.args[0] == .Expr(argument) {
-            if argument == .Ident(name, _, _) -> return Val(name)
-        }
-        return None
-    }
-    None
-}
-
 // Rust `serde_enum_variant_key`: the variant's `#Rename` (its `json:` label
 // first), else the container's casing of the variant name.
 sema_serde_items_variant_key: fn(variant: Variant, style: String?) -> String Never! {
@@ -1238,7 +1224,7 @@ sema_serde_items_payload_bindings: fn(payload: VariantPayload, prefix: String) -
 sema_serde_items_enum_encode_body: fn(definition: EnumDef, span: Span) -> [Stmt] Never! {
     tag_key: sema_serde_items_enum_tag(definition.serde_markers)
     untagged: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
-    style: sema_serde_items_rename_all_style(definition.serde_markers)
+    style: sema_checked_rename_case(definition.serde_markers)
     arms := [SwitchArm]{}
     loop variant in definition.variants {
         bindings: sema_serde_items_payload_bindings(variant.payload, "v")
@@ -1296,7 +1282,7 @@ sema_serde_items_no_matching_enum: fn(span: Span) -> Stmt Never! {
 sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt] Never! {
     tag_key: sema_serde_items_enum_tag(definition.serde_markers)
     untagged: sema_serde_items_has_marker(definition.serde_markers, "Untagged")
-    style: sema_serde_items_rename_all_style(definition.serde_markers)
+    style: sema_checked_rename_case(definition.serde_markers)
     body := [Stmt]{}
     if untagged {
         loop variant in definition.variants {
@@ -1577,7 +1563,7 @@ sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> sema_codec_type_names(field.ty, names)
         .Union(members) -> loop member in members -> sema_codec_type_names(member, names)
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -1715,7 +1701,7 @@ sema_codec_index_module: fn(items: [Item], module_index: Int, positions: &[Strin
                 trait_name: implementation.trait_name ?? next
                 key = "{module_index}|{implementation.type_name}|{trait_name}"
             }
-            else -> next
+            .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if positions.get(key) == None -> positions[key] = position
     }
@@ -1773,7 +1759,8 @@ sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: 
 // Equatable/Comparable bound is met at its type (sema_derive_demand_type):
 // IR keeps a derived Core method only when a kept body names it
 // (ir_reachable_core_rows), and the Prelude error module's are reached the
-// same way. sema_derive_waves checks the demanded ones after the body pass.
+// same way. sema_derive_waves checks the demanded ones after the body pass;
+// a compile that checks every Core body (`jet check Core`) demands them all.
 sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
     rows := [String:SemaDeriveMethodRow]{}
     types := [String:[String]]{}

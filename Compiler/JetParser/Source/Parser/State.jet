@@ -7,6 +7,7 @@ use {
         Diagnostic,
         DiagnosticFixApplicability,
         DiagnosticFixSafety,
+        ElseArmLayout,
         ElseArmSpan,
         Expr,
         Marker,
@@ -87,7 +88,7 @@ JetParserState: struct {
     // Byte offsets where each source line starts, when the source text is
     // known; E0083 names the opener's line from it.
     line_starts: [Int]{[Int]{}}
-    // L0303 (#3716): the `else` arm of every dispatch table parsed so far.
+    // E0641: the `else` arm of every dispatch table parsed so far.
     else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // Block `#Policy(...) { … }` declarations, joined to the
     // program's policy declarations after the parse.
@@ -105,6 +106,8 @@ JetParserState: struct {
     // cancels the abort); `abort_position` is the cursor where it was found.
     abort_mark: Int{0}
     abort_position: Int{0}
+    // An interpolation hole's own parser: its end is the hole's closing `}`.
+    in_hole: Bool{false}
     // Depth of one-statement `->` bodies; their statement may end before `else`.
     adjacent_if_body_depth: Int{0}
     // Rust `block_depth`: braced statement lists entered so far. Value
@@ -120,6 +123,9 @@ JetParserState: struct {
     // template bodies entered so far. A `comptime loop` inside one is a
     // template loop the derive expansion unrolls.
     derive_template_depth: Int{0}
+    // Code and generic module bodies entered so far; 0 is a file's top
+    // level, where `priv` already keeps a declaration inside the package.
+    module_depth: Int{0}
     // Rust `allow_environment_reads`: a Jetpack config surface reads `$NAME`
     // as the typed environment read ordinary source
     // rejects the same token with E0003.
@@ -381,8 +387,22 @@ parser_bump: fn(state: &JetParserState) -> Token Never! {
     }
     token: parser_current(state)
     if token.kind == TOKEN_SEMI && token.span.start < token.span.end && !state.explicit_semicolon_reported -> parser_report_explicit_semicolon(state, token.span)
+    if token.kind == TOKEN_IDENT && state.derive_template_depth == 0 && parser_template_paste(state, token) -> parser_report_paste_outside_template(state, token)
     if token.kind != TOKEN_EOF && state.position < state.tokens.len() -> state.position += 1
     token
+}
+
+// Whether the identifier `token` is a template paste `#{name}`, which the
+// lexer reads as one word. A marker group's replayed member names carry the
+// group's `#` span, so past the `#` byte the word itself decides.
+parser_template_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
+    source: state.sources[0]
+    token.span.start >= 0 && token.span.start < source.len() && source[token.span.start] == U8{35} && parser_text(state, token).starts_with("#{{")
+}
+
+parser_report_paste_outside_template: fn(state: &JetParserState, token: Token) Never! {
+    paste: parser_text(state, token)
+    state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{paste}` pastes a template binding outside a template", "only a derive or marker template splices a binding's name into the code it generates", "write the name itself, or move this code into a derive or marker template"))
 }
 
 // An explicit `;` stays a statement boundary but is not canonical
@@ -498,7 +518,17 @@ parser_take_abort: fn(state: &JetParserState, start: Int) -> Bool Never! {
 }
 
 parser_recover_aborted_statement: fn(state: &JetParserState, start: Int) Never! {
-    if parser_take_abort(state, start) -> parser_sync_stmt(state)
+    if !parser_take_abort(state, start) -> return
+    // Braces the statement opened before the error, such as a typed literal's
+    // `HTML{` around a bad hole, close inside it; skip their closers too.
+    open := 0
+    loop index in start..<state.position {
+        if index >= state.tokens.len() -> break
+        kind: state.tokens[index].kind
+        if kind == TOKEN_LBRACE -> open += 1
+        if kind == TOKEN_RBRACE && open > 0 -> open -= 1
+    }
+    parser_sync_stmt_from(state, open)
 }
 
 parser_recover_aborted_item: fn(state: &JetParserState, start: Int) Never! {
@@ -721,6 +751,32 @@ parser_source_slice: fn(state: JetParserState, start: Int, end: Int) -> String N
     String.from_bytes(state.sources[0].slice(start, end)) ?? ""
 }
 
+// E0641: the `else` arm of a dispatch table that opens after `open_end` (just
+// past its `{`), as sema reports and rewrites it. `last_arm_end` ends the arm
+// before the `else`, which starts at `else_start`; the arm ends at `arm_end`.
+parser_else_arm_span: fn(state: JetParserState, table: Span, open_end: Int, last_arm_end: Int, else_start: Int, arm_end: Int) -> ElseArmSpan Never! {
+    arm: Span{start: else_start, end: arm_end}
+    delete: Span{start: last_arm_end, end: arm_end}
+    if parser_source_slice(state, last_arm_end, else_start).contains("\n") -> return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: false, layout: None}
+    source: state.sources[0]
+    close := arm_end
+    loop close < source.len() && parser_is_space_byte(Int.from_u8(source[close])) -> close += 1
+    if close >= source.len() || Int.from_u8(source[close]) != 125 || parser_source_slice(state, open_end, else_start).contains("\n") {
+        return ElseArmSpan{table: table, arm: arm, delete: delete, one_line: true, layout: None}
+    }
+    line_start := open_end
+    loop line_start > 0 && Int.from_u8(source[line_start - 1]) != 10 -> line_start -= 1
+    indent_end := line_start
+    loop indent_end < source.len() && (Int.from_u8(source[indent_end]) == 32 || Int.from_u8(source[indent_end]) == 9) -> indent_end += 1
+    layout: ElseArmLayout{
+        span: Span{start: open_end, end: close},
+        head: parser_source_slice(state, open_end, last_arm_end).trim(),
+        tail: parser_source_slice(state, else_start + 4, arm_end),
+        indent: parser_source_slice(state, line_start, indent_end),
+    }
+    ElseArmSpan{table: table, arm: arm, delete: delete, one_line: true, layout: Val(layout)}
+}
+
 // The source between two recorded pieces may hold only the chain's own
 // connectors (`if`, `else`, `->`); anything else, such as a comment, would be
 // dropped by the rebuilt table.
@@ -886,40 +942,6 @@ parser_recover_statement: fn(state: &JetParserState) Never! {
     }
 }
 
-// Consume one balanced `(…)`, `[…]` or `{…}` group starting at the current
-// opener, so a rejected construct does not cascade into its contents.
-parser_skip_group: fn(state: &JetParserState) Never! {
-    depth := 0
-    loop {
-        kind: parser_current_kind(state)
-        if kind == TOKEN_EOF -> break
-        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
-        if parser_is_closer(kind) -> depth -= 1
-        parser_bump(state)
-        if depth <= 0 -> break
-    }
-}
-
-// S73 recovery: skip a rejected parenthesized group through its `)`, stopping
-// early at a line end or block close at the group's own depth.
-parser_skip_to_rparen: fn(state: &JetParserState) Never! {
-    depth := 0
-    loop {
-        kind: parser_current_kind(state)
-        if kind == TOKEN_EOF -> break
-        if kind == TOKEN_LPAREN -> depth += 1
-        if kind == TOKEN_RPAREN {
-            if depth == 0 {
-                parser_bump(state)
-                break
-            }
-            depth -= 1
-        }
-        if (kind == TOKEN_SEMI || kind == TOKEN_RBRACE) && depth == 0 -> break
-        parser_bump(state)
-    }
-}
-
 // After a failed top-level item: skip to the next plausible item start. A
 // `comptime` starts an item only at the start of a line; after `NAME:` it
 // is that binding's value, which goes with the skipped line.
@@ -933,9 +955,14 @@ parser_sync_top: fn(state: &JetParserState) Never! {
 }
 
 // After a failed statement: skip to just past the next `;` at this brace
-// depth, or stop before the block's closing `}`.
+// depth, or stop before the block's closing `}`. `open` counts braces the
+// failed statement opened and left unclosed; their closers belong to it.
 parser_sync_stmt: fn(state: &JetParserState) Never! {
-    depth := 0
+    parser_sync_stmt_from(state, 0)
+}
+
+parser_sync_stmt_from: fn(state: &JetParserState, open: Int) Never! {
+    depth := open
     loop {
         kind: parser_current_kind(state)
         if kind == TOKEN_EOF -> break

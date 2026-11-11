@@ -112,10 +112,6 @@ observation_relation_as_str: fn(relation: ObservationRelation) -> String Never! 
     }
 }
 
-// Rust `ObservationRelation::supports_plain_callable`: only typed equality is
-// observable from a plain callable; the others need effect or failure capture.
-observation_relation_supports_plain_callable: fn(relation: ObservationRelation) -> Bool Never! { relation == ObservationRelation.TypedEquality }
-
 // Rust `ComparisonObservation::{value, failure}` and its builders.
 comparison_observation_value: fn(raw: String) -> ComparisonObservation Never! {
     ComparisonObservation{raw: raw, typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
@@ -128,18 +124,6 @@ comparison_observation_failure: fn(raw: String, failure: String) -> ComparisonOb
 comparison_observation_with_effects: fn(observation: ComparisonObservation, effects: [String]) -> ComparisonObservation Never! {
     result := observation
     result.ordered_effects = effects
-    result
-}
-
-comparison_observation_with_cleanup: fn(observation: ComparisonObservation, cleanup: [String]) -> ComparisonObservation Never! {
-    result := observation
-    result.cleanup = cleanup
-    result
-}
-
-comparison_observation_with_mutation: fn(observation: ComparisonObservation, mutation: String) -> ComparisonObservation Never! {
-    result := observation
-    result.mutation = Val(mutation)
     result
 }
 
@@ -156,19 +140,6 @@ comparison_identity_is_complete: fn(identity: ComparisonIdentity) -> Bool Never!
 // Rust `ComparisonSample::{new, with_replays, with_declared_equal}`.
 comparison_sample_new: fn(identity: ComparisonIdentity, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
     ComparisonSample{identity: identity, reference: reference, candidate: candidate, reference_replay: None, candidate_replay: None, declared_equal: None}
-}
-
-comparison_sample_with_replays: fn(sample: ComparisonSample, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
-    result := sample
-    result.reference_replay = Val(reference)
-    result.candidate_replay = Val(candidate)
-    result
-}
-
-comparison_sample_with_declared_equal: fn(sample: ComparisonSample, equal: Bool) -> ComparisonSample Never! {
-    result := sample
-    result.declared_equal = Val(equal)
-    result
 }
 
 // Rust `ComparisonRecord::terminal`: a non-observing verdict whose status the
@@ -232,14 +203,6 @@ comparison_record_assert_equal: fn(record: ComparisonRecord) ComparisonAssertion
 // Rust `Display for ComparisonAssertionError`.
 comparison_assertion_error_text: fn(error: ComparisonAssertionError) -> String Never! {
     "comparison {comparison_status_as_str(error.status)}: {error.reason}"
-}
-
-// Rust `ComparisonRecord::first_mismatch`.
-comparison_record_first_mismatch: fn(record: ComparisonRecord) -> ComparisonSample? Never! {
-    if record.reduced_counterexample != None -> return record.reduced_counterexample
-    index: record.first_difference ?? return None
-    if index >= record.samples.len() -> return None
-    Val(record.samples[index])
 }
 
 // Rust `optional_string_json`.

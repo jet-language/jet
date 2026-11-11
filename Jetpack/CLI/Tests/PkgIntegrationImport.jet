@@ -160,7 +160,7 @@ cli_pkg_integration_loss: fn(facts: ProviderFacts, needle: String) -> Bool Never
     )
     record.rationales[0].adapter_id = if status == {
         .AdapterWrapped(name) -> "adapter:{name}"
-        else -> ""
+        .ForeignDependencyRetained(_) | .FFIStubGenerated(_) | .NativeReplacementCandidate(_) | .CompatibilityProved(_) | .NativeReplacementActive(_) -> ""
     }
     assert_eq(record.rationales[0].adapter_id, "adapter:left-pad")
 }

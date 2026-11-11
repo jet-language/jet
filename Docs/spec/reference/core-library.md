@@ -260,6 +260,65 @@ use "core/files"
 The first form is an ordinary import error under D-S14-PAUSE; the second uses
 the file-import grammar.
 
+The `jet.runtime` root holds the runtime's public interface: one module per
+inline module of the runtime source. The runtime declares each member as a
+runtime binding, a body-less `#Import(c)` of one of its own exports with the
+member's Jet signature and effect row; the export stays the one body. The
+runtime pack build renders the interface from those declarations and fails
+when the copy jet embeds disagrees, so no hand-written copy exists. A call to
+a member is checked against that signature, and the member's row is the
+effect the call performs; a member without a row is pure:
+
+```jet
+use rt: jet.runtime.time
+
+nap: fn(nanos: Int) -[Time.Wait]> {
+    rt.sleep_ns(nanos)
+}
+```
+
+A call crosses the runtime's route carriers, not the C law: an `Int` or a
+machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
+and a `List` of scalars; a result may also be an `Option` of one of those or
+of a tuple, or a tuple whose items are those or an `Option` of one, whose
+items the export writes in the tuple's label-sorted order. A binding
+parameter or result outside those carriers is
+E3203. Only the generated interface units and the runtime's own inline
+modules declare bindings; an `#Import(c)` in a user module of any name,
+`jet.runtime.*` included, is an ordinary C import (E3101 outside `#Unsafe`,
+E3203 for a non-C type, E1341 for a shared symbol).
+
+`jet.runtime.time` holds the clock, wait and zone reads of the `core.time`
+leaves: `host_monotonic_ns` and the pure `clock_mono_ns` (`Int`), `sleep_ns`
+(`-[Time.Wait]>`), `task_timeout` (the `task.timeout` deadline),
+`reject_uncontrolled`, `wall_sample`
+(`(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)`), the controlled
+and world clocks `world_wall_ms`, `wall_override_ms`, `controlled_monotonic_ns`
+and `world_monotonic_ns` (`Int?`), `zone_env` (`-[Env]> String?`),
+`zone_file_bytes` (`-[FS.Read]> [U8]?`) and the pure `embedded_zone_bytes`. A
+runtime member keeps the name of the Core leaf it replaces without the `__`
+(`core.time.__sleep_ns` becomes `rt.sleep_ns`). A `jet.runtime` path that names
+no interface module is E1001.
+
+`jet.runtime.term` holds the stdio and terminal functions `core.term` is
+built on: `stdio_write`, `stdio_bytes` and `stdio_flush` (`-[IO]> String?`, the
+write's failure), the pure `stdio_fault`, `stdout_terminal` and
+`stderr_terminal`, and the `terminal8_*` reads and writes. A read answers its
+failure as an item: `terminal8_line` is
+`(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is
+`(h: Int, w: Int)?`. `jet.runtime.log` holds the calling thread's logging
+cells `core.log` is built on (`level_load`, `filter_store`, …), `flush`,
+`process_exit` and `span_allocate` (`(id: Int, name: String)`), each
+`-[Log]>`, and the pure `metric_publish`. `jet.runtime.encoding` holds the pure codec scopes
+`text_cells_*` and `etf_strings_*` that CSV, typed data, `core.sys.decode`
+and ETF decoding enter.
+`jet.runtime.process` holds the signal subscription calls `signal_open`,
+`signal_close` and `signal_disposition` (`-[Exec]>`). Any package can call a
+binding, so a leaf whose caller must first prove a bound or a UTF-8 encoding
+(`core.encoding.__string_byte`, `__bytes_into_text`), or that reads the clock
+or writes stderr outside the effect rows (the JSON coercion audit's
+`__coerce_now`, `__coerce_emit`), has none and stays Core's.
+
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
 `Compiler/Prelude/Core.jet`. Every other declaration in its source belongs to
@@ -324,7 +383,7 @@ separate meanings:
 | View | Shape | Ordering and scope |
 | --- | --- | --- |
 | `manifest()` | `CompilerManifest` | The uncomposed `package.jet` or inline package carrier. `dependencies` and `outputs` use manifest map-key order; `packages` and `build_profiles` keep declaration order. |
-| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `$build.package` values. |
+| `package()` | `CompilerPackage` | The package after declared Config files compose successfully. It uses the manifest fields and the canonical current-package identity; `name` and `version` remain the `#package` values. |
 | `lock()` | `CompilerLock` | `schema_version`, `file`, `version`, `root_dependencies`, and locked package records. Root dependencies and locked packages retain lock-model order. |
 | `profiles()` | `CompilerProfileSet` | `schema_version`, `file`, and named profiles. Profile and collision maps use key order; `extends`, `packages`, and `sources` retain declaration order. |
 
@@ -467,7 +526,7 @@ records the shipped surface without adding aliases:
 
 | Type | Constructors | Description |
 | --- | --- | --- |
-| `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `copy`, and `equal`. |
+| `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `fill`, `fill_repeat`, `copy`, and `equal`. |
 | `[K:V]` | `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | Ordered `keys`, `values`, `get`, `has_key`, `add`, `add_new`, `remove`, `pop`, `merge`, `copy`, `equal`, `map`, `filter`, `flat_map`, `fold`, `intersection`, `slice`, `top_n`, and reducers. |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`(w: String) -> w.len()`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
@@ -489,6 +548,25 @@ counts; `top_n(n)` orders by descending count and ascending key for ties.
 `para_map` preserves source order, and `para_map(f, limit: n)` bounds workers
 for that call.
 
+`xs.fill(range, value)` sets every element of `xs[range]` to `value`, in
+place, as Rust's `slice.fill` and C++'s `std::fill` do.
+`xs.fill_repeat(range, pattern)` repeats the list `pattern` across the same
+span: element `range.start + i` becomes `pattern[i % pattern.len()]`, so a
+four-byte RGBA pixel or a gradient row tiles a pixel row. A span that is not a
+whole number of patterns ends with a partial pattern. Neither method clamps:
+a range outside `0..xs.len()` stops with the bounds fault that `xs[range]`
+gives, and an empty `pattern` stops with the bounds fault of `pattern[0]`,
+even over an empty range. Both write plain data such as `[U8]` as block
+stores, not a loop of element stores: a pattern of 1, 2, 4 or 8 bytes as one
+repeated word, any other as block copies.
+
+```jet
+pixels := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+pixels.fill(0..<2, 255)
+pixels.fill_repeat(2..<10, [U8]{1, 2, 3})
+print(pixels) // [255, 255, 1, 2, 3, 1, 2, 3, 1, 2]
+```
+
 Set closure operations use the same collection kernels as other containers.
 Mapping a Set does not promise to preserve uniqueness; use `.to_set()` when
 the result must be deduplicated. `values` is the lazy alias of `to_list`,
@@ -506,8 +584,9 @@ family includes `map`, `filter`, `take`, `skip`, `step_by`, `dedup`,
 `skip_while`, `flat_map`, `filter_map`, `scan`, `cycle`, `repeat`,
 `drop_last`, and `shuffle`. `cycle(n)` is bounded and produces exactly `n`
 items; `repeat(n)` repeats the source `n` times. A zero-argument infinite cycle
-is not a Core API. `fill`, `cycle_n`, and `duplicate` are declined or mapped
-to the existing names under D-ITER-DECLINE1.
+is not a Core API. An `Iter<T>` `fill` adapter, `cycle_n`, and `duplicate`
+are declined or mapped to the existing names under D-ITER-DECLINE1; the list
+method `fill` above writes in place.
 
 `next()` is the one partial pull (D-ITER-RESUME1, which amends
 D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
@@ -733,6 +812,8 @@ runs each of these cases.
 | `[T]` | `remove(item, [RemoveBy])` | exclusive, in place | Mutate | None | current |
 | `[T]` | `pop()` | exclusive, in place | Mutate | None | current |
 | `[T]` | `reverse()` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `fill(Range, item)` | exclusive, in place | Mutate | Unit | current |
+| `[T]` | `fill_repeat(Range, [item])` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `clear()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `get(Int)` | borrows | Lookup | None | current |
 | `[T]` | `index_of(item)` | borrows | Lookup | None | current |
@@ -896,6 +977,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | API | Result | Description |
 | --- | --- | --- |
 | `read(path)` | `String !IOError` | Read a UTF-8 text file. Invalid UTF-8 is `IOError.InvalidInput` with cause `stream did not contain valid UTF-8`. |
+| `read_or(path, fallback)` | `String` | The text `read` gives, or `fallback` when the file cannot be read (missing, unreadable or not UTF-8): `files.read_or(path, "")` is `cat path 2>/dev/null` with the fallback stated in the call. |
 | `read_bytes(path)` | `[U8] !IOError` | Read raw bytes. |
 | `write(path, text)` | `!IOError` | Create or replace a text file. |
 | `write_bytes(path, bytes)` | `!IOError` | Create or replace raw bytes. |
@@ -914,16 +996,18 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `exists(path)` / `is_dir(path)` / `is_file(path)` | `Bool` | Return false when the path cannot be observed; these helpers do not raise a missing-path error. |
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
-| `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
+| `list_dir(path, matching: String?{None})` | `[DirEntry] !IOError` | List entries in name order. `matching` keeps the names that match a shell pattern (`*` any bytes, `?` one byte), so `list_dir(dir, matching: "*.files")` is `dir/*.files`. |
+| `list_dir_or(path, fallback, matching: String?{None})` | `[DirEntry]` | The entries `list_dir` gives, or `fallback` when the directory cannot be listed: `files.list_dir_or(dir, [])`. |
 | `create_dir_all(path)` | `!IOError` | Create a directory and any missing parents; an existing directory is success. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
-| `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
+| `symlink(original, link, replace: Bool{false})` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. `replace: true` first removes a link or file at `link`, so a link to a directory is replaced rather than followed (`ln -sfn`); a real directory there is an error. |
+| `best_effort()` | `BestEffort` | A record for file operations a script runs best effort, keeping going past one that fails as the shell does. `done.copy_file` (which runs `copy`; a method can't be named `copy`), `copy_dir`, `remove`, `remove_all`, `create_dir_all`, `symlink` and `canonicalize` take their `core.files` namesake's arguments and record a failure in `done.failures` instead of returning it; `remove` and `remove_all` count a path already gone as done (`rm -f`, `rm -rf`), and `canonicalize` gives the path unchanged when it cannot be resolved. `done.failed()` says whether any failed and `done.report()` is one line per failure, so the run reports what failed once. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
-| `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. `.list()` collects them all as `[WalkEntry] !IOError`. |
-| `walk_files(root, ignore)` | `Walk` | The same walk, keeping regular files only. |
+| `canonicalize(path, missing_last: Bool{false})` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. `missing_last: true` lets the last part be missing, as `readlink -f` does: the parent is resolved and the last name joined to it. |
+| `walk(root, ignore, skip: [String]{[String]{}})` | `Walk` | Traverse recursively with an optional ignore-file name, lazily: a loop over the `Walk` yields each entry as `WalkEntry !IOError` in path order. An entry whose name is in `skip` is neither yielded nor entered (`find -name NAME -prune`). `.list()` collects them all as `[WalkEntry] !IOError`. |
+| `walk_files(root, ignore, skip:)` | `Walk` | The same walk, keeping regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path, timeout: Duration?{None})` / `try_lock(path)` | `FileLock !IOError` / `FileLock? !IOError` | Acquire an exclusive system lock; `try_lock` returns None only for contention. |
@@ -1105,6 +1189,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
 | `reader.read_line()` | `?String !IOError` | Read from the shared buffered position, remove all trailing CR/LF bytes, and return `None` only at EOF. A final unterminated line is returned; invalid UTF-8 is `IOError.InvalidInput`. |
 | `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.read_into(buffer: &[U8], limit)` | `Int !IOError` | Append up to `limit` bytes from the shared position to the caller's `buffer` and return the count; 0 is EOF, and a limit below one is `IOError.InvalidInput` before any read. A cleared, reused buffer reads without allocating. |
 | `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
 | `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
@@ -1253,6 +1338,8 @@ rejected without a body allocation.
 | `headers()` / `headers_get(h, name)` | `Headers` / `?String` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
 | `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct the checked empty, text, or byte body variants. |
+| `Body.reader(reader)` / `Body.reader(reader, length)` | `Body !HTTPError` | Take a `FileReader` and read its bytes when the body is made. With no length, read to end of file, at most 1 GiB. With a length, read exactly that many bytes: more than 1 GiB is `BodyTooLarge`, and a negative length or a source that ends short is `InvalidFraming`. The upload is not streamed. |
+| `Body.multipart(fields)` | `Body` | `multipart/form-data` text fields in map order. The boundary is the first `jet-http-boundary-%016x` that no field contains, and the body's first line is `--` plus that boundary, which the message's `Content-Type` names. |
 | `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
 | `get(url)` / `post(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot GET or POST calls with URL and body checks. |
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
@@ -1374,6 +1461,20 @@ served only for other methods is `405` with `Allow`, an unknown path `404`, and
 `OPTIONS *` is `204` with every registered method in `Allow`. Middleware
 registered first runs outermost. Every request carries `x-request-id`: a valid
 incoming value (1–128 visible ASCII bytes) is kept, otherwise one is generated.
+
+A route registers with its method's verb, `mux.get(path, handler)` and the
+other standard methods, or with `mux.custom(token, path, handler)` for any other
+method; `HTTPRouter` and the `#Server.Get(path)` … `#Server.Custom(token,
+path)` marks of a mounted struct take the same forms. A custom method is any
+RFC 9110 token, matched in the exact case it is sent: `get` is not `GET`. Only
+a token that is exactly a standard method is refused, since that method has
+its own verb, and so is a token that is not a method; both refusals are
+E2808. One check decides both: a static token is checked while building, and a
+run-time token (a mux only) when its route registers. A route path is a
+`String` or a `Path`; a `Path{…}` literal hole is one percent-encoded segment,
+and a literal without holes is a static pattern like the same `String`.
+`web.openapi` lists a custom method's operation, like `CONNECT`'s, under the
+OpenAPI 3.2 `additionalOperations` of its path, keyed by the method as sent.
 
 Request framing refuses what HTTP/1.1 forbids: a head over 32 KiB or more than
 100 fields is `431`; a malformed request line, an obsolete folded field, a
@@ -1606,7 +1707,10 @@ the original zeroizing owner. The private JETC v2 engine uses those projections
 only inside reasoned `#Unsafe` blocks and wipes each operation-scoped copy on
 both success and refusal before propagating the outcome. The original
 `Secret`, `SharedSecret`, and `X25519SecretKey` retain their ordinary `Close`
-duty; no raw secret-field access is required outside the expert boundary.
+duty; no raw secret-field access is required outside the expert boundary. Only
+`core.crypto`, the module that declares these types, reads a secret's `.bytes`
+field directly; any other module, a Core one included, reads it only inside an
+`#Unsafe` region (E0510), and the expert projections are `#Unsafe` functions.
 
 Fixed-limb operations reserve their complete workspace before filling it,
 avoiding geometric regrowth that could leave stale secret bytes in freed
@@ -2153,6 +2257,7 @@ run: fn() {
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
+| `timing_host()` | `TimingHost -[Env]>` | `.Confirmed` when this host's processor vendor confirms that the instructions `timing: .Fixed` values meet run in the same time for every value, else `.Unconfirmed`. Under `policy.harden` a program holding such values refuses to start on an unconfirmed host. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
 | `user_ids()` / `group_ids()` | `Ids !IOError -[Env]>` | `getresuid` / `getresgid`: the `real`, `effective` and `saved` IDs. |
@@ -2336,6 +2441,33 @@ run: fn() -[Exec, Time.Wait]> {
 }
 ```
 
+A command line a script writes out is `Sh{"…"}`: its literal words are
+argv items and each `{hole}` is exactly one more, never split, globbed or
+parsed by a shell (a runtime `String` is E0149; `Sh.raw(text)` is the audited
+split). It runs in one call, and `spec()` gives its `ProcessSpec` when the run
+needs a directory, environment, stream policy or limit first.
+
+```jet
+run: fn() -[Exec, Time.Wait]> {
+    branch: "topic/a b"
+    if !(Sh{"git rev-parse --verify -q {branch}"}.ok()) -> return
+    head: Sh{"git rev-parse {branch}"}.text() ?? return
+    changed: Sh{"git diff --name-only {head}"}.lines() ?? return
+    _ := Sh{"git add --"}.extend(changed).status()
+}
+```
+
+| `Sh` method | Returns | Description |
+| --- | --- | --- |
+| `status()` | `Int !IOError -[Exec, Time.Wait]>` | Run with the terminal's stdin, stdout and stderr, as a shell runs a plain line; the exit status, 128 + n after signal n. |
+| `ok()` | `Bool -[Exec, Time.Wait]>` | Run with stdout discarded and stderr passed through (`cmd >/dev/null`); whether it started and exited 0. |
+| `text()` | `String !IOError -[Exec, Time.Wait]>` | Standard output without its trailing newlines, stderr passed through, whatever the status (`$(cmd)`). |
+| `lines()` | `[String] !IOError -[Exec, Time.Wait]>` | The lines of standard output, stderr passed through, whatever the status. |
+| `run()` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run with stdout and stderr captured; the whole receipt. |
+| `spec()` | `ProcessSpec -[Exec]>` | The command's specification, to set a directory, environment, stream policy or limit before running it. |
+| `extend(items)` | `Sh` | The command with each item of `items` appended as one argv item (`"$@"`). |
+| `args()` | `[String]` | A copy of the argv. |
+
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `process.args()` | `[String] -[Exec]>` | Return the words after the program name, as the host supplied them. |
@@ -2355,6 +2487,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.check(receipt)` | `Unit !IOError` | Convert a failed receipt to `IOError`, preserving timeout, resource-limit, exit-code, or signal information. |
 | `process.status_ok(receipt)` | `Bool` | Test whether a receipt represents a successful exit. |
 | `process.failed(receipt)` / `process.exited(receipt)` | `Bool` | Inspect failure or normal process exit on a receipt. |
+| `process.exit_status(receipt)` | `Int` | A finished child's status as the shell's `$?` reports it: 124 when its timeout stopped it (as `timeout(1)` does), 128 + n after signal n, else its exit code. `Sh.status()` returns the same number. |
 | `process.current_pid()` | `Int -[Env]>` | Return the current process identifier. |
 | `process.cwd(spec, path)` | `ProcessSpec` | Builder form that sets the child working directory; there is no zero-argument `process.cwd()`. |
 | `process.env_get(name)` | `?String -[Env]>` | Read one environment variable; environment construction belongs to a `ProcessSpec`. |
@@ -2363,8 +2496,9 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
 | `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
 | `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
-| `process.exit(code)` | `Never -[Exec]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). |
-| `#Unsafe process.exit_unmapped(code)` | `Never -[Exec]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
+| `process.exit(code)` | `Never -[Exec.Exit]>` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
+| `#Unsafe process.exit_unmapped(code)` | `Never -[Exec.Exit]>` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
+| `process.fail(code, message)` | `Never -[Exec.Exit, IO, Time.Wait]>` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
@@ -2502,9 +2636,9 @@ escape. This explicit authority boundary is the process execution contract (D-AG
 ```jet
 run_with_authority: fn() -[Exec, Time.Wait]> {
     policy: Authority.from_rights([
-        "FS.Read:repo",
-        "FS.Write:.jet/build",
-        "Exec:/usr/bin/cargo",
+        "FS.Read(\"repo\")",
+        "FS.Write(\".jet/build\")",
+        "Exec(\"/usr/bin/cargo\")",
     ])
     spec: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
     receipt: process.run_spec(spec) ?? return
@@ -2577,6 +2711,33 @@ A terminal session is an opt-in process mode. It supplies terminal-sized input
 and output through the terminal policy and fails with a typed error when the
 selected backend cannot provide one; it is not an implicit replacement for
 captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
+
+### `core.git` — the git steps scripts repeat
+
+`core.git` turns the git blocks that recur in scripts into one call each, on a
+`Repo` that names a work tree: `w: git.repo(dir)`. Every git command it runs
+uses `dir` as its working directory with the caller's `GIT_DIR`,
+`GIT_INDEX_FILE` and `GIT_WORK_TREE` unset, so a script started from a hook,
+a lander or another repository's environment acts on this tree alone. git's
+own errors go to stderr. The implementation is
+[`Core/Git/Git.jet`](../../../Core/Git/Git.jet), and
+`Examples/Systems/Process/GitLand.jet` is the golden.
+
+| Call | Result |
+|---|---|
+| `w.spec(Sh{"git …"})` | the command as a `ProcessSpec` in the work tree, the git environment unset and stderr shown, for a run that sets more first |
+| `w.head()` | HEAD's short sha, `""` when there is none |
+| `w.clean()` | whether no tracked file has changes (`git status --porcelain -uno` prints nothing) |
+| `w.patch_paths(patch)` | every path the patch file touches without repeats: each file under its new path in patch order, then the old path of each rename; empty when the patch does not parse |
+| `w.land(patch, message) -> Landed GitError!` | `git apply --index`, then a commit of exactly the staged paths, rename sources included; `Landed{sha, paths}` |
+| `w.commit(paths, message) -> String GitError!` | `git add -A -f` of `paths` (deletions included), then a commit of exactly those paths; the new short sha |
+| `w.export(commit, dir) IOError!` | `git archive COMMIT \| tar -x -C DIR`, `dir` created first |
+| `w.drift(dir, skip:) -> [Drift] IOError!` | how the tracked files differ from the tree at `dir`: each tracked file that differs or is missing there, in git's order, then each file only `dir` has; symlinks are not compared and `skip` names directories never entered |
+
+`GitError` is `.NoApply` (the patch does not apply) or `.NoCommit` (git
+refused the commit or did not run). A `Drift` is `{path, tracked, tested}`:
+`tracked` when the work tree tracks and has the file, `tested` when the
+tested tree has it; with both, their bytes differ.
 
 ### `core.math` — numeric functions
 
@@ -3096,6 +3257,27 @@ compile time), so the value can key a hash table. It is not cryptographic, and
 the value may differ between runs and compiler versions: never persist it or
 compare it across processes.
 
+Shell-style line and field work is a set of String methods. They need no
+import, and the line methods follow the `lines()` rule (LF ends a line, one
+CR before it is dropped, and a final LF adds no empty line). All but `words`
+are Jet bodies in `core.text.parse` (`has_line` in `core.regex`), which the
+compiler loads for the spelling:
+
+| Method | Returns | Shell | Meaning |
+|--------|---------|-------|---------|
+| `text.trim_newlines()` | `String` | `$(…)` | `text` without its trailing LFs; other trailing whitespace stays. |
+| `text.words()` | `[String]` | `set -- $x` | The fields between runs of Unicode White_Space; none is empty. |
+| `text.first_lines(n: Int)` | `[String]` | `head -n` | The first `n` lines; all of them when there are fewer, none when `n <= 0`. |
+| `text.last_lines(n: Int)` | `[String]` | `tail -n` | The last `n` lines, by the same rule. |
+| `text.has_line_prefix(prefix: String)` | `Bool` | `grep -q '^prefix'` | Whether some line starts with `prefix`, read literally. |
+| `text.has_line(pattern: Regex)` | `Bool` | `grep -qE` | Whether some line matches `pattern`; `^` and `$` anchor at each line. |
+| `text.tsv_records()` | `[[String]]` | `cut -f` | Each line split on every tab; empty fields stay, a line with no tab is one field. |
+
+`has_line` takes a quoted pattern as a checked `Regex` literal:
+`text.has_line("^(a|b)")` checks the pattern when the program compiles, so
+the call has no compile, flags or failure step, and a bad pattern is E0152 at
+the call. A `Regex` value built at run time is passed as is.
+
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),
@@ -3145,7 +3327,10 @@ named IANA zones from TZif data. On native hosts, lookup checks
 lookup. Web/WASM uses its embedded zone data. A name with `..`, a leading
 `/`, or a leading `\` is rejected; an unavailable name returns `TimeError`
 with an `unknown IANA time zone` message that points to `JET_TZDB_DIR` or
-`TZDIR` (D-FREESTAND-TIME1).
+`TZDIR` (D-FREESTAND-TIME1). A version 2 or later TZif file's footer holds a
+POSIX TZ rule such as `EST5EDT,M3.2.0,M11.1.0`; offsets, transitions, gaps and
+overlaps past the table's last transition follow that rule. A malformed footer
+returns `TimeError`.
 
 ```jet
 use time: core.time
@@ -3327,8 +3512,9 @@ The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 A parser returns a `Dyn` (or a format-specific document). A typed codec
 maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 `#Decode` derive the typed encode/decode routes; field attributes such as
-`#Rename`, `#Skip`, `#Flatten`, `#RenameAll`, `#DenyUnknownFields`,
-`#Discriminant`, and `#Untagged` describe the wire shape. Unknown fields are
+`#Rename`, `#Skip`, `#Flatten`, `#DenyUnknownFields`, `#Discriminant`, and
+`#Untagged` describe the wire shape; `#Rename(.Camel)` on a type sets the
+casing of every field or variant. Unknown fields are
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
 an unrelated type.
@@ -3890,7 +4076,7 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `flush() -[Log]>` / `disable() -[Log]>` | — | Flush records or disable logging. |
 
 The emitting functions, `handle`, `set_level` and `enabled` also take a
-trailing `at: SourceLocation{$caller}`; callers leave it to the compiler.
+trailing `at: SourceLocation{#caller}`; callers leave it to the compiler.
 
 **Level filter.** A filter is comma-separated pairs: a bare `level` covers
 every module, and `module=level` covers that dotted module path and every
@@ -4026,15 +4212,15 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds by `compare` (a Float by IEEE 754 totalOrder); reversed bounds are accepted. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
-`SourceLocation` is the record `$here` and a `$caller` parameter default
-(`at: SourceLocation{$caller}`) give: `file`, `line`, `column`, `function`
+`SourceLocation` is the record `#here` and a `#caller` parameter default
+(`at: SourceLocation{#caller}`) give: `file`, `line`, `column`, `function`
 and `module`, displayed as `file:line:column`. `module` is the dotted module
 of the place: the package's name, then the `name: module` declarations that
 reach the file, then the inline modules around it. In package `shop`, code in
 `run.jet` is `shop`, code in the file `cache: module` declares is
 `shop.cache`, and code inside `db: module { … }` there is `shop.cache.db`.
 A file that no `name: module` declaration reaches sits at the package root.
-The compiler fills `module` at every `$here` and `$caller` site; its `""`
+The compiler fills `module` at every `#here` and `#caller` site; its `""`
 default only covers a record built by hand. `core.log` filters records by it.
 
 ### `core.testing` — deterministic test helpers
@@ -4061,7 +4247,7 @@ or golden file. The public source is
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
 | `test_suite() -> Test` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
-| `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). |
+| `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). A strategy's `generate`, `rebuild` and `valid` slots are pure (`-[]>`): a case draws only from the `HistoryRNG`, so the campaign's effects are those of `model`, `actual` and `observe`, and a target that denies an effect they do not use still runs it. |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 
 `#Test` is the only test declaration syntax (`D-TESTKIT1`).
@@ -4529,7 +4715,8 @@ hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
 Setting a synchronized signal updates the provider state, not the Jet carrier
 binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
-button handlers use the trailing block form, `ui.button("Click") { … }`.
+button handlers are ordinary code arguments, `ui.button("Click", () -> { … })`
+(D-TRAILBLOCK2); a bare `{ }` after the call is E0335.
 
 ### `core.reactive.loadable` — asynchronous value state
 
@@ -4791,7 +4978,7 @@ On x86-64 a value of four or eight bytes is written with `movnti`; narrower
 values and aggregates use an ordinary store. A function that streams fences
 those writes (`sfence`) before each call and at its return, so callers,
 callees and other threads see them in program order. Pad hot fields to the
-cache line with `#Layout(c, align($build.cpu.cache_line))`; the fact is 64 on
+cache line with `#Layout(c, align(#build.cpu.cache_line))`; the fact is 64 on
 every target until Jet selects CPUs (D-CACHE-CONTROL1).
 
 ### `core.text.parse` — text parsing and scanning
@@ -4844,7 +5031,7 @@ including for empty text. This is a separate operation from the module function
 | `startswith`, `endswith`, `removeprefix`, `removesuffix`, `rindex`, `encode` | aliases | Python-compatible aliases for the corresponding helpers. |
 
 `Int.parse(text)`, `Int.from_radix(text, base)`, and `Float.parse(text)` return
-`!ParseError` and should be handled with `?` or `??`; `Int.from_radix` also
+`ParseError!` and should be handled with `?` or `??`; `Int.from_radix` also
 reports a base outside `2..=36` as a parse error. `Cursor.over(text)` is the consuming scanner for
 structured text: `skip_ws`, `take_pattern`, and `take_until` advance the cursor
 and return an ordinary error value on a miss. The scanner example is
@@ -5031,6 +5218,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
+| `stream.read_into(buffer: &[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int !NetError` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
@@ -5053,6 +5241,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `stream.read_into(buffer: &[U8], limit, deadline:)` on `UnixStream` | `Int !NetError` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit !NetError` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
 | `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage !NetError` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
@@ -5173,6 +5362,7 @@ Mbed TLS 3.6.7); configuration carriers are validated before network use. See
 | `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
+| `stream.read_into(buffer: &[U8], limit, deadline:)` | `Int !IOError` | Append up to `limit` decrypted bytes to the caller's `buffer` and return the count; 0 is close-notify, and a limit below one is `IOError.InvalidInput`. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
 
 TLS handshake, read, write, and close-notify drive the engine over the consumed
@@ -5701,6 +5891,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files.path`
 - `core.font`
 - `core.game`
+- `core.git`
 - `core.http`
 - `core.http.client`
 - `core.http.server`

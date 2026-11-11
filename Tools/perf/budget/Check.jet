@@ -353,7 +353,7 @@ field: fn(value: Dyn, key: String) -> Dyn? Never! {
             if seen -> return Val(found)
             None
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
@@ -365,7 +365,7 @@ number: fn(value: Dyn?) -> Float? Never! {
                 .Int(whole) -> Val(Float.parse("{whole}") ?? math.NAN)
                 .Float(real) -> Val(real)
                 .Number(lexeme) -> Val(Float.parse(lexeme) ?? math.NAN)
-                else -> None
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
             }
         }
         .None -> None
@@ -396,7 +396,7 @@ js_string: fn(value: Dyn?) -> String Never! {
                     }
                     words.join(",")
                 }
-                else -> "[object Object]"
+                .Bytes(_) | .DateTime(_) | .Object(_) -> "[object Object]"
             }
         }
         .None -> "undefined"
@@ -432,7 +432,7 @@ truthy: fn(value: Dyn?) -> Bool Never! {
                     real: number(value) ?? math.NAN
                     real != ZERO && !math.is_nan(real)
                 }
-                else -> true
+                .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
             }
         }
         .None -> false
@@ -460,7 +460,7 @@ map_key: fn(value: Dyn?, unique: Int) -> String Never! {
                 .Number(_) -> "n:{js_number(number(value) ?? math.NAN)}"
                 .Bool(flag) -> "b:{flag}"
                 .Null -> "null"
-                else -> "o:{unique}"
+                .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> "o:{unique}"
             }
         }
         .None -> "undefined"

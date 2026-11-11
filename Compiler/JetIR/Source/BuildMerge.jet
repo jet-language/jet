@@ -206,7 +206,7 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
     // this one fills the merged key maps. A task's arguments stay shared with
     // the thread that spawns it, which drops them after the join, so each
     // part reaches its thread through `released`: the thread pops it off.
-    released: shared [IRModule]{}
+    released: Shared{[IRModule]{}}
     ir_merge_release_fill(released, parts)
     task.group ir_merge_release_group {
         dropped: task ir_merge_release(released, -1)
@@ -389,7 +389,7 @@ ir_merge_uses: fn(f: IRFunction, local: Int, seen: &IRMergeSeen, uses: &[Int]) N
             .ConstBigInt | .CallRuntime -> ir_merge_use(seen.names, IR_MERGE_USE_NAME, f.a[at], local, uses)
             .Close -> ir_merge_use(seen.names, IR_MERGE_USE_NAME, f.b[at], local, uses)
             .Call | .FunctionAddress -> ir_merge_use(seen.functions, IR_MERGE_USE_FUNCTION, f.a[at], local, uses)
-            else -> {}
+            .Nop | .Const | .Copy | .Move | .Drop | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallIndirect | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
 }
@@ -604,7 +604,7 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
                 if name >= 0 -> f.b[at] = side.name_new[name]
             }
             .Call | .FunctionAddress -> { if a >= 0 -> f.a[at] = side.function_new[a] }
-            else -> {}
+            .Nop | .Const | .Copy | .Move | .Drop | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallIndirect | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {}
         }
     }
 }

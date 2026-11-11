@@ -17,7 +17,7 @@ ir_string_format_integer: fn(ty: Type) -> Bool Never! {
         .InlineRange(base, _, _) -> ir_string_format_integer(base)
         .Named(name) -> name == "Int"
         .Tagged(_, inner) -> ir_string_format_integer(inner)
-        else -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -109,7 +109,7 @@ ir_failure_carrier_for_type: fn(ty: Type) -> TFailureCarrier Never! {
         .Result(ok, err) -> TFailureCarrier.Result{success: ok.copy(), error: err.copy()}
         // copy: `value` is a payload of read parameter `ty`, which keeps the original; field `value` of the new TFailureCarrier.Optional owns this one
         .Option(value) -> TFailureCarrier.Optional{value: value.copy()}
-        else -> TFailureCarrier.Infallible
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Infallible
     }
 }
 
@@ -217,7 +217,7 @@ ir_numeric_bound_constant: fn(ty: Type, member: String) -> IRNumericBound? {
             }
             return Val(IRNumericBound.Int{value: value})
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }

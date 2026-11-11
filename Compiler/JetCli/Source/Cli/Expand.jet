@@ -115,7 +115,7 @@ jet_cli_expand_inline_items: fn(items: [Item], owner: String?, unit: JetDriverDo
             .CodeModule(code) -> {
                 if code.body == .Val(body) -> jet_cli_expand_inline_items(body, owner, unit, facts)
             }
-            else -> {}
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -243,7 +243,7 @@ jet_cli_expand_templates: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact
                     }
                     output.push(jet_cli_expand_template(unit, test.span, kind, name, [String]{}, "{kind} #Test({name})"))
                 }
-                else -> {}
+                .Func(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
     }

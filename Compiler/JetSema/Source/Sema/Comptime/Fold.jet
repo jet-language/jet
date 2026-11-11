@@ -9,14 +9,14 @@
 // default), enum constructors with positional or named payloads, `Val(x)` and
 // `None`, constants that already landed, and integer, Float and Bool arithmetic
 // and comparison over them. It reads the same checked facts evaluation does: a
-// `T.$layout` read is the LayoutInfo sema computed for the selected target (a
+// `T.reflect().layout` read is the LayoutInfo sema computed for the selected target (a
 // CtLit) and `.size` its field; `x ?? panic(..)` on a present value is that
 // value; a value `if`/else-if chain takes the arm its folded condition selects;
 // shifts stay within the checked width. Aggregates take the shape the evaluator
 // returns: the declared type name, field and named payload labels. A value
-// outside its checked type, a selected arm that stops (`panic`), a division or
-// power, a call, and any other shape is not folded: it is evaluated, and the
-// evaluator reports it.
+// outside its checked type, a selected arm that stops (`panic`), an integer
+// division, a power, a call, and any other shape is not folded: it is
+// evaluated, and the evaluator reports it.
 //
 // The fold reads each node and its checked type in place in the tree (no
 // node or type copy per visited node): a generated data table folds millions
@@ -54,6 +54,17 @@ sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
     }
     if low < tree.nodes.len() && tree.nodes[low].id == id -> return low
     panic("body tree has no node {id}")
+}
+
+// The payload node of a module `Shared{X}` holder: `expression` is the
+// `Shared.new` static (`jet_std::JetShared`) over its one argument. The build
+// folds the payload; the program allocates the cell on its first read
+// (JetIR ir_shared_holder_read).
+sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never! {
+    if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .StaticCall(owner, _, method, _, args) {
+        if owner == .Prelude(rooted, path, _) && rooted && path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 -> return Val(args[0].value)
+    }
+    None
 }
 
 sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: Type, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
@@ -162,7 +173,7 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
                 if folded == .String(text) -> return sema_comptime_fold_decimal(text)
             }
         }
-        else -> {}
+        .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) -> {}
     }
     None
 }
@@ -249,7 +260,7 @@ sema_comptime_fold_data: fn(value: TComptimeValue) -> Bool Never! {
         .Failed(report) -> {
             if report == .Told(inner) -> return sema_comptime_fold_data(inner)
         }
-        else -> {}
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Unit -> {}
     }
     true
 }
@@ -266,7 +277,7 @@ sema_comptime_fold_condition: fn(tree: BodyTree, cond: BodyIfCond, values: [Sema
             if !(sema_comptime_fold_condition(tree, left, values) ?? return None) -> return Val(false)
             sema_comptime_fold_condition(tree, right, values)
         }
-        else -> None
+        .IfLet(_, _) -> None
     }
 }
 
@@ -285,7 +296,7 @@ sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaCompt
                 if item == .Int(number) -> bytes.push(U8.from_int(number) ?? return None)
                 else -> return None
             }
-            else -> return None
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
         }
         decoded: String.from_bytes(bytes) ?? return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "UTF8Error"}}})
         return Val(TComptimeValue.Present{value: TComptimeValue.String{value: decoded}})
@@ -315,7 +326,7 @@ sema_comptime_fold_type_name: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(sema_comptime_fold_after_last(name, true))
         .Apply(name, _) -> Val(sema_comptime_fold_after_last(name, true))
-        else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -343,10 +354,11 @@ sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
     String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
 }
 
-// The value of a constant that already landed in this run.
+// The value of a constant that already landed in this run. A `Shared`
+// holder's landed value is its payload, not the holder, so it folds no read.
 sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key == key -> return Val(value.value)
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder -> return Val(value.value)
     }
     None
 }
@@ -390,7 +402,7 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                     .Gt -> return Val(TComptimeValue.Bool{value: a > b})
                     .Le -> return Val(TComptimeValue.Bool{value: a <= b})
                     .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
-                    else -> return None
+                    .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> return None
                 }
             }
             if op == {
@@ -410,7 +422,7 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                     if a < 0 || b < 0 || b > 63 -> return None
                     return sema_comptime_fold_int(a /% (1 << b), ty)
                 }
-                else -> return None
+                .Div | .FloorDiv | .Mod | .Rem | .Pow | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
             }
         }
         return None
@@ -426,7 +438,7 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                     .Gt -> return Val(TComptimeValue.Bool{value: a > b})
                     .Le -> return Val(TComptimeValue.Bool{value: a <= b})
                     .Ge -> return Val(TComptimeValue.Bool{value: a >= b})
-                    else -> return None
+                    .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> return None
                 }
             }
             if ty != Type.Float -> return None
@@ -434,7 +446,10 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                 .Add -> return Val(TComptimeValue.Float{value: a + b, bits: 64})
                 .Sub -> return Val(TComptimeValue.Float{value: a - b, bits: 64})
                 .Mul -> return Val(TComptimeValue.Float{value: a * b, bits: 64})
-                else -> return None
+                // IEEE-754 binary64 division never traps: a zero divisor
+                // gives an infinity or NaN, as the evaluator's does.
+                .Div -> return Val(TComptimeValue.Float{value: a / b, bits: 64})
+                .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> return None
             }
         }
         return None
@@ -447,7 +462,7 @@ sema_comptime_fold_binary: fn(op: TBinaryOp, ty: Type, left: TComptimeValue, rig
                 .Or -> return Val(TComptimeValue.Bool{value: a || b})
                 .Eq -> return Val(TComptimeValue.Bool{value: a == b})
                 .Ne -> return Val(TComptimeValue.Bool{value: a != b})
-                else -> return None
+                .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Lt | .Gt | .Le | .Ge | .Compare -> return None
             }
         }
     }

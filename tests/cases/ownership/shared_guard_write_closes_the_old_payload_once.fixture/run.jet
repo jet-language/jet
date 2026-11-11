@@ -2,11 +2,13 @@
 // write through an edit guard replaces it in place: the old value closes
 // once, at the write, and the new value closes once, when the storage ends.
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Slot: struct { res: Res?, tag: Int }
 
 // The whole payload replaced through the guard.
@@ -31,11 +33,11 @@ refill: fn(storage: Shared<Res?>) {
 }
 
 run: fn() {
-    whole: shared (Res?{Val(Res{name: "whole"})})
+    whole: Shared{(Res?{Val(Res{name: "whole"})})}
     clear_whole(whole)
-    field: shared Slot{res: Val(Res{name: "field"}), tag: 1}
+    field: Shared{Slot{res: Val(Res{name: "field"}), tag: 1}}
     clear_field(field)
-    again: shared (Res?{Val(Res{name: "old"})})
+    again: Shared{(Res?{Val(Res{name: "old"})})}
     refill(again)
     print("end")
 }

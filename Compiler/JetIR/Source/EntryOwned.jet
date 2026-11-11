@@ -27,10 +27,11 @@ use jet_foundation.[name_rows_value]
 // exact Int arithmetic (Int.jet: a big result allocates; a zero divisor or
 // a negative exponent is int_stop, the numeric stop's report, and the
 // scheduler is read only after it), the failed entry's exit
-// (JourneyTLS.jet), the backtrace mode and the cleanup scopes (with no root
-// no stop is ever pending). jet_rt_process_entry_return only marks the end
-// of a rooted process, so an owned main drops its calls. Int shifts are not
-// here: jet_int_shl/shr read the scheduler on every call.
+// (JourneyTLS.jet), the fixed-timing host admission (HostTiming.jet: a CPUID
+// probe, then the failed entry's exit), the backtrace mode and the cleanup
+// scopes (with no root no stop is ever pending). jet_rt_process_entry_return
+// only marks the end of a rooted process, so an owned main drops its calls.
+// Int shifts are not here: jet_int_shl/shr read the scheduler on every call.
 //
 // The generated CLI parser's routes (#6328 S2) are root-free too: the
 // arguments (HostStartup.jet: the owned main captures them first, as
@@ -91,6 +92,7 @@ IR_ROOT_FREE_ROUTES: comptime { [String]{
     "jet_rt_int_drop",
     "jet_rt_int_to_string",
     "jet_rt_list_bounds_stop",
+    "jet_rt_mem_fill",
     "jet_rt_mem_move",
     "jet_rt_numeric_stop",
     "jet_rt_panic_message",
@@ -109,6 +111,7 @@ IR_ROOT_FREE_ROUTES: comptime { [String]{
     "jet_rt_string_drop",
     "jet_rt_string_eq",
     "jet_rt_string_from_static",
+    "jet_rt_timing_admit",
     "jet_rt_u64_to_string",
     "jet_rt_unreachable",
     "jet_std_io_args",
@@ -204,7 +207,7 @@ ir_entry_quiet: fn(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> 
             glue: quiet.glue[f.slot_type[f.a[at]]]
             glue == -1 || (glue >= 0 && quiet.functions[glue])
         }
-        else -> true
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Sqrt | .IntBig | .StreamStore -> true
     }
 }
 

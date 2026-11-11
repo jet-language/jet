@@ -51,7 +51,7 @@ sema_library_effect_declared: fn(items: [Item], name: String) -> Bool Never! {
             .Struct(definition) -> { if definition.name == name -> typed = true }
             .Enum(definition) -> { if definition.name == name -> typed = true }
             .EffectDecl(declaration) -> { if declaration.name == name -> declared = true }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     typed && declared
@@ -84,7 +84,7 @@ sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity:
                     effects.push(SemaLibraryEffect{package_identity: package_identity, name: definition.name, cases: cases, kernel: sema_library_effect_kernel_list(definition.cap)})
                 }
             }
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -162,7 +162,7 @@ sema_library_effect_check_lists: fn(items: [Item], diagnostics: &[Diagnostic]) {
         if item == {
             .Struct(definition) -> sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
             .Enum(definition) -> sema_library_effect_check_list(items, definition.name, definition.cap, diagnostics)
-            else -> {}
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }

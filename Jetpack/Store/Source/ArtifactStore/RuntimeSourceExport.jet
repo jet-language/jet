@@ -122,7 +122,7 @@ store_runtime_export_line: fn(line: String, masked: String, scope: NativeRuntime
         .Struct -> store_runtime_looks_like_struct_field(code)
         .InherentImpl -> store_runtime_starts_impl_member(code)
         .ThreadLocal -> store_runtime_strip_visibility(code).starts_with("static ")
-        else -> false
+        .Enum | .Trait | .TraitImpl | .Function | .Macro | .Other -> false
     }
     if !should_export -> return line.copy()
     raw: line.bytes()
@@ -131,7 +131,7 @@ store_runtime_export_line: fn(line: String, masked: String, scope: NativeRuntime
     body: pkg_bytes_text(raw, indent, raw.len())
     exported: if store_runtime_restricted_visibility_rest(body) == {
         .Val(rest) -> "{lead}pub {rest}"
-        else -> if body.starts_with("pub ") -> line else -> "{lead}pub {body}"
+        .None -> if body.starts_with("pub ") -> line else -> "{lead}pub {body}"
     }
     if scope == NativeRuntimeScope.Module && store_runtime_is_tuple_struct(code) -> return store_runtime_export_tuple_field(exported)
     exported
@@ -151,7 +151,7 @@ store_runtime_export_macro_line: fn(line: String, masked: String, transcriber_it
     if store_runtime_restricted_visibility_rest(code) != None {
         if store_runtime_restricted_visibility_rest(body) == {
             .Val(rest) -> return "{lead}pub {rest}"
-            else -> {}
+            .None -> {}
         }
     }
     if transcriber_item && !code.starts_with("pub") && store_runtime_starts_exportable_item(code) -> return "{lead}pub {body}"
@@ -194,7 +194,7 @@ store_runtime_restricted_visibility_rest: fn(value: String) -> String? Never! {
 store_runtime_starts_restricted_reexport: fn(code: String) -> Bool Never! {
     if store_runtime_restricted_visibility_rest(code) == {
         .Val(rest) -> rest.starts_with("use ")
-        else -> false
+        .None -> false
     }
 }
 
@@ -249,7 +249,7 @@ store_runtime_starts_item_header: fn(code: String, scope: NativeRuntimeScope) ->
             store_runtime_starts_exportable_item(item) || item.starts_with("impl") || item.starts_with("unsafe impl") || item.starts_with("extern ") || item.starts_with("macro_rules!") || item.starts_with("thread_local!")
         }
         .InherentImpl | .TraitImpl | .Trait -> store_runtime_starts_impl_member(code)
-        else -> false
+        .Struct | .Enum | .Function | .Macro | .ThreadLocal | .Other -> false
     }
 }
 

@@ -34,6 +34,12 @@
 // <scratch>/check.receipt (hosted.receipt for --hosted); its last line is
 // `exit: N`. check-errors.txt maps `jet check` errors back to source files.
 //
+// No child runs in the source tree: the assembler and each --each area run in
+// the state directory or the proof's scratch directory, with the script by its
+// absolute path and the tree as an absolute JETPACK_BOOTSTRAP_SOURCE_ROOT, so a
+// child that writes or removes relative to its working directory never reaches
+// the checkout.
+//
 // Environment:
 //   JET                       the admitted native jet compiler (required); a link
 //                             names the binary it points to. The assembler's own
@@ -73,7 +79,7 @@ run: fn() {
     options: parse_options(args)
     if options.hosted && (options.areas != "" || options.own != "" || options.each || options.syntax) -> fail(64, "--hosted builds the whole engine; it takes no area selection, --each or --syntax")
     jet: admitted_jet()
-    state: "{state_root()}/jetpack-bootstrap"
+    state: resolve_path(files.cwd() ?? ".", "{state_root()}/jetpack-bootstrap")
     if options.each -> process.exit(each_area(repo, state, jet))
     process.exit(prove(repo, state, jet, options))
 }
@@ -192,21 +198,21 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
     worker: process.env_get("JETPACK_WORKER") ?? ""
     worker_name: if worker == "" -> "lead" else -> worker
     if !plain_name(worker_name) -> fail(64, "JETPACK_WORKER must be a plain name")
-    selection: if options.closure -> area_closure(repo, jet, options.own) else -> options.areas.copy() // copy: the options stay whole
+    given_root: process.env_get("JETPACK_BOOTSTRAP_SOURCE_ROOT") ?? ""
+    source_root: if given_root != "" -> given_root else -> repo.copy() // copy: the proof keeps the checkout
+    absolute_root: resolve_path(files.cwd() ?? ".", source_root)
+    if !files.is_dir(absolute_root) -> fail(1, "{source_root} is not a directory")
+    selection: if options.closure -> area_closure(repo, state, absolute_root, jet, options.own) else -> options.areas.copy() // copy: the options stay whole
     areas: sorted_areas(selection)
     identity_set: process.env_get("JET_COMPILER_IDENTITY") ?? ""
     identity: if identity_set != "" -> identity_set else -> identity_beside(jet)
     toolchain_set: process.env_get("JET_TOOLCHAIN_ROOT") ?? ""
     if toolchain_set == "" && !files.is_dir("{repo}/Core") -> fail(69, "JET_TOOLCHAIN_ROOT is unset and {repo} has no Core/ tree")
-    toolchain: if toolchain_set != "" -> toolchain_set else -> repo.copy() // copy: the proof keeps the checkout
+    toolchain: resolve_path(files.cwd() ?? ".", if toolchain_set != "" -> toolchain_set else -> repo)
     if options.deps_from_head && options.own == "" -> fail(64, "--deps-from-head needs --area")
-    given_root: process.env_get("JETPACK_BOOTSTRAP_SOURCE_ROOT") ?? ""
-    source_root: if given_root != "" -> given_root else -> repo.copy() // copy: the proof keeps the checkout
-    absolute_root: resolve_path(files.cwd() ?? ".", source_root)
-    if !files.is_dir(absolute_root) -> fail(1, "{source_root} is not a directory")
     scratch: "{state}/{worker_name}-{root_tag(absolute_root, areas, options.own, if options.deps_from_head -> "1" else -> "0")}"
     child := Child{names: [String]{}, values: [String]{}, unset: [String]{}}
-    set(child, "JETPACK_BOOTSTRAP_SOURCE_ROOT", source_root)
+    set(child, "JETPACK_BOOTSTRAP_SOURCE_ROOT", absolute_root)
     set(child, "JETPACK_BOOTSTRAP_SCRATCH", scratch)
     set(child, "JETPACK_WORKER", worker_name)
     set_or_unset(child, "JETPACK_BOOTSTRAP_AREAS", areas)
@@ -247,9 +253,11 @@ identity_beside: fn(jet: String) -> String {
     line
 }
 
-// The comma-joined closure `Assemble.jet areas closure` answers for `area`.
-area_closure: fn(repo: String, jet: String, area: String) -> String {
-    ran: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "closure", area}).cwd(repo).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
+// The comma-joined closure `Assemble.jet areas closure` answers for `area` of
+// the tree `source`, run in the state directory.
+area_closure: fn(repo: String, state: String, source: String, jet: String, area: String) -> String {
+    files.create_dir_all(state) ?? fail(1, "cannot create {state}: {err}")
+    ran: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "closure", area}).cwd(state).env("JETPACK_BOOTSTRAP_SOURCE_ROOT", source).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
     if ran.errors != "" -> term.eprint(ran.errors.removesuffix("\n"))
     if status_of(ran) != 0 -> process.exit(status_of(ran))
     ran.output.trim()
@@ -300,11 +308,11 @@ child_spec: fn(child: Child, argv: [String], cwd: String) -> ProcessSpec {
     spec
 }
 
-// Assemble.jet with `words`, in the checkout.
+// Assemble.jet with `words`, in the proof's scratch directory (never the checkout).
 assembler: fn(proof: Proof, words: [String]) -> ProcessSpec {
     argv := [String]{proof.jet, "{proof.repo}/{ASSEMBLER}"}
     argv.extend(words.copy()) // copy: the words are the caller's
-    child_spec(proof.child, argv, proof.repo)
+    child_spec(proof.child, argv, proof.scratch)
 }
 
 // The source tree's HEAD commit, or `unknown`.
@@ -498,13 +506,16 @@ memory_bytes: fn(text: String) -> Int {
 // --- every area ------------------------------------------------------------------
 
 // One unit per populated area, JETPACK_EACH_PARALLEL at a time; each child
-// caps its own memory and writes <state>/<worker>-each-<area>.log.
+// caps its own memory and writes <state>/<worker>-each-<area>.log. The
+// children run in `state` with the tree as an absolute source root.
 each_area: fn(repo: String, state: String, jet: String) -> Int {
     parallel: int_or(process.env_get("JETPACK_EACH_PARALLEL") ?? "", 4)
     worker: process.env_get("JETPACK_WORKER") ?? ""
     base: if worker == "" -> "lead" else -> worker
+    given_root: process.env_get("JETPACK_BOOTSTRAP_SOURCE_ROOT") ?? ""
+    source: resolve_path(files.cwd() ?? ".", if given_root != "" -> given_root else -> repo)
     files.create_dir_all(state) ?? fail(1, "cannot create {state}: {err}")
-    listed: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "populated"}).cwd(repo).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
+    listed: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "populated"}).cwd(state).env("JETPACK_BOOTSTRAP_SOURCE_ROOT", source).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
     if status_of(listed) != 0 {
         term.eprint(listed.errors.removesuffix("\n"))
         return status_of(listed)
@@ -514,7 +525,7 @@ each_area: fn(repo: String, state: String, jet: String) -> Int {
         if line.trim() != "" -> areas.push(line.trim())
     }
     specs := [ProcessSpec]{}
-    loop area in areas -> specs.push(process.cmd([String]{jet, "{repo}/{SELF}", "--area", area}).cwd(repo).env("JETPACK_WORKER", "{base}-each-{area}").output_limit(OUTPUT_LIMIT))
+    loop area in areas -> specs.push(process.cmd([String]{jet, "{repo}/{SELF}", "--area", area}).cwd(state).env("JETPACK_WORKER", "{base}-each-{area}").env("JETPACK_BOOTSTRAP_SOURCE_ROOT", source).output_limit(OUTPUT_LIMIT))
     results: process.run_all(specs, if parallel < 1 -> 1 else -> parallel) ?? fail(1, "the areas could not run: {err}")
     rows := [String]{}
     loop at in 0..<areas.len() {
@@ -763,7 +774,7 @@ dyn_int: fn(value: Dyn) -> Int? {
     if value == {
         .Int(number) -> Val(number)
         .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 

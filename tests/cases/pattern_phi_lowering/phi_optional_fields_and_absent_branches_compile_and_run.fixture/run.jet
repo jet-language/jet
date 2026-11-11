@@ -9,25 +9,25 @@ PhiErrorProbe: enum {
 phi_code: fn(error: PhiErrorProbe) -> Int? Never! {
     if error == {
         .Context(context) -> context.code
-        else -> None
+        .Limit -> None
     }
 }
 phi_cause: fn(error: PhiErrorProbe) -> String? Never! {
     if error == {
         .Context(context) -> context.cause
-        else -> String?{None}
+        .Limit -> String?{None}
     }
 }
 phi_io_code: fn(error: IOError) -> Int? Never! {
     if error == {
         .InvalidInput(context) | .NotFound(context) -> context.os_code
-        else -> None
+        .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> None
     }
 }
 phi_io_cause: fn(error: IOError) -> String? Never! {
     if error == {
         .NotFound(context) -> context.cause
-        else -> String?{None}
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> String?{None}
     }
 }
 run: fn() {

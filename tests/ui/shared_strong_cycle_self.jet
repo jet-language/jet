@@ -4,9 +4,9 @@ Node: struct {
 }
 
 run: fn() {
-    a: shared Node{label: "a", next: None}
+    a: Shared{Node{label: "a", next: None}}
     a.next = Val(a)
     // A new cell that points back at `a` closes the same loop.
-    a.next = Val(shared Node{label: "b", next: Val(a)})
+    a.next = Val(Shared{Node{label: "b", next: Val(a)}})
     print(a.label)
 }

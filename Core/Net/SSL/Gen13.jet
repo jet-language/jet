@@ -352,13 +352,13 @@ ssl_tls13_parse_certificate: fn(ssl: &ssldefs.SSLContext, buf: Int, end: Int) ->
                         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT, .X509(e))
                         return Err(.X509(e))
                     }
-                    else -> {
+                    .FeatureUnavailable(_) | .UnknownOid | .InvalidFormat(_) | .InvalidVersion(_) | .InvalidSerial(_) | .InvalidAlg(_) | .InvalidAlgOid(_) | .InvalidName(_) | .InvalidDate(_) | .InvalidSignature(_) | .InvalidExtensions(_) | .SigMismatch | .CertVerifyFailed(_) | .CertUnknownFormat | .BadInput | .BufferTooSmall | .FatalError | .Callback(_) | .Asn1(_) | .PK(_) | .PEM(_) | .OID(_) -> {
                         sslmsg.ssl_pend_fatal_alert(ssl, ssldefs.SSL_ALERT_MSG_BAD_CERT, .X509(e))
                         return Err(.X509(e))
                     }
                 }
             }
-            else -> {}
+            .Ok(_) -> {}
         }
         p += cert_data_len
         ssltls.ssl_chk_buf_read(ssl, p, certificate_list_end, 2) ?? return Err(err)

@@ -328,7 +328,7 @@ text: fn(tree: Dyn) -> String {
         .Number(lexeme) -> lexeme.copy()
         .Bool(value) -> if value -> "true" else -> "false"
         .Float(_) -> js(tree)
-        else -> ""
+        .Null | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> ""
     }
 }
 
@@ -339,7 +339,7 @@ num: fn(tree: Dyn) -> Float {
         .Number(lexeme) -> Float.parse(lexeme) ?? 0.0
         .Text(value) -> Float.parse(value.trim()) ?? 0.0
         .Bool(value) -> if value -> 1.0 else -> 0.0
-        else -> 0.0
+        .Null | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> 0.0
     }
 }
 
@@ -357,7 +357,7 @@ truthy: fn(tree: Dyn) -> Bool {
         .Float(value) -> value != 0.0 && value == value
         .Number(lexeme) -> (Float.parse(lexeme) ?? 0.0) != 0.0
         .Text(value) -> value != ""
-        else -> true
+        .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> true
     }
 }
 

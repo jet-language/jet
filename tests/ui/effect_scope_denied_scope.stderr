@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `load` reaches the `FS.Read("secrets/key.txt")` effect, which it prohibits with `-[!FS.Read("secrets/")]>`
+  --> tests/ui/effect_scope_denied_scope.jet:5:15
+    |
+  5 | load: fn() -[!FS.Read("secrets/")]> String {
+    |               ^^^^^^^^^^^^^^^^^^^
+ Why: A `-[!FS.Read("secrets/")]>` row means the function and every callee it can reach must not use `FS.Read("secrets/key.txt")`
+ Fix: Remove the call that introduces `FS.Read("secrets/key.txt")`, or drop the `-[!FS.Read("secrets/")]>` prohibition
+ Denial: invocation
+ Call chain: load
+More: jet-lang.dev/e/E0749

@@ -173,14 +173,14 @@ manifest_files: fn(text: String) -> [String] Err! {
     loop key in MANIFEST_SCRIPTS {
         if field(tree, key) == {
             .Text(name) -> named.push(name.copy())
-            else -> return Err("no `{key}` file")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err("no `{key}` file")
         }
     }
     if field(tree, "partitions") == .Array(partitions) {
         loop partition in partitions {
             if field(partition, "module") == {
                 .Text(name) -> named.push(name.copy())
-                else -> return Err("a partition without a `module` file")
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return Err("a partition without a `module` file")
             }
         }
         return Ok(named)

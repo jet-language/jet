@@ -167,8 +167,7 @@ take_snapshot: fn(jetdir: String, sg: String, fs: String, label: String) -[Env, 
         if copied.code != 0 || copied.signal != None -> return fail("cannot copy {jetdir} to {held_copy}: {copied.errors.trim_end()}")
     }
     if !files.exists("{link}/jet") {
-        if files.is_symlink(link) -> files.remove(link) ?? return fail("cannot remove {link}: {err}")
-        files.symlink(held_copy, link) ?? return fail("cannot link {link}: {err}")
+        files.symlink(held_copy, link, replace: true) ?? return fail("cannot link {link}: {err}")
     }
     0
 }

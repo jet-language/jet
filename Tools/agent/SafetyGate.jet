@@ -1823,7 +1823,7 @@ falsy: fn(value: Dyn) -> Bool Never! {
         .Bool(flag) -> !flag
         .Text(word) -> word == ""
         .Int(number) -> number == 0
-        else -> false
+        .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
     }
 }
 
@@ -1883,7 +1883,7 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     if field(tree, name) == {
         .Int(value) -> Val(value)
         .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
-        else -> None
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 

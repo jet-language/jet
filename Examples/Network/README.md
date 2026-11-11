@@ -10,6 +10,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [IPPublicDestination](IPPublicDestination.jet) — Reachable versus safe to fetch.
 - [IPSpecialProfile](IPSpecialProfile.jet) — IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
 - [NetworkProjection](NetworkProjection.jet) — Loopback TCP/UDP, readiness, typed addresses, and DNS records.
+- [ReadInto](ReadInto.jet) — `read_into` appends each read to one buffer the caller keeps, on TCP, Unix and TLS streams and file readers.
 - [SocketAddrs](SocketAddrs.jet) — `socket_addrs` returns every address a host names, in the resolver's order; a numeric host is its one address.
 - [SocketEcho](SocketEcho.jet) — Typed addresses, TCP echo, UDP datagrams, Unix sockets.
 - [TLSPeerIdentity](TLSPeerIdentity.jet) — A real loopback TLS handshake uses only the checked-in test CA, then exposes the verified name, chain and version.
@@ -31,6 +32,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 ## HTTP
 
 - [HTTPClient](HTTP/HTTPClient.jet) — core.http is the one-shot rung; core.http.client is the configurable rung.
+- [HTTPMessageValues](HTTP/HTTPMessageValues.jet) — Checked HTTP message values: methods, statuses, versions, fields and bodies.
 - [HTTPObservability](HTTP/HTTPObservability.jet) — Static responses and access records share the server surface.
 - [HTTPRestService](HTTP/HTTPRestService.jet) — Realistic core.http client + server, no third-party package.
 - [HTTPRouteMarkers](HTTP/HTTPRouteMarkers.jet) — Tags expose only this explicitly mounted value.

@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 
 use {
-    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -50,8 +50,14 @@ IRWriteBack: struct { cell: Int, slot: Int }
 // `guards` the statement guards held when it opened (leaving it drops the
 // ones taken since, ir_exit_statement_guards).
 // A valued loop (`x: loop { ... break v }`) writes its break value into
-// `value` (-1: a statement loop).
-IRLoopFrame: struct { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1} }
+// `value` (-1: a statement loop). `edge` is the word each `break` sets to
+// tell its path apart where the loop's exits meet (ir_loop_edge; -1: none).
+IRLoopFrame: struct { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1}, edge: Int{-1} }
+
+// A `break` out of the loop whose edge word is `edge`: the id it set that
+// word to and the ownership where it left of the variables bound before
+// the loop (IRLoopFrame.mark), which its drops left as they were.
+IRLoopEdge: struct { edge: Int, id: Int, states: [IROwnState] }
 
 // A guard a temporary in the statement being built took, or a temporary
 // with cleanup lent to a read parameter (IRBuilder statement_guards): its
@@ -121,6 +127,21 @@ IRBuilder: struct {
     // The variable slot an explicit move (`x.move()`) just read (-1: none): that
     // read moves even where a plain read of the variable would share.
     moving: Int{-1}
+    // The Bool slot the arm of a masked branch being built runs under (-1:
+    // none): an assignment there keeps its old value where it is false
+    // (BuildMask.jet).
+    mask: Int{-1}
+    // A function with masked early returns (BuildMask.jet ir_masked_exits):
+    // the Bool variable no masked return has run yet and the variable
+    // holding the value one chose (-1: none), and whether the code being
+    // built may run after one, so its assignments are masked by `live`.
+    live: Int{-1}
+    exit_value: Int{-1}
+    exiting: Bool{false}
+    // Per type of the checked body's type table, whether it is fixed
+    // (BuildMask.jet ir_fixed_types; empty when none is): a scalar slot of
+    // such a type is marked fixed (IRFunction.slot_fixed).
+    fixed_ids: [Bool]{[Bool]{}}
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
     impure: Int{0}
@@ -209,6 +230,9 @@ IRBuilder: struct {
     // A task body (ir_task_spawn): a failure that leaves it stops the task,
     // which its join reports as TaskFailure.Panicked (ir_try_failure).
     task_body: Bool{false}
+    // The breaks built so far (ir_loop_jump), whose ownership meets that of
+    // their loop's other exits after it (ir_loop_join).
+    loop_edges: [IRLoopEdge]{[IRLoopEdge]{}}
 }
 
 // One failure of a body: its message and the span it names.
@@ -275,6 +299,13 @@ IRChecks: struct {
     // filters the entry passes to the runtime (ir_log_configure).
     log_package: String{""}
     log_flag: String{""}
+    // The entry package's `policy.harden`: when a function holds a
+    // `timing: .Fixed` value, the entry first calls jet_rt_timing_admit,
+    // which ends the program on an unconfirmed host (ir_timing_admitted).
+    harden: Bool{false}
+    // A release build (the `release` or `hardened` profile): an
+    // `#Off(.Release)` body emits no code (ir_stmt).
+    release: Bool{false}
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -337,10 +368,6 @@ IRProgram: struct {
     // definition, so neither a read nor a landed value copies one.
     constants: [String:Int]
     constant_defs: [TConstantDef]
-    // The keys of the constants computed at startup (TConstantDef.init),
-    // in declaration order: the entry computes each before the program
-    // runs (ir_entry_function).
-    startup: [String]
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>".
     render_impls: [String:Int]
@@ -603,10 +630,6 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         constant_keys.push((key: "constant:{definition.module_identity}::{definition.name}", at: 2 * index + 1, row: 2 * index + 1))
     }
     constant_rows: ir_first_rows(constant_keys)
-    startup := [String]{}
-    loop (index, definition) in defs {
-        if definition.init != None && constant_rows.get(definition.key) == Val(2 * index) -> startup.push(definition.key.copy())
-    }
     constants := [String:Int]{}
     loop (key, at) in constant_rows -> constants[key] = at /% 2
     // The Display, Printable and Close implementations of the host target,
@@ -644,7 +667,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), startup: startup, render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -832,7 +855,7 @@ ir_declared_owner: fn(declared: [String:String], module_identity: String, owner:
             key: declared.get("{module_identity}|{name}") ?? return None
             return Val(Type.Apply{name: key.copy(), args: args.copy()})
         }
-        else -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
     }
 }
 
@@ -979,7 +1002,7 @@ ir_keyed_nominals: fn(p: IRProgram, ty: Type) -> Type Never! {
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: ir_keyed_nominals(p, field.ty)}}
         // copy: a type with no nominal head is returned as a new tree; the
         // caller keeps the read parameter.
-        else -> ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> ty.copy()
     }
 }
 
@@ -1252,28 +1275,23 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
     ir_build_waves_kept(p, roots, false, threads)
 }
 
-// The name prefix of a constant's startup function (TConstantDef.init):
-// the function the program runs to compute the constant at startup.
-IR_STARTUP_FUNCTION_PREFIX: "__startup_"
-
 // The function the executable starts: `entry` itself when it takes nothing,
-// returns nothing, the program computes no constant at startup, the
-// `backtrace` build option is the stock `full`, the program allocator the
-// system heap, no job is selectable, the build is neither checked nor
+// returns nothing, the `backtrace` build option is the stock `full`, the
+// program allocator the system heap, no job is selectable, the build is
+// neither checked nor
 // observed and sets no log filter, otherwise a generated `entry` function.
 // It first links a checked build's checked heap (ir_checked_alloc_link) and
 // an observed build's observation start (ir_observe_link), passes the log
 // filters (ir_log_configure), a `brief` or `off` backtrace to
 // the runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
 // program allocator's cap (jet_rt_program_allocator_configure,
-// IRChecks.counting), computes every constant computed at startup
-// (p.startup, through ir_startup_guard), then runs the job the program's
+// IRChecks.counting), then runs the job the program's
 // first word names (jet_rt_entry_job_selected over
 // IRChecks.jobs), reports any other job word as unknown (E1294,
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "") -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p)) -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}#entry"
     id: m.functions.len()
@@ -1283,6 +1301,9 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
     ir_checked_alloc_link(m, p, b)
+    if ir_timing_admitted(p) {
+        _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)
+    }
     ir_observe_link(m, p, b)
     ir_log_configure(m, p, b)
     if p.checks.backtrace != .Full {
@@ -1294,17 +1315,6 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
         counting: ir_word_const(m, b, 1)
         limit: ir_word_const(m, b, cap)
         _: ir_runtime(m, b, "jet_rt_program_allocator_configure", [Int]{counting, limit}, -1)
-    }
-    loop constant_key in p.startup {
-        at: p.constants.get(constant_key) ?? next
-        definition: p.constant_defs[at]
-        guard: ir_startup_guard(m, p, definition)
-        if guard < 0 {
-            ir_fail(b, span, "the startup function of constant {definition.name}")
-            next
-        }
-        guard_operands: ir_args(b.f, [Int]{})
-        ir_emit(b.f, IROp.Call, -1, guard, guard_operands, 0, b.line)
     }
     loop job in p.checks.jobs -> ir_entry_job(m, p, b, job, p.checks.declared_jobs, span)
     selectable := false
@@ -1323,6 +1333,14 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     ir_resolve_deferred(m, p, b)
     m.functions[id] = b.f.move()
     id
+}
+
+// Whether the entry admits the host first: the entry package sets
+// `policy.harden` and a function holds a `timing: .Fixed` value. The
+// runtime (JetRuntime HostTiming.jet jet_rt_timing_admit) ends the program
+// with the reason on a host its vendor does not confirm.
+ir_timing_admitted: fn(p: IRProgram) -> Bool Never! {
+    p.checks.harden && body_fixed_timing(p.functions)
 }
 
 // A `--checked-alloc` build's entry (or test harness main) first calls
@@ -1463,7 +1481,7 @@ ir_entry_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: I
             ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
             ir_end(b.f, b.line)
         }
-        else -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if result >= 0 -> ir_release(m, b, result)
 }
@@ -1886,7 +1904,7 @@ ir_payload_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int
     if !ir_box_row(m, carrier_row) -> return -1
     if ir_untag(m.types[carrier_row].ty) == {
         .Option(_) | .Result(_, _) -> {}
-        else -> return -1
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return -1
     }
     ir_close_disarm(b, slot)
     ir_close_disarm(b, carrier)
@@ -2126,6 +2144,72 @@ ir_join_owned: fn(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnSta
     loop (at, index) in joined -> ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
 }
 
+// Before a loop's exit Block opens: its edge word (IRLoopFrame.edge), 0 on
+// the path that leaves at its test, when a variable bound before it has a
+// drop, so a `break` may leave it owning other than that path does;
+// else -1.
+ir_loop_edge: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
+    loop index in 0..<b.bindings.len() {
+        binding: b.bindings[index]
+        if binding.indirect < 0 && binding.slot >= 0 && ir_has_drop(m, b, binding.slot) -> return ir_word_const(m, b, 0)
+    }
+    -1
+}
+
+// After a loop's exit Block ends, where its exits meet: each `break` to it
+// (IRLoopEdge, with edge word `edge`) and, when `tested` (the loop has a
+// test), the path that left there, whose ownership the bindings hold. A
+// loop without a test takes its first break's ownership as that path's. A
+// variable the exits disagree on still owns its value through a live flag
+// each exit's edge word selects, as ir_join_owned does for an If's two.
+ir_loop_join: fn(m: &IRModule, b: &IRBuilder, edge: Int, tested: Bool) Never! {
+    if edge < 0 -> return
+    rows := [Int]{}
+    loop at in 0..<b.loop_edges.len() {
+        if b.loop_edges[at].edge == edge -> rows.push(at)
+    }
+    if rows.len() == 0 -> return
+    first := 0
+    if !tested {
+        loop index in 0..<b.loop_edges[rows[0]].states.len() {
+            if index >= b.bindings.len() -> break
+            state: b.loop_edges[rows[0]].states[index]
+            ir_set_own_state(b, index, state)
+        }
+        first = 1
+    }
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    count: b.loop_edges[rows[0]].states.len()
+    loop index in 0..<count {
+        if index >= b.bindings.len() -> break
+        base: IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live}
+        differs := false
+        held := base.owned
+        loop at in first..<rows.len() {
+            state: b.loop_edges[rows[at]].states[index]
+            if state.owned != base.owned || state.live != base.live -> differs = true
+            if state.owned -> held = true
+        }
+        if !differs -> next
+        if !held {
+            ir_set_own_state(b, index, IROwnState{owned: false})
+            next
+        }
+        live: ir_temp(m, b, bool_row)
+        ir_live_set(b, live, base)
+        loop at in first..<rows.len() {
+            state: b.loop_edges[rows[at]].states[index]
+            if state.owned == base.owned && state.live == base.live -> next
+            id: ir_word_const(m, b, b.loop_edges[rows[at]].id)
+            taken: ir_bool_op(m, b, IROp.Eq, edge, id)
+            ir_open_if(b.f, taken, b.line)
+            ir_live_set(b, live, state)
+            ir_end(b.f, b.line)
+        }
+        ir_set_own_state(b, index, IROwnState{owned: true, live: live})
+    }
+}
+
 // Sets the live flag `live` to whether a variable in `state` holds its value.
 ir_live_set: fn(b: &IRBuilder, live: Int, state: IROwnState) Never! {
     if state.owned && state.live >= 0 {
@@ -2213,11 +2297,6 @@ ir_scope_close: fn(m: &IRModule, b: &IRBuilder) Never! {
     loop b.bindings.len() > mark {
         _: b.bindings.pop()
     }
-}
-
-ir_lookup: fn(b: IRBuilder, name: String) -> Int? Never! {
-    binding: ir_lookup_binding(b, name) ?? return None
-    Val(binding.slot)
 }
 
 ir_lookup_binding: fn(b: IRBuilder, name: String) -> IRBinding? Never! {
@@ -2313,12 +2392,13 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
     if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") -> return false
     if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") -> return false
     if symbol == {
-        "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
+        "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_rt_string_clear" | "jet_journey_reset" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" -> false
         "jet_term_mode_enter" | "jet_term_mode_leave" -> false
         "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
+        "jet_rt_effect_scope_enter" | "jet_rt_effect_scope_leave" -> false
         "jet_rt_coverage_function" -> false
         "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
         "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false
@@ -2360,7 +2440,7 @@ ir_op_can_stop: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
         .Div | .Rem | .FloorDiv | .Mod -> kind == .Int || kind == .Word
         .Shl | .Shr -> kind == .Int || trap
         .Add | .Sub | .Mul | .Neg -> trap
-        else -> false
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
     }
 }
 

@@ -182,7 +182,7 @@ jet_cli_doctor_io_kind: fn(error: IOError) -> String Never! {
         .Cancelled(_) -> "operation interrupted"
         .Closed(_) -> "broken pipe"
         .Protocol(_) -> "invalid data"
-        else -> "other error"
+        .Other(_) | .ResourceLimit(_) -> "other error"
     }
 }
 
@@ -248,11 +248,11 @@ jet_cli_doctor_apply_fixes: fn(checks: [JetCLIDoctorCheck]) -[FS]> [String] Neve
 jet_cli_doctor_remove: fn(path: String) -[FS]> Bool Never! {
     if doctor_files.remove(path) == {
         .Err(_) -> {}
-        else -> return true
+        .Ok(_) -> return true
     }
     if doctor_files.remove_all(path) == {
         .Err(_) -> false
-        else -> true
+        .Ok(_) -> true
     }
 }
 

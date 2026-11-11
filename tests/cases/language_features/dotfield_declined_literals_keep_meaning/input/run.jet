@@ -1,0 +1,23 @@
+// Zig's `.{ .field = value }` is not Jet; the Jet spellings keep their
+// meaning: a named struct literal and leading-dot enum values.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Mode: enum { Fast Careful }
+
+describe: fn(mode: Mode) -> String {
+    if mode == {
+        .Fast -> "fast"
+        .Careful -> "careful"
+    }
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    print("{point.x} {point.y}")
+    mode: Mode.Careful
+    print(describe(mode))
+    print(describe(.Fast))
+}

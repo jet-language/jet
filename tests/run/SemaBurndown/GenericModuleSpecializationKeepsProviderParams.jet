@@ -15,10 +15,10 @@ Labelled: trait {
 
 Provider: struct {
     count: Int
-}
 
-impl Provider.Native {
-    strong_count: fn(self) -> Int { self.count }
+    impl Native {
+        strong_count: fn(self) -> Int { self.count }
+    }
 }
 
 seam: module<N: Native> {
@@ -44,6 +44,10 @@ seam_alias: seam_m8
 Outer: struct {
     inner: seam_m8.Handle
     others: [seam_alias.Handle]
+
+    impl gc_m8.Native {
+        strong_count: fn(self) -> Int { self.inner.strong_count() + self.others.len() }
+    }
 }
 
 impl seam_m8.Handle.Labelled {
@@ -76,10 +80,6 @@ plain: module {
     }
 
     doubled: fn<N: Native>(value: N) -> Int { value.strong_count() * 2 }
-}
-
-impl Outer.gc_m8.Native {
-    strong_count: fn(self) -> Int { self.inner.strong_count() + self.others.len() }
 }
 
 run: fn() {

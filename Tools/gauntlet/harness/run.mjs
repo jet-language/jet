@@ -2511,8 +2511,12 @@ function toolCommand(script) {
 // entry's shape). Each case runs the original (`tool.original`) and the Jet
 // twin (`tool.jet`), both paths under `root` (the repository), with the
 // case's `args` and `env` (variables added to the harness environment); each
-// must exit with the case's `exit` (0 when it names none) and print the
-// case's `expected` file byte for byte. A `jetBin` given as a path is also the
+// must exit with the case's `exit` (0 when it names none) and do the job. A
+// case with a `check` (a Jet program in the entry) proves the job: after each
+// program, `jetBin CHECK STDOUT` runs in the case directory, STDOUT being a
+// file holding the program's output, and must exit 0 and print the case's
+// `expected` file byte for byte; a case without one compares the program's
+// own output with `expected` byte for byte. A `jetBin` given as a path is also the
 // `jet` the scripts run: its directory goes first on PATH and it is $JET,
 // which the dev shell's `jet` runs (a case's `env` may still set either); a
 // bare name is left to the caller's PATH. Every run starts in its own fresh
@@ -2558,9 +2562,20 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
       if (fixtures === null) await fs.mkdir(cwd, { recursive: true });
       else await fs.cp(fixtures, cwd, { recursive: true, verbatimSymlinks: true });
       const result = await runProcess(cwd, [...command, ...args], { env: { ...inner, ...env } });
-      const reason = result.code !== exitCode
+      let reason = result.code !== exitCode
         ? `exit ${result.code}, not ${exitCode}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
-        : mismatch(expected, result.stdout);
+        : null;
+      if (reason === null && typeof item?.check === "string" && item.check !== "") {
+        const printed = `${cwd}.stdout`;
+        await fs.writeFile(printed, result.stdout);
+        const checked = await runProcess(cwd, [jetBin, path.join(dir, item.check), printed], { env: { ...inner, ...env } });
+        await fs.rm(printed, { force: true });
+        reason = checked.code !== 0
+          ? `its check \`${item.check}\` fails (exit ${checked.code}): ${checked.stderr.toString("utf8").trim().slice(0, 300)}`
+          : mismatch(expected, checked.stdout);
+      } else if (reason === null) {
+        reason = mismatch(expected, result.stdout);
+      }
       row[side] = reason === null ? { status: "pass" } : { status: "fail", reason };
     }
     row.status = row.original.status === "pass" && row.jet.status === "pass" ? "pass" : "fail";

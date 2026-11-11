@@ -99,7 +99,7 @@ run: fn() {
     print("queue:{queue_report.status}:delivered={queue_report.delivered}:retried={queue_report.retried}")
     loop gate in backend.core_gates() -> print("gate:{gate.ticket}:available={gate.available}")
 
-    metrics: shared Metrics{requests: 0, errors: 0}
+    metrics: Shared{Metrics{requests: 0, errors: 0}}
     mux: http_server.mux()
     http_server.request_id(mux)
     mux.get("/health", (req: HTTPRequest) -> health(req, metrics))

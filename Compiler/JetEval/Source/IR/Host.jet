@@ -295,7 +295,7 @@ jet_eval_ir_host_store: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, v
             if !jet_eval_ir_host_fill(types, p, s, value, row, target) -> return None
             return Val(target)
         }
-        else -> {}
+        .Float | .Float32 -> {}
     }
     jet_eval_ir_host_unwritable(s, value, checked)
     None
@@ -340,7 +340,7 @@ jet_eval_ir_host_box: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, val
                     return None
                 }
             }
-            else -> value
+            .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit -> value
         }
         ok_row: ir_value_type(types, p, ok_ty) ?? {
             jet_eval_ir_host_unwritable(s, value, checked)
@@ -446,7 +446,7 @@ jet_eval_ir_host_fill: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, va
         name: if checked == {
             .Named(name) -> name
             .Apply(name, _) -> name
-            else -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
                 jet_eval_ir_host_unwritable(s, value, checked)
                 return false
             }

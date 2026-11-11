@@ -21,7 +21,7 @@ validate_tree: fn(value: Dyn) xml.XMLFault! {
         .Float(_) | .Bytes(_) -> {
             return Err(shape_error("XML tree cannot contain non-integer numbers or Bytes values"))
         }
-        else -> return Err(shape_error("internal JSON carrier escaped typed decode"))
+        .Number(_) | .DateTime(_) -> return Err(shape_error("internal JSON carrier escaped typed decode"))
     }
 }
 

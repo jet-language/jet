@@ -228,6 +228,17 @@ GitHub holds only in part. Every run appends a JSON entry under `DIR/audit/`,
 and a rerun moves the earlier stage and record there instead of deleting them.
 Evidence comes first: `publish` refuses a record with no `candidate` entry,
 and it writes its own entry before `gh release create` runs.
+The release also uploads each pinned asset jet embeds: the C toolchain pack
+(`CC_PACK_ASSETS`) and the static bubblewrap the native sandbox falls back to
+(`jet-bwrap-<arch>-linux`, `NATIVE_SANDBOX_BWRAP_ASSETS` in
+`Jetpack/Foundation/Source/NativeSandbox.jet`, built by
+`Tools/agent/bwrap.nix`). `admit` builds both from their pinned Nix sources,
+refuses one whose SHA-256 or size differs from the row jet embeds, and puts
+them beside jet; the seed and combined archives carry the bubblewrap, and
+`SHA256SUMS` lists it. `candidate` and `publish` read both tables at the
+release commit and block a staged asset whose bytes jet does not embed, and
+a release that lacks the bubblewrap jet embeds. An asset is published with the
+first release whose jet embeds it; an earlier release is never replaced.
 `Tools/release/Tests.jet` covers each case with a fake `gh`.
 
 ## Exit codes

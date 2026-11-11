@@ -1,0 +1,57 @@
+{
+  "startedAt": "2026-11-09T10:00:00Z",
+  "finishedAt": "2026-11-09T11:00:00Z",
+  "compilers": [{ "label": "rust", "path": "/opt/jet" }, { "label": "jetc", "template": "jet:{dir}" }, { "label": "bare", "path": null }],
+  "failures": [{ "kind": "growth" }, { "kind": "floor" }, "timeout"],
+  "series": [
+    {
+      "shape": "modules", "layout": "files", "compiler": "rust", "done": true, "truncated": "wall budget",
+      "points": [
+        { "x": 1000, "ok": true, "metrics": { "wall_seconds": 0.125, "peak_rss_kb": 524288 } },
+        { "x": 2000, "ok": true, "metrics": { "wall_seconds": 2.25, "peak_rss_kb": 1048576 } },
+        { "x": 4000, "ok": false }
+      ],
+      "failures": [
+        { "kind": "growth", "metric": "phase.sema.bodies", "phase": "sema.bodies", "ratio": 2.5, "exponent": 1.005, "counter": "counter.sema.items" },
+        { "kind": "growth", "metric": "wall_seconds", "phase": "total", "ratio": "fast", "exponent": -0.001 },
+        { "kind": "growth", "metric": "phase.parse", "phase": "parse", "ratio": 1e400, "exponent": 0.5, "counter": null },
+        { "kind": "floor", "text": "1200 lines/s < 5000" },
+        { "kind": "compile", "phase": "parse", "text": "exit 1" },
+        { "kind": "timeout", "text": "timed out after 120 s" },
+        { "kind": "other", "text": "ignored" }
+      ],
+      "profile": {
+        "phases": {
+          "sema.bodies": { "inclusive": [
+            { "source": "Sema.jet:10", "share": 0.4567 },
+            { "symbol": "check_body", "share": 0.205 },
+            { "source": null, "symbol": "lower", "share": 0.125 },
+            { "source": "late.jet", "share": 0.01 }
+          ] },
+          "total": {},
+          "parse": { "inclusive": [{ "source": "Parse.jet:3" }] }
+        }
+      }
+    },
+    {
+      "shape": "generics", "layout": "single", "compiler": "jetc", "mode": "timing", "done": false,
+      "points": [
+        { "x": "8", "ok": 1, "metrics": { "wall_seconds": 1e400, "peak_rss_kb": null } },
+        { "x": null, "ok": "yes", "metrics": { "wall_seconds": "3", "peak_rss_kb": "2097152" } }
+      ],
+      "failures": [{ "kind": "truncated", "phase": null, "text": "rung 3 cut" }]
+    },
+    {
+      "shape": "web", "layout": "files", "compiler": "rust", "points": [],
+      "projection": { "phases": {
+        "phase_parse": { "at_lines": 125000, "measured_s": 0.5, "exponent": 1.02, "projected_s": 4.05 },
+        "wall_seconds": { "at_lines": 125000, "measured_s": 1.25, "exponent": 1.1, "projected_s": 12.25 },
+        "phase_sema": { "at_lines": 125000, "measured_s": 0.5, "exponent": 1.0, "projected_s": 4.05 },
+        "phase_ir": { "at_lines": "125k", "measured_s": "slow", "exponent": null, "projected_s": "0.5" },
+        "phase_lower": { "at_lines": 125000, "measured_s": -0.004, "exponent": 2, "projected_s": 0.05 }
+      } }
+    },
+    { "shape": "cli", "layout": "files", "compiler": "rust", "points": [{ "x": 500, "ok": false }], "failures": [] },
+    { "shape": "game", "layout": "files", "compiler": "rust", "mode": "counters", "points": [{ "x": 7, "ok": true, "metrics": { "wall_seconds": 5 } }], "done": true, "failures": [] }
+  ]
+}

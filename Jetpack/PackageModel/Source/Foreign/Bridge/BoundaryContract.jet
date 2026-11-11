@@ -111,11 +111,11 @@ pkg_foreign_boundary_capability: fn(language: ForeignLanguage) -> ForeignBoundar
     }
     source_import: if language == {
         .Py | .Java | .DotNet | .JS | .Go -> true
-        else -> false
+        .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .C | .Cpp | .Asm | .Octave | .Rust | .Swift -> false
     }
     binder_only: if language == {
         .Com | .Ada | .Pascal -> true
-        else -> false
+        .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .C | .Cpp | .Asm | .Py | .Octave | .Rust | .JS | .Swift -> false
     }
     disposition: if {
         !active -> ForeignBoundaryDisposition.Unsupported
@@ -129,11 +129,11 @@ pkg_foreign_boundary_capability: fn(language: ForeignLanguage) -> ForeignBoundar
     }
     mixed_debug: if language == {
         .C | .Cpp | .Py | .Java | .DotNet | .JS | .Go -> true
-        else -> false
+        .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Asm | .Octave | .Rust | .Swift -> false
     }
     native: if language == {
         .C | .Cpp -> true
-        else -> false
+        .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Asm | .Py | .Octave | .Rust | .JS | .Swift -> false
     }
     ForeignBoundaryCapability{language: language, disposition: disposition, source_import: source_import, mixed_debug: mixed_debug, native_export: native, build_host: native, reason: reason}
 }

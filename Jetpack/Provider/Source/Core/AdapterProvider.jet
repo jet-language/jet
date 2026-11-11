@@ -115,7 +115,7 @@ provider_adapter_failure: fn(plan: AdapterPlan, ctx: ProviderCtx, staged: String
 provider_adapter_is_build: fn(recipe: AdapterRecipe) -> Bool Never! {
     if recipe == {
         .Build(_) -> true
-        else -> false
+        .Copy | .Prebuilt(_, _) -> false
     }
 }
 

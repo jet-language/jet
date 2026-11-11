@@ -11,6 +11,7 @@ use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverForeignLinkFacts, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_foreign_link_cache_identity, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
     jet_foundation.[stable_id, sha256_bytes, sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    jetpack_foundation.[NATIVE_SANDBOX_FIX, foundation_linux_bwrap]
 }
 
 JET_CLI_RUST_ARTIFACT_SCHEMA: "jet-ffi-artifacts-v2"
@@ -33,7 +34,7 @@ jet_cli_rust_foreign_io: fn(message: String) -> JetDriverRustForeignError Never!
     JetDriverRustForeignError{code: "E0704", what: message, why: "building the foreign crate bridge failed", fix: "check disk permissions and try again"}
 }
 jet_cli_rust_foreign_sandbox_error: fn(detail: String) -> JetDriverRustForeignError Never! {
-    JetDriverRustForeignError{code: "E1275", what: "build sandboxing is required but unavailable", why: detail, fix: "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"}
+    JetDriverRustForeignError{code: "E1275", what: "build sandboxing is required but unavailable", why: detail, fix: "{NATIVE_SANDBOX_FIX}; Jet will not run Cargo unsandboxed"}
 }
 jet_cli_rust_foreign_digest: fn(bytes: [U8]) -> String Never! {
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
@@ -205,26 +206,26 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
     packages_value: jet_cli_rust_foreign_json_field(document, "packages") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata has no packages"))
     packages: if packages_value == {
         .Array(values) -> values
-        else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array")) }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata packages must be an array")) }
     }
     present := false
     loop package in packages {
         name_value: jet_cli_rust_foreign_json_field(package, "name") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no name"))
         name: if name_value == {
             .Text(value) -> value
-            else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata package name must be a string")) }
         }
         if name == crate_name -> next
         targets_value: jet_cli_rust_foreign_json_field(package, "targets") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata package has no targets"))
         targets: if targets_value == {
             .Array(values) -> values
-            else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata targets must be an array")) }
         }
         loop target in targets {
             kinds_value: jet_cli_rust_foreign_json_field(target, "kind") ?? return Err(jet_cli_rust_foreign_io("Cargo metadata target has no kind"))
             kinds: if kinds_value == {
                 .Array(values) -> values
-                else -> { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array")) }
+                .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> { return Err(jet_cli_rust_foreign_io("Cargo metadata target kind must be an array")) }
             }
             loop kind in kinds {
                 if kind == .Text(value) {
@@ -332,7 +333,10 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
     // ("linux"); `sys.family()` is the family ("unix"), which never matches.
     if cli_sys.name() != "linux" -> return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
     if cli_sys.get("JETPACK_FAKE_SANDBOX") != None -> return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
-    bwrap: cli_process.which("bwrap") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap (`bwrap`) is not available on PATH"))
+    // The one Bubblewrap every sandboxed action resolves (PATH, else Jet's
+    // pinned copy in the Hangar), probed there; the probe below adds the
+    // registry overlay this helper needs.
+    bwrap: foundation_linux_bwrap() ?? return Err(jet_cli_rust_foreign_sandbox_error(err.message()))
     shell: cli_process.which("sh") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap is present but no immutable shell probe is available"))
     probe := jet_cli_rust_foreign_bwrap(bwrap, "", "", "", false, false)
     // A registry overlay needs bubblewrap 0.11 or newer; probe the exact mount
@@ -504,10 +508,14 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
 // `.trace-workspaces` until the audit; otherwise its owner removes it when
 // the run ends. The caller holds the full-key OS lock, so any other workspace
 // under the key is a killed run's leftover, removed before this one is made.
-JetCLIRustForeignWorkspace: struct { path: String, retain: Bool }
-impl JetCLIRustForeignWorkspace.Close {
-    close: fn(&&self) -[FS]> {
-        if !self.retain -> cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+JetCLIRustForeignWorkspace: struct {
+    path: String
+    retain: Bool
+
+    impl Close {
+        close: fn(&&self) -[FS]> {
+            if !self.retain -> cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
+        }
     }
 }
 jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeignWorkspace JetDriverRustForeignError! {

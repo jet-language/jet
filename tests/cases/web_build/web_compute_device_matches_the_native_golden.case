@@ -1,0 +1,14 @@
+# `.Auto` compute placement has one meaning on every tier: the web target
+# runs the one runtime selected to WebAssembly, so
+# Examples/Math/Compute/ComputeDevice.jet built for the web prints its native
+# golden's exact lines, the CPU placement and its receipt included.
+requires: tool:node
+env: NO_COLOR=1
+copy: {root}/Examples/Math/Compute/ComputeDevice.jet main.jet
+step: jet build --target web main.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = ../../../Examples/Math/Compute/ComputeDevice.out
+stderr: = ""

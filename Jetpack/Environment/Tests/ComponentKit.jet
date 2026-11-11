@@ -43,7 +43,7 @@ env_component_test_dir: fn(label: String) -[FS]> String {
         .Err(error) -> {
             if error == {
                 .AlreadyExists(path) -> assert_eq(path, dest)
-                else -> panic("expected AlreadyExists")
+                .IO(_) -> panic("expected AlreadyExists")
             }
         }
         .Ok(_) -> panic("second copy should refuse")

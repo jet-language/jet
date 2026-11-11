@@ -22,6 +22,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `:=` | mutable binding |
 | `use { … } / use alias: path` | import block (#6542): one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
+| `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `#` | attached marker; #[A, B] stacks |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
@@ -39,13 +40,15 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `comptime fn` | build-time literal-hook method |
 | `comptime use { … } / comptime use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime { … }` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
 | `<comptime N: Int>` | compile-time number parameter declaration |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left` |
-| `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) |
-| `$package` | package fact root: `$package.name`, `.version` |
-| `$phase` | total evaluation-site phase fact |
-| `$program` | authorized checked-program fact root |
-| `$here` | the `SourceLocation` (file, line, column, function, module) where it is written |
-| `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
+| `$` | config-surface environment read `$NAME`; program source has no `$` words |
+| `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
+| `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
+| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features` |
+| `#package` | package site value: `#package.name`, `.version` |
+| `#phase` | compiler evaluation-site `Phase` value |
+| `#program` | compiler authorized checked-program fact value |
+| `#here` | site value: the `SourceLocation` (file, line, column, function, module) where it is written, as in `#here.line` and `#here.file` |
+| `#caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{#caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
@@ -121,7 +124,7 @@ PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,
 (2026-09-30): the rule covers every word of every type-like name, not only a
 leading word — `MIRType`, `TIRExpr`, `SourceAST`, `TaskID`, `UINode`.
 Glued compounds (`HTTPHeader`); underscore only between touching capital runs
-(`HTTP_API`). Coined contractions stay words: `Wasm`, `WasmExport`,
+(`HTTP_API`). Coined contractions stay words: `Wasm`,
 `Bindgen`. No PascalCase aliases; a word-cased acronym in a type-like
 declaration or type position gets E0358 with a `jet fix` edit (markers:
 E0927).
@@ -361,9 +364,9 @@ below)*: in a file with `run: fn`, that is the file's execution body; `jet run`,
 `name: value` and `name := value` are module globals
 visible to every function in the file; the mutable form is writable and is
 initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
-instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23) amends the
-immutable form: its initializer is any expression, computed once in dependency
-order before `run: fn` and read as an ordinary copy on every tier (spec "Values,
+instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23 and by
+D-MODULE-BUILD1 below) amends the immutable form: its initializer is any
+expression, read as an ordinary copy on every tier (spec "Values,
 expressions, and calls"). Loose top-level statements beside `run: fn` are
 E0621, and an imported file with loose statements is E0620. Notebook and REPL
 adapters may construct an explicit `run: fn` for their submitted fragment.
@@ -382,27 +385,49 @@ module rules above; a file with both is E0621; a file with neither is a library
 (E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
 meaning on every tier.
 
-**D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
-2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
+**D-MODULE-BUILD1=A — module values are built, never computed at startup**
+*(owner ruling 2026-11-09, #6281 c132; amends D-MODULE-VALUE1)*: a module-level
+`name: value` is always evaluated while building and stored in the program,
+the same value on every tier. No code runs before `run: fn`. A value whose
+evaluation stops, reaches the outside world, or can't run while building is a
+build error (E0643, which retires E0627), whose fix names the three ways out:
+compute it in `run`, make it a function (`#Memo` when pure), or read a pinned
+build input through `comptime { embed_file(…) }`. Inside a function a plain
+`name: value` only tries to fold; top-level statement files run in order
+(D-ENTRY-STATEMENTS1).
+
+**D-CLI-POS1=A — positional by default, `#Arg(flag_only: true)` to opt out**
+*(ratified 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
 flag-only. Every field still accepts its named `--field` spelling; when both the
 named form and a bare value appear for the same field, the named value wins.
-`#Flag` on a required value field removes it from positional filling (expert
-opt-out for secrets and similar). `#Flag` on a Bool / optional / defaulted
-field is E1309. Declaration order of required value fields is
+`#Arg(flag_only: true)` on a required value field removes it from positional
+filling (expert opt-out for secrets and similar). `flag_only: true` on a Bool /
+optional / defaulted field is E1309. Declaration order of required value fields is
 part of the command interface; the always-available named spelling keeps scripts
-stable across reorders. Help lists positionals before flags. Marker constant:
-`MARKER_FLAG` (`Flag`).
+stable across reorders. Help lists positionals before flags. The option lives on
+`#Arg` (D-CLI-ARG1).
 
 **D-CLI-FIELD-MARKERS1=A — per-field short names and environment fallbacks**
-*(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Short("n")`
-for a one-letter alias and `#Env("PORT")` for an environment fallback. Both
+*(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Arg(short: "n")`
+for a one-letter alias and `#Arg(env: "PORT")` for an environment fallback. Both
 rules use the existing field marker list and lower to the existing `core.args`
 builder. Explicit command input wins over the environment, and the environment
 wins over the field `{expr}` default. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
-Typed-CLI markers with no builder mapping are E1319. Marker constants:
-`MARKER_SHORT` (`Short`) and `MARKER_ENV` (`Env`).
+Typed-CLI markers with no builder mapping are E1319. The options live on
+`#Arg` (D-CLI-ARG1).
+
+**D-CLI-ARG1=A — one `#Arg` marker carries a command field's options**
+*(Tower #4294)*: `#Arg(flag_only: Bool{false}, short: String?, env: String?)`
+replaces the separate `#Flag`, `#Short("n")` and `#Env("NAME")` field markers.
+Options are written by label (`#Arg(short: "p", env: "PORT")`) or in that
+parameter order, and each keeps its old meaning and diagnostic: `flag_only:
+true` where nothing opts out is E1309, a bad or repeated `short:` is E1318,
+and `#Arg` outside a `#CLI` struct or `env:` on a presence-only `Bool` is
+E1319. `#Flag`, `#Short` and `#Env` are retired with no alias; they are
+unknown markers (E0927). Registry row: the `Arg` struct of
+`Compiler/Prelude/Markers.jet`.
 
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `run: fn(args: T)` is
@@ -417,7 +442,7 @@ directly imported module.
 **D-CLI-GLOBAL1=E — one program struct owns root flags and commands** *(ratified
 2026-08-10, Tower #1858)*: use one `#CLI` struct for a multi-command program.
 Scalar fields are root/shared flags and are valid before or after the command.
-Their precedence is command input > `#Env` > field default. Callable members
+Their precedence is command input > `#Arg(env:)` > field default. Callable members
 are commands: a method receives read-only `self`, and a member binding
 `name = function` binds an existing function. A bound function may receive
 the program struct as its first read-only parameter; remaining command
@@ -478,13 +503,19 @@ rule for two bindings within one function.
 See the executable [lambda interface example](../../Examples/Basics/Functions/LambdaInterface.jet).
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
-parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
-values only when every parameter also has plain read access. Declaration-local
-parameter names are documentation, not function-value identity; explicit
-public labels and parameter zones remain callable obligations. A named function
-with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
-has no function-type spelling that could preserve that requirement; a callback
-that must change a value takes it read-only and returns the updated value. Captures follow M2: shared read for read-only
+parameter has plain read access (D-MEM-PARAM1). A parameter type marks a
+written input `&` or a taken input `&&`, as a declaration does: `fn(&[Int])`
+writes its argument in place and `fn(&&Map)` takes it. A lambda parameter
+marks its access the same way (`(buf: &[Int]) -> buf.push(1)`); an unmarked
+lambda parameter takes the access of the function type it fills, and a marked
+one must match it (E0113). Named `fn`s coerce to function values only where
+the function type marks every parameter as the declaration does (E0227), and a
+function value crosses only into a function type that writes the same
+parameters (E0227). Declaration-local parameter names are documentation, not
+function-value identity; explicit public labels and parameter zones remain
+callable obligations. A call through a write-marked function type lends the
+argument's place, so named, lambda, generic and struct-field calls all write the
+caller's value. Captures follow M2: shared read for read-only
 names, mutable borrow for written names. Escaping closures own captures.
 Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
@@ -609,7 +640,9 @@ arm, with no run-time test. A union arm may name a member without binding it
 no `else`. Run-time dispatch over mixed values uses unions; no `Any` type
 (D-ANY-JAI1 stands).
 
-**D-ENUM-EVOLUTION1=A — Caller-selected enum fallback** *(ratified 2026-09-12, card #3145)*: named enums remain closed. Adding a case can make downstream exhaustive matches fail until they handle it. Callers may add an explicit `else` when they choose future-case tolerance; publishers cannot require it with a marker, so that tolerance is the caller's choice rather than a publisher-enforced compatibility promise. The same completeness rule applies inside and outside the defining module. This policy adds no enum constructor, integer conversion, or unknown-case fallback; foreign and wire ingress remain separate contracts (D-ENUM-UNKNOWN1).
+**D-ENUM-EVOLUTION1=A — Caller-selected enum fallback** *(superseded by the owner ruling on #6281, 2026-11: closed-set matches name every case)*: named enums remain closed. Adding a case can make downstream exhaustive matches fail until they handle it. Callers could add an explicit `else` when they chose future-case tolerance; publishers cannot require it with a marker. The same completeness rule applies inside and outside the defining module. This policy adds no enum constructor, integer conversion, or unknown-case fallback; foreign and wire ingress remain separate contracts (D-ENUM-UNKNOWN1).
+
+**Closed-set matches name every case** *(owner ruling on #6281, 2026-11; supersedes D-ENUM-EVOLUTION1)*: an `else` arm over a closed set (an enum, `T?`, `T E!`, or a union) is an error, E0641, with no exemption. Adding a case therefore breaks every table over that type until it handles the new case (E0307), instead of the case falling into an `else` silently. An `else` that can never run is the same error, not a lint (L0303 is retired). The Safe edit replaces the `else` with an or-pattern of the cases it stood for (`.Green | .Blue(_) -> …`) or deletes a dead `else`; `jet fix --code E0641` applies it. A hand-written classifier function may replace a long or-pattern; an `else` may not. Tables over open sets (numbers, text, structs) and tables with a non-pattern arm keep `else`.
 
 **D-TRAILBLOCK1 — Trailing block argument** *(superseded by D-TRAILBLOCK2=A)*:
 when a call's final param was a function type, a bare `{ }` after `)` stood in
@@ -647,7 +680,12 @@ next `|>`, so a step's own `?? return` leaves the function. `<>` is one
 longest-match lexer token beside `<:` and `:>` (`<`, `<=`, `<=>`, `<<` and `>>`
 never form it) and a primary expression legal only inside a step (E0437). Every
 step reads `<>` at least once (E0438) and may read it more often; the value is
-computed once. `<>` means the nearest enclosing step, through lambdas and string
+computed once. E0438's fix writes `<>` where it fits (D-PIPE-FIRST1=A, ratified
+2026-11-10): a bare function name becomes `name(<>)`, a call one argument
+short gets `<>` in the argument slot that accepts the value, and a method of
+the value becomes `<>.name(…)`. `jet fix` applies it only when exactly one
+placement fits; with several, the error lists each and the editor offers each,
+first slot first. `<>` means the nearest enclosing step, through lambdas and string
 holes, and a pipe inside a lambda or brackets has its own steps. Each step
 lowers before type checking to a hidden immutable binding in a frame of its own,
 so the pipe checks, owns and compiles exactly as the hand-named form; a head
@@ -1129,14 +1167,24 @@ the Float function runs on the exactly widened arguments and its result rounds
 once to `F32`; `to_bits` returns the binary32 bits, and `is_finite`/`cmp`
 classify the `F32` value.
 
-**D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
-.Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary
+**D-WRAP-SCOPE1=A** *(owner outcome, card #2171; spelling superseded by
+D-POLICY-FILE1)*: `#Policy(arithmetic: .Checked | .Wrapping | .Saturating)` is
+the one lexical policy for fixed-width `+`, `-`, `*`, unary
 negation, and `pow`. It may attach to a function, method, or block; the
 innermost block wins, and a declaration policy does not cross a call boundary.
 `.Checked` is the explicit spelling of the default. Division, remainder,
 shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
 existing rules and do not inherit this policy. The operation keeps the exact
 source span of its active policy for tooling and diagnostics.
+
+**D-POLICY-FILE1** *(card #4299, carried by #4284 c15)*: arithmetic is a
+`#Policy` setting, `arithmetic: .Mode`, at function, method and block scope.
+Written on the line directly above a declaration, `#Policy(arithmetic: …)`
+belongs to that declaration. Followed by a blank line or the end of the file
+it is a module policy, which is E0355. A package `policy: { arithmetic: … }`
+is an invalid manifest (E1215). A bare `arithmetic` with no mode is E0355, and
+a mode outside the menu is E0930. The standalone `#Arithmetic(mode)` marker is
+retired and is an unknown marker (E0927).
 
 **D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
 2026-07-28)*: one numeric widening law applies to operators, arguments,
@@ -1315,13 +1363,30 @@ are readable by bare name inside `expr`). `#Memo` is the explicit retained
 form: the first read keeps its answer, and a write to any stored sibling in
 its dependency graph drops that answer. Both forms are unsettable: the field
 is absent from a `Type{ … }` literal's required/allowed field list (E0339 if
-provided), and direct assignment (`s.field = v`, `s.field++`) is also E0339. A
+provided), and no write reaches it (E0339, D-FIELD-READONLY1 below). A
 cycle among computed-field formulas, including self-reference, is E0338.
 Codegen: not a Rust struct member — a synthesized inherent getter method
 instead; every read routes to a call of it. `#Patchable` (D-PATCH1) excludes a
 computed field from `T.Patch` and from `apply`/`diff`/`merge`. `#Codable` encode
 calls the getter (the field appears in the wire output); decode never reads
 into it.
+
+**D-FIELD-READONLY1=A — read-only fields are computed getters over `priv`
+storage** *(ratified 2026-11-09, card #6468)*: no new syntax. A field that every
+module reads but only its own module changes is a public computed field over a
+`priv` stored one, `priv stored_path: String` beside `path: String ->
+stored_path`. Nothing writes a computed field, not even its own module: an
+assignment or compound assignment (`lock.path = …`, `s.count += 1`), a write
+loan (`edit(lock.path)` to a `&` parameter, a method that writes its
+receiver) and a take (`lock.path.move()`) are each E0339, directly or through
+a field, element or range below it (`h.lock.path = …`, `s.items[0] = …`). The
+check runs before the owner's mutability, so a computed target reports E0339
+whether its owner is immutable or mutable. Provider code edits the stored
+field. A read is an ordinary materialized getter result, and consuming that
+result stays legal. A literal that sets a computed field is E0339 and still
+reports the first `priv` field it omits (E0605). The `core.files` handles
+`TempDir`, `TempFile`, `FileLock`, `FileReader`, `FileWriter`, `Directory` and
+`MappedFile` expose `path` this way.
 
 **D-QUAL3 — Unit families**: `#UnitFamily(Currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
@@ -1568,9 +1633,16 @@ suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in one
 `state { A, B, C }` section inside their named `struct` body;
-`#State(S) m: fn(self)` requires state S; `#Transition(From, To) fn` advances
+`#State(S) m: fn(self)` requires state S; `#State(From -> To) fn` advances
 it (`_` from-state = entry constructor). Wrong-state call E0150; markers erase
 in codegen. Ordering falls out of the transition graph.
+
+**D-STATE-ARROW1=A** *(card #4302)*: the transition marker is
+`#State(From -> To)`, one marker for both typestate facts. `From` may be `_`
+(the entry constructor); `To` may not. One arrow only: a chain
+`#State(A -> B -> C)` is a parse error at the second arrow, and `#State(_)`,
+`#State(A, B)` and `#State(A, to: B)` are E0930. The former
+`#Transition(From, To)` spelling is retired and is the unknown marker E0927.
 
 **D-STATE-TERMINAL1=A** *(card #2184)*: a checked state with no outgoing
 transition is a valid terminal state. The compiler stores `terminal: true` only
@@ -1593,7 +1665,14 @@ content-addressed definitions (D-CADEFS1, frozen).
 ### Collections
 
 **S37 — List literal**: `[a, b, c]`; empty `[]` needs a context type
-(**S78**: `[]` infers from expected type; explicit `[]: [T]` always accepted).
+(**S78**: `[]` infers from the expected type; `[T]{}` names the type on the value).
+**D-INFER-LEVEL1=A**: with no expected type, an untyped `names := []` (E0501) or
+`best := None` (E0308) is not inferred from later lines. The report reads ahead in
+the same function for the first use that implies the type (a push or insert
+argument, a map add or index store, an assignment, a return, or a typed call
+argument), names that line and type, and carries a Safe edit that writes
+`[String]{}`, `[String:Int]{}` or `Int?{None}` where the value starts. With no such
+use the report gives the general advice.
 
 **S38 / D-EMPTYLIT1 — Map literal**: `["key": value, …]`. **D-EMPTYLIT1**
 *(ratified 2026-07-04)*: `[]` is the ONE empty-collection spelling for both
@@ -1812,6 +1891,9 @@ encoded; a Path hole is one encoded component, including `.` and `..`; a
 DateTime head cannot contain holes. Runtime strings keep the existing
 fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
 and D-CORE-PATH1; no compatibility spelling is retained.
+Since D-TEXTHEAD-HOLES1=A and D-HOST-LEAF1=E, `URL`, `Path` and `DateTime`
+are Core `CheckedText` impls: an invalid body is E2712, whose Why is the Core
+check's reason (`URL port cannot contain interpolation`). E0155 is retired.
 
 **D-BOUND-RAW1=A — typed head bodies own escapes** *(ratified 2026-08-13,
 card #1815)*: inside any `Type{"…"}` body, backslash is literal text owned
@@ -2143,24 +2225,30 @@ namespace like any other, so `use` and `pub use` are legal inside
 inside that body.
 
 **S18 — Visibility** *(D-VIS-MODULE1, owner directive 2026-10-07, card #4723;
-supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: everything is public by default,
-and declarations never carry a visibility marker. The only visibility keyword is
-`priv`, and it marks only two things:
+D-VIS-ITEM1=A, card #6050; supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*:
+everything is public by default. The only visibility keyword is `priv`, and it
+is the only hiding form:
 
+- a declaration: `priv name: fn …`, `priv Name: struct …` and every other
+  declaration (function, type, enum, trait, tag, protocol, constant, alias).
+  At the top level of a package it keeps the declaration inside the package;
+  inside a module it keeps it to that module and the module's children, and
+  `priv(package)` there widens it to the whole package.
 - a module: `priv name: module { … }` or the file-module form `priv name: module`.
   Its contents are usable only by the enclosing module and that module's other
   children. `priv(package) module` makes them usable by every module of the same
   package and invisible to other packages (other `priv(…)` qualifiers: E0414).
+  A `priv` declaration inside a `priv(package) module` stays module-only.
 - a struct field: `priv value: T` is readable and writable only by code in the
   type's own module (and its children). Invariant carriers such as secrets,
   native handles and validated values use it.
 
 Removed forms are compile errors whose fix deletes the marker: `pub` and
-`pub(…)` on a declaration, method or field (E0411), `private` (E0412), `priv`
-on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
-`priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
-`priv module` or a `priv` field from outside is E0605/E0609. There is no
-package-level privacy yet (it will come through the manifest).
+`pub(…)` on a declaration, method or field (E0411), `private` (E0412),
+`pub:`/`priv:` section labels (E0415), `priv(package)` on a top-level
+declaration other than a module (E0414: write `priv`) or on a field (E0417),
+and `#PubFile` (E0418). Reaching a `priv` declaration, a `priv module` or a
+`priv` field from outside is E0605/E0609.
 
 Re-export (`pub use`) is not decided: it stays the only `pub` form until the
 re-export ballot is ratified (the owner leans toward imports being public by
@@ -2420,9 +2508,10 @@ sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
 `[T#N]` and package selectors `pkg#1.2.3`. The caller-location value this entry
-once spelled `#Caller()` is the fact root `$caller` (D-JAI-SITE1=A).
+once spelled `#Caller()` is the site value `#caller` (D-JAI-SITE1=A, respelled
+by D-SITE-CALLER1=A).
 Later rulings assign `$name` to known-value splice (D-NAME-SPLICE1=B), `<: … :>`
-to statement expansion (D-FENCE2=A), and `T.$layout` to the compiler-known
+to statement expansion (D-FENCE2=A), and `T.reflect().layout` to the compiler-known
 layout projection (D-COMPILER-NS1=A); the `@` and older `$` spellings are retired.
 
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
@@ -2431,8 +2520,9 @@ D-VERDICT-732-1)*: on `#`: `MustUse`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Comparable`
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
 purity to the empty function-effect row (`f: fn(Int) -[]> Int`). Field-level wire markers
-use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
-`DenyUnknownFields`, `Discriminant`, `Untagged`.
+use `#`: `Rename`, `Skip`, `Default`, `Flatten`,
+`DenyUnknownFields`, `Discriminant`, `Untagged`; a type's casing is
+`#Rename(.Camel)` (D-RENAME-CASE1).
 
 **S82 — One placement law** *(D-SHAPE2/D-ATTR2/D-VERDICT-732-1; rewritten by
 D-MARK-FORM1=A, ratified 2026-08-05, card #1455)*: a marker, or one `#[A, B]`
@@ -2558,11 +2648,12 @@ outcome itself is unchanged: `#Static` gives the constant an address, `#Inline`
 copies it into use sites.
 
 **D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
-type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`
-parses and type-checks the statement in every build, emits in debug/dev builds,
-and strips from release output. Both attach to statements only; item position is
-E0342, expression position is E0343, and doubled switch attributes are E0344.
-Names introduced inside the marker body do not escape. Bare `build.profile` is
+type-checks the statement, then emits no code in every build. `#Off(.Release) <stmt>`
+(D-OFF-RELEASE1=A, which retires `#DebugOnly`) parses and type-checks the
+statement in every build, emits in debug/dev builds, and is erased in release
+builds. Both attach to statements only; item position is E0342, expression
+position is E0343, and two `#Off` forms on one statement are E0344.
+Names introduced inside the marker body do not escape. Bare `#build.profile` is
 not a user-typeable comptime value; the registered fact spelling is
 `$build.profile` (D-BUILD-FACT3=A).
 
@@ -2601,7 +2692,7 @@ an error.
 **D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
 card #1268)*: `print` and bare interpolation show a quantity's magnitude and
 declared unit symbol by default. Derived dimensions use a normalized product
-or quotient, such as `4 meter/ns`. An explicit `Display` implementation
+or quotient, such as `4 meter/s`. An explicit `Display` implementation
 replaces this default for its concrete unit type.
 
 `{value:Unit(name)}` uses the generated unit type name.
@@ -2613,8 +2704,16 @@ use the same Display path. `.raw()` still extracts the unchanged numeric value.
 #498)*: `#Target(…)` is the only target-partition spelling, for every axis —
 `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, `#Target(OS.Linux)`. The
 bare `#Wasm` and `#JS` markers are removed from the grammar (ordinary
-unknown-marker errors, no teaching residue). `#WasmExport` is a different
-job (export surface) and is untouched.
+unknown-marker errors, no teaching residue). The Wasm export surface is a
+different job; it is spelled `#Export(wasm)` (D-EXPORT-WASM1).
+
+**D-EXPORT-WASM1=A — `#Export(wasm)` replaces `#WasmExport`** *(ratified,
+card #4296)*: `#Export(wasm)` on a function marks the Wasm entry that
+generated JavaScript calls. It lowers to exactly what `#WasmExport` did: the
+same JS bridge, manifest entry and Wasm bucket, with no extra
+`#Target(Wasm)`. `#Export(c)` keeps the native Library export contract
+unchanged. `#WasmExport` is retired with no teaching residue: it is an
+unknown marker (E0927).
 
 **D-BLOCKPLANE1=A — expert regions are `#` blocks** *(ratified by owner
 2026-07-12, card #512)*: the three keyword regions join the marker
@@ -3111,8 +3210,8 @@ is not built yet: it attaches to the D-MEMREF1 link build.
 *(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
 no-`defer` ruling)*: automatic scope-end cleanup remains
 the safety net on success, error, panic, and cancellation; a small block still
-ends ownership early. `close(^resource)` is the one consuming close operation
-for files, locks, connections, and other resources. `defer close(^resource)`
+ends ownership early. `close(resource)` is the one consuming close operation
+for files, locks, connections, and other resources. `defer close(resource)`
 schedules it beside acquisition and runs deferred closes in reverse order on
 every scope exit. An immediate close consumes at the call; a deferred close
 consumes when its scheduled action runs. `.drop("reason")` remains deliberate
@@ -3121,8 +3220,11 @@ success such as `finish`, `commit`, `flush`, and `shutdown` remains an ordinary
 fallible method rather than pretending automatic cleanup succeeded.
 There is no general deferred statement or block: `defer action()` and
 `defer { ... }` are E0003. The resource expression is one directly moved local;
-ordinary close-call resolution proves that `close(^resource)` is valid, and the
+ordinary close-call resolution proves that `close(resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
+(Corrected 2026-11-10: this entry first spelled the operand `^resource`; a
+`^` in value position is E0003, and `close` consumes its argument through its
+`Close` contract, so the operand is the plain local.)
 Checked instantiated owned fields and List/Option payloads retain their
 ordinary `Close` cleanup (#4792). A partial field move leaves cleanup only
 for the remaining initialized fields; moving the payload transfers its duty.
@@ -3540,6 +3642,13 @@ first, fuel-limited; comptime `panic` is a user-authored compile error;
 results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
+*Amended by D-META-RECONCILE1=A (ratified 2026-10-07,
+card #3520):* the comptime-type clause gives way to D-GENERIC-TYPEFN1
+(standard `prep fn` type recipes), and the const-generics clause to
+D-CONSTGEN1. The dispatch clause binds standard code; specialization by an
+approved root follows D-META-CONTROL2 and D-META-OPTIN2, now the
+D-META-LADDER1 `Compiler` value. The ban on token, AST and attribute macros
+and custom syntax stays universal.
 
 **S57 — Compile-time demand** *(as amended by D-META-STAGE1=B and
 D-ONCE-AT1=D; the `@if` branch is reaffirmed by D-STRUCT-ONCE1=A; ratified
@@ -3585,7 +3694,7 @@ Constant: `COMPTIME_MARK` in
 `Examples/Metaprogramming/Comptime/PrepBlock.jet` and `comptime_if.jet`.
 
 **D-LAYOUT-FACTS1=B — Compiler-owned type facts** *(spelling amended by
-D-COMPILER-NS1=A)*: `T.$layout`, `T.$name` and `T.$fields` are one closed spelling,
+D-COMPILER-NS1=A)*: `T.reflect().layout`, `T.reflect().name` and `T.reflect().fields` are one closed spelling,
 each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
@@ -3627,6 +3736,11 @@ from the build entry (post-sema snapshot; diagnostics must carry
 code+what/why/fix). No mutation, no AST injection, no macros
 (D-PROCMACRO1/D-READERMACRO1 deferred/rejected; libraries can never mutate
 grammar).
+*Amended by D-META-RECONCILE1=A:* "no macros" and the
+grammar ban stay universal. "No mutation, no AST injection" binds standard
+code; an approved root changes written code only through D-META-CONTROL2
+checked change sets under D-META-OPTIN2, now the D-META-LADDER1 `Compiler`
+value.
 
 **D-METAREFLECT1 — Reflection API**: `T.reflect()` returns a `Type` handle —
 `.name` is the leaf, `.path` is the canonical typeable path, and `.fields` is
@@ -3645,7 +3759,7 @@ copies. The difference is therefore an intentional projection boundary, not a
 second metadata model.
 
 **D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
-2026-08-03, spelling amended by D-COMPILER-NS1=A)*: `T.$layout` is exactly the
+2026-08-03, spelling amended by D-COMPILER-NS1=A)*: `T.reflect().layout` is exactly the
 focused projection of `T.reflect().layout`, not a second metadata model. Users
 cannot declare `$` members.
 Layout exposes kind, optional size/alignment/stride, target,
@@ -3661,7 +3775,7 @@ physical layout is not guaranteed. Completion visibly groups
 the body contains typed Jet members. `@` holes are filled at expansion and the
 resulting items enter ordinary sema like hand-written code (**D-META-CODE1** —
 never inject unchecked AST or re-lex emitted text). `comptime loop` over
-`T.$fields` contributes one checked member per field. Local-only orphan rule.
+`T.reflect().fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
 **D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
@@ -3736,6 +3850,65 @@ permissions.
 effects follow the rule of every effect, and only the root package's build
 function receives the `Compiler` value (`b.compiler(app)`).
 
+**D-META-RECONCILE1=A — The September 21
+opt-in rulings govern the metaprogramming ceiling** *(ratified 2026-10-07,
+card #3520; amends S26, D-METAMUTATE1, D-FRONTENDAPI1, D-METADEPTH1/2 and
+D-META-GATE1 by amendment links to D-META-CONTROL2 and D-META-OPTIN2)*:
+D-META-CONTROL2 and D-META-OPTIN2 stay in force in full: project trust and
+policy approve the root and the provider, a changed provider is refused until
+approved again, revocation invalidates the affected preparation, targets are
+named by compiler-issued declaration handles, a dependency target needs an
+exact grant, and a rewrite's receipt never promises equivalence with the
+original. D-META-LADDER1 later carries that authority as the root-only
+`Compiler` value under the Meta effects. The older refusals bind standard
+code, which every program gets: read facts, publish additive `Generated`
+items, and use type recipes (D-GENERIC-TYPEFN1) and const generics
+(D-CONSTGEN1). Written code means what its file says, and no rewrite happens.
+Advanced mode is the approved root's checked change sets: types built from
+facts, parsed code, specialization and rewrites of written code. Each is
+rechecked like hand-written code. Some limits bind both modes: no token,
+tree or attribute macros and no custom syntax (S26, D-META-GATE1,
+D-METADEPTH2); no message loop and no user macros (D-METAMUTATE1); no
+mutable compiler nodes and no forged facts (D-META-CONTROL2); no AST mutation
+inside compilation (D-FRONTENDAPI1); and host permissions stay on their own
+effects (D-META-OPTIN2). Advanced parsing runs the real Jet lexer and parser
+into checked fragments, so the closed grammar holds in both modes. The
+clause map for D-META-GATE1 is as follows. Token and tree macros stay refused
+everywhere. Splicing into existing code, in-place rewrite, a type with no
+file and running the program inside the compiler bind standard code, and
+advanced mode reaches them only through D-META-CONTROL2. The approved root
+opt-in is the gate its "not one flag away" example refers to. The ruling adds
+no name, capability, operation or syntax. The advanced operations are
+ratified contract, not delivered behavior; their implementation is tracked on
+card #3526.
+
+**D-META-LADDER1=A — Meta effects and one root-only `Compiler` value**
+*(ratified 2026-11-09, cards #6129 and #3526; supersedes D-META-OPTIN2 and
+D-META-CONTROL2)*: compile-time power grows in three steps: reading facts,
+markers that add code, and a `Compiler` value that adds code anywhere and
+rewrites function bodies. `Meta: enum { Generate, Include, Rewrite, Types,
+Raw }` is an ordinary effect family in Core's compiler library (`#FX` with no
+machine effect). It is allowed unless written code denies it, and each action
+checks every case it uses: a marker that writes declarations is
+`-[Meta.Generate]>`, and adding a type from text checks `Generate`, `Types`
+and `Raw` together. No `Meta` case hides FS, Exec or FFI; host work keeps its
+own effects and gates.
+
+Only the root package's own build source makes the value, through
+`b.compiler(app)`, checked by loader and lock identity, so a forwarded `Build`
+cannot get around it. Passing the value delegates control, and every handoff
+is recorded in provenance. A value kept past its build fails closed. Root and
+organization denials, and a locked dependency's `allow_rewrite` consent
+(D-META-CROSSPKG1), apply to every deferred action. The operations are
+ordinary calls: `meta.events(watch:, handler)` watches and grants no change,
+`meta.add(code, scope:)` adds code, and `meta.rewrite_body(f, code)` replaces
+a body. `#code { … }` builds a `Code` value with D-META-HASH1 hygiene, and
+`#{f.body}` pastes a `Code` inside it. Jet has no macros: no call-site
+expansion is registered. A handler's actions are rechecked together with the
+callers they affect, and a failed handler publishes none of them. Handlers
+share D-PREP-FUEL1's step budget and the round limit, and cache keys cover
+source, compiler, reflected inputs, lock, authority and consent.
+
 **D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
 subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,
 `line`, `column`, `function`; it displays as `file:line:column`). `$here` is
@@ -3747,6 +3920,20 @@ declaring the same default and passing `at` on. `$caller` anywhere else is
 E2427, which names the two legal places. Like every location, both never fail.
 Option A's member facts `x.$known` and `call.$callee` are ratified and not yet
 built.
+*Respelled by D-SITE-CALLER1=A (ratified 2026-11-10, #4276):* the two roots
+are the site values `#here` and `#caller`; D-META-HASH1=A's `#line` and
+`#file` are the fields `#here.line` and `#here.file`. A `#here` parameter
+default is E2428, whose fix is `#caller`.
+
+**D-JAI-SMALL1=A — Four small checked conveniences** *(ratified 2026-10-17, card #5028)*:
+a `Set` of a small fieldless enum is stored as bits, with `.bits()` and a
+fallible `from_bits(n)`; `#Through` after a match arm's body runs the next
+arm's body too; `#As` on one field lets the struct pass where that field's
+type is expected; and `#Specified` makes every case of a numbered enum state
+its number: `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A case
+without a number is E1124, and `#Specified` on a struct or on an enum whose
+cases have no numbers is E1125. `#Specified` is built; the Set bits, `#Through`
+and `#As` are ratified and not yet implemented (card #5028).
 
 
 ### Low-level tier
@@ -3857,7 +4044,7 @@ and scope-inferred by default (the region is the arena binding's lexical
 scope); explicit `#Region(r) { … }` for the expert tier (respelled by D-BLOCKPLANE1, 2026-07-12). `arena:
 mem.Arena.new(capacity: 4096)`; `arena.alloc(value)` returns a scope-bound
 view — escape E0631, use-after-reset E0632. D-SHAPE-RESOURCE2 later supersedes
-terminal `free()` with universal `close(^allocator)`. Arenas live flat in
+terminal `free()` with universal `close(allocator)`. Arenas live flat in
 `core.mem` (D-REF2); arena values are not `#Unsafe`.
 
 **D-FIXED-BACKING1=A — Fixed allocator backing**: `fixed:
@@ -3867,7 +4054,7 @@ mutable fixed-size byte array instead. Both constructors must directly
 initialize a lexical binding. Payload plus alignment grows from the buffer
 start, reverse-drop metadata reserves from its end, and allocation fails
 atomically before the cursors collide; there is no heap fallback. The backing
-borrow is exclusive until consuming `close(^fixed)` or scope exit. Fixed
+borrow is exclusive until consuming `close(fixed)` or scope exit. Fixed
 handles and allocation views cannot escape, be stored/captured, or cross a
 task/join boundary, and `reset()` is rejected while any allocation view lives.
 
@@ -3890,8 +4077,8 @@ E1109); `columnar [T]` type-position reserved (E1107); deferred surface ops
 E1108; serialization-transparent. **D-REPRC1**: `#Layout(c)` = C repr in the
 same family (growable field under it = compile error).
 **D-PLACE1=A — Layout alignment and lock-free scalar cells** *(ratified)*:
-reuse the one `T.$layout` fact, including its exact
-`T.$layout.size` and `T.$layout.alignment` projections; no `size_of` or
+reuse the one `T.reflect().layout` fact, including its exact
+`T.reflect().layout.size` and `T.reflect().layout.alignment` projections; no `size_of` or
 `align_of` aliases enter the language. `#Layout(c, align(N))` puts alignment
 inside the existing layout family. The portable form accepts positive
 power-of-two byte values from 1 through 1048576 inclusive. The explicit
@@ -3970,7 +4157,11 @@ compiler-extension API (D-DX5-HOOK1) and not PATH `jet-*` helpers (D-DX5).
 `target:` (bare-metal ⇒ no-std).
 **D-OOBPROOF1**: bounds-check elision is proof-carrying: a fixed-list index
 whose interval fact fits `0..N-1` lowers without the runtime bounds helper;
-other dynamic indexes keep the check.
+other dynamic indexes keep the check. The interval may be derived: an
+`Int` range fact shifted by `+`/`-` constants (`faces[roll.raw() - 1]` for
+`Die: distinct Int(1..6)` into `[String#6]`) is proved by the same fact, and
+`jet prove --lens solver` reports it as a `fixed_index_bounds` obligation.
+An index that keeps its check is a stop for D-NOPANIC1 (#6281 c154).
 
 **D-DX5-HOOK1=A — compiler-extension v1 boundary** *(ratified 2026-07-14,
 card #549)*: the optional formal compiler-extension API's first hook is a
@@ -4577,8 +4768,9 @@ binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
 `encode`/`decode` verbs over `Dyn`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
-`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`,
-`#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
+`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`;
+a type's `#Rename(.Camel|.Snake|.Pascal|.Kebab|.Screaming)` (E2409,
+D-RENAME-CASE1). Enum wire:
 externally tagged default, single-value variants bare; `#Discriminant("type")`
 internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
 keys ignored by default;
@@ -4586,6 +4778,17 @@ keys ignored by default;
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
+
+**D-RENAME-CASE1 = A** *(Shipped, #4284 c16 / #4300)*: `#Rename` is the one
+wire-rename marker. Its first argument is a string or a `NamingCase`
+(`.Camel`, `.Snake`, `.Pascal`, `.Kebab`, `.Screaming`). A string renames one
+field or variant and keeps the projection arguments `json:`, `cbor:`, `csv:`,
+`toml:`, `yaml:`, `xml:`, `args:`, `env:`, `db:` and `layout:`. A
+`NamingCase` on a struct or enum sets the wire casing of every field or
+variant that has no string `#Rename` of its own: `#[Codable, Rename(.Camel)]`.
+On a type that derives a codec, a casing word outside the menu, a plain
+name or a string is E2409. `#RenameAll` is retired: the marker is unknown
+(E0927) and gets no teaching diagnostic.
 
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
@@ -5901,13 +6104,19 @@ contract covers first-party Jet build libraries and packaged/third-party WASM
 component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAPI1=A:
 `core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
 value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
-AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
+AST mutation enters compilation (universal under D-META-RECONCILE1=A: an
+approved root's change sets are checked Jet code, never compiler nodes).
+D-DSLBLOCK1=A: stdlib-only PascalCase
 directive DSL blocks such as `#SQL(Row) { ... }` and `#HTML { ... }` are a
 fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
 targets/actions, read-only program/build graph enforcement, DSL blocks, and
-front-end APIs.
+front-end APIs. *Amended by D-META-RECONCILE1=A:* the
+message-loop and user-macro ban stays universal; the refusal to rewrite
+written code binds standard code, and an approved root rewrites only through
+D-META-CONTROL2 change sets under D-META-OPTIN2, now the D-META-LADDER1
+`Compiler` value.
 
 **D-BUILD-DEFAULT1=B — default profile split by command** *(ratified
 2026-07-16, card #666)*: `jet run` and `jet dev` compile at the fast profile
@@ -7460,10 +7669,10 @@ stock entry fallback, so a root `run: fn` there is both. A `run.jet` below the
 package root is ordinary source.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
-#505)*: `#Every(…)` is a directive marker on a `#Job fn`
-(D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1); the
-canonical Time family also accepts `2h` and `1d`;
-`#Every("03:00")` takes a daily wall-clock time; both are
+#505; spelling superseded by D-JOB-EVERY1)*: a schedule is a directive on a
+`#Job fn` (D-JPK-TASKRUN1). `#Job(every: 5min)` takes a duration literal
+(D-UNITLIT1); the canonical Time family also accepts `2h` and `1d`;
+`#Job(every: "03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
 due jobs in the dev loop, the service runtime (D-SERVICE1) schedules
 them in production, a jetos generation projects them as timer units.
@@ -7472,10 +7681,16 @@ runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
 
 *Shipped 2026-07-12 (card #505, slice 2)*: `#Job fn` (D-JPK-TASKRUN1) and
-`#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
+the schedule parse, placement-check, and value-check (E0926); `jet
 dev`'s watch loop runs due jobs on their own schedule (UTC for
-`#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
+`"HH:MM"` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
+
+**D-JOB-EVERY1** *(card #4297, carried by #4284)*: `#Job` gains
+`every: Duration | String = none` beside its other options and replaces the
+standalone `#Every(…)` marker entirely. A positive Duration cadence and a
+daily UTC `"HH:MM"` time keep their meaning and checks (E0926); `#Every` is
+an unknown applied rule (E0927) and E0925 is retired.
 
 *Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C; narrowed by D-JOB-NAMES1=A)*: reserved-name reject on `#Job fn
 run|dev|build|test|help|version` (E0928); `jet run <entry> -- <name>` dispatches an
@@ -7487,7 +7702,7 @@ D-SERVICE1's typed builder has since shipped: `service.tree(…)` promotes ordin
 functions into named workers and groups, so a schedule now has somewhere to go.
 D-TYPE2-TIME1 supplies the ordinary typed `Duration` and Instant carriers, and
 the service path consumes them directly. It must still not reinterpret raw
-extras as `#Every` or add a second scheduler.
+extras as a schedule or add a second scheduler.
 
 **D-JOB-SUBCMD1=C**: D-JOB-SUBCMD1=C is wired
 through one Prelude job-scope selector. `jet run <entry> -- <name>`, `jet dev`,
@@ -7946,6 +8161,10 @@ when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
 The diagnostic names the panic site and gives the three exits: return a
 fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
+*Shipped (#6281 c154)*: a checked List, Range or Map index and a slice are
+stops, so `-[!Panic]>` refuses one that no fact proves (E0749); a fixed-list
+index proved by D-OOBPROOF1 is not a stop. The Core `Shared` publication
+check counts this row as no effect.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
   vocabulary only as a deny-only row: no positive signature, `#FX`, or grant
@@ -8228,8 +8447,8 @@ D-ARROW-RESPELL1=A)*: one arrow, `:>` (the historical spelling), in every arrow
 position — a callable result, a dispatch arm, a loop body, and a lambda. The
 effect ceiling becomes `:[IO]>` (historical spelling). This retires the split that
 D-ARROW-CONTROL1=A introduced (`=>` for a result, `->` for control) along with
-D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's `=[Effects]=>`
-row to `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
+D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's historical `=[Effects]=>`
+row to the historical `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
 still parse unambiguously against `:>`; the owning card carries that fixture.
 
 **2026-08-20 — D-TEST-XFAIL1=A** *(card #2107; ratified 2026-08-20)*: a test
@@ -8394,8 +8613,25 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-11-11 — D-LAMBDA-SHAPE1=C and D-LAMBDA-STORED1=A** *(card #6251;
+decision card c0rqt0kq, ratified 2026-11-01)*: a lambda is a function
+binding's value without its name, and like every function value it starts
+with `fn`: `nums.filter(fn(n) { n > 2 })`. Its interface after the parameters
+is a named function's (`-> T`, `-[E]>`, `-[E]> T`, `E!`), and a passed lambda
+leaves out the parameter types, effect row and result that the expected
+callable type fixes. A stored lambda writes them as a named function does:
+`square: fn(n: Int) -> Int { n * n }`. The body is always braced and its last
+value is the result, so `return` leaves the lambda and growing a body to two
+lines keeps its head. The arrow lambdas `n -> e` and `(n) -> { … }` retire with
+no teaching diagnostic or `jet fix` rule: once the repository is converted
+they are not Jet. This supersedes S46, D-LAMBDA-INFER1's bare-parameter form
+and D-LAMBDA-IFACE2=A, whose lambdas never wrote a result. Example:
+`tests/cases/core_and_closures/fn_lambda_form_runs_on_every_tier.fixture/main.jet`.
+
 **2026-10-29 — `::` folds as an optimization; `comptime` forces it** *(card
-#6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1)*: an
+#6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1; its
+module-level startup fallback is amended by D-MODULE-BUILD1, under which such
+a value is a build error, E0643)*: an
 immutable `::` binding asks for build-time evaluation as an optimization, and
 `comptime` forces it. A module-level `NAME: value` folds while building when
 its evaluation is pure and succeeds; otherwise the program computes it at

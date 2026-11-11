@@ -120,7 +120,7 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
                             actual_bytes: if exists -> Val(files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "file optional bytes: {err}")) else -> None
                             return if actual_bytes == expected -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "optional file bytes differ")
                         }
-                        else -> return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
+                        .Text(_) | .Numbers(_) | .Tree(_) | .Absent -> return kit_expect_verdict("ERROR", "same-as needs an opt-bytes capture")
                     }
                 }
             }

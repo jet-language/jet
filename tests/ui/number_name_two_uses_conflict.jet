@@ -1,0 +1,12 @@
+// #6281 c165: `half` takes the Int `count` as a widened Float, so `small`'s
+// U8 is the first use that refuses its default and makes `count` a U8. Then
+// `half` needs a Float from a U8: one error, naming both uses.
+half: fn(x: Float) -> Float { x * 0.5 }
+small: fn(x: U8) -> U8 { x }
+
+run: fn() {
+    count := 3
+    count = 4
+    print(half(count))
+    print(small(count))
+}

@@ -1,0 +1,19 @@
+# `[K: V]{}` is the map spelling (D-LISTMAP-CANON1=A; `Map<K, V>` is an
+# unknown type, tests/ui/map_type_spelling_is_not_jet). The empty literal
+# builds an empty map that takes entries, on O0, O1 and O2 (#5976 c109).
+fixture: an_empty_bracket_map_literal_builds_an_empty_map_on_every_tier.fixture
+step o0: jet run --optimize=none main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty
+step o2: jet run --optimize=full main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = expected.out
+stderr: empty

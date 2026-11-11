@@ -3,16 +3,20 @@
 // statement, and so does throwing a Res, a Res IOError! or a Res? away with
 // `.drop("why")`. A Close type with no buffers closes the same way.
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
-Plain: struct { id: Int }
-impl Plain.Close {
-    close: fn(&&self) { print("close plain {self.id}") }
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
 }
+Plain: struct {
+    id: Int
 
+    impl Close {
+        close: fn(&&self) { print("close plain {self.id}") }
+    }
+}
 make: fn(name: String) -> Res { Res{name: name} }
 attempt: fn(name: String) -> Res IOError! { Ok(Res{name: name}) }
 maybe: fn(name: String) -> Res? { Val(Res{name: name}) }

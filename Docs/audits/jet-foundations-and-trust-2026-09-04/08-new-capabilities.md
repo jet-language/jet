@@ -231,7 +231,7 @@ Memory safety alone does not prevent a delayed result from overwriting newer val
 ```jet
 // Proposed API; not implemented or executed in this campaign.
 struct State { value: String }
-state :: shared State{value: "old"}
+state :: Shared{State{value: "old"}}
 seen :: state.capture()
 state.value = "new"
 print(state.try_replace(seen, State{value: "late"}))

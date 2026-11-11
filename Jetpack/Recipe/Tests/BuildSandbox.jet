@@ -298,6 +298,6 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
     assert_eq(facts.packages[0].targets.len(), 1)
     if facts.packages[0].targets[0] == {
         .Plugin(export) -> assert_eq(export, Val("mathkit"))
-        else -> panic("sandbox target must be Plugin with mathkit export")
+        .Library | .Executable | .Test | .Example -> panic("sandbox target must be Plugin with mathkit export")
     }
 }

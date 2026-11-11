@@ -67,14 +67,6 @@ derivation_record_reference: fn(record: DerivationRecord) -> DerivationRef Never
     DerivationRef{id: record.id}
 }
 
-// Rust DerivationRecord::invalidate_if_identity_changed, reused by evidence.
-derivation_record_invalidate_if_identity_changed: fn(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
-    if record.disposition != DerivationDisposition.Current -> return false
-    if record.identity.source == current.source && record.identity.build == current.build && record.identity.run == current.run && record.identity.target == current.target -> return false
-    record.disposition = DerivationDisposition.Stale
-    true
-}
-
 derivation_record_validate: fn(record: DerivationRecord) -> Bool Never! {
     record.id == derivation_record_id(record)
 }
@@ -101,34 +93,6 @@ derivation_record_json: fn(record: DerivationRecord) -> String Never! {
 derivation_optional_payload_json: fn(payload: DerivationPayload?, absent: String) -> String Never! {
     value: payload ?? return absent.copy()
     derivation_payload_json(value)
-}
-
-derivation_store_empty: fn() -> DerivationStore Never! {
-    DerivationStore{records: [DerivationRecord]{}}
-}
-
-// Invalid non-canonical records are not interned. Existing IDs resolve to the
-// first canonical record, preserving idempotent evidence collection.
-derivation_store_intern: fn(store: &DerivationStore, record: DerivationRecord) -> DerivationRef? {
-    if !derivation_record_validate(record) -> return None
-    loop existing in store.records {
-        if existing.id == record.id -> return Val(derivation_record_reference(existing))
-    }
-    store.records.push(record.copy())
-    derivation_store_sort(store)
-    Val(derivation_record_reference(record))
-}
-
-derivation_store_sort: fn(store: &DerivationStore) Never! {
-    loop i in 1..<store.records.len() {
-        value := store.records[i]
-        j := i
-        loop j > 0 && store.records[j - 1].id > value.id {
-            store.records[j] = store.records[j - 1]
-            j -= 1
-        }
-        store.records[j] = value
-    }
 }
 
 derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {

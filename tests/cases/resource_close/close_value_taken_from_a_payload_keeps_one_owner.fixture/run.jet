@@ -3,11 +3,13 @@
 // ends, and a borrowed holder reads it in place without closing it.
 use files: core.files
 
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Held: struct {
     tracer: Res
     directory: Directory?

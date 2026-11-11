@@ -561,7 +561,7 @@ pkg_authority_canonicalize_root: fn(root: String) -[FS, Env]> String AuthorityEr
 pkg_authority_is_symlink: fn(error: AuthorityError) -> Bool Never! {
     if error == {
         .Symlink(_) -> true
-        else -> false
+        .Missing(_, _) | .ManifestParse(_, _) | .IO(_, _, _) | .WrongKind(_, _, _) | .Escapes(_) | .WorkspaceAmbiguous(_) | .WorkspaceNoModule | .NestedMembers(_, _) | .Invalid(_, _) | .NotText(_, _) | .Changed(_) | .Unsupported(_) -> false
     }
 }
 

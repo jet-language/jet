@@ -175,34 +175,6 @@ jet_target_layout_support_exact: fn(triple: String, address_bound: Int) -> Layou
     }
 }
 
-// Build an authoritative support row from a target-provided alignment set.
-// Empty rows are unknown; no caller may treat unknown as unlimited support.
-jet_target_layout_support_exact_rows: fn(alignments: [Int], max_size: Int?, max_address: Int?, provenance: String) -> LayoutSupportFacts Never! {
-    proven: alignments.len() > 0
-    LayoutSupportFacts{
-        proven: proven,
-        alignments: alignments,
-        max_size: max_size,
-        max_address: max_address,
-        abi: None,
-        provenance: provenance,
-    }
-}
-
-// Build the exact powers-of-two support row through one checked boundary.
-jet_target_layout_support_powers_through: fn(max_alignment: Int, max_size: Int?, max_address: Int?, provenance: String) -> LayoutSupportFacts Never! {
-    if max_alignment <= 0 || !jet_layout_is_power_of_two(max_alignment) -> return jet_target_layout_support_unknown()
-    alignments := [Int]{}
-    alignment := 1
-    loop {
-        alignments.push(alignment)
-        if alignment >= max_alignment -> break
-        next: jet_layout_checked_mul(alignment, 2) ?? break
-        alignment = next
-    }
-    jet_target_layout_support_exact_rows(alignments, max_size, max_address, provenance)
-}
-
 jet_target_layout_support_with_abi: fn(support: LayoutSupportFacts, abi: String) -> LayoutSupportFacts Never! {
     LayoutSupportFacts{
         proven: support.proven,
@@ -228,6 +200,20 @@ jet_target_layout_known_triple: fn(triple: String) -> Bool Never! {
 
 jet_target_layout_pointer_size: fn(triple: String) -> Int Never! {
     if triple.starts_with("wasm32-") || triple.starts_with("i686-") || triple.starts_with("arm-") || triple.starts_with("armv7-") || triple.starts_with("thumb") -> 4 else -> 8
+}
+
+// The bytes one cache line of `triple`'s CPU holds: Apple's arm64 cores fetch
+// 128-byte lines, every other supported CPU 64.
+jet_target_layout_cache_line: fn(triple: String) -> Int Never! {
+    if triple.starts_with("aarch64-apple-") -> 128 else -> 64
+}
+
+// The CPU features every CPU `triple` names has, so code built for it may use
+// them unprobed: SSE2 on x86-64, NEON on arm64, none elsewhere.
+jet_target_layout_cpu_features: fn(triple: String) -> [String] Never! {
+    if triple.starts_with("x86_64-") -> return [String]{"sse2"}
+    if triple.starts_with("aarch64-") -> return [String]{"neon"}
+    [String]{}
 }
 
 jet_target_layout_from_triple_and_version: fn(triple: String, package_version: String) -> JetTargetLayout Never! {
@@ -271,18 +257,6 @@ jet_target_layout_from_machine: fn(machine: TargetMachine) -> JetTargetLayout Ne
         pointer_size: pointer_size,
         pointer_alignment: pointer_size,
         facts: machine.layout,
-    }
-}
-
-// Same as the machine adapter for callers that retain only the selected
-// profile facts. The triple remains explicit and is never taken from the host.
-jet_target_layout_from_selected_facts: fn(triple: String, facts: LayoutCapabilityFacts) -> JetTargetLayout Never! {
-    pointer_size: jet_target_layout_pointer_size(triple)
-    JetTargetLayout{
-        triple: triple,
-        pointer_size: pointer_size,
-        pointer_alignment: pointer_size,
-        facts: facts,
     }
 }
 
@@ -353,85 +327,12 @@ jet_target_layout_check_alignment: fn(target: JetTargetLayout, requested: Int, n
     }}
 }
 
-jet_target_layout_alignment_error_reason: fn(error: JetLayoutAlignmentError) -> String Never! {
-    if error == {
-        .Zero -> "zero does not establish an alignment boundary"
-        .NotPowerOfTwo(_) -> "the value is not a power of two"
-        .PortableBaseline(_, baseline) -> "the portable declaration baseline is {baseline} bytes; use `align(target, N)` for a profile-specific request"
-        .MissingTypeFacts(profile) -> "target profile `{profile}` has no proved type-representation alignment facts"
-        .Unsupported(requested, effective, profile) -> "target profile `{profile}` does not support requested alignment {requested} (effective {effective})"
-    }
-}
-
-jet_target_layout_support_for_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind) -> LayoutSupportFacts Never! {
-    if kind == {
-        .Stack -> target.facts.stack_placement
-        .Global -> target.facts.global_placement
-        .Heap -> target.facts.heap_allocator
-        else -> target.facts.foreign_by_value_abi
-    }
-}
 
 jet_target_layout_storage_kind_name: fn(kind: JetLayoutStorageKind) -> String Never! {
     if kind == JetLayoutStorageKind.Stack -> return "Stack"
     if kind == JetLayoutStorageKind.Global -> return "Global"
     if kind == JetLayoutStorageKind.Heap -> return "Heap"
     "ForeignByValue"
-}
-
-jet_target_layout_storage_kind_name_lower: fn(kind: JetLayoutStorageKind) -> String Never! {
-    if kind == JetLayoutStorageKind.Stack -> return "stack"
-    if kind == JetLayoutStorageKind.Global -> return "global"
-    if kind == JetLayoutStorageKind.Heap -> return "heap"
-    "foreign by-value ABI"
-}
-
-jet_target_layout_storage_error_reason: fn(error: JetLayoutStorageError) -> String Never! {
-    if error == {
-        .MissingFacts(kind, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement facts are missing for target profile `{profile}`"
-        .UnsupportedAlignment(kind, alignment, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement does not support alignment {alignment} on target profile `{profile}`"
-        .MissingSizeBound(kind) -> "{jet_target_layout_storage_kind_name(kind)} placement has no proved size bound"
-        .SizeExceeded(kind, size, max_size) -> "{jet_target_layout_storage_kind_name(kind)} object size {size} exceeds target bound {max_size}"
-        .MissingAddressBound(kind) -> "{jet_target_layout_storage_kind_name(kind)} placement has no proved address bound"
-        .AddressOverflow(kind) -> "{jet_target_layout_storage_kind_name(kind)} address plus object size overflows"
-        .AddressExceeded(kind, end, max_address) -> "{jet_target_layout_storage_kind_name(kind)} object end {end} exceeds target address bound {max_address}"
-    }
-}
-
-jet_target_layout_check_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: Int?) -> JetLayoutStorageResult Never! {
-    support: jet_target_layout_support_for_storage(target, kind)
-    if !support.proven -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingFacts{kind: kind, profile: target.facts.target_profile}}
-    if alignment <= 0 || !jet_target_layout_supports_alignment(support, alignment) -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.UnsupportedAlignment{kind: kind, alignment: alignment, profile: target.facts.target_profile}}
-    if size < 0 -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-    max_size: support.max_size ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingSizeBound{kind: kind}}
-    if size > max_size -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.SizeExceeded{kind: kind, size: size, max_size: max_size}}
-    if address == .Val(address_value) {
-        max_address: support.max_address ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingAddressBound{kind: kind}}
-        end: jet_layout_checked_add(address_value, size) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-        if end > max_address -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressExceeded{kind: kind, end: end, max_address: max_address}}
-    }
-    JetLayoutStorageResult.Accepted
-}
-
-jet_target_layout_check_array_storage: fn(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: Int?) -> JetLayoutStorageResult Never! {
-    size: jet_layout_checked_mul(layout.stride, count) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
-    jet_target_layout_check_storage(target, kind, layout.alignment, size, address)
-}
-
-jet_target_layout_engine_from_machine_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], machine: TargetMachine) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_machine(machine))
-}
-
-jet_target_layout_engine_from_selected_facts_with_registry: fn(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], triple: String, facts: LayoutCapabilityFacts) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_selected_facts(triple, facts))
-}
-
-jet_target_layout_engine_from_machine: fn(items: [Item], machine: TargetMachine) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_from_machine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, machine)
-}
-
-jet_target_layout_engine_from_selected_facts: fn(items: [Item], triple: String, facts: LayoutCapabilityFacts) -> TargetLayoutEngine Never! {
-    jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_selected_facts(triple, facts))
 }
 
 jet_target_layout_engine: fn(items: [Item], target: JetTargetLayout) -> TargetLayoutEngine Never! {
@@ -461,35 +362,12 @@ jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayo
     engine.target
 }
 
-jet_target_layout_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
-    jet_target_layout_struct_facts_inner_named(engine, definition, definition.name, "", query)
-}
-
 jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
 }
 
-jet_target_layout_checked_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef) -> JetCheckedLayoutResult Never! {
-    physical: jet_target_layout_struct_facts(engine, definition)
-    if definition.layout == {
-        Val(layout) -> if layout == {
-            .CAligned(alignment, target_mode) -> {
-                natural: physical.bytes.map(value -> value.alignment) ?? 1
-                checked: jet_target_layout_check_alignment(engine.target, alignment, natural, target_mode)
-                if checked == {
-                    .Accepted(value) -> return JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: Val(value)}}
-                    .Rejected(error) -> return JetCheckedLayoutResult.Rejected{error: error}
-                }
-            }
-            else -> {}
-        }
-        None -> {}
-    }
-    JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: None}}
-}
 
 // `#Layout(U8)` names the integer type that backs a
 // payload-free enum; these are the accepted backing types.
@@ -518,12 +396,15 @@ jet_target_layout_enum_c_tag: fn(definition: EnumDef) -> CEnumTag? {
         if candidate.name == "Layout" -> break candidate
     } ?? return None
     layout_expr: jet_target_layout_marker_expression(marker, 0) ?? return None
-    layout_name: if layout_expr == { .Ident(name, _, _) -> name else -> "" }
+    layout_name: if layout_expr == {
+        .Ident(name, _, _) -> name
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> ""
+    }
     if jet_target_layout_ascii_lower(layout_name) != "c" -> return None
     enum_tag: jet_target_layout_marker_expression(marker, 1) ?? return Val(CEnumTag.CInt)
     if enum_tag == {
         .Ident(name, _, _) -> jet_layout_integer_backing_tag(name)
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -537,7 +418,7 @@ jet_target_layout_enum_backing: fn(definition: EnumDef) -> String? {
     layout_expr: jet_target_layout_marker_expression(marker, 0) ?? return None
     if layout_expr == {
         .Ident(name, _, _) -> if jet_layout_integer_backing_name(name) -> Val(name) else -> None
-        else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -567,12 +448,10 @@ jet_layout_integer_backing_max: fn(name: String) -> Int Never! {
 
 jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
-    if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
-}
-
-jet_target_layout_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
-    query := jet_target_layout_query()
-    jet_target_layout_enum_facts_inner_named(engine, definition, definition.name, "", query)
+    if marker.args[index] == {
+        .Expr(value) -> Val(value)
+        .EffectRow(_, _) -> None
+    }
 }
 
 jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
@@ -602,7 +481,7 @@ jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, defin
     query.active[identity] = false
     if layout == {
         .CAligned(alignment, _) -> jet_target_layout_aligned_struct_facts(facts, alignment)
-        else -> facts
+        .C | .Columnar -> facts
     }
 }
 
@@ -676,7 +555,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
         .Apply(name, args) -> if name == "Ptr" && args.len() == 1 -> Val(jet_target_layout_scalar(8)) else -> None
-        else -> None
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
     }
 }
 
@@ -714,7 +593,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
             query.active[identity] = false
             bytes
         }
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
 
@@ -906,7 +785,7 @@ jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identit
             query.active[identity] = false
             bytes
         }
-        else -> None
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
     if cycle_hits == query.cycle_hits && query.completed_positions.get(key) == None {
         query.completed_positions[key] = query.completed.len()
@@ -963,7 +842,7 @@ jet_target_layout_item_name: fn(item: Item) -> String Never! {
         .Enum(definition) -> definition.name
         .Distinct(definition) -> definition.name
         .TypeAlias(definition) -> definition.name
-        else -> ""
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> ""
     }
 }
 
@@ -1021,7 +900,7 @@ jet_target_layout_atomic_scalar_type: fn(ty: Type) -> Bool Never! {
             numeric: jet_target_layout_numeric_type(name) ?? return false
             jet_target_layout_atomic_scalar_type(numeric)
         }
-        else -> false
+        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1030,7 +909,7 @@ jet_target_layout_atomic_add_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Bool -> false
         .Named(name) -> name != "Bool"
-        else -> true
+        .Int | .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 

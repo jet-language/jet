@@ -10,6 +10,7 @@
 // (`sema_inference_resolve_type_bindings`) follows chains, because a solver
 // binding may name a solver parameter bound later.
 use jet_foundation.[
+    Measure,
     Type,
     TypeTupleField,
     type_identity_equal,
@@ -85,8 +86,7 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
             normalized: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, seen, chain)}
             Type.Tuple{fields: normalized}
         }
-        // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
-        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen, chain), len: length.copy()}
+        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen, chain), len: sema_inference_substitute_length(length, bindings, seen, chain)}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), lo: lo, hi: hi}
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
@@ -96,8 +96,20 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), dimension: dimension.copy()}
-        else -> ty
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
+}
+
+// The length of `[T#N]` under the bindings: a `<comptime N: Int>` number
+// parameter bound to a number (`Packet<4>` binds `N` to the length measure
+// 4) becomes that number in the slot's own measure kind.
+sema_inference_substitute_length: fn(length: Measure, bindings: [SemaInferenceBinding], seen: [String], chain: Bool) -> Measure Never! {
+    if length == .Symbol(kind, name) {
+        bound: sema_inference_substitute_type_inner(Type.Named{name: name.copy()}, bindings, seen, chain)
+        if bound == .Measure(number) && number == .Literal(_, value) -> return Measure.Literal{kind: kind.copy(), value: value}
+    }
+    // copy: `length` is a payload of the caller's read type, which keeps the original.
+    length.copy()
 }
 
 sema_inference_substitute_type_bindings: fn(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
@@ -151,7 +163,10 @@ sema_inference_type_changes: fn(ty: Type, bindings: [SemaInferenceBinding], chai
             }
             return false
         }
-        .FixedList(element, _) -> return sema_inference_type_changes(element, bindings, chain)
+        .FixedList(element, length) -> {
+            if length == .Symbol(_, name) && sema_inference_type_changes(Type.Named{name: name.copy()}, bindings, chain) -> return true
+            return sema_inference_type_changes(element, bindings, chain)
+        }
         .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings, chain)
         .Quantity(base, _) -> return sema_inference_type_changes(base, bindings, chain)
         .Union(members) -> {
@@ -160,7 +175,7 @@ sema_inference_type_changes: fn(ty: Type, bindings: [SemaInferenceBinding], chai
             }
             return false
         }
-        else -> return false
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> return false
     }
 }
 
@@ -205,7 +220,10 @@ sema_inference_type_mentions_param: fn(ty: Type, name: String) -> Bool Never! {
             }
             false
         }
-        .FixedList(element, _) -> sema_inference_type_mentions_param(element, name)
+        .FixedList(element, length) -> {
+            if length == .Symbol(_, length_name) && length_name == name -> return true
+            sema_inference_type_mentions_param(element, name)
+        }
         .InlineRange(base, _, _) -> sema_inference_type_mentions_param(base, name)
         .Tagged(_, inner) -> sema_inference_type_mentions_param(inner, name)
         .Union(members) -> {
@@ -215,6 +233,6 @@ sema_inference_type_mentions_param: fn(ty: Type, name: String) -> Bool Never! {
             false
         }
         .Quantity(base, _) -> sema_inference_type_mentions_param(base, name)
-        else -> false
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> false
     }
 }

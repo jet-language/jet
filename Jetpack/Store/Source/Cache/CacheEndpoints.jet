@@ -57,7 +57,7 @@ CacheEndpoint: enum {
     is_hangar: fn(self) -> Bool Never! {
         if self == {
             .Hangar -> true
-            else -> false
+            .Local(_) | .HTTP(_) | .SSH(_, _) | .S3(_) -> false
         }
     }
 }
@@ -273,7 +273,7 @@ store_cache_write_remote_resumable: fn(endpoint: CacheEndpoint, key: String, byt
     if offset == 0 -> return store_cache_endpoint_put(endpoint, key, bytes)
     if endpoint == {
         .SSH(target, _) -> store_cache_ssh_append(target, store_cache_endpoint_key(endpoint, key), bytes[offset..<bytes.len()])
-        else -> store_cache_endpoint_put(endpoint, key, bytes)
+        .Local(_) | .HTTP(_) | .S3(_) | .Hangar -> store_cache_endpoint_put(endpoint, key, bytes)
     }
 }
 
@@ -294,7 +294,7 @@ store_cache_promote_remote: fn(endpoint: CacheEndpoint, partial: String, final_k
             store_cache_ssh_promote(target, store_cache_endpoint_key(endpoint, partial), store_cache_endpoint_key(endpoint, final_key))
         }
         .S3(_) -> store_cache_s3_promote(store_cache_endpoint_key(endpoint, partial), store_cache_endpoint_key(endpoint, final_key))
-        else -> Err(StoreError.InvalidData("{endpoint.label()} cache endpoint cannot promote staged objects"))
+        .Local(_) | .HTTP(_) | .Hangar -> Err(StoreError.InvalidData("{endpoint.label()} cache endpoint cannot promote staged objects"))
     }
 }
 
@@ -343,7 +343,7 @@ store_cache_ssh_mkdir_for_key: fn(endpoint: CacheEndpoint, key: String) StoreErr
     if parent == "" -> return Err(StoreError.InvalidData("SSH cache object has no parent"))
     if endpoint == {
         .SSH(target, _) -> store_cache_ssh_mkdir(target, parent)
-        else -> Err(StoreError.InvalidData("SSH directory creation needs an SSH endpoint"))
+        .Local(_) | .HTTP(_) | .S3(_) | .Hangar -> Err(StoreError.InvalidData("SSH directory creation needs an SSH endpoint"))
     }
 }
 

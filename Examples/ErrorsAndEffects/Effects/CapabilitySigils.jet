@@ -4,6 +4,10 @@
 Player: struct {
     hp: Int
     name: String
+
+    show: fn(self) -> Int { self.hp }
+
+    heal: fn(&self, amount: Int) { self.hp += amount }
 }
 
 Item: struct {
@@ -22,12 +26,6 @@ report: fn(p: Player) { print("{p.name}: {p.hp}") }
 equip: fn(p: &Player, item: &&Item) {
     p.hp += item.bonus
     print("equipped {item.label}, hp now {p.hp}")
-}
-
-impl Player {
-    show: fn(self) -> Int { self.hp }
-
-    heal: fn(&self, amount: Int) { self.hp += amount }
 }
 
 run: fn() {

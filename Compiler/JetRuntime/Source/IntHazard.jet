@@ -128,13 +128,3 @@ int_hazard_clone: fn(place: I64, initial: I64, callback: I64, context: I64) -> I
 #Export(c) jet_rt_int_clone_atomic_reload: fn(initial: I64, callback: I64, context: I64) -> I64 {
     int_hazard_clone(I64{0}, initial, callback, context)
 }
-
-// Detach invokes this AFTER all dynamic TLS/Sentry destructors. Their final
-// Int operations may have lazily created the record; never free the registry
-// node that concurrent scanners can still visit after this thread exits.
-int_hazard_thread_detach: fn() {
-    base: thread_base()
-    record: sync_swap(wrapping(base + I64{192}), I64{0})
-    if (record != I64{0}) -> jet_rt_int_hazard_clear(record)
-    else if (int_hazard_root != I64{0}) -> jet_rt_int_hazard_reclaim()
-}

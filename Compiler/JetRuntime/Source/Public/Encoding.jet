@@ -1,0 +1,15 @@
+// `jet.runtime.encoding` (#6615): the runtime's public codec scope functions
+// the encoding modules are built on, in Jet types. Each member is a runtime
+// binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
+// its one body. A member with no row is pure.
+encoding: module {
+    // Enters the thread's text-cells scope, answering the previous one,
+    // which leaving restores.
+    #Import(c) text_cells_enter: fn() -> Bool = "jet_rt_codec_text_cells_enter"
+    #Import(c) text_cells_leave: fn(previous: Bool) = "jet_rt_codec_text_cells_leave"
+
+    // Enters the thread's ETF strings `mode`, answering the previous one,
+    // which leaving restores.
+    #Import(c) etf_strings_enter: fn(mode: Int) -> Int = "jet_rt_codec_etf_strings_enter"
+    #Import(c) etf_strings_leave: fn(previous: Int) = "jet_rt_codec_etf_strings_leave"
+}

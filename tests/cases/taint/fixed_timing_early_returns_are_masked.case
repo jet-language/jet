@@ -1,0 +1,20 @@
+# An early return from a branch on a `timing: .Fixed` value is masked when
+# the code it skips is total: every round of the loop still runs, its
+# assignments keep their values once a masked return has run, and the
+# function returns the value of the first return taken. `jet inspect
+# decisions` lists each such branch, and every tier prints the same results.
+fixture: fixed_timing_early_returns_are_masked.fixture
+env: NO_COLOR=1
+step: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "masked check_fast main.jet:15: both arms run" # the byte compare
+stdout: ~ "masked position main.jet:23: both arms run" # a count after the return
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = fixed_timing_early_returns_are_masked.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = fixed_timing_early_returns_are_masked.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = fixed_timing_early_returns_are_masked.out

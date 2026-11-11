@@ -79,7 +79,7 @@ ssl_tls13_psa_mpi_error: fn(e: bn.MpiError) -> ssldefs.SSLError Never! {
         .BadInput | .InvalidCharacter | .NegativeValue | .DivisionByZero | .NotAcceptable -> ssldefs.SSLError.BadInputData
         .BufferTooSmall -> ssldefs.SSLError.BufferTooSmall
         .AllocFailed -> ssldefs.SSLError.AllocFailed
-        else -> ssldefs.SSLError.GenericError
+        .Random | .FileIO -> ssldefs.SSLError.GenericError
     }
 }
 
@@ -374,7 +374,7 @@ ssl_tls13_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, endpoint: I
 ssl_tls13_key_cipher: fn(ctx: &layer.CipherContext, key: [U8], op: layer.CipherOperation) -> layer.CipherLayerError? Never! {
     if layer.cipher_setkey(ctx, key, op) == {
         .Err(e) -> return Val(e)
-        else -> {}
+        .Ok(_) -> {}
     }
     None
 }
@@ -421,7 +421,10 @@ ssl_tls13_key_schedule_stage_early: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLErro
     cs: ssl.handshake.ciphersuite_info ?? return Err(.InternalError)
     psk := [U8]{}
     if ssltls.ssl_tls13_key_exchange_mode_with_psk(ssl) -> psk = ssl_tls13_export_handshake_psk(ssl) ?? return Err(err)
-    early: ssl_tls13_evolve_secret(cs.mac, None, psk)
+    early: ssl_tls13_evolve_secret(cs.mac, None, psk) ?? {
+        ssldefs.ssl_wipe(psk)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(psk)
     ssl.handshake.tls13_early_secret = early
 }
@@ -496,7 +499,10 @@ ssl_tls13_key_schedule_stage_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng
         if !ssltls.ssl_tls13_named_group_is_ecdhe(g) && !ssltls.ssl_tls13_named_group_is_ffdh(g) -> return Err(.FeatureUnavailable)
         shared_secret = ssl_tls13_xxdh_agree(ssl, rng) ?? return Err(err)
     }
-    hs: ssl_tls13_evolve_secret(cs.mac, Val(ssl.handshake.tls13_early_secret), shared_secret)
+    hs: ssl_tls13_evolve_secret(cs.mac, Val(ssl.handshake.tls13_early_secret), shared_secret) ?? {
+        ssldefs.ssl_wipe(shared_secret)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(shared_secret)
     ssl.handshake.tls13_handshake_secret = hs
 }
@@ -553,7 +559,7 @@ ssl_tls13_application_keys_of: fn(ssl: &ssldefs.SSLContext) -> SSLKeySet ssldefs
             ssldefs.ssl_wipe(transcript)
             return Err(e)
         }
-        else -> ssldefs.ssl_wipe(transcript)
+        .Ok(_) -> ssldefs.ssl_wipe(transcript)
     }
     keys: ssl_tls13_make_traffic_keys(md, ssl.spool[sn].app_secrets.client_application_traffic_secret_n, ssl.spool[sn].app_secrets.server_application_traffic_secret_n, lens.key_len, lens.iv_len)
     ssl_tls13_export_secret(ssl, ssldefs.SSL_KEY_EXPORT_TLS1_3_CLIENT_APPLICATION_TRAFFIC_SECRET, ssl.spool[sn].app_secrets.client_application_traffic_secret_n)
@@ -574,7 +580,7 @@ ssl_tls13_compute_handshake_transform: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng:
             ssldefs.ssl_transform_release(ssl, tix)
             return Err(e)
         }
-        else -> ssl_tls13_key_set_wipe(traffic_keys)
+        .Ok(_) -> ssl_tls13_key_set_wipe(traffic_keys)
     }
     ssl.handshake.transform_handshake = tix
 }
@@ -591,7 +597,7 @@ ssl_tls13_compute_resumption_master_secret: fn(ssl: &ssldefs.SSLContext) ssldefs
             ssldefs.ssl_wipe(transcript)
             return Err(e)
         }
-        else -> ssldefs.ssl_wipe(transcript)
+        .Ok(_) -> ssldefs.ssl_wipe(transcript)
     }
     ssldefs.ssl_wipe(ssl.handshake.tls13_early_secret)
     ssldefs.ssl_wipe(ssl.handshake.tls13_handshake_secret)
@@ -611,7 +617,7 @@ ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SS
             ssldefs.ssl_transform_release(ssl, tix)
             return Err(e)
         }
-        else -> ssl_tls13_key_set_wipe(traffic_keys)
+        .Ok(_) -> ssl_tls13_key_set_wipe(traffic_keys)
     }
     ssl.transform_application = tix
 }
@@ -622,7 +628,10 @@ ssl_tls13_compute_application_transform: fn(ssl: &ssldefs.SSLContext) ssldefs.SS
 ssl_tls13_exporter: fn(md: hashes.Md, secret: [U8], label: [U8], context_value: [U8], out_len: Int) -> [U8] ssldefs.SSLError! {
     hash_len: hashes.md_size(md)
     hkdf_secret := ssl_tls13_derive_secret(md, secret, label, [U8]{}, SSL_TLS1_3_CONTEXT_UNHASHED, hash_len) ?? return Err(err)
-    out: ssl_tls13_derive_secret(md, hkdf_secret, "exporter".bytes(), context_value, SSL_TLS1_3_CONTEXT_UNHASHED, out_len)
+    out: ssl_tls13_derive_secret(md, hkdf_secret, "exporter".bytes(), context_value, SSL_TLS1_3_CONTEXT_UNHASHED, out_len) ?? {
+        ssldefs.ssl_wipe(hkdf_secret)
+        return Err(err)
+    }
     ssldefs.ssl_wipe(hkdf_secret)
     out
 }

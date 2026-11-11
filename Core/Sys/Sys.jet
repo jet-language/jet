@@ -14,6 +14,7 @@ use {
     files: core.files
     process_api: core.process
     text_parse: core.text.parse
+    rt: jet.runtime.encoding
 
     core.encoding.[Dyn]
     core.sys.[EnvError]
@@ -31,7 +32,7 @@ SysTargetPointer: struct { pointer: *Int }
 // Layout facts must be evaluated inside the selected-target comptime boundary,
 // not through an ordinary function checked outside compile-time context.
 // Each prepared binding has one final expression.
-SYS_TARGET_POINTER_BYTES: comptime { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
+SYS_TARGET_POINTER_BYTES: comptime { SysTargetPointer.reflect().layout.size ?? panic("selected target has no concrete pointer layout") }
 SYS_TARGET_USIZE_MAX: comptime {
     if {
         SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 -> panic("selected target pointer width does not fit the U64 carrier")
@@ -43,7 +44,7 @@ SYS_TARGET_USIZE_MAX: comptime {
 usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 #Test("usize maximum follows the selected target pointer layout") {
-    size: comptime { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
+    size: comptime { SysTargetPointer.reflect().layout.size ?? panic("selected target pointer layout") }
     maximum: usize_max()
     assert((maximum >> (8 * (size - 1))) == U64{255})
     assert((maximum.bit_and(U64{255})) == U64{255})
@@ -248,7 +249,7 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
     if entry_names(entries) == {
         .Err(.NonUnicode) -> {}
-        else -> panic("a non-Unicode value must refuse enumeration with NonUnicode")
+        .Ok(_) | .Err(_) -> panic("a non-Unicode value must refuse enumeration with NonUnicode")
     }
 }
 
@@ -409,6 +410,20 @@ cpu_count: fn() -[Env]> Int Never! {
     count: core.sys.__cpu_count() ?? 1
     if count < 1 -> return 1
     count
+}
+
+// Whether this host's processor vendor confirms that the instructions
+// `timing: .Fixed` values meet run in the same time for every value
+// (JetRuntime HostTiming.jet). A program holding such values runs on an
+// unconfirmed host, unless its package sets `policy.harden`: then its entry
+// refuses to start there.
+TimingHost: enum {
+    Confirmed
+    Unconfirmed
+}
+
+timing_host: fn() -[Env]> TimingHost Never! {
+    if core.sys.__timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
 }
 
 getppid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
@@ -772,13 +787,11 @@ set_current_dir: fn(path: String) IOError! -[FS, Env]> {
 // never mapped, so a peer that truncates its file cannot fault this one.
 Fd: struct {
     priv token: Int
-}
 
-impl Fd.Close {
-    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
-}
+    impl Close {
+        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
+    }
 
-impl Fd {
     // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
     // (fewer at its end; none past it). Both bounds are in the types, so a
     // runtime value comes through `Int(lo..hi).from_int(n)?` first.
@@ -838,40 +851,11 @@ __fd_token: fn(fd: Fd) -> Int { fd.token }
 SharedMemory: struct {
     priv token: Int
     priv size: Int
-}
 
-impl SharedMemory.Close {
-    close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
-}
-
-FD_READ_MAX: 16777216
-SHARED_MEMORY_MAX: 1073741824
-
-// `size` zeroed bytes of shared memory, 1 B to 1 GiB.
-shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
-    bytes: wrapping(size + 0)
-    Ok(SharedMemory{token: core.sys.__shared_create_raw(bytes), size: bytes})
-}
-
-// How SharedMemory bounds its accesses: not part of the sys surface. Offsets
-// and lengths are range-typed, so only the end of an access is left to check
-// here; each sum stays below 2^31 and the `wrapping` gate never wraps.
-priv shared_bounds: module {
-    // Whether `count` bytes from byte `offset` lie inside `memory`.
-    shared_range_valid: fn(memory: SharedMemory, offset: Int(0..1073741824), count: Int(0..1073741824)) -> Bool {
-        wrapping(offset + count) <= memory.size
+    impl Close {
+        close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
     }
-}
 
-// A 32-bit pixel layout with a padding byte, named as wl_shm and DRM name
-// them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
-// is R, G, B, X.
-PixelFormat: enum {
-    XRGB8888
-    XBGR8888
-}
-
-impl SharedMemory {
     len: fn(self) -> Int { self.size }
 
     // Copies `bytes` in at byte `offset`.
@@ -916,6 +900,33 @@ impl SharedMemory {
 
     // A new descriptor for this memory, to pass to another process.
     descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
+}
+
+FD_READ_MAX: 16777216
+SHARED_MEMORY_MAX: 1073741824
+
+// `size` zeroed bytes of shared memory, 1 B to 1 GiB.
+shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
+    bytes: wrapping(size + 0)
+    Ok(SharedMemory{token: core.sys.__shared_create_raw(bytes), size: bytes})
+}
+
+// How SharedMemory bounds its accesses: not part of the sys surface. Offsets
+// and lengths are range-typed, so only the end of an access is left to check
+// here; each sum stays below 2^31 and the `wrapping` gate never wraps.
+priv shared_bounds: module {
+    // Whether `count` bytes from byte `offset` lie inside `memory`.
+    shared_range_valid: fn(memory: SharedMemory, offset: Int(0..1073741824), count: Int(0..1073741824)) -> Bool {
+        wrapping(offset + count) <= memory.size
+    }
+}
+
+// A 32-bit pixel layout with a padding byte, named as wl_shm and DRM name
+// them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
+// is R, G, B, X.
+PixelFormat: enum {
+    XRGB8888
+    XBGR8888
 }
 
 atexit: fn(handler: fn()) Never! -[Env]> {
@@ -1403,14 +1414,14 @@ has_nul: fn(value: String) -> Bool {
 // host environment writer.
 decode: fn<Target: Decode>(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> Target [FieldError]! {
     found: __decode_tree(prefix, file, allow, names) ?? return Err(err)
-    previous: core.encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     if found.tree.decode<Target>() == {
         .Ok(value) -> {
-            core.encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            core.encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Err(__decode_errors(failures, found.origins))
         }
     }
@@ -1688,16 +1699,16 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
                     assert_eq(children.len(), 1)
                     if children[0].value == {
                         .Text(text) -> assert_eq(text, "remote")
-                        else -> assert(false)
+                        .Object(_) -> assert(false)
                     }
                 }
-                else -> assert(false)
+                .Text(_) -> assert(false)
             }
             if pairs[0].value == {
                 .Text(text) -> assert_eq(text, "updated")
-                else -> assert(false)
+                .Object(_) -> assert(false)
             }
         }
-        else -> assert(false)
+        .Text(_) -> assert(false)
     }
 }

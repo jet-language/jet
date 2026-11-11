@@ -180,7 +180,7 @@ pkg_php_lint: fn(php: String, script: String) ForeignBindError! -[Exec, Time.Wai
         .Err(error) -> {
             if error == {
                 .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: (ForeignLanguage.Php).worker_action(), detail: "the PHP source has a parse error"})
-                else -> return Err(error)
+                .Source(_) | .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> return Err(error)
             }
         }
     }

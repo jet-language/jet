@@ -10,11 +10,7 @@ HyperLogLog: struct {
     impl Display {
         display: fn(self) -> String { "HyperLogLog(count={self.count()})" }
     }
-}
 
-new: fn() -> HyperLogLog Never! { HyperLogLog.new() }
-
-impl HyperLogLog {
     new: fn() -> HyperLogLog Never! {
         registers := [U8]{}
         loop _ in 0..<256 -> registers.push(U8{0})
@@ -44,6 +40,8 @@ impl HyperLogLog {
         rounded_count(alpha * width * width / sum)
     }
 }
+
+new: fn() -> HyperLogLog Never! { HyperLogLog.new() }
 
 rounded_count: fn(estimate: Float) -> Int Never! {
     if estimate >= 9223372036854775808.0 -> return 9223372036854775807

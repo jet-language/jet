@@ -446,35 +446,35 @@ value_numeric_type: fn(m: &Mem) -> Int Never! {
 SQLArgs: struct {
     args: [Mem]
     used: Int
+
+    impl PrintfArgs {
+        int_arg: fn(&self) -> Int Never! {
+            if self.used >= self.args.len() -> return 0
+            self.used += 1
+            int_value(self.args[self.used - 1])
+        }
+        double_arg: fn(&self) -> Float Never! {
+            if self.used >= self.args.len() -> return Float{0}
+            self.used += 1
+            real_value(self.args[self.used - 1])
+        }
+        next_text: fn(&self, out: &[U8]) -> Bool Never! {
+            if self.used >= self.args.len() -> return false
+            self.used += 1
+            m := self.args[self.used - 1]
+            if !value_text(m, base.UTF8) {
+                self.args[self.used - 1] = m
+                return false
+            }
+            out.clear()
+            loop b in m.z -> out.push(b)
+            self.args[self.used - 1] = m
+            true
+        }
+    }
 }
 
 new_sql_args: fn(args: [Mem]) -> SQLArgs Never! { SQLArgs{args: args, used: 0} }
-
-impl SQLArgs.PrintfArgs {
-    int_arg: fn(&self) -> Int Never! {
-        if self.used >= self.args.len() -> return 0
-        self.used += 1
-        int_value(self.args[self.used - 1])
-    }
-    double_arg: fn(&self) -> Float Never! {
-        if self.used >= self.args.len() -> return Float{0}
-        self.used += 1
-        real_value(self.args[self.used - 1])
-    }
-    next_text: fn(&self, out: &[U8]) -> Bool Never! {
-        if self.used >= self.args.len() -> return false
-        self.used += 1
-        m := self.args[self.used - 1]
-        if !value_text(m, base.UTF8) {
-            self.args[self.used - 1] = m
-            return false
-        }
-        out.clear()
-        loop b in m.z -> out.push(b)
-        self.args[self.used - 1] = m
-        true
-    }
-}
 
 // SQL printf(fmt, args...) as func.c printfFunc renders it.
 sql_printf: fn(fmt: [U8], args: [Mem], limit: Int) -> [U8]? Never! {

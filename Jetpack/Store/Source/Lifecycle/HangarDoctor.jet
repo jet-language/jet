@@ -79,7 +79,7 @@ store_hangar_doctor: fn(verification: &StoreVerification, roots: HangarRoots, re
                 store_path: scan.repair_paths.get(digest) ?? next
                 if !requests.has_key(store_path) -> requests[store_path] = NixOutputRequest{name: "doctor-{requests.len()}", store_path}
             }
-            else -> {}
+            .NoRepair | .Remove(_) -> {}
         }
     }
     repair_errors := [String: String]{}

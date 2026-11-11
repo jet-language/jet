@@ -1,0 +1,9 @@
+// A scoped denial refuses every path its scope covers: `secrets/key.txt` is
+// inside the denied folder `secrets/`.
+use files: core.files
+
+load: fn() -[!FS.Read("secrets/")]> String {
+    files.read("secrets/key.txt") ?? ""
+}
+
+run: fn() { print(load()) }

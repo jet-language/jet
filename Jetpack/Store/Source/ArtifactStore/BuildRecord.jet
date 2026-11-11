@@ -112,21 +112,21 @@ store_build_record_object: fn(value: Dyn) -> [String: Dyn]? Never! {
             loop pair in entries -> members[pair.key] = pair.value
             Val(members)
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
 store_build_record_array: fn(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> None
     }
 }
 
 store_build_record_text: fn(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -189,7 +189,7 @@ store_build_last_run_directory: fn(root: String, create: Bool) -[FS, Env]> files
                 if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
                     if failure == {
                         .AlreadyExists(_) -> {}
-                        else -> { return Err(ArtifactStoreError.IO(failure)) }
+                        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> { return Err(ArtifactStoreError.IO(failure)) }
                     }
                 }
             } else { return Err(ArtifactStoreError.IO(error)) }

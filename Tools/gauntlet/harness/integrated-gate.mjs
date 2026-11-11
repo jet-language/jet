@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { PAIR_ID, PLAIN_LABEL, PLAIN_PROGRAM, PLAIN_SOURCE, SURFACE_LABEL, SURFACE_PROGRAM, SURFACE_SOURCE, TARGET, METRIC, EXPECTED_OUTPUT, WARMUPS, TRIALS, validatePerformanceSurfaceReceipt } from "./performance-surface.mjs";
+import { PAIR_ID, PLAIN_LABEL, PLAIN_PROGRAM, PLAIN_SOURCE, SURFACE_LABEL, SURFACE_PROGRAM, SURFACE_SOURCE, TIER, TARGET, METRIC, EXPECTED_OUTPUT, WARMUPS, TRIALS, validatePerformanceSurfaceReceipt } from "./performance-surface.mjs";
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
@@ -303,9 +303,9 @@ function validatePerformanceSurfacePairs(spec) {
   if (!isObject(evidence) || !nonEmpty(evidence.file) || !nonEmpty(evidence.path)) {
     issues.push("performance_surface_pairs.evidence.file and evidence.path are required");
   }
-  if (!nonEmpty(evidence?.tier) || evidence.tier !== "interpreter"
+  if (!nonEmpty(evidence?.tier) || evidence.tier !== TIER
     || evidence.metric !== METRIC || evidence.target !== TARGET || evidence.output_oracle !== EXPECTED_OUTPUT) {
-    issues.push("performance_surface_pairs evidence must pin interpreter target, wall_time_ms metric, and exact output oracle");
+    issues.push(`performance_surface_pairs evidence must pin the ${TIER} ${TARGET} target, ${METRIC} metric, and exact output oracle`);
   }
   if (!nonEmpty(evidence?.input) || !nonEmpty(evidence?.setup)
     || evidence.warmups !== WARMUPS || evidence.trials !== TRIALS) {
@@ -345,6 +345,21 @@ function validatePerformanceSurfacePairs(spec) {
       if (!nonEmpty(pair[field])) issues.push(`performance surface pair ${pair.id ?? "missing"} is missing ${field}`);
     }
     if (pair.surface_program === pair.plain_program) issues.push(`performance surface pair ${pair.id ?? "missing"} reuses one program for both spellings`);
+    // A pair other than the strict compound receipt's keeps its own receipt
+    // file and declares everything that receipt is held to.
+    if (pair.evidence_file !== undefined
+      && (pair.id === PAIR_ID || !nonEmpty(pair.evidence_file) || pair.evidence_file === evidence?.file)) {
+      issues.push(`performance surface pair ${pair.id ?? "missing"} evidence_file must name its own receipt, not the shared one`);
+    }
+    if (nonEmpty(pair.evidence_file) && pair.id !== PAIR_ID) {
+      for (const field of ["surface_source", "plain_source", "input_range", "expected_output"]) {
+        if (!nonEmpty(pair[field])) issues.push(`performance surface pair ${pair.id ?? "missing"} is missing ${field}`);
+      }
+      if (!isObject(pair.inputs) || pair.inputs.range !== pair.input_range) {
+        issues.push(`performance surface pair ${pair.id ?? "missing"} inputs must name its input_range`);
+      }
+      if (pair.surface_source === pair.plain_source) issues.push(`performance surface pair ${pair.id ?? "missing"} uses one source for both spellings`);
+    }
     if (pair.verdict !== undefined && !["win", "loss", "inconclusive"].includes(pair.verdict)) {
       issues.push(`performance surface pair ${pair.id ?? "missing"} has unknown verdict ${pair.verdict}`);
     }
@@ -364,11 +379,15 @@ function validatePerformanceSurfacePairs(spec) {
   return issues;
 }
 
+// `evidence` is the shared compound receipt; options.pairEvidence maps a pair
+// id to { receipt, file } for each pair that names its own evidence_file.
 function evaluatePerformanceSurfacePairs(spec, evidence, options = {}) {
   const findings = [];
   const pairs = [];
-  const evidenceFile = options.evidence_file ?? spec?.evidence?.file ?? null;
-  const add = (kind, pair, cause) => {
+  const sharedFile = options.evidence_file ?? spec?.evidence?.file ?? null;
+  const pairEvidence = options.pairEvidence instanceof Map ? options.pairEvidence : new Map();
+  let currentFile = sharedFile;
+  const add = (kind, pair, cause, file = currentFile) => {
     findings.push({
       kind,
       cell: pair?.id ?? null,
@@ -376,23 +395,29 @@ function evaluatePerformanceSurfacePairs(spec, evidence, options = {}) {
       peer: null,
       tier: spec?.evidence?.tier ?? null,
       metric: spec?.evidence?.metric ?? "wall_time_ms",
-      evidence_file: evidenceFile,
+      evidence_file: file,
       cause,
     });
   };
   for (const issue of validatePerformanceSurfacePairs(spec)) add("malformed-input", null, issue);
   const configuredPairs = asArray(spec?.pairs);
-  const rows = surfaceEvidenceRows(evidence, spec?.evidence?.path);
-  const byId = new Map(rows.filter((row) => isObject(row) && nonEmpty(row.id)).map((row) => [row.id, row]));
+  const sharedRows = surfaceEvidenceRows(evidence, spec?.evidence?.path);
+  const rowsById = (rows) => new Map(rows.filter((row) => isObject(row) && nonEmpty(row.id)).map((row) => [row.id, row]));
+  const sharedById = rowsById(sharedRows);
   for (const pair of configuredPairs) {
     if (!isObject(pair) || !nonEmpty(pair.id)) continue;
-    const evidenceRow = byId.get(pair.evidence_key ?? pair.id);
+    const own = nonEmpty(pair.evidence_file) ? pairEvidence.get(pair.id) ?? { receipt: null, file: pair.evidence_file } : null;
+    const receipt = own ? own.receipt : evidence;
+    const evidenceFile = own ? own.file : sharedFile;
+    currentFile = evidenceFile;
+    // A pair's own receipt is the harness's, which keeps its row under `pairs`.
+    const evidenceRow = own ? rowsById(surfaceEvidenceRows(receipt, "pairs")).get(pair.evidence_key ?? pair.id) : sharedById.get(pair.evidence_key ?? pair.id);
     if (!evidenceRow) {
       add("missing-evidence", pair, `performance surface pair ${pair.id} has no evidence row`);
       continue;
     }
-    if (pair.id === PAIR_ID) {
-      const strict = validatePerformanceSurfaceReceipt(evidence, { pairSpec: pair });
+    if (pair.id === PAIR_ID || own) {
+      const strict = validatePerformanceSurfaceReceipt(receipt, { pairSpec: pair });
       for (const finding of strict.findings) add(finding.kind, pair, finding.cause);
     }
     if (nonEmpty(evidenceRow.canonical) && evidenceRow.canonical !== pair.surface) {
@@ -590,6 +615,13 @@ async function loadInputs(options = {}) {
     const entryPath = path.join(paths.entries_dir, row.name, "entry.json");
     entries.set(row.name, { path: entryPath, ...(await readFileValue(entryPath, true)) });
   }));
+  // A pair that names its own evidence_file is measured into that receipt.
+  const pairEvidence = new Map();
+  await Promise.all(asArray(surfaceSpec?.pairs).map(async (pair) => {
+    if (!isObject(pair) || !nonEmpty(pair.id) || !nonEmpty(pair.evidence_file)) return;
+    const pairPath = resolvePath(pair.evidence_file, repoDir);
+    pairEvidence.set(pair.id, { path: pairPath, ...(await readFileValue(pairPath, true)) });
+  }));
   return {
     manifest,
     manifestResult,
@@ -600,6 +632,7 @@ async function loadInputs(options = {}) {
     tierCensus: tierCensus.value,
     compilerSpeed: compilerSpeed.value,
     performanceSurfaceEvidence: performanceSurfaceEvidence.value,
+    pairEvidence,
     files: { matrix, status, conformanceManifest, tierCensus, compilerSpeed, performanceSurfaceEvidence },
     entries,
     loadErrors: [
@@ -607,6 +640,7 @@ async function loadInputs(options = {}) {
       ["conformance_manifest", conformanceManifest],
       ["tier_census", tierCensus], ["compiler_speed", compilerSpeed],
       ...(surfaceSpec ? [["performance_surface_evidence", performanceSurfaceEvidence]] : []),
+      ...[...pairEvidence].map(([id, result]) => [`performance_surface_evidence:${id}`, result]),
       ...[...entries].map(([name, result]) => [`entry:${name}`, result]),
     ].filter(([, result]) => result.error).map(([label, result]) => ({ label, path: result.path ?? paths[label] ?? paths.manifest, error: result.error })),
   };
@@ -639,10 +673,11 @@ function evaluateGate(inputs, options = {}) {
   for (const loadError of asArray(inputs?.loadErrors)) {
     add("missing-input", { evidence_file: loadError.path ?? manifestPath, cause: `${loadError.label}: ${loadError.error}` });
   }
+  const pairEvidence = new Map([...(inputs?.pairEvidence ?? new Map())].map(([id, result]) => [id, { receipt: result.value, file: result.path }]));
   const performanceSurfaceResult = evaluatePerformanceSurfacePairs(
     manifest?.performance_surface_pairs,
     inputs?.performanceSurfaceEvidence,
-    { evidence_file: inputs?.paths?.performance_surface_evidence },
+    { evidence_file: inputs?.paths?.performance_surface_evidence, pairEvidence },
   );
   for (const finding of performanceSurfaceResult.findings) add(finding.kind, finding);
   const contract = manifest?.report_contract ?? {};
@@ -663,14 +698,18 @@ function evaluateGate(inputs, options = {}) {
     return stamp;
   };
   if (isObject(manifest?.performance_surface_pairs)) {
+    const metric = { metric: manifest.performance_surface_pairs.evidence?.metric ?? "wall_time_ms" };
     checkFresh(
       "performance surface evidence",
       inputs?.performanceSurfaceEvidence,
       inputs?.files?.performanceSurfaceEvidence?.stat,
       inputs?.paths?.performance_surface_evidence,
       true,
-      { metric: manifest.performance_surface_pairs.evidence?.metric ?? "wall_time_ms" },
+      metric,
     );
+    for (const [id, result] of inputs?.pairEvidence ?? new Map()) {
+      checkFresh(`performance surface evidence for ${id}`, result.value, result.stat, result.path, true, { ...metric, cell: id });
+    }
   }
 
   const checks = {

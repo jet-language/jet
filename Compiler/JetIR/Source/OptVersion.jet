@@ -92,6 +92,10 @@
 // overflow tests the copy saves, while its copy grows the program. O2 copies
 // up to IR_VERSION_BODY instructions. A function's loop copies stay within
 // IR_VERSION_COPIES times the copy limit.
+//
+// A copy is made only when it gains something: a body whose arithmetic the
+// SSA round trip already proves inline without the guards keeps its loops
+// as they are (ir_opt_version_function).
 
 use jet_foundation.[compiler_threads_single, name_rows_set]
 
@@ -250,6 +254,63 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
     f.code_line = code.line.move()
     ir_opt_compact(f)
     starts.len()
+}
+
+// The loop versioning of `f` (ir_opt_version_loops) unless the SSA round
+// trip already makes its loops plain. The guards cost their tests on every
+// pass, and a body whose Int arithmetic OptRange proves inline without
+// them gains nothing from the copy: ScriptBench w14's
+// `sum += i * i %% 7919` is bounded by its trip count, so its head guard on
+// `sum` took 5 of the loop's 23 instructions a pass. With `ssa` (the round
+// trip may run on this body), a body that has a loop to copy goes through
+// the round trip as it is first; when none of its loops' instructions is
+// left for a guard to gain (ir_version_gains), that body is kept and true
+// is returned, its round trip done. Otherwise `f` is the versioned copy
+// taken before, and false is returned, as it is without `ssa`.
+ir_opt_version_function: fn(m: IRModule, f: &IRFunction, body: Int, options: IROptOptions, ssa: Bool, report: &IROptReport) -> Bool Never! {
+    if !ssa || !f.op.contains(IROp.Loop) {
+        _ := ir_opt_version_loops(m, f, body, report)
+        return false
+    }
+    versioned := f.copy()
+    steps := ir_opt_report(report.level)
+    if ir_opt_version_loops(m, versioned, body, steps) > 0 {
+        trial := ir_opt_report(report.level)
+        ir_opt_ssa(m, f, options, trial)
+        if trial.lint.len() == 0 && ir_version_gains(m, f) == 0 {
+            ir_opt_report_add(report, trial)
+            return true
+        }
+    }
+    f = versioned.move()
+    ir_opt_report_add(report, steps)
+    false
+}
+
+// How many instructions inside the loops of `f` a guard could still make
+// plain (ir_version_gain). Code outside every loop runs once a call, so
+// what a guard would gain there does not pay for its tests.
+ir_version_gains: fn(m: IRModule, f: IRFunction) -> Int Never! {
+    count := 0
+    // The open regions, true for a Loop.
+    open := [Bool]{}
+    loops := 0
+    loop k in 0..<f.op.len() {
+        if f.op[k] == {
+            .Block | .If -> open.push(false)
+            .Loop -> {
+                open.push(true)
+                loops += 1
+            }
+            .End -> {
+                if (open.pop() ?? false) -> loops -= 1
+            }
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
+                if loops > 0 && ir_version_gain(m, f, k) -> count += 1
+            }
+        }
+    }
+    count
 }
 
 // The counted loop start..=last with bound `bound` behind its test
@@ -435,7 +496,7 @@ ir_version_gain: fn(m: IRModule, f: IRFunction, k: Int) -> Bool Never! {
     compare: op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
     if !arithmetic && !compare -> return false
     if f.a[k] < 0 || m.types[f.slot_type[f.a[k]]].kind != .Int -> return false
-    f.c[k] != IR_OVERFLOW_WRAP
+    !ir_overflow_wraps(f.c[k])
 }
 
 // The Int slots the innermost loop `at` (its End `end`; its region from
@@ -667,7 +728,7 @@ ir_version_holds_loop: fn(f: IRFunction, at: Int, end: Int) -> Bool Never! {
         arm_end: if op == {
             .If -> if f.b[k] >= 0 -> f.b[k] else -> f.c[k]
             .Else -> f.a[k]
-            else -> -1
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> -1
         }
         k = if arm_end >= 0 && ir_version_exit_arm(f, k + 1, arm_end) -> arm_end else -> k + 1
     }

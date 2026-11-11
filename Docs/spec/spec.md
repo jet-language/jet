@@ -86,12 +86,29 @@ vocabulary](vocabulary.md).
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A).
+- A checked text type is any nominal with one `CheckedText` impl. A
+  `distinct String` type's literal is the joined text, with each hole passed
+  through `encode_hole`. A type that binds `Hole: T` and declares
+  `build: fn(parts: [String], holes: [Hole]) -[]> Owner` keeps its holes as
+  values: `Owner{"a {x} b"}` is `Owner.build(["a ", " b"],
+  [Owner.encode_hole(x)])`, and `check` accepts the parts joined by `{}`
+  before the program runs, or the literal is E2712. Such a literal adds no
+  failure route to the function it is in: a failure of `encode_hole` or
+  `build` stops the program at the literal, as a rejected run-time check
+  does. `Hole` without `build` is E0907 (D-TEXTHEAD-HOLES1=A;
+  Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
   `name: value` (`sites: [...]`, `repeatable: true`, …) and its template
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
+  `expand` runs at each site its `sites` names, and `target` is the record a
+  derive reads there: a struct's or enum's TypeInfo, a field's or variant's
+  FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
+  TypeInfo, a code module's ModuleInfo (PackageInfo's `name`, `identity`,
+  `types` and `functions` for that module), and a `.Block`'s text
+  (Examples/Metaprogramming/Reflection/MarkerSites.jet).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,
@@ -117,6 +134,15 @@ vocabulary](vocabulary.md).
   otherwise it remains `Int`. Ordinary numeric widening then applies. A typed
   or destination-owned literal is checked against that destination's range
   (D-INTLIT-WIDTH1, D-NUMLIT-PEER1).
+- A local name for a number reads as its number would (D-LIT-ADAPT1=A). A
+  `:` binding of a number literal with no width or type suffix, a negated
+  one, or arithmetic on such literals and names keeps that literal; a use
+  that refuses the name's own type reads it as the literal written there:
+  `y: 2.5` passed to a `Float` parameter is the `Float` 2.5. A use its own
+  type serves reads the name unchanged. A `:=` binding takes the type of the
+  first use that refuses its default, where the literal fits; a second use
+  that needs another type is one E0112 naming both uses. Module constants
+  keep their registered type.
 - Explicit conversion is destination-owned:
   `Target.from_source(value)`. Numeric narrowing is fallible; safe widening is
   implicit where the numeric decisions allow it. Numeric-backed distinct and
@@ -259,12 +285,14 @@ D-FAIL-EXIT1=A).
 At ordinary file scope, `name: value` declares an immutable module global and
 `name := value` declares a mutable module global. A mutable or `#Persist`
 global's initializer is a tier-stable scalar literal; any other initializer is
-E0622. An immutable global's initializer is any expression, computed once in
-dependency order before `run: fn`, and every read is an ordinary copy
-(D-MODULE-VALUE1). An initializer that stops stops the program before `run: fn`
-with its normal report, the same way on every tier. Compile-time code reads an
-immutable global only when the build can compute it, which needs a pure
-evaluation that succeeds (E0627). Only an explicit `comptime { … }` reads build
+E0622. An immutable global's initializer is any expression, computed while
+building and stored in the program, and every read is an ordinary copy
+(D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
+initializer that stops, reaches the outside world, or can't run while building
+is a build error (E0643), the same on every tier. A `name: Shared{value}`
+global holds one process-wide cell: the build computes `value`, which must be
+literal data, and every read shares the one cell. Only an explicit
+`comptime { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
@@ -309,7 +337,7 @@ not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
 `#Track name: value` and `#Track name := value` attach the origin fact. Read
-that fact as `value.$origin -> ?OriginInfo`; there is no runtime origin
+that fact as `value.reflect().origin -> ?OriginInfo`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
@@ -328,8 +356,8 @@ execution tier.
 
 `print` is an ambient prelude operation. It accepts one or more printable
 arguments and writes one line per argument with a trailing newline. `eprint` is
-the ambient stderr twin. Stdout is buffered by the one runtime, the same on
-every tier: a terminal stdout is written at each line end, a pipe or file when
+the ambient stderr twin. Stdout is buffered the same way on every tier: a
+terminal stdout is written at each line end, a pipe or file when
 its buffer fills. Pending stdout is written before any stderr write, before
 every read of stdin (so all that was printed is out before the program waits
 for input), before a child process starts, and when the process stops. Stdin
@@ -423,8 +451,9 @@ or any `Bool` expression; unrelated head forms may coexist. The first match or
 true guard wins. Chained `else if` remains legal, but an arm table is the
 preferred teaching form. `->` introduces a one-statement arm or value; braces
 hold multiple statements and make a scope. Arm tables can yield `()`; value
-branches require `else` unless a closed subject is exhaustive, and all arm
-results unify (D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, D-IFDIST1=A).
+branches over an open subject require `else`, a closed subject's table names
+every case instead (E0641), and all arm results unify (D-IF1, D-IF2, D-IF3,
+D-IFGUARD1=A, D-IFDIST1=A).
 
 `if subject == { head -> body }` compares a bare value head with the subject.
 A range head `lo..hi` tests inclusive membership. The subject and both bounds
@@ -447,7 +476,7 @@ field access, for example — the arms refer to it as `it`, as in
 
 Inside a generic function the subject may be a type parameter, making a
 type table: `if T == { Int -> … Point -> … else -> … }`. Each arm names one
-type and is checked with `T` read as that type, including in its result and
+type, a list type as `[U8]`, and is checked with `T` read as that type, including in its result and
 its `return`s. `else` sees only `T`'s bounds and is required (E0003), because
 types are an open set. Matching is exact identity (a bare `2.5` is a
 `Decimal`, not a `Float`): a repeated type is an unreachable arm (E0365) and
@@ -504,11 +533,10 @@ the literal: `if a > (I32{0}) ->`.
 ## Compile-time names and staged syntax
 
 An immutable `:` binding asks for build-time evaluation as an optimization,
-and `comptime` forces it (#6125). A module-level `MAX_RETRIES: 3` or
-`LIMIT: 6 * 7 + 1` is evaluated while building when its evaluation is pure
-and succeeds, and is read as `MAX_RETRIES` like a literal. A value that reads
-the outside world, or fails while building, is computed once at startup,
-before `run: fn`, with no build error; a trap there is the program's own. In a
+and `comptime` forces it (#6125). A module-level `name: value`, such as
+`MAX_RETRIES: 3` or `LIMIT: 6 * 7 + 1`, is always evaluated while building
+and read as `MAX_RETRIES` like a literal (D-MODULE-BUILD1). A value that reads
+the outside world, or stops while building, is a build error (E0643). In a
 block, an immutable `name: value` of Int arithmetic (`+`, `-`, `*`,
 negation) over literals and other folded bindings holds its value from the
 build on, at every optimization level; any other block value computes at run
@@ -528,17 +556,29 @@ a use that must own it copies only the part it takes. The retired `@NAME`
 spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 
-`embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]`
-embeds raw bytes, and `find("glob") -> [String]` returns sorted relative paths.
-`find` accepts the std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`.
-They are the sanctioned build-time I/O operations inside a compile-time binding;
-other comptime evaluation is pure.
-Paths and globs are string literals resolved relative to the embedding file, never
-absolute and never escaping the project with `..` (E0957). Missing or unreadable
-input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched
-file records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1).
+`embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]` embeds raw
+bytes, and `find("glob") -> [String]` returns sorted relative paths. `find` accepts the
+std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`. They are the sanctioned build-time
+I/O operations inside a compile-time binding; other comptime evaluation is pure.
+A path or glob is any `String` the comptime code computes: a literal, or a value such
+as a path an earlier `find` returned (D-EMBED-WALK1). It resolves relative to the
+embedding file, never absolute and never escaping the project with `..` (E0957, which
+quotes a computed value that breaks the law). Sema judges a literal; the compiler judges
+a computed value when the evaluation reaches the call, before it reads anything. Missing or unreadable
+input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched file
+records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1), and every `find`
+its glob with the SHA-256 of its sorted matches, an empty match included. Each is an input of
+the build identity: editing a file, or adding a file to or removing one from a glob, makes
+`jet build` and `jet run` rebuild, not reuse a stored binary, and `jet dev` rerun.
 A Core library file embeds files beside it in the toolchain's Core tree. They
 are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
+A path or glob spelled `toolchain:<path>` resolves against the toolchain tree the
+compile takes Core from (`JET_TOOLCHAIN_ROOT`, else the nearest toolchain checkout),
+held beneath that tree's root, with no built-in copy to fall back on (D-EMBED-TOOLCHAIN1).
+Only the toolchain's own packages read it: the compiler workspace `Compiler/`, its
+members, and the packages their path dependencies reach inside the tree. A file in any
+other package, a file outside the tree, a Core file and a compile against the built-in
+Core are E0945. Its `.jet/lock` row keeps the `toolchain:` name.
 
 When a ratified feature has a staged diagnostic, unsupported syntax receives that
 registered error and its milestone rather than a generic syntax failure. A spelling
@@ -620,7 +660,12 @@ outside a type body or `impl`, an inline module's included, can't take `self`
 
 Multiple construction shapes use distinctly named no-`self` statics such as
 `Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name
-is E0105. Enum `if subject == { … }` tables must be exhaustive.
+is E0105. Enum `if subject == { … }` tables must be exhaustive, and they name
+every case: an `else` over a closed set (an enum, `T?`, `T E!`, or a union) is
+E0641, whose edit writes the cases the `else` stood for, or deletes an `else`
+that can never run. A table whose arms are not all pattern tests of the subject
+(a Bool or comparison arm), and a table over an open set (numbers, text,
+structs), keep `else`.
 
 Traits contain signatures and implementations contain behavior. Implement a trait
 inside its type or with `impl Type.Trait { … }`; qualify a foreign type when the
@@ -639,6 +684,24 @@ impl Circle.Shape {
 Outside a type body, `impl Shape { … }` on a trait names no type to implement
 it for and is E0301.
 
+A module that declares a trait may implement it for a built-in scalar or Core
+math type (`impl Int.Named { … }`). The module owns the trait, and under the
+orphan rule the owner of either the trait or the type may write the impl. An
+`impl Int.Trait` for a trait the module does not declare is E0301; wrap the
+built-in type in a type the module declares instead.
+
+An impl of a generic type may apply only under conditions on the type's
+parameters (D-IMPL-COND1=A): `impl Pair<T: Priced>.Describe { … }` makes a
+`Pair<T>` `Describe` only where `T` is `Priced`, and inside its methods `T` is
+`Priced`. The head lists the type's parameters in their declared order, each
+with its bounds (E0003 otherwise); a list with no bound at all is the plain
+`impl Pair.Describe` spelled with parameters and is E0003 too. A call on a
+`Pair<Int>`, or a `Pair<Int>` where a `Describe` bound is wanted, is E0905.
+Inside a function with `U: Priced`, a `Pair<U>` meets the condition, because
+the check reads `U`'s declared bounds. Two impls of one trait for one type
+overlap and are E0908, conditions or not. A conditional impl stays outside
+its type's body: a nested impl cannot state the bounds.
+
 A trait name in type position, such as `[Shape]` or `f: fn(shape: Shape)`, means
 dynamic dispatch with invisible boxing. Generic bounds use `f: fn<T: Bound>(…)`
 and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
@@ -646,6 +709,8 @@ and `Pair: struct<T> { … }`. Built-in `Printable`, `Equatable`, `Debug`,
 package default can deny `auto_derive` through
 `policy: { lints: { deny: [auto_derive] } }`. A signed type marker opts one
 trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
+A `Display` implementation also satisfies a `Printable` bound, and a list,
+fixed list or option is `Printable` when its element is.
 `#Codable` requests both codec directions; `#Encode` and `#Decode` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
 
@@ -702,6 +767,101 @@ where dispatch or method attachment is expected is E0731. Tag names are
 PascalCase. Prelude declares `Input`, `PII`, `Secret`, and `Credential`
 (D-QUAL2, D-TAG-SURFACE1, D-CASING1).
 
+A tag body may also write `timing: .Free | .Fixed` and `protects: .Secrecy |
+.Integrity` (core.compiler.lang `TagTiming`, `TagProtects`). Left out, they are
+`.Free` and `.Secrecy`; `Secret` is `.Fixed` and `Input` is `.Integrity`. A
+`.Fixed` value must not decide a branch, a loop, a `&&` or `||` right side, an
+index, a slice bound, a division, a shift amount, an exponent, an allocation
+size, an indirect call target, a `?` or a `??` (E0737); must not be held in an
+`Int` or a `Float` (E0738); and must not reach a checked `+`, `-` or `*` outside
+`wrapping(...)`, `saturating(...)` or a wrapping or saturating arithmetic mode
+(E0739); `wrapping_add`, `wrapping_sub` and `wrapping_mul` never stop. A
+list's or a string's length is public whatever its contents carry
+(D-SECRET-CT1).
+
+A branch on a `.Fixed` value whose arms are total is masked, not refused. A
+total arm only binds names, assigns to local names, and reads literals, names
+and fields. It may use operators that cannot stop (bitwise operators,
+comparisons, a shift by a literal, wrapping arithmetic), the bit methods, the
+wrapping methods, `len()` and `is_empty()`, and nested total branches. No
+arm breaks, calls, stops or writes memory, and an arm returns only as an
+early return (below). Both arms run. Each local
+an arm assigns keeps its old value where the arm's test fails, and an `if`
+value keeps the chosen arm's value. Both are chosen with a masked select and
+no jump, and the result carries the test's tag. Only fixed-width integers and
+`Bool` are selected. `jet inspect decisions` lists each masked branch. A
+branch with an arm that is not total stays E0737 (D-SECRET-CT1).
+
+An early return from a branch on a `.Fixed` value is masked too. This is an
+`if` with no else whose arms are total except for a last `return` of a total
+value. It becomes a secret flag, and the code after it still runs. From that
+return on, and through a loop that holds one, each local assignment keeps its
+old value where the flag is set. Every later return gives the value of the
+first return taken. So `check_fast(expected: #Secret [U8], got: [U8]) ->
+#Secret Bool` reads every byte with no jump on the secret. The code an early
+return skips must be total: total statements, `if`s over total code, counted
+loops `for i in a..<b` with total bounds, and returns of total values. There
+`xs[i]` is total when `i` counts a loop to `xs.len()`. It is also total when
+`i` counts a loop to `ys.len()` and both lists are read parameters that an
+earlier `if xs.len() != ys.len() -> return …` proved the same length. If the
+skipped code is not total (it calls, can stop, writes memory or loops on its
+own), the early return stays E0737. So does an early `break` or `continue`.
+
+A tag inside a type counts as the value's own. The elements' tag of
+`[#Secret U8]` or `[#Secret U8#4]`, an `Option`'s or `Result`'s payload tag,
+a Map's value tag and a tuple field's tag reach every read out of the value,
+a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
+value secret too: `opt ?? d` on it is E0737.
+
+A `.Fixed` value keeps its meaning across calls, so the check gives the same
+answer at every optimization level, before any inlining. A call that passes
+one to a parameter with no `.Fixed` tag is checked as if the parameter had
+the tag: the callee's body is walked with it, and through every call that
+body makes. If the body would decide a branch or an early return on it,
+divide by it, index with it, or do anything else above, the call is E0737 at
+the argument. The report's why gives the chain of callees down to the code
+that steers. A total helper, one that only combines the value with
+operators that cannot stop, takes it with no tag and no report. A parameter
+written with a `.Fixed` tag is checked in its own body instead. A call
+through a value with no known body cannot be checked, so a `.Fixed` argument
+to one is E0737. That covers a local function value and any other callee
+expression. A foreign import keeps the C rules (D-SECRET-CT1).
+
+The compiler keeps this check after its own lowering too. In the IR, a
+fixed-width integer, `Bool` or `Char` whose type carries a `.Fixed` tag holds a
+fixed bit. So does every value computed from one without a call. Before code
+selection, and with the optimizer's verify mode after each of its passes, IR
+Lint finds any fixed value that decides a branch, divides, sets a shift amount,
+an address or an indirect call target, or meets arithmetic that can stop. Each
+finding is a compiler bug (an ICE), never a user diagnostic. A routine that
+reveals a fixed value (`#Scrub`) is not inlined where its result is public
+(D-SECRET-CT1).
+
+The selected instructions are checked too. For each function that holds a
+fixed value, a validator reads the code selected for it on every target,
+instruction by instruction. Each instruction a fixed value meets must be in
+that target's table. x86-64's table holds the general-purpose instructions
+on Intel's list of data operand independent timing instructions. It has no
+division, no branch or stop the value decides, no memory access at a fixed
+address, no string operation and no inline-asm template given the value.
+wasm32's table is CT-Wasm's: integer constants, local and global access,
+arithmetic without division or remainder, bit operations, shifts, rotates,
+comparisons and width changes, but no branch, select, call target or
+address. A finding is an ICE that names the function, the instruction and
+its line (D-SECRET-CT1).
+
+A host runs that code in fixed time only if its processor's vendor says so.
+Intel's guidance does for a processor without `IA32_ARCH_CAPABILITIES`; one
+with it holds only while the operating system sets DOITM, which a program
+cannot read. AMD and other vendors publish no such statement, and a
+WebAssembly engine picks its own instructions. So a program with fixed values
+runs on any host by default: `core.sys.timing_host()` says whether the host
+it runs on is confirmed, and `jet inspect decisions` prints the build's
+`timing host:` row. A package that sets `policy.harden` admits only a
+confirmed host: its native entry checks the host before `run` and refuses to
+start anywhere else, giving the reason. A build of such a package for web or
+another wasm32 target is E0744 (D-SECRET-CT1).
+
 `#Rule` or `#[A, B]` applies a rule on the line before a declaration. Block
 markers use PascalCase and parenthesized arguments when needed. An explicit empty
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`
@@ -714,7 +874,7 @@ is `#!X`, `#X: v` passes one name path, string, or number, and
 `#X: (args)` passes any other argument list; any other value is E0943, and a
 required Bool argument is written `#X: (true)` (E0943). The line is the same
 marker as `#X(args)` above the declaration, checked at the same site; type
-facts such as `$layout` apply once the whole body is read, and a function's
+facts such as `reflect().layout` apply once the whole body is read, and a function's
 value line may come before its marker lines. One declaration writes its whole
 set in one place: markers above and inside together are E0942, whose fix
 moves the set above. A line inside a nested block or a lambda body, and a
@@ -729,10 +889,12 @@ that declaration's own site (`.Trait`, `.Impl`, `.Module`); no Prelude marker
 accepts `.Trait`, so a marker on a trait is E0355.
 
 `#Off <stmt>` parses and type-checks one statement but emits no code in any
-build. `#DebugOnly <stmt>` type-checks in every build and emits only in debug or
-dev builds. Names introduced inside either marker are scoped to that marker body.
-The registered build-profile fact is `$build.profile`; bare `build.profile` is
-not a user-typeable comptime value (D-CANVASSTATE1).
+build. `#Off(.Release) <stmt>` type-checks in every build and is erased only in
+release builds (the `release` and `hardened` profiles); the condition menu is
+closed (D-OFF-RELEASE1). Two `#Off` forms on one statement are E0344. Names
+introduced inside either form are scoped to that marker body.
+The registered build-profile fact is `#build.profile`, read through the compiler
+value `#build` (D-CANVASSTATE1, D-META-HASH1, D-META-HASH2).
 
 `#Meta(category: "Movement", tunable)` attaches checked tooling facts to a
 binding, top-level const, or function. `category` is a non-empty plain string
@@ -747,7 +909,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-comptime if $build.os == {
+comptime if #build.target.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -756,7 +918,7 @@ comptime if $build.os == {
 ```
 
 The switch folds before target-gating checks. Arms must cover each OS or provide
-`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `$build.os`
+`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `#build.target.os`
 (E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
@@ -803,7 +965,7 @@ D-VALIDATE-DECODE1=B).
 
 For a concrete `#PublishedSchema` type that derives `Decode` and has migration
 blocks, decode first tries the current shape. If that fails, it compares the
-wire key set (after any `#Rename`/`#RenameAll` treatment) with historical shapes
+wire key set (after any field `#Rename` and type `#Rename(.Case)` treatment) with historical shapes
 from newest to oldest, rewrites the first match forward in source order, and
 decodes the current shape. The `rename` operation moves a
 key, `remove` drops it, `add` evaluates its default, and `change` decodes,
@@ -819,7 +981,7 @@ chain per row (D-MIGRATE4=A).
 A struct without `#Layout` is laid out by the compiler: its stored fields take
 offsets by descending alignment (declaration order among equals), each at its
 own alignment, and the struct rounds up to a multiple of 8 bytes, so
-`{U8, Int, U8, Int, U8}` takes 24 bytes. `T.$layout` reports the size,
+`{U8, Int, U8, Int, U8}` takes 24 bytes. `T.reflect().layout` reports the size,
 alignment and offsets the compiler chose, with guarantee `optimized`. A C
 declaration that follows them, with explicit padding fields, takes such a
 struct by reference: an `#Import` C function with a `&T` parameter receives the
@@ -859,6 +1021,12 @@ A case with a payload is E1120, a number the backing type can't hold is E1121,
 two cases with one number are E1122, and a case number that is not an integer
 literal is E0035. `#Layout(U8)` on a struct is E1105; `#Layout(c, U8)` remains
 the C ABI tag width of a `#Layout(c)` enum.
+
+`#Specified` on a numbered enum (`#Layout(U8)` … or `#Layout(c)`) makes every
+case state its number, so adding or moving a case renumbers no other
+(D-JAI-SMALL1=A): `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A
+case without a number is E1124, and `#Specified` on a struct or on an enum
+whose cases have no numbers is E1125.
 
 ## Fixed-size lists
 
@@ -901,6 +1069,27 @@ if channel >= channels.len() -> return Err("bad channel")
 channels[channel] += U64{1}
 ```
 Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
+
+### Number parameters
+
+A type or function may take a compile-time `Int` as a generic parameter,
+declared `<comptime N: Int>`; only the declaration writes `comptime`. Each
+number is its own instance: `Packet<4>` and `Packet<2>` are two types, laid
+out and named apart. An argument is an integer literal or a constant
+(`Packet<SIZE>`), or a number parameter in scope (`Packet<N>`). Inside the
+declaration, `[T#N]` takes the instance's length and `N` reads as an `Int`.
+A call infers `N` from its arguments' types (D-CONSTGEN1, D-CONSTGEN2).
+
+```jet
+Packet: struct<comptime N: Int> {
+    data: [U8#N]
+}
+
+size_of: fn<comptime N: Int>(packet: Packet<N>) -> Int { N }
+```
+
+A number parameter of any other value type (`<comptime N: String>`) is
+**E0390**.
 
 ## Closures and function values
 
@@ -1129,6 +1318,14 @@ for the complete report shape and fixes. (S36)
 `#Todo` reports E3011 with its source file, source line, and the checked Jet
 type expected at that expression. Native adapters pass those facts to the
 shared stop renderer; backend carrier names are not source type names.
+
+A function diverges when no path of its body returns to its caller: every
+path ends in `panic`, `#Todo`, a `loop` with no `break`, or a call of a
+function that diverges. The compiler decides this once per bundle as a least
+fixed point, so a public function that only calls a private helper that
+panics diverges too, while functions that only call each other do not. A
+public diverging function whose return type does not say `Never` gets the
+advisory **L2421** (D-NEVER1=C, D-NEVER2=B).
 
 ### Cleanup at a process stop
 
@@ -1515,8 +1712,10 @@ not satisfied. See
 
 ### Shared state, local cells, and pools
 
-`Shared<T>` is a lock-guarded, copyable handle. `shared value` constructs it and
-infers `T` from the value. A field read takes one read lock and a field write one
+`Shared<T>` is a lock-guarded, copyable handle. `Shared{value}` constructs it and
+infers `T` from the value; `Shared<T>{value}` names `T`, and the value adapts to
+it like any typed literal's field (#6281 c130). `shared` is an ordinary name,
+not a construction word. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `&&`
@@ -1525,7 +1724,7 @@ A type may declare strong `Shared` edges back to itself (a linked list, a tree);
 the cycle check runs at the write. A write into a shared cell, its edit guard's
 `.value`, or `try_replace`, whose place can hold a strong edge back to the cell's
 type, is rejected with E0221 unless the stored value is built in place: a
-literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
+literal, a new cell (`Shared{T{…}}`) whose fields are built the same way, a value
 whose type has no strong path back, or a `:` name bound to a new cell in the
 same run of its scope and read nowhere else since. A writing call
 (`cell.kids.push(kid)`) is checked the same way for each argument. Building a
@@ -1554,7 +1753,7 @@ handle: fn(id: Int, config: Shared<AppConfig>) -> String {
 }
 
 run: fn() {
-    config: shared AppConfig{name: "jet-server", hits: 0}
+    config: Shared{AppConfig{name: "jet-server", hits: 0}}
     t1: task handle(1, config)
     print(t1.join() ?? panic("task failed"))
     config.hits += 1
@@ -1565,8 +1764,8 @@ The lock is per statement. When one statement touches a second shared value,
 the ordered shared engine avoids nesting locks and therefore avoids the plain
 access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
 are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
-use `shared x`. A grouped operand uses the same construction, `shared (expr)`;
-for example, a generic optional payload can be `shared (T?{Val(x.move())})`.
+use `Shared{x}`. The braces hold any expression, so a generic optional payload
+is `Shared<T?>{Val(x.move())}`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
@@ -1940,7 +2139,7 @@ The same exclusion applies to inferred purity: an explicit empty effect row
 `-[]>` admits allocation, heap copies, and panic facts without requesting a
 positive right. Ambient effects such as `IO` still violate that empty ceiling.
 Writing module state is not an effect, but a `-[]>` function may not do it,
-itself or through any function it calls (E3401): a module `shared` holder's
+itself or through any function it calls (E3401): a module `Shared` holder's
 value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
 outlive the call, so a later call could see the write. Its own locals stay
 free to change.
@@ -1986,6 +2185,82 @@ call with a precise leaf under its own root records only that leaf, so
 still covers both. Application authority reads these sema facts and never
 alters them.
 
+### Effect scopes
+
+An effect argument names a scope from Core's scope kinds: a folder
+(`FS.Read("templates/")`), a host (`Net("api.example.com")`) or a device
+(`GPU("npu")`). The argument is one plain string, with no interpolation,
+quote or backslash; `Mem` and `Panic` take none. One covers rule
+(`Compiler/JetFoundation/Source/Policy/EffectScope.jet`) decides coverage for
+effect rows, denials and run grants, from three fixed laws
+(D-EFFECT-ARGS1):
+
+- A path covers by whole components after normalization: `templates/` covers
+  `templates/home.html` but not `templates2/`, and `templates/../secret.txt`
+  is `secret.txt`. A `..` kept above a relative start never climbs into a
+  scope: `..` does not cover `../..`, nor `.` cover `../a`.
+- A host covers by exact match after lower-casing and dropping one trailing
+  `.`: `api.example.com` never covers `evilapi.example.com`. Every other byte,
+  whitespace too, is part of the host. Internationalized names are compared
+  as written.
+- Any other argument covers by equality.
+
+These laws have one implementation, the runtime's (`jet_authority_covers`):
+the checker's rows, grants and denials, `--allow` and `--deny`, the runtime's
+Authority values (`with`, `without`) and its effect-scope checks all answer by
+it, and one normalization table pins its answers.
+
+A bare effect covers every scoped instance of itself and its leaves, so `FS`
+and `FS.Read` both cover `FS.Read("assets/")`. A scoped effect never covers
+the bare one.
+
+A call names its scope through a constant argument. The `core.files`
+functions that read or write the one path their first argument names, such
+as `read`, `read_bytes`, `open`, `write` and `create`, need `FS.Read` or
+`FS.Write` scoped to that path when it is a string literal. The compiler
+reads this off each declaration: a top-level `core.files` function whose
+first parameter is `path` and whose row declares one `FS` leaf publishes it.
+`files.read("assets/logo.txt")` needs `FS.Read("assets/logo.txt")`. An
+interpolated literal names the folder its constant text ends in, so
+`files.read("assets/{name}")` needs `FS.Read("assets/")`. `http.get` with a
+constant URL host needs `Net` scoped to that host. A path known only at run
+time names no scope and needs the bare effect.
+
+```jet
+load: fn() -[FS.Read("assets/")]> String {
+    files.read("assets/logo.txt") ?? ""
+}
+```
+
+A row with a scope is checked at build time: a constant path outside it is
+E0740, and so is a run-time path, since the bare need is outside every scope.
+A denial (`-[!FS.Read("secrets/")]>`) refuses each need it covers with E0749;
+a need that only overlaps it, such as `FS.Read("assets/")` under a denied
+`assets/private/`, builds. Run grants (`--allow`, `--deny`) use the same
+spelling and rule, and a mediated call checks its run-time path against them
+(see "Application authority").
+
+A constant prefix proves where a call starts, not where it lands:
+`files.read("data/{name}")` with `name` set to `../secret.txt` leaves
+`data/`. So a closed written row with a scoped `FS` or `Net` entry is also
+mediated at run time, at every optimization level. While the function runs,
+its row is in force, for every callee and every task it spawns. Each file a
+`core.files` path call reaches, and each host an `http.get` reaches,
+including every redirect hop, is checked before the system call or the
+lookup against every row in force. A file is resolved as the kernel resolves
+it: from the working directory, with each link of its existing part followed
+(a call that acts on a link itself resolves only its folder) and `..`
+applied. A scope's folder is resolved the same way and covers by whole
+components. A row that allows some effect of the resource's root (`FS` or
+`Net`) must allow one covering it, else the call fails with E0740. A denial
+in the row that covers it fails the call with E0749. The failure is the
+call's own error, `IOError.PermissionDenied` with the refusal as its cause,
+or `HTTPError.Policy` with the refusal as its reason, and the call does
+nothing. A path replaced between the check and the system call is the
+kernel's to confine (`--allow`, Landlock). An open row (`..E`), the listed
+scopes of a library effect and value scopes (`GPU("npu")`) stay build-time
+only. An inline loop body runs under its function's row.
+
 ### Application authority
 
 Every effect is allowed unless code denies it (D-AUTH-DEFAULT1). With no
@@ -2020,7 +2295,7 @@ on stderr whose `effects` field lists the noticed rights, beside
 `required_effects`, on every run with an effect to name.
 `-A` (`--allow-all`) acknowledges every effect and hides
 the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
-resource-qualified right still confines the run through the host sandbox.
+scoped right (`--allow='FS.Read("data/")'`) still confines the run through the host sandbox.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops
 with E1803 before host state changes.
 
@@ -2610,15 +2885,19 @@ imports are rejected with **E0612**. An unqualified import of an undefined
 member is **E0611**, and importing an item from a module that is not in scope is
 **E0610** (D-MOD2).
 
-Declarations are public by default (S18, D-VIS-MODULE1). `priv name: module`
-keeps a module's contents to its enclosing module, and `priv(package) module
-name` keeps them inside the package; a `priv` struct field is usable only by its
-type's module. Reaching into a private module or field across files reports
-**E0605**, importing a member of a private module **E0609**. These markers are
-errors whose fix deletes them: `priv` on another declaration (**E0413**), an
-unknown `priv(...)` qualifier (**E0414**), section labels (**E0415**) and
-`priv(package)` on a field (**E0417**). Inline-module bodies are type-checked
-in their defining scope, so siblings call each other freely.
+Declarations are public by default (S18, D-VIS-MODULE1, D-VIS-ITEM1). `priv`
+is the only hiding form: a `priv` declaration at the top level of a package is
+usable by every file of that package, and inside a module by that module and
+its children (`priv(package)` there widens it to the package). `priv name:
+module` keeps a module's contents to its enclosing module, and `priv(package)
+module name` keeps them inside the package; a `priv` struct field is usable
+only by its type's module. Reaching a private declaration, module or field from
+outside reports **E0605**, importing a member of a private module **E0609**.
+These markers are errors whose fix deletes them: an unknown `priv(...)`
+qualifier or `priv(package)` on a top-level declaration other than a module
+(**E0414**), section labels (**E0415**) and `priv(package)` on a field
+(**E0417**). Inline-module bodies are type-checked in their defining scope, so
+siblings call each other freely.
 
 A member import names any top-level declaration: a function, type, enum,
 trait, tag, protocol, or constant. A constant is declared like any other item,
@@ -2642,7 +2921,7 @@ module has no record, so binding or passing one, such as `m: math` after
 
 A type is not a value: binding, passing or printing a type, such as
 `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type, or
-read a compile-time fact of it such as `Rock.$fields`.
+read a compile-time fact of it such as `Rock.reflect().fields`.
 
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
@@ -3109,7 +3388,16 @@ retain source order. `race` and `any` remain positional.
 
 `task.group name { ... }` creates a lexical group. `task.group name(limit: n)
 { ... }` limits active children; a limit below one is clamped to one before
-admission. The group owns and joins every child created in its body. A `Group`
+admission. `task.group name(stack: bytes) { ... }` gives each child at least
+`bytes` of stack, and the groups and tasks a child opens inherit it unless
+they name their own; every other task gets the system's stack size (the soft
+`RLIMIT_STACK`), at least 8 MiB. The runtime caps a request at 8 GiB, and
+under a finite address-space limit at a hundredth of it; a constant `stack:`
+outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
+**E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both
+arguments may be given, in either order, at most once each
+(D-THREAD-STACK1=A). The group owns and joins every child created in its
+body. A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet
@@ -3630,7 +3918,7 @@ runtime, and schema. LuaRocks realization remains provider work. See
 
 **Binds.** `jet inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]`
 reads exported functions from an Ada package specification and compiles its
-sibling body with GNAT. Supported exports use `Export`, `Convention => C`, and
+sibling body with GNAT. Supported Ada exports use `Export`, `Convention => C`, and
 `External_Name`; scalar arguments and results use
 `Interfaces.C.long_long`/`Long_Long_Integer` or
 `Interfaces.C.double`/`Long_Float`.
@@ -4449,9 +4737,18 @@ together with `debug_info: false` is refused with E2104. The stock `full` under
 `debug_info: false` prints the return addresses instead.
 
 `dead_code` (stock `remove`) says whether the image keeps functions the entry
-never reaches. `remove` builds only the reached ones. `keep` also builds every
-non-generic function of the package's own modules, so the image carries them
-(a generic function is still built only for the instances a call reaches).
+never reaches. `remove` builds only the reached ones, and for `jet build`,
+`jet run`, a script and `jet dev` it lowers only those of the package's own
+modules: the ones its roots reach. The roots are the entry, its jobs, every
+function under a marker (`#Export(c)` among them) or that the compiler
+generates, and a foreign call's callback, `#Close` or `undo` function; a
+function passed as a value is reached through the body that names it. `keep`
+also builds every non-generic function of the package's own modules, so the
+image carries them (a generic function is still built only for the instances
+a call reaches). A dependency package's function is lowered only when a
+lowered body reaches it, under either setting and in every command but
+`jet test`, as a Core function is: an unreached one costs the build nothing
+past its check.
 `build: fn` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`tests/run/Tooling/BuildBacktrace`](../../tests/run/Tooling/BuildBacktrace/run.jet).
@@ -4920,8 +5217,8 @@ into typed input with one parameter whose type is a `#CLI` struct:
 ```jet
 #CLI
 ServeArgs: struct {
-    #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
-    #Short("v") verbose: Bool
+    #[Doc("port to listen on"), Arg(env: "PORT")] port: Int{3000}
+    #Arg(short: "v") verbose: Bool
     config: String?
 }
 
@@ -4932,8 +5229,8 @@ run: fn(args: ServeArgs) {
 
 `#CLI` is a sibling derive of `#Codable`. `#Doc` on a struct describes the
 program, on a field describes its option, and on a callable member describes
-its command. Descriptions preserve embedded line breaks. `#Short` and `#Env`
-are field markers. `#CLI(Standard)` additionally registers
+its command. Descriptions preserve embedded line breaks. `#Arg(flag_only:,
+short:, env:)` is the one command-input field marker (D-CLI-ARG1). `#CLI(Standard)` additionally registers
 `--verbose`/`-v`, `--quiet`/`-q`, `--color=auto|always|never`, and `--version`.
 Plain `#CLI` always registers `--help`.
 
@@ -4948,8 +5245,8 @@ and serves the returned App; it does not change the CLI schema
 ### Field mapping
 
 Each supported `#CLI` field maps to exactly one long flag. Required scalar
-fields also fill bare positional values in declaration order unless `#Flag`
-opts that field out. Named input wins over a positional value. The supported
+fields also fill bare positional values in declaration order unless
+`#Arg(flag_only: true)` opts that field out. Named input wins over a positional value. The supported
 shapes are:
 
 | Field shape | Named form | Bare form | Missing value |
@@ -4957,21 +5254,21 @@ shapes are:
 | `Bool` | `--name` | none | `false` |
 | `?T` for a supported scalar | `--name VALUE` | none | `None` |
 | scalar with `{expr}` | `--name VALUE` | none | `expr` |
-| required scalar with `#Flag` | `--name VALUE` | rejected | runtime `core.args` error |
+| required scalar with `#Arg(flag_only: true)` | `--name VALUE` | rejected | runtime `core.args` error |
 | other supported scalar | `--name VALUE` | declaration-order positional | runtime `core.args` error |
 
 Supported scalar types are `Int`, including inline ranges, `Float`, `Bool`,
 `String`, and `Path`. A map, closure, list, or nested `#CLI` struct is E1305.
 Field names convert underscores to dashes. Every field accepts its named form.
-`#Flag` on a bool, optional, or defaulted field is E1309. Declaration order is
+`#Arg(flag_only: true)` on a bool, optional, or defaulted field is E1309. Declaration order is
 part of the command interface and is represented in the checked `CLISchema`.
 A field named `help` collides with generated `--help` and is E1306.
 
-`#Short("n")` adds `-n` to the long form and must be one unique ASCII letter.
-`#Env("PORT")` is read only when command input is absent. The precedence is
-command input, then environment, then field default. Invalid or duplicate
-short names are E1318; field markers outside a `#CLI` struct and `#Env` on a
-presence-only bool are E1319. Nested `#CLI` structs are deliberately not
+`#Arg(short: "n")` adds `-n` to the long form and must be one unique ASCII
+letter. `#Arg(env: "PORT")` is read only when command input is absent. The
+precedence is command input, then environment, then field default. Invalid or
+duplicate short names are E1318; `#Arg` outside a `#CLI` struct and
+`env:` on a presence-only bool are E1319. Nested `#CLI` structs are deliberately not
 supported in this contract; grouped prefix decoding would require its own
 shape and diagnostics (D-CLI-GLOBAL1, D-CLI-POS1).
 
@@ -5235,7 +5532,7 @@ typed plugin handle:
 use plugin: core.plugin
 
 run: fn() {
-    policy: Authority.from_rights(["FS.Read:repo"])
+    policy: Authority.from_rights(["FS.Read(\"repo\")"])
     mathkit: plugin.load("mathkit.wasm", policy)
     area: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
@@ -5515,8 +5812,19 @@ before any build has recorded one it fails with E2104. Example:
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only
 declared inputs enter its writable tree and only declared outputs leave it.
-Network is unshared unless both source and policy grant `Net`. A missing
-sandbox is E3505, not an unsandboxed run. Build authority uses the same
+Network is unshared unless both source and policy grant `Net`. One resolver
+(`foundation_linux_bwrap`) picks the bubblewrap for every sandboxed action,
+`jet build`, `jet cc` and the Rust bridge alike: the `bwrap` on PATH first,
+because a host that lets only profiled programs create user namespaces
+(Ubuntu's AppArmor profile for `/usr/bin/bwrap`) allows only its own copy;
+then Jet's own hash-pinned static bubblewrap at
+`<hangar>/tools/<sha256>/bwrap`, installed from the `jet-bwrap-<arch>-linux`
+beside jet (a release archive carries it there) or, by a command that runs
+build actions, fetched on first need from `JET_BWRAP_URL` or the jet's
+release. Each must pass its probe. With neither usable the build is E3505,
+whose message names why each failed, not an unsandboxed run. Example:
+[`tests/cases/build_entry/build_step_without_any_usable_bubblewrap_names_both.case`](../../tests/cases/build_entry/build_step_without_any_usable_bubblewrap_names_both.case).
+Build authority uses the same
 `--allow=<RIGHTS>` and `--deny=<RIGHTS>` surface as other commands. Every
 effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.
@@ -5544,7 +5852,7 @@ setting and its type, and `build: fn` only computes a value (D-CONF-SPLIT1).
 Before a package that declares settings compiles (`jet build`, `jet run`,
 `jet test`), its `build: fn` runs, and the project lock records each
 contribution as a `[[build.contribution]]` row. Every compile of the package
-reads those rows: `$build.settings.cache_slots` folds to the contributed value
+reads those rows: `#build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
 [`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
@@ -5622,7 +5930,7 @@ and may have `panic`. A locked package requires `name`, `version`, `source_kind`
 `content_hash`, `layer`, and `inferred_layer`. Empty collections remain empty
 lists. Optional source fields remain optional strings. Git sources redact
 credentials, URL queries, and fragments. Current package identity remains
-available through `$package.name` and `$package.version`, not as a
+available through `#package.name` and `#package.version`, not as a
 repeated field in each view.
 
 Each operation returns a compile-time `Result`. The Rust facade reports

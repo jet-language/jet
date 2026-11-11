@@ -82,7 +82,7 @@ store_verify_cache_entry: fn(verification: &StoreVerification, roots: HangarRoot
 store_reuse_optional_graph: fn(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph? Never! {
     if store_closure_graph_structure(verification, roots) == {
         .Ok(graph) -> Val(graph)
-        else -> None
+        .Err(_) -> None
     }
 }
 
@@ -121,7 +121,7 @@ store_verify_cache_entry_with_graph: fn(verification: &StoreVerification, roots:
 store_reuse_output_hash_matches: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
     if store_try_entry_output_hash(verification, roots, entry) == {
         .Ok(hash) -> hash == entry.envelope.output_hash
-        else -> false
+        .Err(_) -> false
     }
 }
 
@@ -137,7 +137,7 @@ store_reuse_hash_probe: fn(verification: &StoreVerification, roots: HangarRoots,
 store_reuse_lexists: fn(path: String) -> Bool Never! {
     if files.stat(path) == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
 }
 
@@ -183,7 +183,7 @@ store_reuse_producer_authority_verified: fn(roots: HangarRoots, entry: StoreEntr
     builder: trust_cache_builder_identity(producer.provider, producer.immutable_source, producer.source_digest)
     valid: if provenance.validate() == {
         .Ok(_) -> true
-        else -> false
+        .Err(_) -> false
     }
     revoked: trust_is_cache_builder_revoked(roots.root, builder) ?? true
     valid && provenance.reference == entry.reference && provenance.source == producer.immutable_source && provenance.builder == builder && provenance.action == store_cache_action_identity(producer, entry.reference, entry.cache_identity, entry.references) && provenance.output == entry.envelope.output_hash && provenance.platform == identity.platform && provenance.sandbox == "sandbox:policy-bound" && provenance.policy == identity.policy_fingerprint && !revoked
@@ -203,7 +203,7 @@ store_enforce_manifest_provenance_floor: fn(project: String?, package: String) R
     lock: pkg_lock_load(root) ?? return Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, "{pkg_lock_path(root)} is missing")))
     if pkg_lock_enforce_provenance_requirement(lock, requirement) == {
         .Err(detail) -> return Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, detail.message())))
-        else -> {}
+        .Ok(_) -> {}
     }
 }
 
@@ -286,7 +286,7 @@ store_reuse_user_profile_batch_locked: fn(verification: &StoreVerification, root
         entry: store_reuse_newest(valid, reference) ?? next
         permitted: if store_require_entry_catalog_permission(entry, local_nix_catalog) == {
             .Ok(_) -> true
-            else -> false
+            .Err(_) -> false
         }
         if !permitted -> next
         selected.push(entry)

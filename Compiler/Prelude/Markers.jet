@@ -30,14 +30,6 @@ Policy: struct {
     }
 }
 
-Arithmetic: struct {
-    mode: ArithmeticMode
-
-    impl Marker {
-        sites: [.Function, .Method, .Block]
-    }
-}
-
 Unsafe: struct {
     reason: String
     obligations: ObligationMode{.None}
@@ -55,6 +47,9 @@ Scrub: struct {
     }
 }
 
+// Stores a pure function result or a computed field result until its checked
+// inputs change. A function uses the bounded default or `bound: none`; the
+// field form is bare `#Memo` before `name: T -> expr`.
 Memo: struct {
     bound: MemoBound{.Default}
 
@@ -63,6 +58,9 @@ Memo: struct {
     }
 }
 
+// A precondition on a function signature, `#Pre(cond, "msg")`. The condition
+// is a pure expression (the `#Pure` checker); it is checked in every build
+// unless a module's build policy strips it.
 Pre: struct {
     condition: Value
     message: String
@@ -73,6 +71,8 @@ Pre: struct {
     }
 }
 
+// A postcondition, `#Post(cond, "msg")`; `result` names the return value
+// inside `cond`.
 Post: struct {
     condition: Value
     message: String
@@ -85,6 +85,8 @@ Post: struct {
 
 // These rows stay separate. Kernel requests a checked
 // worker-boundary proof; Inline(Always) is a checked promise, not a hint.
+// `#Kernel(.parallel) name: fn …`: the mode is a closed argument, so another
+// execution mode needs a new owner ruling.
 Kernel: struct {
     mode: KernelMode
 
@@ -93,6 +95,8 @@ Kernel: struct {
     }
 }
 
+// `#Inline` on a function or method is a soft hint to inline it; sema never
+// rejects it and the compiler may ignore it.
 Inline: struct {
     mode: InlineMode{.Hint}
 
@@ -127,14 +131,9 @@ Job: struct {
     limits: Value{none}
     after: Value{[]}
     parallel: Value{none}
-
-    impl Marker {
-        sites: [.Function]
-    }
-}
-
-Every: struct {
-    schedule: Duration | String
+    // The schedule: a positive Duration cadence or a daily
+    // UTC "HH:MM" time.
+    every: Duration | String{none}
 
     impl Marker {
         sites: [.Function]
@@ -147,23 +146,11 @@ Replayable: struct {
     }
 }
 
-WasmExport: struct {
-    impl Marker {
-        sites: [.Function]
-    }
-}
-
+// `#State(S)` requires S; `#State(A -> B)` moves A (`_` at
+// entry) to B, the arrow binding `to`.
 State: struct {
     state: State
-
-    impl Marker {
-        sites: [.Function, .Method]
-    }
-}
-
-Transition: struct {
-    from: State
-    to: State
+    to: State{none}
 
     impl Marker {
         sites: [.Function, .Method]
@@ -179,6 +166,8 @@ FFI: struct {
     }
 }
 
+// `#Undo(inverse)` names the compensating function a foreign binding
+// registers on the enclosing transaction's rollback path.
 Undo: struct {
     inverse: Ident
 
@@ -187,6 +176,9 @@ Undo: struct {
     }
 }
 
+// `#Close(close)` joins a returned foreign handle to the consuming
+// `close(handle)` protocol; the named foreign function is checked against the
+// returned handle before the binding is registered.
 Close: struct {
     close: Ident
 
@@ -195,6 +187,8 @@ Close: struct {
     }
 }
 
+// A C declaration's native calling convention. C is the implicit default;
+// another ABI is never inherited.
 ABI: struct {
     name: ABI
 
@@ -209,6 +203,8 @@ MustUse: struct {
     }
 }
 
+// Marks a named type as an allowed explicit error domain for a `!Error`
+// callable contract.
 Error: struct {
     impl Marker {
         sites: [.Type]
@@ -296,6 +292,9 @@ CodableAsBase: struct {
     }
 }
 
+// `#CLI` on a struct: a resolved `run: fn(args: T)` parameter type owns
+// parsing, defaults, help, completion, validation and audit facts. The marker
+// is optional; plain `run: fn()` stays a complete entry.
 CLI: struct {
     pack: Ident{none}
 
@@ -304,6 +303,8 @@ CLI: struct {
     }
 }
 
+// Derives a nested `T.Patch` with `apply`, `diff` and `merge`, Codable by
+// construction.
 Patchable: struct {
     impl Marker {
         sites: [.Type]
@@ -340,12 +341,13 @@ Layout: struct {
     }
 }
 
-RenameAll: struct {
-    case: NamingCase
-
+// Every case of a numbered enum (`#Layout(U8)` or `#Layout(c)`) states its
+// number: `#[Specified, Layout(U8)] Op: enum { Add = 1, Sub = 2 }`. A case
+// without one is E1124, and the marker on a type without case numbers is
+// E1125.
+Specified: struct {
     impl Marker {
         sites: [.Type]
-        owns_menu: true
     }
 }
 
@@ -375,8 +377,11 @@ Redact: struct {
     }
 }
 
+// A string renames one field or variant (keeping the
+// projection arguments below); a NamingCase (`.Camel`) on a type sets the
+// wire casing of all its fields or variants.
 Rename: struct {
-    name: String
+    name: String | NamingCase
     json: String{none}
     cbor: String{none}
     csv: String{none}
@@ -389,7 +394,7 @@ Rename: struct {
     layout: String{none}
 
     impl Marker {
-        sites: [.Field, .Variant]
+        sites: [.Field, .Variant, .Type]
     }
 }
 
@@ -405,6 +410,7 @@ Flatten: struct {
     }
 }
 
+// Field and command help for CLI-derived arguments.
 Doc: struct {
     text: String
 
@@ -414,28 +420,23 @@ Doc: struct {
     }
 }
 
-Flag: struct {
-    impl Marker {
-        sites: [.Field]
-    }
-}
-
-Short: struct {
-    name: String
-
-    impl Marker {
-        sites: [.Field]
-    }
-}
-
-Env: struct {
-    name: String
+// The one `#CLI` field marker. `flag_only: true` keeps a required
+// value field off bare positional input; `short:` is a one-letter alias and
+// `env:` the environment fallback. Command input beats the environment, which
+// beats the typed default.
+Arg: struct {
+    flag_only: Bool{false}
+    short: String{none}
+    env: String{none}
 
     impl Marker {
         sites: [.Field]
     }
 }
 
+// A dev-tier contract on a module-level binding: the value survives `jet dev`
+// hot reloads (identity is module path plus binding name). Inert in release
+// builds.
 Persist: struct {
     impl Marker {
         sites: [.Declaration]
@@ -551,13 +552,11 @@ Reactive: struct {
     }
 }
 
+// `#Off` erases a statement or block from every build; `#Off(.Release)` only
+// from release builds. Either body is type-checked in every build.
 Off: struct {
-    impl Marker {
-        sites: [.Statement, .Block]
-    }
-}
+    build: BuildCondition{none}
 
-DebugOnly: struct {
     impl Marker {
         sites: [.Statement, .Block]
     }
@@ -594,6 +593,8 @@ Interrupt: struct {
     }
 }
 
+// Marks a free function's first bare-read parameter as the receiver for the
+// equivalent `value.function(…)` spelling.
 Root: struct {
     impl Marker {
         sites: [.Parameter]
@@ -628,6 +629,9 @@ Bindgen: struct {
     }
 }
 
+// `#Allow(jet.FloatMoney, "why")` on a declaration, field or statement
+// silences that one lint there; the lint is named by its diagnostic type path
+// (JetSema/Source/Sema/LintAllowances.jet).
 Allow: struct {
     lint: Ident
     reason: String{none}

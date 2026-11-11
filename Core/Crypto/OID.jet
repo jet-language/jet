@@ -337,7 +337,7 @@ oid_by_sig_alg: fn(pk: PKType, md: hashes.Md?) -> [U8] OIDError! {
             .SHA256 -> Ok(OID_PKCS1_SHA256.copy())
             .SHA384 -> Ok(OID_PKCS1_SHA384.copy())
             .SHA512 -> Ok(OID_PKCS1_SHA512.copy())
-            else -> Err(.NotFound)
+            .RIPEMD160 | .SHA3x224 | .SHA3x256 | .SHA3x384 | .SHA3x512 -> Err(.NotFound)
         }
     }
     if pk == .ECDSA {
@@ -347,7 +347,7 @@ oid_by_sig_alg: fn(pk: PKType, md: hashes.Md?) -> [U8] OIDError! {
             .SHA256 -> Ok(OID_ECDSA_SHA256.copy())
             .SHA384 -> Ok(OID_ECDSA_SHA384.copy())
             .SHA512 -> Ok(OID_ECDSA_SHA512.copy())
-            else -> Err(.NotFound)
+            .MD5 | .RIPEMD160 | .SHA3x224 | .SHA3x256 | .SHA3x384 | .SHA3x512 -> Err(.NotFound)
         }
     }
     Err(.NotFound)
@@ -359,7 +359,7 @@ oid_by_pk_alg: fn(pk: PKType) -> [U8] OIDError! {
         .RSA -> Ok(OID_PKCS1_RSA.copy())
         .ECKey -> Ok(OID_EC_ALG_UNRESTRICTED.copy())
         .ECKeyDH -> Ok(OID_EC_ALG_ECDH.copy())
-        else -> Err(.NotFound)
+        .ECDSA | .RSAAlt | .RSASSAPSS | .Opaque -> Err(.NotFound)
     }
 }
 
@@ -377,7 +377,7 @@ oid_by_ec_grp: fn(id: ecp.GroupID) -> [U8] OIDError! {
         .Bp256r1 -> Ok(OID_EC_GRP_BP256R1.copy())
         .Bp384r1 -> Ok(OID_EC_GRP_BP384R1.copy())
         .Bp512r1 -> Ok(OID_EC_GRP_BP512R1.copy())
-        else -> Err(.NotFound)
+        .Unknown | .Curve25519 | .Curve448 -> Err(.NotFound)
     }
 }
 
@@ -386,7 +386,7 @@ oid_by_ec_grp_algid: fn(id: ecp.GroupID) -> [U8] OIDError! {
     if id == {
         .Curve25519 -> Ok(OID_X25519.copy())
         .Curve448 -> Ok(OID_X448.copy())
-        else -> Err(.NotFound)
+        .Unknown | .Secp192r1 | .Secp224r1 | .Secp256r1 | .Secp384r1 | .Secp521r1 | .Bp256r1 | .Bp384r1 | .Bp512r1 | .Secp192k1 | .Secp224k1 | .Secp256k1 -> Err(.NotFound)
     }
 }
 

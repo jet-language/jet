@@ -127,7 +127,7 @@ text_field: fn(fields: [(key: String, value: Dyn)], key: String) -> Bool Never! 
         if field.key != key -> next
         return if field.value == {
             .Text(_) -> true
-            else -> false
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> false
         }
     }
     false
@@ -155,12 +155,12 @@ finding_array: fn(text: String) -> Bool Never! {
                     .Object(fields) -> {
                         if !text_field(fields, "rule") || !text_field(fields, "ref") || !text_field(fields, "msg") -> return false
                     }
-                    else -> return false
+                    .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return false
                 }
             }
             true
         }
-        else -> false
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> false
     }
 }
 

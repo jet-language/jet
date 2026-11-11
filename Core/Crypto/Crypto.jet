@@ -55,26 +55,30 @@ __JetcStat: struct {
     status: Int, errno: Int, dev: Int, ino: Int, len: Int,
     mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
 }
-JetcFd: struct { priv fd: Int } // priv: a literal elsewhere could close any descriptor at scope end
-// Close reads the consumed receiver in place. Rebinding it (`owner: &&self`)
-// would make a second owner whose scope-end Close re-enters this one.
-impl JetcFd.Close {
-    close: fn(&&self) {
-        if self.fd >= 0 -> _: core.crypto.__jetc_close(self.fd)
+JetcFd: struct {
+    priv fd: Int
+
+    // Close reads the consumed receiver in place. Rebinding it (`owner: &&self`)
+    // would make a second owner whose scope-end Close re-enters this one.
+    impl Close {
+        close: fn(&&self) {
+            if self.fd >= 0 -> _: core.crypto.__jetc_close(self.fd)
+        }
     }
-}
-JetcTemp: struct { file: JetcFd, path: String? }
-impl JetcTemp.Close {
-    close: fn(&&self) {
-        // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
-        if self.path == .Val(path) {
-            core.files.__remove_raw(path).drop("temp removal at close is best-effort")
+} // priv: a literal elsewhere could close any descriptor at scope end
+JetcTemp: struct {
+    file: JetcFd
+    path: String?
+
+    impl Close {
+        close: fn(&&self) {
+            // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
+            if self.path == .Val(path) {
+                core.files.__remove_raw(path).drop("temp removal at close is best-effort")
+            }
         }
     }
 }
-
-C_MASK32: 4294967295
-
 #Error
 CryptoError: enum {
     OpenFailed
@@ -99,9 +103,9 @@ Digest256: struct {
     as_bytes: fn(self) -> [U8] Never! { self.bytes }
 
     hex: fn(self) -> String Never! { hex_encode(self.bytes) }
-}
 
-impl Digest256.Display { display: fn(self) -> String { self.hex() } }
+    impl Display { display: fn(self) -> String { self.hex() } }
+}
 
 Digest512: struct {
     bytes: [U8]
@@ -109,9 +113,9 @@ Digest512: struct {
     as_bytes: fn(self) -> [U8] Never! { self.bytes }
 
     hex: fn(self) -> String Never! { hex_encode(self.bytes) }
-}
 
-impl Digest512.Display { display: fn(self) -> String { self.hex() } }
+    impl Display { display: fn(self) -> String { self.hex() } }
+}
 
 /// Streaming SHA-256 (FIPS 180-4): `update` absorbs input as it arrives,
 /// holding at most one partial 64-byte block, so a large input is never held
@@ -146,25 +150,25 @@ Secret: struct {
     from_text: fn(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
 
     from_bytes: fn(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
-}
 
-// Configuration codecs construct the nominal secret from text.
-// There is deliberately no Encode implementation that could reveal its bytes.
-impl Secret.Decode {
-    decode: fn(tree: Dyn) -> Secret [FieldError]! {
-        if tree == .Text(text) -> return Ok(Secret.from_text(text))
-        return Err([FieldError{path: "", reason: "expected a string"}])
+    // Configuration codecs construct the nominal secret from text.
+    // There is deliberately no Encode implementation that could reveal its bytes.
+    impl Decode {
+        decode: fn(tree: Dyn) -> Secret [FieldError]! {
+            if tree == .Text(text) -> return Ok(Secret.from_text(text))
+            return Err([FieldError{path: "", reason: "expected a string"}])
+        }
     }
-}
 
-// Secret-bearing values wipe their bytes when they close.
-// Close takes the resident buffer out of the consumed receiver and zeroes that
-// same allocation before it is released. Rebinding `self.move()` instead would make a
-// second owner whose scope-end Close re-enters this one.
-impl Secret.Close {
-    close: fn(&&self) {
-        bytes := self.bytes.move()
-        core.crypto.wipe(bytes)
+    // Secret-bearing values wipe their bytes when they close.
+    // Close takes the resident buffer out of the consumed receiver and zeroes that
+    // same allocation before it is released. Rebinding `self.move()` instead would make a
+    // second owner whose scope-end Close re-enters this one.
+    impl Close {
+        close: fn(&&self) {
+            bytes := self.bytes.move()
+            core.crypto.wipe(bytes)
+        }
     }
 }
 
@@ -185,12 +189,12 @@ SigningKey: struct {
 
     /// The RFC 8032 public key for this seed.
     public_key: fn(self) -> VerifyKey Never! { VerifyKey{bytes: ed25519_public_raw(self.bytes)} }
-}
 
-impl SigningKey.Close {
-    close: fn(&&self) {
-        bytes := self.bytes.move()
-        core.crypto.wipe(bytes)
+    impl Close {
+        close: fn(&&self) {
+            bytes := self.bytes.move()
+            core.crypto.wipe(bytes)
+        }
     }
 }
 
@@ -222,12 +226,12 @@ X25519SecretKey: struct {
     /// The RFC 7748 public key. A key that isn't 32 bytes stops with a panic;
     /// `x25519_public` is the checked form.
     public_key: fn(self) -> X25519PublicKey Never! { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
-}
 
-impl X25519SecretKey.Close {
-    close: fn(&&self) {
-        bytes := self.bytes.move()
-        core.crypto.wipe(bytes)
+    impl Close {
+        close: fn(&&self) {
+            bytes := self.bytes.move()
+            core.crypto.wipe(bytes)
+        }
     }
 }
 
@@ -253,12 +257,12 @@ X25519PublicKey: struct {
 
 SharedSecret: struct {
     bytes: [U8]
-}
 
-impl SharedSecret.Close {
-    close: fn(&&self) {
-        bytes := self.bytes.move()
-        core.crypto.wipe(bytes)
+    impl Close {
+        close: fn(&&self) {
+            bytes := self.bytes.move()
+            core.crypto.wipe(bytes)
+        }
     }
 }
 
@@ -1245,33 +1249,47 @@ split_comma: fn(text: String) -> [String] Never! {
     out
 }
 
-/// PHC string format B64: RFC 4648 standard alphabet, no `=` padding.
+/// PHC string format B64: RFC 4648 standard alphabet, no `=` padding. Each
+/// digit is computed from its six bits (`b64_digit`), with no table lookup or
+/// branch on them: the bytes are a password hash's.
 phc_b64_encode: fn(bytes: [U8]) -> String Never! {
-    alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    raw: alphabet.bytes()
     out := [U8]{}
     i := 0
     loop i + 3 <= bytes.len() {
-        n: (((Int.from_u8(bytes[i]) << 16)).bit_or((Int.from_u8(bytes[i + 1]) << 8))).bit_or(Int.from_u8(bytes[i + 2]))
-        out.push(raw[((n >> 18)).bit_and(63)])
-        out.push(raw[((n >> 12)).bit_and(63)])
-        out.push(raw[((n >> 6)).bit_and(63)])
-        out.push(raw[(n).bit_and(63)])
+        n: ((U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)).bit_or(U32{bytes[i + 2]})
+        out.push(__b64_digit(n >> 18))
+        out.push(__b64_digit(n >> 12))
+        out.push(__b64_digit(n >> 6))
+        out.push(__b64_digit(n))
         i += 3
     }
     rest: bytes.len() - i
     if rest == 1 {
-        n: Int.from_u8(bytes[i]) << 16
-        out.push(raw[((n >> 18)).bit_and(63)])
-        out.push(raw[((n >> 12)).bit_and(63)])
+        n: U32{bytes[i]} << 16
+        out.push(__b64_digit(n >> 18))
+        out.push(__b64_digit(n >> 12))
     }
     if rest == 2 {
-        n: ((Int.from_u8(bytes[i]) << 16)).bit_or((Int.from_u8(bytes[i + 1]) << 8))
-        out.push(raw[((n >> 18)).bit_and(63)])
-        out.push(raw[((n >> 12)).bit_and(63)])
-        out.push(raw[((n >> 6)).bit_and(63)])
+        n: (U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)
+        out.push(__b64_digit(n >> 18))
+        out.push(__b64_digit(n >> 12))
+        out.push(__b64_digit(n >> 6))
     }
-    String.from_bytes(out) ?? panic("invalid UTF-8 in PHC encoding")
+    String.from_bytes_lossy(out)
+}
+
+/// The base64 digit of `n`'s low six bits `v`: `A`-`Z`, `a`-`z`, `0`-`9`,
+/// `+`, `/`, computed as `A` plus the offsets of the ranges `v` is past, each
+/// a mask from the borrow of a wrapping subtraction.
+#Policy(arithmetic: .Wrapping)
+__b64_digit: fn(n: U32) -> U8 Never! {
+    v: n.bit_and(U32{63})
+    c := v + U32{65}
+    c += ((U32{25} - v) >> 8).bit_and(U32{6})
+    c -= ((U32{51} - v) >> 8).bit_and(U32{75})
+    c -= ((U32{61} - v) >> 8).bit_and(U32{15})
+    c += ((U32{62} - v) >> 8).bit_and(U32{3})
+    wrapping(U8{c})
 }
 
 /// Strict inverse of `phc_b64_encode`: rejects padding, a one-character
@@ -1305,18 +1323,9 @@ phc_b64_value: fn(b: U8) -> Int? {
     None
 }
 
-wrap32: fn(n: Int) -> Int Never! { (n).bit_and(C_MASK32) }
-
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
-
 read_be32: fn(data: [U8], offset: Int) -> Int Never! {
     if offset < 0 || offset + 4 > data.len() -> return 0
     ((((Int.from_u8(data[offset]) << 24)).bit_or((Int.from_u8(data[offset + 1]) << 16))).bit_or((Int.from_u8(data[offset + 2]) << 8))).bit_or(Int.from_u8(data[offset + 3]))
-}
-
-rotr32: fn(x: Int, n: Int) -> Int Never! {
-    v: wrap32(x)
-    wrap32(((v >> n)).bit_or((v << (32 - n))))
 }
 
 // Byte-order loads behind ChaCha20, not part of the crypto surface.
@@ -1327,7 +1336,7 @@ priv byte_words: module {
     }
 
     push_le32: fn(out: &[U8], value: U32) Never! {
-        loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+        loop k in 0..<4 -> out.push(wrapping(U8{value >> (8 * k)}))
     }
 }
 
@@ -1337,25 +1346,23 @@ copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out
 }
 
-copy_ints: fn(xs: [Int]) -> [Int] Never! {
-    out := [Int]{}
-    loop n in xs -> out.push(n)
-    out
-}
-
+/// The lowercase hex of `bytes`, each digit computed with no branch or table
+/// lookup on it (`hex_digit`): the bytes may be a key's.
 hex_encode: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
-        n: u8_int(b)
-        out.push(hex_nibble(n >> 4))
-        out.push(hex_nibble((n).bit_and(15)))
+        n: U32{b}
+        out.push(__hex_digit(n >> 4))
+        out.push(__hex_digit(n.bit_and(U32{15})))
     }
-    String.from_bytes(out) ?? panic("invalid UTF-8 in hexadecimal encoding")
+    String.from_bytes_lossy(out)
 }
 
-hex_nibble: fn(n: Int) -> U8 Never! {
-    if n < 10 -> return wrapping(U8{48 + n})
-    wrapping(U8{87 + n})
+/// The lowercase hex digit of `n` (0 to 15): `0` plus `n`, and the 39 from
+/// `9` to `a` when `n` is past 9, a mask from the borrow of `9 - n`.
+#Policy(arithmetic: .Wrapping)
+__hex_digit: fn(n: U32) -> U8 Never! {
+    wrapping(U8{n + U32{48} + ((U32{9} - n) >> 8).bit_and(U32{39})})
 }
 
 slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -1464,7 +1471,7 @@ priv chacha20_core: module {
     }
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     state: chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -1474,7 +1481,7 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
     out
 }
 
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
@@ -1494,12 +1501,7 @@ qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     s[id] = d
 }
 
-u32le: fn(bytes: [U8], off: Int) -> Int Never! {
-    if off + 3 >= bytes.len() -> return 0
-    (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
-}
-
-#Arithmetic(.Wrapping)
+#Policy(arithmetic: .Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
     state := chacha20_state(key, nonce, counter)
     w := chacha20_words()
@@ -1511,7 +1513,7 @@ chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Neve
             word: w[k] + state[k]
             loop shift in 0..<4 {
                 if i >= plain.len() -> return out
-                out.push(plain[i].bit_xor(U8{(word >> (8 * shift)).bit_and(U32{255})}))
+                out.push(plain[i].bit_xor(wrapping(U8{word >> (8 * shift)})))
                 i += 1
             }
         }
@@ -1646,7 +1648,7 @@ EdPoint: struct {
 }
 
 
-C_BLAKE3_IV: [Int]{0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19}
+C_BLAKE3_IV: [U32]{U32{0x6A09E667}, U32{0xBB67AE85}, U32{0x3C6EF372}, U32{0xA54FF53A}, U32{0x510E527F}, U32{0x9B05688C}, U32{0x1F83D9AB}, U32{0x5BE0CD19}}
 
 C_BLAKE3_MSG: [Int]{
     0,
@@ -1763,17 +1765,20 @@ C_BLAKE3_MSG: [Int]{
     13,
 }
 
+// BLAKE3 works on 32-bit words (U32, wrapping where the specification's sums
+// are modulo 2^32), so a word of the input is never an Int's: no overflow
+// check or wider form branches on it.
 blake3_raw: fn(input: [U8]) -> [U8] {
     if input.len() <= 1024 -> return blake3_root_chunk(input)
     // tree: 1024-byte chunks
-    chunks := [Int]{}  // flattened chaining values 8 words each
+    chunks := [U32]{}  // flattened chaining values 8 words each
     i := 0
     idx := 0
     loop {
         if i >= input.len() -> break
         end := i + 1024
         if end > input.len() -> end = input.len()
-        cv: blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
+        cv: __blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
         loop w in cv -> chunks.push(w)
         i = end
         idx = idx + 1
@@ -1785,25 +1790,19 @@ blake3_raw: fn(input: [U8]) -> [U8] {
     loop {
         if count == 1 {
             out := [U8]{}
-            loop k in 0..<8 {
-                v: cvs[k]
-                out.push(wrapping(U8{v}))
-                out.push(wrapping(U8{v >> 8}))
-                out.push(wrapping(U8{v >> 16}))
-                out.push(wrapping(U8{v >> 24}))
-            }
+            loop k in 0..<8 -> push_le32(out, cvs[k])
             return out
         }
-        next := [Int]{}
+        next := [U32]{}
         p := 0
         loop {
             if p + 16 <= cvs.len() {
-                left := [Int]{}
-                right := [Int]{}
+                left := [U32]{}
+                right := [U32]{}
                 loop k in 0..<8 -> left.push(cvs[p + k])
                 loop k in 0..<8 -> right.push(cvs[p + 8 + k])
                 is_root := p + 16 >= cvs.len() && next.len() == 0 && (cvs.len() - p) == 16
-                cv: blake3_parent(left, right, is_root)
+                cv: __blake3_parent(left, right, is_root)
                 loop w in cv -> next.push(w)
                 p = p + 16
             } else {
@@ -1816,8 +1815,8 @@ blake3_raw: fn(input: [U8]) -> [U8] {
     }
 }
 
-blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [Int] {
-    cv := copy_ints(C_BLAKE3_IV)
+__blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
+    cv := C_BLAKE3_IV
     blocks := (data.len() + 63) /% 64
     if blocks == 0 -> blocks = 1
     loop i in 0..<blocks {
@@ -1834,47 +1833,32 @@ blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [Int] {
         if i == 0 -> flags = (flags).bit_or(1)
         if i == blocks - 1 -> flags = (flags).bit_or(2)
         if is_root && i == blocks - 1 -> flags = (flags).bit_or(8)
-        cv = blake3_compress(cv, block, chunk_index, end - start, flags)
+        cv = __blake3_compress(cv, block, chunk_index, end - start, flags)
     }
     cv
 }
 
 blake3_root_chunk: fn(data: [U8]) -> [U8] {
-    cv: blake3_chunk(data, 0, true)
+    cv: __blake3_chunk(data, 0, true)
     out := [U8]{}
-    loop k in 0..<8 {
-        v: cv[k]
-        out.push(wrapping(U8{v}))
-        out.push(wrapping(U8{v >> 8}))
-        out.push(wrapping(U8{v >> 16}))
-        out.push(wrapping(U8{v >> 24}))
-    }
+    loop k in 0..<8 -> push_le32(out, cv[k])
     out
 }
 
-blake3_parent: fn(left: [Int], right: [Int], is_root: Bool) -> [Int] {
+__blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
     block := [U8]{}
-    loop w in left {
-        block.push(wrapping(U8{w}))
-        block.push(wrapping(U8{w >> 8}))
-        block.push(wrapping(U8{w >> 16}))
-        block.push(wrapping(U8{w >> 24}))
-    }
-    loop w in right {
-        block.push(wrapping(U8{w}))
-        block.push(wrapping(U8{w >> 8}))
-        block.push(wrapping(U8{w >> 16}))
-        block.push(wrapping(U8{w >> 24}))
-    }
+    loop w in left -> push_le32(block, w)
+    loop w in right -> push_le32(block, w)
     flags := 4
     if is_root -> flags = (flags).bit_or(8)
-    blake3_compress(copy_ints(C_BLAKE3_IV), block, 0, 64, flags)
+    __blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
 }
 
-blake3_compress: fn(cv: [Int], block: [U8], counter: Int, block_len: Int, flags: Int) -> [Int] {
-    m := [Int]{}
-    loop i in 0..<16 -> m.push(u32le(block, i * 4))
-    s := [Int]{
+#Policy(arithmetic: .Wrapping)
+__blake3_compress: fn(cv: [U32], block: [U8], counter: Int, block_len: Int, flags: Int) -> [U32] {
+    m := [U32]{}
+    loop i in 0..<16 -> m.push(load_le32(block, i * 4))
+    s := [U32]{
         cv[0],
         cv[1],
         cv[2],
@@ -1887,37 +1871,73 @@ blake3_compress: fn(cv: [Int], block: [U8], counter: Int, block_len: Int, flags:
         C_BLAKE3_IV[1],
         C_BLAKE3_IV[2],
         C_BLAKE3_IV[3],
-        wrap32(counter),
-        wrap32(counter >> 32),
-        wrap32(block_len),
-        wrap32(flags),
+        wrapping(U32{counter}),
+        wrapping(U32{counter >> 32}),
+        wrapping(U32{block_len}),
+        wrapping(U32{flags}),
     }
     loop r in 0..<7 {
         base: r * 16
-        g(s, 0, 4, 8, 12, m[C_BLAKE3_MSG[base + 0]], m[C_BLAKE3_MSG[base + 1]])
-        g(s, 1, 5, 9, 13, m[C_BLAKE3_MSG[base + 2]], m[C_BLAKE3_MSG[base + 3]])
-        g(s, 2, 6, 10, 14, m[C_BLAKE3_MSG[base + 4]], m[C_BLAKE3_MSG[base + 5]])
-        g(s, 3, 7, 11, 15, m[C_BLAKE3_MSG[base + 6]], m[C_BLAKE3_MSG[base + 7]])
-        g(s, 0, 5, 10, 15, m[C_BLAKE3_MSG[base + 8]], m[C_BLAKE3_MSG[base + 9]])
-        g(s, 1, 6, 11, 12, m[C_BLAKE3_MSG[base + 10]], m[C_BLAKE3_MSG[base + 11]])
-        g(s, 2, 7, 8, 13, m[C_BLAKE3_MSG[base + 12]], m[C_BLAKE3_MSG[base + 13]])
-        g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
+        __blake3_g(s, 0, 4, 8, 12, m[C_BLAKE3_MSG[base + 0]], m[C_BLAKE3_MSG[base + 1]])
+        __blake3_g(s, 1, 5, 9, 13, m[C_BLAKE3_MSG[base + 2]], m[C_BLAKE3_MSG[base + 3]])
+        __blake3_g(s, 2, 6, 10, 14, m[C_BLAKE3_MSG[base + 4]], m[C_BLAKE3_MSG[base + 5]])
+        __blake3_g(s, 3, 7, 11, 15, m[C_BLAKE3_MSG[base + 6]], m[C_BLAKE3_MSG[base + 7]])
+        __blake3_g(s, 0, 5, 10, 15, m[C_BLAKE3_MSG[base + 8]], m[C_BLAKE3_MSG[base + 9]])
+        __blake3_g(s, 1, 6, 11, 12, m[C_BLAKE3_MSG[base + 10]], m[C_BLAKE3_MSG[base + 11]])
+        __blake3_g(s, 2, 7, 8, 13, m[C_BLAKE3_MSG[base + 12]], m[C_BLAKE3_MSG[base + 13]])
+        __blake3_g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
     }
-    out := [Int]{}
-    loop i in 0..<8 -> out.push(wrap32((s[i]).bit_xor(s[i + 8])))
+    out := [U32]{}
+    loop i in 0..<8 -> out.push(s[i].bit_xor(s[i + 8]))
     out
 }
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
-g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
-    s[a] = wrap32(s[a] + s[b] + mx)
-    s[d] = rotr32((s[d]).bit_xor(s[a]), 16)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotr32((s[b]).bit_xor(s[c]), 12)
-    s[a] = wrap32(s[a] + s[b] + my)
-    s[d] = rotr32((s[d]).bit_xor(s[a]), 8)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotr32((s[b]).bit_xor(s[c]), 7)
+#Policy(arithmetic: .Wrapping)
+__blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
+    s[a] = s[a] + s[b] + mx
+    s[d] = (s[d].bit_xor(s[a])).rotate_right(16)
+    s[c] = s[c] + s[d]
+    s[b] = (s[b].bit_xor(s[c])).rotate_right(12)
+    s[a] = s[a] + s[b] + my
+    s[d] = (s[d].bit_xor(s[a])).rotate_right(8)
+    s[c] = s[c] + s[d]
+    s[b] = (s[b].bit_xor(s[c])).rotate_right(7)
+}
+
+#Test("BLAKE3 matches the reference vectors (input bytes i mod 251) across one block, one chunk and a chunk tree") {
+    lengths: [Int]{0, 1, 1023, 1024, 1025, 2049, 3073, 5121, 8193}
+    want: [String]{
+        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+        "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213",
+        "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11",
+        "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7",
+        "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444",
+        "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030",
+        "7124b49501012f81cc7f11ca069ec9226cecb8a2c850cfe644e327d22d3e1cd3",
+        "628bd2cb2004694adaab7bbd778a25df25c47b9d4155a55f8fbd79f2fe154cff",
+        "bab6c09cb8ce8cf459261398d2e7aef35700bf488116ceb94a36d0f5f1b7bc3b",
+    }
+    loop k in 0..<lengths.len() {
+        data := [U8]{}
+        loop i in 0..<lengths[k] -> data.push(U8{i %% 251})
+        assert_eq(blake3(data).hex(), want[k])
+    }
+}
+
+#Test("Hex and PHC base64 digits match their alphabets at every value") {
+    bytes := [U8]{}
+    loop i in 0..<256 -> bytes.push(U8{i})
+    hex: hex_encode(bytes).bytes()
+    digits: "0123456789abcdef".bytes()
+    loop i in 0..<256 {
+        assert_eq(hex[2 * i], digits[i /% 16])
+        assert_eq(hex[2 * i + 1], digits[i %% 16])
+    }
+    alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
+    loop v in 0..<64 -> assert_eq(__b64_digit(wrapping(U32{v})), alphabet[v])
+    assert_eq(phc_b64_encode("abcd".bytes()), "YWJjZA")
+    assert_eq(phc_b64_decode(phc_b64_encode(bytes)) ?? panic("decode"), bytes)
 }
 
 #Test("JETC2 streaming hash matches the one-shot digest across partial blocks") {
@@ -2027,13 +2047,13 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
             before: core.files.read_bytes(sealed.to_string()) ?? panic("read sealed")
             assert(if file_seal([recipient], source, sealed) == {
                 .Err(.DestinationExists) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert((core.files.read_bytes(sealed.to_string()) ?? panic("read unchanged sealed")) == before)
             opened.write_atomic([U8]{9, 8, 7}) ?? panic("existing output")
             assert(if file_open(identity, sealed, opened) == {
                 .Err(.DestinationExists) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert((core.files.read_bytes(opened.to_string()) ?? panic("read existing output")) == ([U8]{9, 8, 7}))
             corrupt := before.copy()
@@ -2041,7 +2061,7 @@ g: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int, mx: Int, my: Int) {
             sealed.write_atomic(corrupt) ?? panic("tamper")
             assert(if file_open(identity, sealed, failed) == {
                 .Err(.OpenFailed) -> true
-                else -> false
+                .Ok(_) | .Err(_) -> false
             })
             assert(!core.files.exists(failed.to_string()))
             assert((core.files.read_bytes(source.to_string()) ?? panic("read source")) == ([U8]{0, 1, 2}))

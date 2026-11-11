@@ -130,6 +130,7 @@ ir_generator_producer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: F
     a.cells = ir_window_cells(m, p, a, captured)
     ir_cell_params(m, a)
     ir_sentry_frame(m, p, a)
+    ir_effect_scope_frame(m, a, function.effect_scope)
     if !ir_failed(a) {
         ir_stmts(m, p, a, function.body)
         if !ir_failed(a) && a.failures.len() == 0 -> ir_return_fallthrough(m, p, a)

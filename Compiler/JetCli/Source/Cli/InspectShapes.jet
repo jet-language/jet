@@ -18,7 +18,7 @@ use {
         diagnostic_from_registry,
         type_name,
     ]
-    jet_sema.[sema_checked_wire_case]
+    jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text]
 }
 
 // `ShapeProjectionKind::ALL`, in order.
@@ -101,7 +101,7 @@ jet_cli_shape_type: fn(source: String, ty: Type) -> JetCLIShapeType Never! {
         }
         .Apply(name, _) -> JetCLIShapeType.Unknown{name: name}
         .Map(_, _, _) -> JetCLIShapeType.Unknown{name: "Map"}
-        else -> JetCLIShapeType.Unknown{name: type_name(ty)}
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Union(_) | .Measure(_) -> JetCLIShapeType.Unknown{name: type_name(ty)}
     }
 }
 
@@ -153,7 +153,7 @@ jet_cli_shape_default: fn(value: CtValue) -> JetCLIStatusValue? Never! {
         .Str(text) -> Val(jet_cli_status_text(text))
         .Bytes(bytes) -> Val(jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte))))
         .Present(inner) -> jet_cli_shape_default(inner)
-        else -> None
+        .BigInt(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit | .Closure(_) -> None
     }
 }
 
@@ -193,21 +193,12 @@ jet_cli_shape_marker_string: fn(marker: Marker, label: String?) -> String? Never
     None
 }
 
-jet_cli_shape_rename_all_style: fn(structure: StructDef) -> String? Never! {
-    marker: jet_cli_shape_marker(structure.serde_markers, "RenameAll") ?? return None
-    if marker.args.len() == 0 -> return None
-    if marker.args[0] == .Expr(expression) {
-        if expression == .Ident(name, _, _) -> return Val(name)
-    }
-    None
-}
-
 // `shape_field_names` over `ShapeFieldNames::from_source`.
 jet_cli_shape_field_names: fn(structure: StructDef, field: Field) -> JetCLIShapeNames Never! {
     rename: jet_cli_shape_marker(field.serde_markers, "Rename")
     shared := String?{None}
     if rename == .Val(marker) -> shared = jet_cli_shape_marker_string(marker, None)
-    text: shared ?? sema_checked_wire_case(jet_cli_shape_rename_all_style(structure), field.name)
+    text: shared ?? sema_checked_wire_case(sema_checked_rename_case(structure.serde_markers), field.name)
     names := JetCLIShapeNames{text: text, json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: text.replace("_", "-"), env: jet_cli_shape_env_name(text), db: None, layout: None}
     if rename == .Val(marker) {
         names.json = jet_cli_shape_marker_string(marker, Val("json"))
@@ -221,9 +212,7 @@ jet_cli_shape_field_names: fn(structure: StructDef, field: Field) -> JetCLIShape
         names.db = jet_cli_shape_marker_string(marker, Val("db"))
         names.layout = jet_cli_shape_marker_string(marker, Val("layout"))
     }
-    if jet_cli_shape_marker(field.serde_markers, "Env") == .Val(marker) {
-        if jet_cli_shape_marker_string(marker, None) == .Val(env) -> names.env = env
-    }
+    if sema_registration_cli_arg_text(field.serde_markers, "env") == .Val(env) -> names.env = env
     names
 }
 
@@ -280,10 +269,7 @@ jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild
     loop (order, field) in structure.fields {
         ty: jet_cli_shape_type(source, field.ty)
         default: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
-        short := String?{None}
-        if jet_cli_shape_marker(field.serde_markers, "Short") == .Val(marker) {
-            short = jet_cli_shape_marker_string(marker, None)
-        }
+        short: sema_registration_cli_arg_text(field.serde_markers, "short")
         skip: field.computed != None || jet_cli_shape_marker(field.serde_markers, "Skip") != None
         fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }

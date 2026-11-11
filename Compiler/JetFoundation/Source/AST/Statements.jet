@@ -23,7 +23,7 @@ Stmt: enum {
     Switched(marker: Marker, body: [Stmt], span: Span)
     Region(name: String, name_span: Span, body: [Stmt], span: Span)
     Policy(declarations: [PolicyDeclaration], body: [Stmt], span: Span)
-    TaskGroup(name: String, name_span: Span, limit: Expr?, body: [Stmt], span: Span)
+    TaskGroup(name: String, name_span: Span, args: TaskGroupArgs, body: [Stmt], span: Span)
     Layout(name: String, name_span: Span, body: [Stmt], span: Span)
     AuthorityScope(caps: [NamedSpan], caps_span: Span, binding: NamedSpan?, body: [Stmt], span: Span)
     ComptimeIf(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, selected_then: Bool?)
@@ -48,6 +48,12 @@ IfStmt: struct {
 ElseBranch: enum {
     ElseIf(branch: IfStmt)
     Else(body: [Stmt])
+}
+
+// `task.group g(limit: n, stack: bytes) { … }`: either argument may be left out.
+TaskGroupArgs: struct {
+    limit: Expr?{None}
+    stack: Expr?{None}
 }
 
 SwitchArm: struct {
@@ -92,6 +98,10 @@ PolicyKey: enum {
     ExplicitUnits
     Copies
     Sentries
+    // `#Policy(arithmetic: .Mode)`, at function, method or
+    // block scope only; the innermost declaration wins and never crosses a call.
+    Arithmetic
+    Writes
 }
 
 PolicyValue: enum {
@@ -109,6 +119,8 @@ PolicyValue: enum {
     On
     Off
     Explicit
+    // The fixed-width arithmetic mode of `#Policy(arithmetic: .Mode)`.
+    Arithmetic(mode: ArithmeticMode)
 }
 
 PolicyScope: enum {

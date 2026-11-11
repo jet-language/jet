@@ -15,6 +15,7 @@ use {
     core.files.[FileReader]
     math: core.math
     encoding: core.encoding
+    rt: jet.runtime.encoding
     core.encoding.[EncodingError, EncodingLimits]
     json_codec: core.encoding.json
     csv_codec: core.encoding.csv
@@ -104,16 +105,15 @@ DataError: struct {
     index: Int?
     reason: String
     cause: EncodingError?
-}
 
-impl DataError.Display {
-    display: fn(self) -> String { data_error_text(self) }
-}
-impl DataError.Debug {
-    debug: fn(&&self) -> String { data_error_text(self) }
-}
+    impl Display {
+        display: fn(self) -> String { data_error_text(self) }
+    }
 
-impl DataError {
+    impl Debug {
+        debug: fn(&&self) -> String { data_error_text(self) }
+    }
+
     new: fn(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
@@ -217,6 +217,17 @@ DataLimits: struct {
     max_sort_rows: Int
     max_join_rows: Int
     max_output_rows: Int
+
+    // Typed data declarations and provider-backed boundaries.
+    safe: fn() -> DataLimits Never! {
+        DataLimits{
+            encoding: encoding.EncodingLimits.safe(),
+            max_groups: 100000,
+            max_sort_rows: 1000000,
+            max_join_rows: 1000000,
+            max_output_rows: 1000000,
+        }
+    }
 }
 
 
@@ -718,25 +729,12 @@ JetDataPlotPlan: struct {
     schema: JetDataPlotSchema
 }
 
-// Typed data declarations and provider-backed boundaries.
-impl DataLimits {
-    safe: fn() -> DataLimits Never! {
-        DataLimits{
-            encoding: encoding.EncodingLimits.safe(),
-            max_groups: 100000,
-            max_sort_rows: 1000000,
-            max_join_rows: 1000000,
-            max_output_rows: 1000000,
-        }
-    }
-}
-
 track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
 __query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: run.move()}}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{__QueryState{consumed: false}}, __cell: Shared{__QueryCell<T>{run: run.move()}}}
 }
 
 __query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -767,7 +765,7 @@ query: fn<T>(rows: [T]) -> Query<T> Never! {
 __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     limits: if source.__source == {
         .Val(pull) -> pull.guard_read().value.limits.copy()
-        else -> DataLimits.safe()
+        .None -> DataLimits.safe()
     }
     __query_make<T>([String]{"stream"}, true, limits.copy(), () -> {
         reader := source.copy()
@@ -807,7 +805,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
             }
             if cell.value.terminal == {
                 .Val(failure) -> return Err(failure.copy())
-                else -> {}
+                .None -> {}
             }
             if cell.value.done -> return Ok(None)
             if cell.value.pull() == {
@@ -824,7 +822,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
                 }
             }
         }
-        else -> return Ok(None)
+        .None -> return Ok(None)
     }
 }
 
@@ -834,7 +832,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
 __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
     limit: if stream.__source == {
         .Val(source) -> source.guard_read().value.limits.max_output_rows
-        else -> -1
+        .None -> -1
     }
     out := [T]{}
     loop {
@@ -847,7 +845,7 @@ __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
                     cell := source.guard_edit()
                     cell.value.terminal = Val(failure.copy())
                 }
-                else -> {}
+                .None -> {}
             }
             return Err(failure)
         }
@@ -869,14 +867,14 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
             reading := !cell.value.done
             if cell.value.terminal == {
                 .Val(_) -> reading = false
-                else -> {}
+                .None -> {}
             }
             loop reading {
                 if cell.value.pull() == {
                     .Ok(item) -> {
                         if item == {
                             .Val(row) -> cell.value.ahead.push(row)
-                            else -> {
+                            .None -> {
                                 cell.value.done = true
                                 reading = false
                             }
@@ -890,7 +888,7 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
             }
             remaining = remaining + cell.value.ahead.len() - cell.value.ahead_index
         }
-        else -> {}
+        .None -> {}
     }
     remaining
 }
@@ -1212,10 +1210,10 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -
 }
 
 __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
-    DataGroupedQuery<T, K>{__query: query, __key: shared __QueryKeyCell<T, K>{key: (row: T) -> {
+    DataGroupedQuery<T, K>{__query: query, __key: Shared{__QueryKeyCell<T, K>{key: (row: T) -> {
         value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
         Ok(value)
-    }}}
+    }}}}
 }
 
 __group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
@@ -1432,7 +1430,7 @@ __query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
             .Float(number) -> core.db.__float_text(number)
             .Bool(flag) -> "{flag}"
             .Null -> ""
-            else -> json_codec.to_string(entry.value) ?? ""
+            .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> json_codec.to_string(entry.value) ?? ""
         })
     }
     None
@@ -1695,15 +1693,15 @@ json: fn<T: Decode>(text: String) -> [T] DataError! {
 csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
     records: csv_codec.reader(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state: shared __CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}
-    source: shared __StreamSource<T>{
+    state: Shared{__CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}}
+    source: Shared{__StreamSource<T>{
         pull: () -> csv_reader_next<T>(state),
         limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,
         done: false,
-    }
+    }}
     Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
 }
 
@@ -1746,14 +1744,14 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
     entries := [(key: String, value: Dyn)]{}
     loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
     tree: encoding_stream.object_from_entries(entries)
-    previous: encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     if tree.decode<T>() == {
         .Ok(value) -> {
-            encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             error := data_decode_error(failures, "csv_reader")
             error.row = Val(row)
             return Err(error)
@@ -1768,7 +1766,7 @@ data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> Da
         .Limit -> DataErrorKind.Limit
         .IO -> DataErrorKind.IO
         .State -> DataErrorKind.State
-        else -> DataErrorKind.Decode
+        .Syntax | .Truncated | .Unsupported -> DataErrorKind.Decode
     }
     DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
 }
@@ -1794,15 +1792,15 @@ json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> 
     data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
-    state: shared __JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}
-    source: shared __StreamSource<T>{
+    state: Shared{__JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}}
+    source: Shared{__StreamSource<T>{
         pull: () -> json_reader_next<T>(state),
         limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,
         done: false,
-    }
+    }}
     Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
 }
 
@@ -3388,7 +3386,7 @@ data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
             out.push(U8{125})
         }
         .DateTime(_) -> data_loader_quote(out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
-        else -> panic("unknown native Dyn carrier")
+        .Number(_) | .Bytes(_) -> panic("unknown native Dyn carrier")
     }
 }
 
@@ -3558,14 +3556,14 @@ data_loader_decode: fn<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]
             }
         }
     }
-    previous: encoding.__text_cells_enter()
+    previous: rt.text_cells_enter()
     if tree.decode<T>() == {
         .Ok(value) -> {
-            encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Ok(value)
         }
         .Err(failures) -> {
-            encoding.__text_cells_leave(previous)
+            rt.text_cells_leave(previous)
             return Err(failures)
         }
     }
@@ -3638,7 +3636,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
                 rows_seen += 1
             }
         }
-        else -> data_schema_absorb(fields, "$", tree, tree == .Null)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> data_schema_absorb(fields, "$", tree, tree == .Null)
     }
     fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
     format_name: data_format_text(format)
@@ -3692,7 +3690,7 @@ data_schema_value_type: fn(value: Dyn) -> String Never! {
         .DateTime(_) -> "datetime"
         .Array(_) -> "array"
         .Object(_) -> "object"
-        else -> panic("unknown native Dyn carrier")
+        .Number(_) | .Bytes(_) -> panic("unknown native Dyn carrier")
     }
 }
 
@@ -3748,7 +3746,7 @@ DataLoaderPortRecord: struct {
             assert_eq(error.operation, "data.value")
             assert_eq(error.reason, "payload is 3 bytes; max_item_bytes is 1")
         }
-        else -> panic("value payload limit must precede constructor validation")
+        .Ok(_) -> panic("value payload limit must precede constructor validation")
     }
 }
 
@@ -3762,11 +3760,11 @@ DataLoaderPortRecord: struct {
 #Test("data CSV and JSON preserve malformed input field-error strings") {
     if csv<Int>("n\n\"7\"x") == {
         .Err(error) -> assert_eq(error.reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
-        else -> panic("malformed CSV accepted")
+        .Ok(_) -> panic("malformed CSV accepted")
     }
     if json<Int>("[1e]") == {
         .Err(error) -> assert_eq(error.reason, "invalid JSON (line 1): exponent must contain a digit")
-        else -> panic("malformed JSON accepted")
+        .Ok(_) -> panic("malformed JSON accepted")
     }
 }
 

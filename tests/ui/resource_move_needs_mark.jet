@@ -2,11 +2,13 @@
 // owned destinations"): an owning position takes a resource out of an owned
 // variable's field or a live match payload only where `^` writes the move,
 // and once it is written a later use of the original is rejected.
-Res: struct { name: String }
-impl Res.Close {
-    close: fn(&&self) { print("close {self.name}") }
-}
+Res: struct {
+    name: String
 
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
 Holder: struct {
     res: Res
     label: String

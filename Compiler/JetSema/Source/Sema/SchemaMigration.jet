@@ -34,7 +34,7 @@ sema_schema_decodable: fn(ty: Type, environment: SemaScopeEnvironment?, program:
             loop member in members { if !sema_schema_decodable(member, None, program) -> return false }
             true
         }
-        else -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -54,7 +54,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
             }
             .ErrorConv(conversion) -> conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
             .Func(function) -> functions.push(function.name)
-            else -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in items {
@@ -126,7 +126,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                         .Remove(removed, _) -> {
                             if removed == field.name -> bridged = true
                         }
-                        else -> {}
+                        .Add(_, _, _, _, _, _, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
                     }
                 }
                 if !bridged -> diagnostics.push(sema_schema_dropped(name, field.name, baseline.published_version, span))
@@ -166,7 +166,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                         .Add(added, _, _, _, _, _, _) -> {
                             if added == field.name -> supplied = true
                         }
-                        else -> {}
+                        .Remove(_, _) | .Change(_, _, _, _, _, _, _, _, _) -> {}
                     }
                 }
                 if !supplied -> diagnostics.push(sema_schema_added(name, field.name, span))

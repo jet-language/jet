@@ -84,7 +84,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
             if !output_fact {
                 if store_reuse_canonical_nix_output_path(candidate_producer, "out") == {
                     .Ok(path) -> store_reuse_add_nix_projection_path(logical_digests, path, candidate.envelope.output_hash)
-                    else -> {}
+                    .Err(_) -> {}
                 }
             }
             loop reference in candidate.references -> pending.push(reference)
@@ -181,7 +181,7 @@ store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, lo
         if primary_logical != None -> break
         if store_reuse_canonical_nix_output_path(producer, name) == {
             .Ok(path) -> primary_logical = Val(path)
-            else -> {}
+            .Err(_) -> {}
         }
     }
     projection := [NixStoreProjection]{}

@@ -19,7 +19,7 @@ jet_cli_expand_checked_json: fn(value: TComptimeValue) -> JetCLIStatusValue Neve
         .Failed(.Clean(_)) -> JetCLIStatusValue.Null
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_expand_checked_json(entry))
         .Struct(_, fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.name, jet_cli_expand_checked_json(field.value)))
-        else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
+        .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> jet_cli_status_text(jet_cli_expand_checked_show(value))
     }
 }
 jet_cli_expand_checked_field: fn(value: TComptimeValue, name: String) -> TComptimeValue? Never! {
@@ -34,7 +34,7 @@ jet_cli_expand_checked_display: fn(value: TComptimeValue?) -> String Never! {
         .String(text) -> text
         .Int(number) -> "{number}"
         .Failed(.Clean(_)) -> "unknown"
-        else -> jet_cli_expand_checked_show(checked)
+        .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> jet_cli_expand_checked_show(checked)
     }
 }
 jet_cli_expand_location: fn(fields: &[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {
@@ -143,7 +143,7 @@ jet_cli_expand_layout: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                 jet_cli_status_field("layout", jet_cli_expand_checked_json(row.value)),
                 jet_cli_status_field("byte_facts", jet_cli_expand_layout_bytes(row.value)),
             })
-            facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.$layout   {jet_cli_expand_layout_text(row.value)}", value: value})
+            facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.reflect().layout   {jet_cli_expand_layout_text(row.value)}", value: value})
         }
     }
     jet_cli_expand_sort_facts(facts)
@@ -152,15 +152,15 @@ jet_cli_expand_layout: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
 jet_cli_expand_origin_receiver: fn(source: String, span: Span) -> String Never! {
     if span.start < 0 || span.end < span.start || span.end > source.len() -> return "value"
     text: source.slice(span.start, span.end).trim()
-    if text.ends_with(".$origin") {
-        receiver: text.slice(0, text.len() - ".$origin".len()).trim()
+    if text.ends_with(".reflect().origin") {
+        receiver: text.slice(0, text.len() - ".reflect().origin".len()).trim()
         if receiver != "" -> return receiver
     }
-    if text == "$origin" {
-        words: jet_cli_find_words(source.slice(0, span.start))
+    // The fact read `x.reflect().origin` is spanned at its member `origin`.
+    if text == "origin" && source.slice(0, span.start).ends_with(".reflect().") {
+        words: jet_cli_find_words(source.slice(0, span.start - ".reflect().".len()))
         if words.len() > 0 {
-            word: words[words.len() - 1]
-            receiver: if word.ends_with(".") -> word.slice(0, word.len() - 1) else -> word
+            receiver: words[words.len() - 1]
             if receiver != "" -> return receiver
         }
     }
@@ -183,7 +183,7 @@ jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                     jet_cli_status_field("span", jet_cli_expand_span(row.span, Val(unit.source))),
                     jet_cli_status_field("value", jet_cli_expand_checked_json(row.value)),
                 })
-                facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.$origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
+                facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.reflect().origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
             }
         }
     }

@@ -104,7 +104,7 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
                     assert_eq(owner_pid, Val(store.owner().pid()))
                     assert(elapsed_ns >= 25000000, "the wait lasts at least the configured bound")
                 }
-                else -> panic("unexpected lock error: {text}")
+                .IO(_) | .Config(_) | .InvalidDigest(_) | .InvalidKey(_) | .Corrupt(_, _) | .Conflict(_) | .Capacity(_, _, _, _) -> panic("unexpected lock error: {text}")
             }
             assert(text.contains("owner pid"))
             assert(text.contains("after waiting"))
@@ -371,7 +371,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     restored: store.restore_file(key, destination) ?? panic("restore")
     if restored == {
         .Hit(_, executable) -> assert(executable)
-        else -> panic("published artifact must restore")
+        .Missing | .Corrupt -> panic("published artifact must restore")
     }
     assert_eq(files.read(destination) ?? panic("read restored"), "artifact")
     info: files.stat(destination) ?? panic("restored mode")
@@ -380,13 +380,13 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     broken: store.restore_file(key, destination) ?? panic("restore corrupt")
     if broken == {
         .Corrupt -> {}
-        else -> panic("a corrupt object must restore as Corrupt")
+        .Missing | .Hit(_, _) -> panic("a corrupt object must restore as Corrupt")
     }
     store.publish_file(key, source, durable: true) ?? panic("republish")
     repaired: store.restore_file(key, destination) ?? panic("restore repaired")
     if repaired == {
         .Hit(_, _) -> {}
-        else -> panic("a republished artifact must restore")
+        .Missing | .Corrupt -> panic("a republished artifact must restore")
     }
     store_artifact_test_cleanup(root)
 }
@@ -403,7 +403,7 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     pid: child.id()
     start: if store_artifact_lookup_process_start(pid) == {
         .Found(token) -> token
-        else -> panic("lease child start token")
+        .Missing | .Unknown -> panic("lease child start token")
     }
     owner: ArtifactProcessIdentity.new(pid, start)
     lease_path: files.join(files.join(root, "leases"), "lease-{pid}-child")

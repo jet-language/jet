@@ -92,7 +92,7 @@ payload_arm: fn(k: Int) -> Int {
     picked: if shape == {
         .Boxed(blob) -> blob
         .Pair(_, right) -> right
-        else -> Blob{data: [Int]{}, text: "empty"}
+        .Empty -> Blob{data: [Int]{}, text: "empty"}
     }
     picked.data.len() * 10 + picked.text.len()
 }
@@ -101,7 +101,7 @@ payload_arm: fn(k: Int) -> Int {
 either: fn(shape: Shape) -> String {
     chosen: if shape == {
         .Boxed(blob) | .Pair(blob, _) -> blob
-        else -> Blob{data: [Int]{}, text: "none"}
+        .Empty -> Blob{data: [Int]{}, text: "none"}
     }
     chosen.text
 }
@@ -112,7 +112,7 @@ payload_changed: fn(k: Int) -> String {
     shape := Shape.Boxed{blob: Blob{data: [Int]{k}, text: "before"}}
     picked: if shape == {
         .Boxed(blob) -> blob
-        else -> Blob{data: [Int]{}, text: "none"}
+        .Pair(_, _) | .Empty -> Blob{data: [Int]{}, text: "none"}
     }
     shape = Shape.Empty
     "{picked.text} {picked.data.len()}"

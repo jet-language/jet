@@ -55,49 +55,49 @@ run: fn() {
 
     if json.decode<SmallI64>("{{\"value\":9223372036854775808}}") == {
         .Err(_) -> { print("i64-overflow") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Float>("1e400") == {
         .Err(_) -> { print("nonfinite") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Decimal>("NaN") == {
         .Err(_) -> { print("nan-rejected") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Decimal>("Infinity") == {
         .Err(_) -> { print("infinity-rejected") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Int>("1.5") == {
         .Err(_) -> { print("fractional-rejected") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Decimal>("1e1000001") == {
         .Err(_) -> { print("exponent-limit") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     mismatch_text: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
     if json.decode<ExactNumbers>(mismatch_text) == {
         .Err(_) -> { print("file-mismatch") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     // Decimal decodes from its own text encoding, so the mismatch is a Bool.
     mismatch_raw: "{{\"amount\":true,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
     if json.decode<ExactNumbers>(mismatch_raw) == {
         .Err(_) -> { print("mismatch") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if data.json<ExactNumbers>("[{mismatch_raw}]") == {
         .Err(_) -> { print("stream-mismatch") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<String>("123") == {
         .Err(_) -> { print("string-mismatch") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
     if json.decode<Decimal>(LIMITED_TEXT) == {
         .Err(_) -> { print("limit") }
-        else -> { print("accepted") }
+        .Ok(_) -> { print("accepted") }
     }
 }

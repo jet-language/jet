@@ -6,9 +6,7 @@ use files: core.files
 #Equatable
 Parser: struct {
     text: String
-}
 
-impl Parser {
     words: fn(self) -> [String] { self.text.split(" ").to_list() }
     count: fn(self) -> Int { self.words().len() }
 
@@ -16,20 +14,20 @@ impl Parser {
     each: fn(self, visit: fn(String)) {
         loop word in self.words() -> visit(word)
     }
-}
 
-impl Parser.Display {
-    display: fn(self) -> String { "Parser of {self.count()} words" }
+    impl Display {
+        display: fn(self) -> String { "Parser of {self.count()} words" }
+    }
 }
 
 Traced: struct<T: Printable> {
     inner: T
-}
 
-impl Traced.Display {
-    display: fn(self) -> String {
-        print("trace: display")
-        "{self.inner}"
+    impl Display {
+        display: fn(self) -> String {
+            print("trace: display")
+            "{self.inner}"
+        }
     }
 }
 

@@ -120,42 +120,37 @@ SIGIL_FENCE_CLOSE: ":>"
 /// `#Track name: expr` / `#Track name := expr`.
 MARKER_TRACK: "Track"
 
-/// The compiler-fact sigil. A fact is a
-/// `$` member of the thing it describes (`T.$layout`, `f.$effects`,
-/// `value.$origin`); subjectless facts use the roots `$build`, `$package`,
-/// `$phase`, `$program`, `$here` and `$caller`. Fact declarations mark compiler metadata the
-/// same way (`$holds:`). Inside a
-/// derive or marker template the same mark splices a template binding
-/// (`$method: fn`, `self.$field`, `.$left`). The mark
-/// belongs to the name, and programs never declare a `$` name. Config
-/// surfaces read the same token as a `$NAME` environment read
+/// The `$` of a config-surface `$NAME` environment read. Program source has
+/// no `$` words: the site values are `#package`, `#here` and `#caller`, a
+/// program reads a compiler fact through its subject (`T.reflect().layout`,
+/// `f.reflect().effects`, `value.reflect().origin`), the other subjectless
+/// facts are the compiler values `#build`, `#phase` and `#program`, and a
+/// derive or marker template pastes a binding as `#{name}` (`#{method}: fn`,
+/// `self.#{field}`, `.#{left}`).
 COMPTIME_MARK: "$"
 
-/// The six subjectless fact roots.
-FACT_ROOT_BUILD: "$build"
+/// The subjectless fact roots: compiler values, which no binding shadows.
+FACT_ROOT_BUILD: "#build"
 
-FACT_ROOT_PACKAGE: "$package"
+FACT_ROOT_PACKAGE: "#package"
 
-FACT_ROOT_PHASE: "$phase"
+FACT_ROOT_PHASE: "#phase"
 
-FACT_ROOT_PROGRAM: "$program"
+FACT_ROOT_PROGRAM: "#program"
 
-/// The `SourceLocation` (file, line, column, function, module) where `$here` is
+/// The `SourceLocation` (file, line, column, function, module) where `#here` is
 /// written.
-FACT_ROOT_HERE: "$here"
+FACT_ROOT_HERE: "#here"
 
 /// The `SourceLocation` of the call. Legal only as a parameter
-/// default (`at: SourceLocation{$caller}`) or inside an #Expand macro; a
+/// default (`at: SourceLocation{#caller}`) or inside an #Expand macro; a
 /// wrapper forwards it by declaring the same default and passing `at`.
-FACT_ROOT_CALLER: "$caller"
+FACT_ROOT_CALLER: "#caller"
 
 /// (ratified 2026-07-09): statement switch-off attribute.
-/// `#Off <stmt>` parses and type-checks the statement, then emits no code.
+/// `#Off <stmt>` parses and type-checks the statement, then emits no code;
+/// `#Off(.Release) <stmt>` emits it in every build but a release build.
 MARKER_OFF: "Off"
-
-/// (ratified 2026-07-09): debug-only statement attribute.
-/// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
-MARKER_DEBUG_ONLY: "DebugOnly"
 
 /// (ratified 2026-07-09): tooling metadata attribute for
 /// bindings, top-level consts, and functions.
@@ -518,11 +513,6 @@ KW_REACTIVE: "Reactive"
 /// spellings). Sema validates it against inferred `Browser` effects.
 MARKER_TARGET: "Target"
 
-/// Export this WASM function to the generated JS loader. A
-/// different job (export surface) from the `#Target(Wasm|JS)` partition
-/// family above — leaves it untouched.
-MARKER_WASM_EXPORT: "WasmExport"
-
 /// `#Target(JS)` argument spelling.
 WEB_BUCKET_JS: "JS"
 
@@ -548,7 +538,7 @@ WEB_TARGET_DEFAULT_WEB: "Web"
 /// replacing the retired bare-string argument.
 MARKER_HTML: "HTML"
 
-/// `#SQL<Row> { ... }` — a checked text block whose row is
+/// `#SQL(Row) { ... }` — a checked text block whose row is
 /// declared in `Prelude/Markers.jet`; block legality comes from the one
 /// declaration registry, not a compiler whitelist.
 DSL_BLOCK_SQL: "SQL"
@@ -587,10 +577,9 @@ TARGET_OS_MACOS: "MacOS"
 TARGET_OS_WINDOWS: "Windows"
 
 /// (ratified 2026-07-03): the compiler-known comptime value
-/// `$build` and its `.os` field — the subject of an `comptime if $build.os == { }`
-/// switch that folds to the arm matching the build's active OS. `build` is not
-/// a reserved keyword: it is recognized only in that syntactic position (an
-/// ordinary local named `build` is still fine); a `$build.os` anywhere else has
+/// `#build` and its `.target.os` field — the subject of an `comptime if #build.target.os == { }`
+/// switch that folds to the arm matching the build's active OS. An ordinary
+/// local named `build` is unrelated; a `#build.target.os` anywhere else has
 /// no compiler meaning.
 BUILD_INFO: "build"
 
@@ -603,30 +592,30 @@ BUILD_INFO_SETTINGS: "settings"
 
 /// Registered complete
 /// build-fact paths.
-COMPILER_BUILD_FACT_PACKAGE_NAME: "$package.name"
+COMPILER_BUILD_FACT_PACKAGE_NAME: "#package.name"
 
-COMPILER_BUILD_FACT_PACKAGE_VERSION: "$package.version"
+COMPILER_BUILD_FACT_PACKAGE_VERSION: "#package.version"
 
-COMPILER_BUILD_FACT_OS: "$build.os"
+COMPILER_BUILD_FACT_OS: "#build.target.os"
 
-COMPILER_BUILD_FACT_PROFILE_PATH: "$build.profile"
+COMPILER_BUILD_FACT_PROFILE_PATH: "#build.profile"
 
 /// Declared settings are dynamic leaves of the same
 /// compiler-owned build-fact namespace.
-COMPILER_BUILD_FACT_SETTINGS_PREFIX: "$build.settings."
+COMPILER_BUILD_FACT_SETTINGS_PREFIX: "#build.settings."
 
-COMPILER_BUILD_FACT_STAMP_GIT: "$build.stamp.git"
+COMPILER_BUILD_FACT_STAMP_GIT: "#build.stamp.git"
 
-COMPILER_BUILD_FACT_STAMP_DIRTY: "$build.stamp.dirty"
+COMPILER_BUILD_FACT_STAMP_DIRTY: "#build.stamp.dirty"
 
-COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: "$build.stamp.toolchain"
+COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: "#build.stamp.toolchain"
 
-COMPILER_BUILD_FACT_STAMP_AT: "$build.stamp.at"
+COMPILER_BUILD_FACT_STAMP_AT: "#build.stamp.at"
 
 /// The selected CPU's cache-line size in bytes (an `Int`).
 /// Jet has no CPU selection, so every target is generic and reads 64
 /// (`COMPILER_BUILD_CPU_CACHE_LINE_GENERIC`, Registry/RegistrationFacts.jet).
-COMPILER_BUILD_FACT_CPU_CACHE_LINE: "$build.cpu.cache_line"
+COMPILER_BUILD_FACT_CPU_CACHE_LINE: "#build.cpu.cache_line"
 
 /// Bare lowercase `unsafe` is not Jet syntax; the gate is `#Unsafe`.
 FOREIGN_UNSAFE: "unsafe"
@@ -1022,7 +1011,7 @@ TYPE_LAYOUT_INFO: "LayoutInfo"
 
 TYPE_LAYOUT_FIELD: "LayoutField"
 
-/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
+/// Internal AST spelling for the typed selector in `T.reflect().layout[.field]`.
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST
 /// variant for a compile-time-only projection. It is never formatted as this
 /// sentinel and never appears in generated Jet source.

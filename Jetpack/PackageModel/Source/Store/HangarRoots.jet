@@ -4,25 +4,14 @@
 // area, which builds on these names instead of re-homing them.
 use {
     jet_foundation.[authority_holds]
-    jetpack_foundation.[SOURCE_ROOT_DIR]
+    jetpack_foundation.[SOURCE_ROOT_DIR, HANGAR_LEGACY_SUBDIR, foundation_hangar_subdir, foundation_explicit_jetpack_root, foundation_home_dir, foundation_environment_path, foundation_absolute_environment_path, foundation_user_data_root]
     json: core.encoding.json
-    sys: core.sys
     files: core.files
 }
 
-// The native data-directory leaf (macOS/Windows spell it
-// `Hangar`); explicit roots keep the historical lower-case child.
-HANGAR_NATIVE_SUBDIR_TITLE: "Hangar"
-HANGAR_LEGACY_SUBDIR: "hangar"
 HANGAR_SHARED_CAS_ENV: "JETPACK_SHARED_CAS"
 HANGAR_MAX_STORE_OBJECTS: 1000000
 HANGAR_MAX_STORE_META_BYTES: 1048576
-
-// The native leaf of the resolved root's content-addressed store.
-pkg_hangar_subdir: fn() -[Env]> String Never! {
-    if sys.is_macos() || sys.is_windows() -> return HANGAR_NATIVE_SUBDIR_TITLE
-    HANGAR_LEGACY_SUBDIR
-}
 
 // The resolved root, and whether it is the default user-owned root.
 HangarRoots: struct {
@@ -37,14 +26,14 @@ HangarRoots: struct {
 
     // The global content-addressed store (hangar) under this root.
     hangar_dir: fn(self) -[Env]> String Never! {
-        leaf: if self.dev_mode -> pkg_hangar_subdir() else -> HANGAR_LEGACY_SUBDIR
+        leaf: if self.dev_mode -> foundation_hangar_subdir() else -> HANGAR_LEGACY_SUBDIR
         files.join(self.root, leaf)
     }
 
     // The immutable payload pool this root shares: the machine-wide pool for
     // the default user root or an explicit JETPACK_SHARED_CAS, else its own.
     shared_cas_dir: fn(self) -[Env]> String Never! {
-        if self.root == pkg_user_data_root() || pkg_environment_path(HANGAR_SHARED_CAS_ENV) != None {
+        if self.root == foundation_user_data_root() || foundation_environment_path(HANGAR_SHARED_CAS_ENV) != None {
             return pkg_shared_cas_dir()
         }
         files.join(self.hangar_dir(), "cas")
@@ -56,7 +45,7 @@ HangarRoots: struct {
         roots := [HangarRoots]{}
         candidates: [HangarRoots]{
             pkg_resolve_roots(),
-            {root: pkg_user_data_root(), dev_mode: true},
+            {root: foundation_user_data_root(), dev_mode: true},
             HangarRoots.at(pkg_legacy_user_root())
         }
         loop candidate in candidates -> pkg_hangar_add_machine_root(roots, candidate)
@@ -66,16 +55,16 @@ HangarRoots: struct {
         }
         name_values: [String]{"XDG_DATA_HOME", "XDG_STATE_HOME", "LOCALAPPDATA"}
         loop name in name_values {
-            parent: pkg_environment_path(name) ?? next
+            parent: foundation_environment_path(name) ?? next
             parents.push(parent)
         }
-        parents.push(pkg_environment_path("XDG_CACHE_HOME") ?? files.join(pkg_home_dir(), ".cache"))
+        parents.push(foundation_environment_path("XDG_CACHE_HOME") ?? files.join(foundation_home_dir(), ".cache"))
         loop parent in authority_holds(parents) {
             entries: files.list_dir(parent) ?? next
             loop entry in entries {
                 info: files.stat(entry.path) ?? next
                 if info.is_symlink || !info.is_dir -> next
-                if pkg_hangar_real_directory(files.join(entry.path, pkg_hangar_subdir())) {
+                if pkg_hangar_real_directory(files.join(entry.path, foundation_hangar_subdir())) {
                     pkg_hangar_add_machine_root(roots, HangarRoots{root: entry.path, dev_mode: true})
                 } else if pkg_hangar_real_directory(files.join(entry.path, HANGAR_LEGACY_SUBDIR)) {
                     pkg_hangar_add_machine_root(roots, HangarRoots.at(entry.path))
@@ -88,7 +77,7 @@ HangarRoots: struct {
 
 // The machine/user shared immutable payload pool.
 pkg_shared_cas_dir: fn() -[Env]> String Never! {
-    explicit: pkg_environment_path(HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(pkg_user_data_root(), pkg_hangar_subdir()), "cas")
+    explicit: foundation_environment_path(HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(foundation_user_data_root(), foundation_hangar_subdir()), "cas")
     explicit
 }
 
@@ -116,46 +105,15 @@ pkg_lock_path: fn(project: String) -> String Never! {
 }
 
 // Resolve the Jetpack root: `JETPACK_ROOT` when set, else the platform data
-// directory from.
+// directory (foundation_hangar_dir names the same Hangar).
 pkg_resolve_roots: fn() -[Env]> HangarRoots Never! {
-    explicit: pkg_environment_path("JETPACK_ROOT") ?? return HangarRoots{root: pkg_user_data_root(), dev_mode: true}
+    explicit: foundation_explicit_jetpack_root() ?? return HangarRoots{root: foundation_user_data_root(), dev_mode: true}
     HangarRoots{root: explicit, dev_mode: false}
-}
-
-pkg_home_dir: fn() -[Env]> String Never! {
-    if sys.is_windows() {
-        if pkg_environment_path("USERPROFILE") == .Val(home) -> return home
-    }
-    pkg_environment_path("HOME") ?? "."
-}
-
-// A non-empty environment value.
-pkg_environment_path: fn(name: String) -[Env]> String? Never! {
-    value: sys.get(name) ?? return None
-    if value == "" -> return None
-    Val(value)
-}
-
-// An environment directory honoured only when absolute.
-pkg_absolute_environment_path: fn(name: String) -[Env]> String? Never! {
-    value: pkg_environment_path(name) ?? return None
-    if !files.is_abs(value) -> return None
-    Val(value)
-}
-
-pkg_user_data_root: fn() -[Env]> String Never! {
-    if sys.is_macos() -> return files.join(files.join(files.join(pkg_home_dir(), "Library"), "Application Support"), "Jet")
-    if sys.is_windows() {
-        local: pkg_environment_path("LOCALAPPDATA") ?? files.join(files.join(pkg_home_dir(), "AppData"), "Local")
-        return files.join(local, "Jet")
-    }
-    data: pkg_absolute_environment_path("XDG_DATA_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "share")
-    files.join(data, "jet")
 }
 
 // The pre- user root, kept only as a migration source.
 pkg_legacy_user_root: fn() -[Env]> String Never! {
-    state: pkg_absolute_environment_path("XDG_STATE_HOME") ?? files.join(files.join(pkg_home_dir(), ".local"), "state")
+    state: foundation_absolute_environment_path("XDG_STATE_HOME") ?? files.join(files.join(foundation_home_dir(), ".local"), "state")
     files.join(state, "jet")
 }
 

@@ -115,7 +115,7 @@ sema_marker_module_items: fn(items: [Item], segments: [String], position: Int, e
             .CodeModule(code_module) -> {
                 if position + 1 < segments.len() && sema_casing_marker_qualifier(code_module.name) == segments[position] && code_module.body == .Val(body) -> sema_marker_module_items(body, segments, position + 1, exported && code_module.is_pub, rows)
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
 }
@@ -150,7 +150,7 @@ sema_marker_module_declaration_by_span: fn(items: [Item], span: Span) -> MarkerD
                     if declaration != None -> return declaration
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     None
@@ -175,21 +175,6 @@ sema_marker_module_scope: fn(items: [Item], span: Span, prefix: String) -> Strin
         }
     }
     prefix.copy()
-}
-
-sema_marker_module_import_declared: fn(items: [Item], scope: String, span: Span, prefix: String) -> Bool Never! {
-    loop item in items {
-        if item == .CodeModule(code_module) && code_module.body == .Val(body) {
-            path: if prefix == "" -> code_module.name else -> "{prefix}.{code_module.name}"
-            if path == scope {
-                loop declaration in code_module.imports {
-                    if declaration.span.start == span.start && declaration.span.end == span.end -> return true
-                }
-            }
-            if scope.starts_with("{path}.") && sema_marker_module_import_declared(body, scope, span, path) -> return true
-        }
-    }
-    false
 }
 
 sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
@@ -237,7 +222,7 @@ sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only
                     loop row in sema_marker_module_declarations(body, name, exported_only) -> declarations.push(row)
                 }
             }
-            else -> {}
+            .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
     }
     declarations
@@ -345,7 +330,7 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 if code_module.body == .Val(body) -> row.body = Val(sema_marker_module_bind_items(body, bindings))
                 value = Item.CodeModule{value: row}
             }
-            else -> {}
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
         bound.push(value)
     }
@@ -502,7 +487,7 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
         // the program registry carries the module's own rules beside the
         // builtin rows, so it judges both kinds.
         repeat_checked := false
-        if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
+        if unresolved.len() > 0 || source_declared {
             program_registry: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
             if program_registry == .Val(registry) {
                 if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, unknown)
@@ -512,12 +497,10 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
             }
         }
         sema_marker_module_check_groups(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.items, "", true, catalog, diagnostics)
-        if !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
-            sema_marker_module_check_trait_collisions(catalog, graph.modules[module_row_index].program.items, diagnostics)
-            sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, diagnostics)
-            sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, diagnostics)
-            if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, diagnostics)
-        }
+        sema_marker_module_check_trait_collisions(catalog, graph.modules[module_row_index].program.items, diagnostics)
+        sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, diagnostics)
+        sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, diagnostics)
+        if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, diagnostics)
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_row_index].source_segments)
         sema_attach_diagnostic_source_locations(unknown, 0, graph.modules[module_row_index].source_segments)
         unknown_rules.push(unknown)
@@ -616,10 +599,10 @@ sema_marker_module_prelude_rules: fn() -> [TAppliedRule] {
 
 // Rust CheckerMarkers `validate_rule_arguments`: an applied rule evaluates an
 // argument only where its binding observes one. A menu word or identifier
-// (`#Layout(c)`), an open value (outside `#Default`), an effect-root list and
-// a duration unit literal are read as written, so the first argument of such
-// a marker stages no compile-time value. A marker no applied rule names keeps
-// its first argument.
+// (`#Layout(c)`, `#Rename(.Camel)`), an open value (outside `#Default`), an
+// effect-root list and a duration unit literal are read as written, so the
+// first argument of such a marker stages no compile-time value. A marker no
+// applied rule names keeps its first argument.
 sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: Marker) -> Bool {
     if marker.declaration_module != None -> return true
     index: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
@@ -634,7 +617,8 @@ sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: M
                 if argument == .UnitLit(_, _, _, _, _, _, _) -> return false
                 return true
             }
-            else -> return true
+            .StringOrMenu -> return !sema_marker_rules_names_menu_word(argument)
+            .String | .Path | .Bool | .Int -> return true
         }
     }
     true

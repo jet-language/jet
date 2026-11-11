@@ -1,7 +1,7 @@
 # tests/fmt.rs::fmt_rewrites_marker_stacking_to_one_shape_and_is_stable at tests/fmt.rs:2198; hand-port
 # Claim: `#[Codable]` before struct becomes `#Codable` (tests/fmt.rs:2201-2204)
 # Claim: single-marker output is stable (tests/fmt.rs:2205-2206)
-# Claim: `#Job #Every(5min) prune: fn()` becomes `#[Job, Every(5min)] prune: fn` (tests/fmt.rs:2210-2213)
+# Claim: `#Job(every: 5min) #Doc("prune") prune: fn()` becomes `#[Job(every: 5min), Doc("prune")] prune: fn` (tests/fmt.rs:2210-2213, in the `#Job(every:)` spelling)
 # Claim: marker-list output is stable (tests/fmt.rs:2214-2215)
 fixture: fmt_rewrites_marker_stacking_to_one_shape_and_is_stable.fixture
 env: NO_COLOR=1
@@ -12,6 +12,6 @@ exit: 0 # tests/fmt.rs:2199-2200 formats
 file: a.jet ~ "#Codable\nInvoice: struct" # tests/fmt.rs:2201-2204
 step: jet fmt b.jet
 exit: 0 # tests/fmt.rs:2208-2209 formats
-file: b.jet ~ "#[Job, Every(5min)]\nprune: fn" # tests/fmt.rs:2210-2213
+file: b.jet ~ "#[Job(every: 5min), Doc(\"prune\")]\nprune: fn" # tests/fmt.rs:2210-2213
 step: jet fmt --check a.jet b.jet
 exit: 0 # tests/fmt.rs:2205, 2214 both outputs stable

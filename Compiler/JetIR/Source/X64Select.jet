@@ -269,6 +269,15 @@ IRX64Emitter: struct {
     // now (-1 none).
     picks: [Int]
     select: Int
+    // Per instruction: of a Loop whose head only tests its exits
+    // (ir_x64_mark_test), the offset past the head's last exit jcc (else
+    // -1), whether a back edge repeated the head (ir_x64_rotate), and that
+    // last exit's BrIf. `marked` counts the slow paths, relocations and
+    // branches when the innermost Loop opened.
+    tests: [Int]
+    rotated: [Bool]
+    exits: [Int]
+    marked: Int
     // Whether the function holds a StreamStore: its non-temporal stores
     // are fenced (sfence) before each call but a stop poll's, an in-place
     // template, a tail jump and the epilogue, so a callee, a caller or
@@ -307,7 +316,7 @@ ir_x64_unsigned: fn(ty: IRX64Shape) -> Bool Never! {
     if ty.kind == {
         .Word -> !ty.signed
         .Bool | .Char | .Pointer | .String -> true
-        else -> false
+        .Unit | .Int | .Float | .Float32 | .Aggregate -> false
     }
 }
 
@@ -610,7 +619,7 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
             ir_x64_store(e, m, f, al, dst, X64_RAX)
         }
         .Float -> ir_x64_store_xmm(e, m, f, al, dst, 0)
-        else -> {}
+        .Empty -> {}
     }
 }
 
@@ -1074,7 +1083,7 @@ ir_x64_condition: fn(op: IROp, unsigned: Bool) -> X64Cond Never! {
         .Lt -> if unsigned -> X64Cond.B else -> X64Cond.L
         .Le -> if unsigned -> X64Cond.BE else -> X64Cond.LE
         .Gt -> if unsigned -> X64Cond.A else -> X64Cond.G
-        else -> if unsigned -> X64Cond.AE else -> X64Cond.GE
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> if unsigned -> X64Cond.AE else -> X64Cond.GE
     }
 }
 
@@ -1101,7 +1110,7 @@ ir_x64_exact_arithmetic: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IR
         if op == {
             .Add -> x64_alu_rr(e.code, X64Alu.Add, X64_RAX, other)
             .Sub -> x64_alu_rr(e.code, X64Alu.Sub, X64_RAX, other)
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 x64_imul_rr(e.code, X64_RAX, other)
                 sites.push(x64_jcc_rel32(e.code, X64Cond.O))
             }
@@ -1669,12 +1678,13 @@ ir_x64_magic_divisor: fn(al: IRX64Allocation, slot: Int) -> Int Never! {
     d
 }
 
-// rax divided by the constant d (ir_x64_magic_divisor) as idiv leaves it:
-// the truncated quotient in rax, the remainder in rdx, d in rcx. Uses r11.
-// A negative d divides by its magnitude and negates the quotient: the
-// truncated quotient of n by -d is minus that of n by d, the remainder the
-// same.
-ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int) Never! {
+// rax divided by the constant d (ir_x64_magic_divisor) as `op` needs it. A
+// Div leaves the truncated quotient in rax; a Rem, the truncated remainder in
+// r11; FloorDiv and Mod leave what idiv does (quotient in rax, remainder in
+// rdx, d in rcx) for ir_x64_floor_adjust. Uses r11. A negative d divides by
+// its magnitude and negates the quotient: the truncated quotient of n by -d
+// is minus that of n by d, the remainder the same.
+ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int, op: IROp) Never! {
     magic: ir_x64_magic(if d < 0 -> 0 - d else -> d)
     x64_mov_rr(e.code, X64_R11, X64_RAX)
     x64_mov_ri(e.code, X64_RCX, magic.multiplier)
@@ -1685,6 +1695,17 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int) Never! {
     x64_shift_ri(e.code, X64Shift.Shr, X64_RAX, 63)
     x64_alu_rr(e.code, X64Alu.Add, X64_RAX, X64_RDX)
     if d < 0 -> x64_neg(e.code, X64_RAX)
+    if op == .Div -> return
+    if op == .Rem {
+        // n - q * d, the product in rax (it cannot overflow: |q * d| <= |n|).
+        if x64_fits_i32(d) {
+            x64_imul_rri(e.code, X64_RAX, X64_RAX, d)
+        } else {
+            x64_mov_ri(e.code, X64_RCX, d)
+            x64_imul_rr(e.code, X64_RAX, X64_RCX)
+        }
+        return x64_alu_rr(e.code, X64Alu.Sub, X64_R11, X64_RAX)
+    }
     x64_mov_ri(e.code, X64_RCX, d)
     x64_mov_rr(e.code, X64_RDX, X64_RAX)
     x64_imul_rr(e.code, X64_RDX, X64_RCX)
@@ -1692,12 +1713,45 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int) Never! {
     x64_mov_rr(e.code, X64_RDX, X64_R11)
 }
 
+// The Div or Rem at `at` of a nonnegative dividend n (IR_OVERFLOW_NONNEG) by
+// the positive constant d. The shifted high product is the quotient: no +1
+// rounds it toward zero, as a negative n would need. n stays in its own
+// register (its home, else r11). A Div's quotient is stored from rdx. A
+// Rem's n - q * d is computed as -d * q + n into dst's own register: when
+// that is not n's, by the three-operand imul; when it is (n dies there),
+// by adding -d * q, built in rdx, to it. Neither copies n or the result.
+ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int) Never! {
+    n: ir_x64_use(e, m, f, al, f.a[at], X64_R11)
+    magic: ir_x64_magic(d)
+    x64_mov_rr(e.code, X64_RAX, n)
+    x64_mov_ri(e.code, X64_RCX, magic.multiplier)
+    x64_imul_wide(e.code, X64_RCX)
+    if magic.add -> x64_alu_rr(e.code, X64Alu.Add, X64_RDX, n)
+    if magic.shift > 0 -> x64_shift_ri(e.code, X64Shift.Sar, X64_RDX, magic.shift)
+    if f.op[at] == .Div -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
+    home: ir_x64_home_reg(m, f, al, f.dst[at], X64_RDX)
+    if x64_fits_i32(d) && home != n {
+        x64_imul_rri(e.code, home, X64_RDX, 0 - d)
+        x64_alu_rr(e.code, X64Alu.Add, home, n)
+        return ir_x64_store(e, m, f, al, f.dst[at], home)
+    }
+    if x64_fits_i32(d) {
+        x64_imul_rri(e.code, X64_RDX, X64_RDX, 0 - d)
+    } else {
+        x64_mov_ri(e.code, X64_RCX, 0 - d)
+        x64_imul_rr(e.code, X64_RDX, X64_RCX)
+    }
+    target: if home == n -> n else -> X64_RDX
+    x64_alu_rr(e.code, X64Alu.Add, target, if home == n -> X64_RDX else -> n)
+    ir_x64_store(e, m, f, al, f.dst[at], target)
+}
+
 ir_x64_division_symbol: fn(op: IROp) -> String Never! {
     if op == {
         .Div -> "jet_int_div"
         .Rem -> "jet_int_rem"
         .FloorDiv -> "jet_int_floor_div"
-        else -> "jet_int_mod"
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> "jet_int_mod"
     }
 }
 
@@ -1811,10 +1865,10 @@ ir_x64_exact_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX6
     if magic != 0 {
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
         ir_x64_operand_test(e, al, f.a[at], X64_RAX, sites)
-        ir_x64_magic_division(e, magic)
+        ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
-        if op == .Rem || op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
-        ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
+        if op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
+        ir_x64_store(e, m, f, al, f.dst[at], if op == .Rem -> X64_R11 else -> X64_RAX)
         return ir_x64_located_cold(e, f, at, ir_x64_division_symbol(op), sites)
     }
     ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
@@ -1849,7 +1903,7 @@ ir_x64_int_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         .BitAnd -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.And, "jet_int_bit_and")
         .BitOr -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.Or, "jet_int_bit_or")
         .BitXor -> ir_x64_exact_bitwise(e, m, f, al, at, X64Alu.Xor, "jet_int_bit_xor")
-        else -> ir_x64_exact_compare(e, m, f, al, at)
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ir_x64_exact_compare(e, m, f, al, at)
     }
 }
 
@@ -1868,7 +1922,7 @@ ir_x64_word_arithmetic: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables,
         if op == {
             .Add -> x64_alu_rr(e.code, X64Alu.Add, X64_RAX, other)
             .Sub -> x64_alu_rr(e.code, X64Alu.Sub, X64_RAX, other)
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 if unsigned && bits == 64 {
                     x64_mul(e.code, other)
                 } else {
@@ -1998,13 +2052,17 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     }
     k: ir_x64_power_of_two(al, f.b[at])
     division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    // A proven nonnegative Int dividend (IR_OVERFLOW_NONNEG) divides as an
+    // unsigned one: no correction toward zero.
+    nonneg: f.c[at] == IR_OVERFLOW_NONNEG
     if k > 0 && division {
         // A 2^k divisor is neither 0 nor -1: no stop can happen. A shift or
         // a mask works in dst's own register, with no copy through rax.
-        in_place: !ty.signed || op == .FloorDiv || op == .Mod
+        signed: ty.signed && !nonneg
+        in_place: !signed || op == .FloorDiv || op == .Mod
         reg: if in_place -> ir_x64_home_reg(m, f, al, f.dst[at], X64_RAX) else -> X64_RAX
         ir_x64_load(e, m, f, al, f.a[at], reg)
-        ir_x64_power_division(e, op, ty.signed, k, reg)
+        ir_x64_power_division(e, op, signed, k, reg)
         return ir_x64_store(e, m, f, al, f.dst[at], reg)
     }
     if op == .Rem || op == .Mod {
@@ -2014,11 +2072,12 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     magic: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
     if magic != 0 {
         // Neither is the divisor 0 or -1.
+        if nonneg && magic > 0 && (op == .Div || op == .Rem) -> return ir_x64_nonneg_magic_division(e, m, f, al, at, magic)
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
-        ir_x64_magic_division(e, magic)
+        ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
-        if op == .Rem || op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
-        return ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
+        if op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
+        return ir_x64_store(e, m, f, al, f.dst[at], if op == .Rem -> X64_R11 else -> X64_RAX)
     }
     if op == .Mul && f.c[at] == IR_OVERFLOW_WRAP {
         // A wrapping product by 2^k is a left shift (the same low bits).
@@ -2079,7 +2138,7 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             .Sub -> X64Alu.Sub
             .BitAnd -> X64Alu.And
             .BitOr -> X64Alu.Or
-            else -> X64Alu.Xor
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> X64Alu.Xor
         }
         if source != target {
             // A wrapping Add, or Sub of a constant, whose left operand sits
@@ -2125,7 +2184,7 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             alu: if op == .BitAnd -> X64Alu.And else if op == .BitOr -> X64Alu.Or else -> X64Alu.Xor
             if imm == .Val(value) -> x64_alu_ri(e.code, alu, X64_RAX, value) else -> x64_alu_rr(e.code, alu, X64_RAX, other)
         }
-        else -> return ir_x64_fail(e, f, at, "no fixed-width form")
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return ir_x64_fail(e, f, at, "no fixed-width form")
     }
     ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
 }
@@ -2161,7 +2220,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
                 x64_alu_rr(e.code, X64Alu.Or, X64_RAX, X64_RCX)
             }
             .Gt | .Lt -> x64_setcc(e.code, X64Cond.A, X64_RAX)
-            else -> x64_setcc(e.code, X64Cond.AE, X64_RAX)
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Le | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> x64_setcc(e.code, X64Cond.AE, X64_RAX)
         }
         x64_movzx_r8(e.code, X64_RAX, X64_RAX)
         return ir_x64_store(e, m, f, al, dst, X64_RAX)
@@ -2179,7 +2238,7 @@ ir_x64_float_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
         .Add -> X64FloatOp.Add
         .Sub -> X64FloatOp.Sub
         .Mul -> X64FloatOp.Mul
-        else -> X64FloatOp.Div
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> X64FloatOp.Div
     }
     if {
         held >= 0 -> x64_float_op(e.code, float_op, single, target, held)
@@ -2215,7 +2274,7 @@ ir_x64_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
     ty: ir_x64_type(m, f, f.a[at])
     if ty.kind == {
         .Int -> {
-            if f.c[at] == IR_OVERFLOW_WRAP -> return ir_x64_word_binary(e, m, f, al, tables, at, IRX64Shape{kind: .Word, size: 8, align: 8, signed: true, bits: 64})
+            if ir_overflow_wraps(f.c[at]) -> return ir_x64_word_binary(e, m, f, al, tables, at, IRX64Shape{kind: .Word, size: 8, align: 8, signed: true, bits: 64})
             ir_x64_int_binary(e, m, f, al, at)
         }
         .Float | .Float32 -> ir_x64_float_binary(e, m, f, al, at, ty)
@@ -2224,7 +2283,7 @@ ir_x64_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             ir_x64_fail(e, f, at, "String operands take Concat or a comparison")
         }
         .Word | .Bool | .Char | .Pointer -> ir_x64_word_binary(e, m, f, al, tables, at, ty)
-        else -> ir_x64_fail(e, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
+        .Unit | .Aggregate -> ir_x64_fail(e, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -2261,7 +2320,7 @@ ir_x64_neg: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
             ir_x64_narrow(e, X64_RAX, ty.signed, bits)
             ir_x64_store(e, m, f, al, dst, X64_RAX)
         }
-        else -> ir_x64_fail(e, f, at, "no negation of {ir_kind_name(ty.kind)}")
+        .Unit | .Bool | .Char | .String | .Pointer | .Aggregate -> ir_x64_fail(e, f, at, "no negation of {ir_kind_name(ty.kind)}")
     }
 }
 
@@ -2299,7 +2358,7 @@ ir_x64_not: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
             e.colds.push(cold)
             return
         }
-        else -> return ir_x64_fail(e, f, at, "no `not` of {ir_kind_name(ty.kind)}")
+        .Unit | .Float | .Float32 | .Char | .String | .Pointer | .Aggregate -> return ir_x64_fail(e, f, at, "no `not` of {ir_kind_name(ty.kind)}")
     }
     ir_x64_store(e, m, f, al, dst, X64_RAX)
 }
@@ -2434,12 +2493,12 @@ ir_x64_select_safe: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int)
     if !arithmetic && op != .Div && op != .FloorDiv && op != .Shl && op != .Shr -> return false
     if f.a[at] < 0 || f.b[at] < 0 || f.dst[at] < 0 -> return false
     ty: ir_x64_type(m, f, f.a[at])
-    if ty.kind != .Word && !(ty.kind == .Int && f.c[at] == IR_OVERFLOW_WRAP) -> return false
+    if ty.kind != .Word && !(ty.kind == .Int && ir_overflow_wraps(f.c[at])) -> return false
     if op == {
         .Add | .Sub | .Mul -> f.c[at] == IR_OVERFLOW_WRAP && !(op == .Mul && !ty.signed && ir_x64_bits(ty) == 64)
         .BitAnd | .BitOr | .BitXor -> true
         .Div | .FloorDiv -> ir_x64_power_of_two(al, f.b[at]) > 0
-        else -> {
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Rem | .Mod | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
             count: ir_x64_imm(al, f.b[at]) ?? -1
             count >= 0 && count < ir_x64_bits(ty)
         }
@@ -2618,7 +2677,7 @@ ir_x64_value_width: fn(ty: IRX64Shape) -> Int Never! {
         .Bool -> 1
         .Float32 -> 4
         .Word -> if ty.size == 1 || ty.size == 2 || ty.size == 4 -> ty.size else -> 8
-        else -> 8
+        .Unit | .Int | .Float | .Char | .String | .Pointer | .Aggregate -> 8
     }
 }
 
@@ -2871,11 +2930,13 @@ ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     if e.open.len() == 0 -> return ir_x64_fail(e, f, at, "End without an open construct")
     here: e.code.bytes.len()
     row: e.open.len() - 1
+    opener: e.open[row]
     if e.heads[row] >= 0 {
-        e.loops.push(e.heads[row])
+        // A rotated loop (ir_x64_rotate) runs its head test once: its
+        // passes start past it.
+        e.loops.push(if e.rotated[opener] -> e.tests[opener] else -> e.heads[row])
         e.loop_ends.push(here)
     }
-    opener: e.open[row]
     e.end_of[opener] = here
     if e.falses[row] >= 0 -> ir_x64_patch(e, e.falses[row], here)
     kept := 0
@@ -2895,6 +2956,86 @@ ir_x64_end: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     _ := e.open.pop()
     _ := e.heads.pop()
     _ := e.falses.pop()
+}
+
+// The slow paths, relocations and branches laid out so far.
+ir_x64_marks: fn(e: IRX64Emitter) -> Int Never! {
+    e.colds.len() + e.relocs.len() + e.branches.len() + e.end_sites.len()
+}
+
+// The most code a loop's back edges repeat of its head (ir_x64_rotate).
+IR_X64_ROTATE_BYTES: 64
+
+// After the BrIf at `at`: when it leaves the innermost open Loop and every
+// instruction before it in that Loop's head only computes (no construct,
+// call or return) or is a BrIf out of the Loop, with no slow path or
+// relocation and no branch but those BrIfs' in at most
+// IR_X64_ROTATE_BYTES, the Loop's back edges may repeat the head up to it
+// (ir_x64_rotate): re-run where the Loop's own values hold what they hold
+// at its head, the same instructions select the same code, and the head
+// runs on every pass anyway.
+ir_x64_mark_test: fn(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
+    row: e.open.len() - 1
+    if row < 0 || e.heads[row] < 0 || f.b[at] < 1 || e.code.bytes.len() - e.heads[row] > IR_X64_ROTATE_BYTES -> return
+    opener: e.open[row]
+    exits := 1
+    loop k in (opener + 1)..<at {
+        if e.absorbed[k] -> next
+        if f.op[k] == {
+            .Block | .Loop | .If | .Else | .End | .Br | .Return | .Unreachable | .Call | .CallRuntime | .CallIndirect | .StreamStore -> return
+            .BrIf -> {
+                if f.b[k] < 1 -> return
+                exits += 1
+            }
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Sqrt | .IntBig -> {}
+        }
+    }
+    if ir_x64_marks(e) != e.marked + exits -> return
+    e.tests[opener] = e.code.bytes.len()
+    e.exits[opener] = at
+}
+
+// Loop rotation: a back edge (Br 0) to a Loop whose head only tests its
+// exits (ir_x64_mark_test) repeats that head instead of jumping to it, its
+// last exit test inverted into a jcc back past the head while the loop goes
+// on, then that exit's edge, which falls through when only the Ends up to
+// the exit's come next. Each pass then runs one branch fewer.
+ir_x64_rotate: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int) -> Bool Never! {
+    if f.a[at] != 0 -> return false
+    row: ir_x64_target(e, 0)
+    if row < 0 || e.heads[row] < 0 -> return false
+    opener: e.open[row]
+    if e.tests[opener] < 0 -> return false
+    test: e.exits[opener]
+    loop k in (opener + 1)..<test {
+        if f.op[k] == .BrIf && !e.absorbed[k] {
+            e.at = k
+            e.code.at = k
+            exit: ir_x64_truth(e, m, f, al, f.a[k])
+            ir_x64_branch(e, f, k, f.b[k], true, exit)
+        } else {
+            ir_x64_select_at(e, m, f, al, tables, k)
+        }
+    }
+    e.at = at
+    e.code.at = at
+    truth: ir_x64_truth(e, m, f, al, f.a[test])
+    site: x64_jcc_rel32(e.code, x64_cond_invert(truth))
+    ir_x64_patch(e, site, e.tests[opener])
+    e.rotated[opener] = true
+    // The exit's row, depth rows out from here: its End comes next when
+    // the next depth + 1 instructions are the Ends of the rows up to it.
+    depth: f.b[test]
+    out: row - depth
+    if e.heads[out] < 0 && e.select < 0 && at + depth + 1 < f.op.len() {
+        falls := true
+        loop k in (at + 1)..<(at + depth + 2) {
+            if f.op[k] != .End -> falls = false
+        }
+        if falls -> return true
+    }
+    ir_x64_branch(e, f, at, depth, false, X64Cond.E)
+    true
 }
 
 // The condition that holds when Bool `slot` is true: a fused comparison's
@@ -3044,7 +3185,10 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
         }
         .Block -> ir_x64_open(e, at, -1, -1)
         // ir_x64_relax aligns the head of an innermost loop.
-        .Loop -> ir_x64_open(e, at, e.code.bytes.len(), -1)
+        .Loop -> {
+            ir_x64_open(e, at, e.code.bytes.len(), -1)
+            e.marked = ir_x64_marks(e)
+        }
         .If -> {
             // Both arms run; the comparison waits for the End.
             if e.picks[at] >= 0 {
@@ -3083,10 +3227,13 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             }
             ir_x64_end(e, f, at)
         }
-        .Br -> ir_x64_branch(e, f, at, f.a[at], false, X64Cond.E)
+        .Br -> {
+            if !ir_x64_rotate(e, m, f, al, tables, at) -> ir_x64_branch(e, f, at, f.a[at], false, X64Cond.E)
+        }
         .BrIf -> {
             truth: ir_x64_truth(e, m, f, al, f.a[at])
             ir_x64_branch(e, f, at, f.b[at], true, truth)
+            ir_x64_mark_test(e, f, at)
         }
         // A tail jump's Return: the Call before it already left.
         .Return -> {
@@ -3358,7 +3505,7 @@ ir_x64_pad_token: fn(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
                 if depth < 0 -> return -1
             }
             .Drop | .Close | .Load | .Const | .Copy | .Move | .CallRuntime -> {}
-            else -> return -1
+            .Nop | .ConstText | .ConstBigInt | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallIndirect | .FunctionAddress | .DataAddress | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .Else | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> return -1
         }
     }
     if depth != 0 -> return -1
@@ -3495,7 +3642,7 @@ ir_x64_pad_key: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int,
                 }
                 if op == .BrIf -> ir_x64_key_slot(f, al, pad, names, order, out, a)
             }
-            else -> {
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> {
                 ir_x64_key_slot(f, al, pad, names, order, out, ir_x64_write(f, at))
                 ir_x64_reads_into(f, at, reads)
                 out.push(reads.len())
@@ -3513,7 +3660,7 @@ ir_x64_pad_key: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int,
                     }
                     .Store | .StreamStore -> out.push(b)
                     .Return -> {}
-                    else -> {
+                    .Nop | .Const | .ConstText | .ConstBigInt | .FunctionAddress | .DataAddress | .StackAddress | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> {
                         out.push(a)
                         out.push(b)
                         out.push(c)
@@ -3900,7 +4047,7 @@ ir_x64_wrap_op: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, picks: [Int]
         .If -> picks[at] < 0
         .Return -> f.b[at] != IR_TAIL_JUMP
         .Mul -> ir_x64_folded(m, f, al, at)
-        else -> ir_x64_quiet(m, f, al.consts, al.values, at)
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .StackAddress | .CopyBytes | .Loop | .Unreachable | .Sqrt | .IntBig | .StreamStore -> ir_x64_quiet(m, f, al.consts, al.values, at)
     }
 }
 
@@ -3945,15 +4092,21 @@ ir_x64_wrap_return: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64
     x64_ret(e.code)
 }
 
-// Function row `row` (`f`, borrowed from `m`).
+// Function row `row` (`f`, borrowed from `m`). A function with a fixed slot
+// keeps its encoder's emission log for the fixed-timing check (Timing.jet).
 ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: x64_code_logged(ir_x64_logged(tables, row)), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, streams: f.op.contains(IROp.StreamStore)}
+    checked: ir_timing_marked(f)
+    logged: ir_x64_logged(tables, row)
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore)}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
         e.absorbed.push(false)
         e.picks.push(-1)
+        e.tests.push(-1)
+        e.rotated.push(false)
+        e.exits.push(-1)
     }
     loop at in 0..<f.op.len() {
         if f.op[at] != .If -> next
@@ -4180,7 +4333,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     ranges := [X64VariableRange]{}
     ir_x64_variables(m, f, al, tables, positions, body_at, ends, variables, ranges)
     name: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
-    log: ir_x64_log_text(m, f, e.code)
+    log: if logged -> ir_x64_log_text(m, f, e.code) else -> [String]{}
+    if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
         debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move()},
@@ -4475,10 +4629,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     assert(x64_assemble_template(restore, [String]{}, false, false).error != None)
 }
 
-// count(n) counts i up to n; the Loop is line 3 and its first instruction
-// line 4, so the line table's row for line 4 is the head. The innermost
-// loop's head starts on its alignment, which the function's start keeps.
-#Test("An innermost Loop's head starts on its alignment") {
+// count(n) counts i up to n; the Loop is line 3, its exit test line 4 and
+// its body line 5. The back edge repeats the test (ir_x64_rotate), so the
+// passes start at the body: the line table's row for line 5 starts on the
+// innermost loop's alignment, which the function's start keeps.
+#Test("A rotated innermost Loop's passes start on its alignment") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
@@ -4501,13 +4656,13 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     _ := ir_emit(f, IROp.Return, -1, i, -1, -1, 6)
     m.functions.push(f)
     compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
-    head := -1
+    body := -1
     loop row in compiled.debug.lines {
-        if row.line == 4 && head < 0 -> head = row.at
+        if row.line == 5 && body < 0 -> body = row.at
     }
-    assert(head > 0)
+    assert(body > 0)
     assert(compiled.function.align >= X64_FUNCTION_ALIGN)
-    assert_eq(head % compiled.function.align, 0)
+    assert_eq(body % compiled.function.align, 0)
 }
 
 // step(x) is x / 2 for an even x, else 3x + 1, both arms wrapping word

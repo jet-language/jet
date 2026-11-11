@@ -1,0 +1,26 @@
+# #4284 c16 (#4300): on a type, `#Rename(NamingCase)` sets the wire casing of
+# every field; a field-level `#Rename("…")` still names that one field. A
+# casing outside the closed menu or a string on a type is E2409, and the
+# retired `#RenameAll` is an unknown marker (E0927).
+fixture: rename_case_renames_every_field_and_rename_all_retires.fixture
+env: NO_COLOR=1
+step run: jet run main.jet
+exit: 0
+stdout: = "Ada\n36\n{\"fullName\":\"Ada\",\"years\":36}\n"
+stderr: empty
+step bad_style: jet check bad_style/main.jet
+exit: 1
+stderr: ~ "`#Rename(.Shouty)` on a type isn't a known casing style." # the NamingCase menu is closed
+stderr: ~ "--> main.jet:1:19" # located at the casing argument
+stderr: ~ "jet-lang.dev/e/E2409" # the casing code
+step type_string: jet check type_string/main.jet
+exit: 1
+stderr: ~ "`#Rename(\"person\")` on a type isn't a known casing style." # a type takes a casing, not a name
+stderr: ~ "--> main.jet:1:19" # located at the string argument
+stderr: ~ "jet-lang.dev/e/E2409" # the casing code
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "`#RenameAll` isn't a known applied rule" # the old marker is retired
+stderr: ~ "--> main.jet:1:12" # located at the retired marker
+stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "1 problem found" # one diagnostic only
