@@ -20,7 +20,6 @@ use {
     regex: core.regex
     roots: "Roots"
     sys: core.sys
-    term: core.term
 }
 
 // Ends the run with `code` after `message`.
@@ -29,9 +28,9 @@ fail: fn(message: String, code: Int) -> Never {
     process.exit(code)
 }
 
-// The text of the files in `dir` whose names start with `prefix` and end with `suffix`, in name order.
-read_all: fn(dir: String, prefix: String, suffix: String) -> String {
-    names := (loop entry in (files.list_dir(dir) ?? []) -> entry.name).filter(name -> name.starts_with(prefix) && name.ends_with(suffix))
+// The text of the files in `dir` that `matching` names, in name order.
+read_all: fn(dir: String, matching: String) -> String {
+    names := loop entry in files.list_dir_or(dir, [], matching: matching) -> entry.name
     names.sort()
     (loop name in names -> files.read("{dir}/{name}")).join("")
 }
@@ -70,7 +69,7 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
     keep := [String]{}
     loop at in 0..<run.len() {
         name: files.basename(run[at])
-        if (files.read("{integ}/{name}.status") ?? "").trim() == "NOAPPLY" -> next
+        if files.read_or("{integ}/{name}.status", "").trim() == "NOAPPLY" -> next
         his: lead(name)
         if hits[at] || blamed.any(other -> lead(other) == his) -> blamed.push(name) else -> keep.push(run[at])
     }
@@ -79,9 +78,9 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
 
 // The files the census rows name: column 2 without `<corelib>/`, its final `:line.col` and `.jet`.
 census_rows: fn(integ: String) -> [String] {
-    text: "{read_all("{integ}/census", "", "keep-going.tsv")}{files.read("{integ}/census.out") ?? ""}"
+    text: "{read_all("{integ}/census", "*keep-going.tsv")}{files.read_or("{integ}/census.out", "")}"
     place: regex.compile(":[0-9.]*$")
-    loop line in text.lines().filter(line -> line.contains("\t")) -> place.replace(line.split("\t").to_list()[1].replace("<corelib>/", ""), "").removesuffix(".jet")
+    loop cells in text.tsv_records().filter(cells -> cells.len() > 1) -> place.replace(cells[1].replace("<corelib>/", ""), "").removesuffix(".jet")
 }
 
 // The source lines quoted under Error headers (not warnings or notes) in census/*.err, trimmed, longer than 8.
@@ -89,7 +88,7 @@ error_lines: fn(integ: String) -> [String] {
     quoted: regex.compile("^ *[0-9]+ \\| (.*)$")
     out := [String]{}
     in_error := false
-    loop line in read_all("{integ}/census", "", ".err").lines() {
+    loop line in read_all("{integ}/census", "*.err").lines() {
         if {
             line.starts_with("Error [") -> in_error = true
             line.starts_with("Warning [") || line.starts_with("Note [") -> in_error = false
@@ -105,15 +104,12 @@ run: fn() {
     // One batch at a time: two runs of the same BATCH would write into one integ dir.
     _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
     args: process.args()
-    if args.len() == 0 {
-        term.eprint("usage: jet Tools/agent/orchestrator/Batch10.jet BATCH SUB...")
-        process.exit(1)
-    }
+    if args.len() == 0 -> process.fail(1, "usage: jet Tools/agent/orchestrator/Batch10.jet BATCH SUB...")
     batch: args[0]
     run := [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
-        seeds: (files.read("{sub}/meta") ?? "").lines().filter(line -> line.starts_with("seed:"))
+        seeds: files.read_or("{sub}/meta", "").lines().filter(line -> line.starts_with("seed:"))
         seed: if seeds.len() > 0 -> seeds[0].removeprefix("seed:").trim() else -> ""
         if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
     }
@@ -123,22 +119,22 @@ run: fn() {
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
         // __from_bits_f32), with every later SUB of the same lead.
-        names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.", ".out")) -> m.groups[0].rpartition(".").tail).filter(name -> name.len() > 3)
+        names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.*.out")) -> m.groups[0].rpartition(".").tail).filter(name -> name.len() > 3)
         word: regex.compile("\\b({(loop name in names -> regex.escape(name)).join("|")})\\b")
-        split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read("{sub}/patch") ?? "", word))
+        split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read_or("{sub}/patch", ""), word))
         if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
         print("QUARANTINED (regen) {split.blamed.join(" ")}")
         process.exit(Sh{"{integrate} {"{batch}-r"}"}.extend(split.keep).status())
     }
-    if (files.read("{integ}/REPORT.md") ?? "").lines().any(line -> line.starts_with("Census rc=0 ")) -> process.exit(0)
+    if files.read_or("{integ}/REPORT.md", "").has_line_prefix("Census rc=0 ") -> process.exit(0)
     rows: census_rows(integ)
     errors: error_lines(integ)
     hits := [Bool]{}
     loop sub in run {
         name: files.basename(sub)
-        paths: (files.read("{integ}/{name}.files") ?? "").lines().filter(path -> path != "")
-        rebased: files.read("{integ}/{name}.rebased") ?? ""
-        hits.push(overlaps(paths.concat(loop path in paths -> path.removesuffix(".jet")), rows) || overlaps(added(if rebased != "" -> rebased else -> files.read("{sub}/patch") ?? ""), errors))
+        paths: files.read_or("{integ}/{name}.files", "").lines().filter(path -> path != "")
+        rebased: files.read_or("{integ}/{name}.rebased", "")
+        hits.push(overlaps(paths.concat(loop path in paths -> path.removesuffix(".jet")), rows) || overlaps(added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")), errors))
     }
     split: quarantine(integ, run, hits)
     if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)

@@ -29,7 +29,6 @@ use {
     regex: core.regex
     roots: "Roots"
     sys: core.sys
-    term: core.term
 }
 
 // The test durations a FAIL row drops before two runs' rows are compared.
@@ -47,7 +46,7 @@ stop: fn(line: String, code: Int) -> Never {
 rc: fn(receipt: ProcessReceipt) -> Int { if receipt.timed_out -> 124 else -> receipt.code }
 
 // The lines of the file at `path`, none when it can't be read.
-lines_of: fn(path: String) -> [String] { (files.read(path) ?? "").lines() }
+lines_of: fn(path: String) -> [String] { files.read_or(path, "").lines() }
 
 // `lines` sorted, each once.
 unique: fn(lines: [String]) -> [String] {
@@ -56,17 +55,11 @@ unique: fn(lines: [String]) -> [String] {
     sorted.dedup().to_list()
 }
 
-// The names in `dir` ending in `suffix`, sorted.
-named: fn(dir: String, suffix: String) -> [String] {
-    names := loop entry in (files.list_dir(dir) ?? []) -> entry.name
+// The names in `dir` that `matching` names, sorted.
+named: fn(dir: String, matching: String) -> [String] {
+    names := loop entry in files.list_dir_or(dir, [], matching: matching) -> entry.name
     names.sort()
-    names.filter(name -> name.ends_with(suffix))
-}
-
-// `link` made a symlink to `target`, replacing what was there.
-relink: fn(target: String, link: String) {
-    if files.lexists(link) -> files.remove(link)
-    files.symlink(target, link)
+    names
 }
 
 // `git archive COMMIT` of the dev worktree unpacked into `dir`.
@@ -88,8 +81,9 @@ test_entry: fn(out: &[String], tests: String, k: Int, code: String, line: String
     }
     o: "{tests}.{k}.out"
     bo: "{tests}.{k}.base.out"
-    base_rc: (files.read("{tests}.{k}.base.rc") ?? "0").trim()
-    log: lines_of(o)
+    base_rc: files.read_or("{tests}.{k}.base.rc", "0").trim()
+    raw: files.read_or(o, "")
+    log: raw.lines()
     if base_rc != "0" && files.is_file(bo) {
         ours: fail_rows(o)
         theirs: fail_rows(bo)
@@ -100,23 +94,20 @@ test_entry: fn(out: &[String], tests: String, k: Int, code: String, line: String
         }
         out.push("- FAIL rc={code} `{line}` (full output {o}; dev with the seed also fails, rc={base_rc}, {bo}). FAIL rows not on dev:")
         out.push("```")
-        out.extend(if fresh.len() > 0 -> fresh.slice(0, 25) else -> log.filter(text -> ["error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(log.slice(log.len() - 5, log.len())))
+        out.extend(if fresh.len() > 0 -> fresh.slice(0, 25) else -> log.filter(text -> ["error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(raw.last_lines(5)))
         out.push("```")
         return true
     }
     out.push("- FAIL rc={code} `{line}` (full output {o}; passes on origin/dev with the seed or was not rerun):")
     out.push("```")
-    out.extend(log.filter(text -> ["FAIL", "error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(log.slice(log.len() - 5, log.len())))
+    out.extend(log.filter(text -> ["FAIL", "error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(raw.last_lines(5)))
     out.push("```")
     true
 }
 
 run: fn() {
     args: process.args()
-    if args.len() == 0 || args[0] == "" {
-        term.eprint("usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
-        process.exit(1)
-    }
+    if args.len() == 0 || args[0] == "" -> process.fail(1, "usage: jet Tools/agent/orchestrator/Integrate10.jet BATCH SUB...")
     batch: args[0]
     subs: args.slice(1, args.len())
     w: roots.worktree()
@@ -155,10 +146,7 @@ run: fn() {
     // A generator that fails on the composed sources leaves every generated table stale: report the regeneration.
     if listing.head.lines().any(line -> line.starts_with("REGEN ") && !line.ends_with(" rc=0")) {
         report.push("REGEN FAILED: the census did not run.")
-        loop name in named(i, ".out").filter(name -> name.starts_with("regen.")) {
-            log: lines_of("{i}/{name}")
-            report.extend(["", "{name}:", "```"].concat(log.slice(log.len() - 20, log.len())).concat(["```"]))
-        }
+        loop name in named(i, "regen.*.out") -> report.extend(["", "{name}:", "```"].concat(files.read_or("{i}/{name}", "").last_lines(20)).concat(["```"]))
         files.write(report_path, "{report.join("\n")}\n")
         files.write("{i}/REGENFAIL", "REGENFAIL\n")
         stop(report_path, 3)
@@ -190,17 +178,16 @@ run: fn() {
         summary.push("ratchet {name} rc={rc(receipt)}")
         if rc(receipt) != 0 {
             rrc = 1
-            log: receipt.output.lines()
-            failures.extend(["Ratchet {name} failed:", "```"].concat(log.slice(log.len() - 30, log.len())).concat(["```"]))
+            failures.extend(["Ratchet {name} failed:", "```"].concat(receipt.output.last_lines(30)).concat(["```"]))
         }
     }
     print("ratchets rc={rrc}")
     if rrc != 0 -> crc = 1
     self_jet: "{t}/Compiler/JetCli/.jet/build/jet"
     built: files.can_execute(self_jet)
-    if built -> relink(self_jet, "{i}/bin/jet")
+    if built -> files.symlink(self_jet, "{i}/bin/jet", replace: true)
     // The engine `jet` talks to must be the seed's jetpack, whose identity JET_COMPILER_IDENTITY names.
-    if files.can_execute("{seed}/jetpack") -> relink("{seed}/jetpack", "{i}/bin/jetpack")
+    if files.can_execute("{seed}/jetpack") -> files.symlink("{seed}/jetpack", "{i}/bin/jetpack", replace: true)
     // The engine beside the batch compiler must be the jetpack this tree builds: the census's hosted bootstrap
     // names it as hosted-binary.
     hb: (lines_of("{i}/census/jetpack.log").filter(line -> line.starts_with("hosted-binary: ")).last() ?? "").words().get(1) ?? ""
@@ -209,8 +196,8 @@ run: fn() {
             packed: "{i}/bin/jetpack.built"
             files.copy(hb, packed)
             files.set_mode(packed, files.stat(hb).mode % 512)
-            relink(packed, "{i}/bin/jetpack")
-            if built -> relink(packed, "{files.dirname(files.canonicalize(self_jet))}/jetpack")
+            files.symlink(packed, "{i}/bin/jetpack", replace: true)
+            if built -> files.symlink(packed, "{files.dirname(files.canonicalize(self_jet))}/jetpack", replace: true)
             print("tests use the built jetpack {hb}")
         }
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
@@ -219,15 +206,15 @@ run: fn() {
     golden_rcs := [String]{}
     if built {
         // Every SUB runs its test lines as one job, four SUBs at a time.
-        _ := process.run_all(loop s in applied.filter(s -> (files.read("{s}/tests") ?? "") != "") -> runsub("new", s), 4)
+        _ := process.run_all(loop s in applied.filter(s -> files.read_or("{s}/tests", "") != "") -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
-        failing: loop name in named("{i}/tests", ".rc").filter(name -> lines_of("{i}/tests/{name}").any(line -> !line.starts_with("0\t"))) -> name.removesuffix(".rc")
+        failing: loop name in named("{i}/tests", "*.rc").filter(name -> lines_of("{i}/tests/{name}").any(line -> !line.starts_with("0\t"))) -> name.removesuffix(".rc")
         if failing.len() > 0 {
             loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
             _ := unpack(w, base, "{i}/basetree")
-            relink("{seed}/jet", "{i}/basebin/jet")
-            relink("{seed}/jetpack", "{i}/basebin/jetpack")
+            files.symlink("{seed}/jet", "{i}/basebin/jet", replace: true)
+            files.symlink("{seed}/jetpack", "{i}/basebin/jetpack", replace: true)
             _ := process.run_all(loop name in failing -> runsub("base", name), 4)
             files.remove_all("{i}/basetree")
         }
@@ -250,7 +237,7 @@ run: fn() {
     }
     // The report: the summary, then one section per SUB.
     rows := [String]{}
-    loop name in named("{i}/census", "keep-going.tsv") -> rows.extend(lines_of("{i}/census/{name}"))
+    loop name in named("{i}/census", "*keep-going.tsv") -> rows.extend(lines_of("{i}/census/{name}"))
     report.extend(["Census rc={crc} (built compiler: {if built -> "yes" else -> "no"}). Summary:", "```"].concat(summary).concat(["```"]).concat(failures).concat([""]))
     loop sub in subs {
         n: files.basename(sub.removesuffix("/"))

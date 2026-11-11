@@ -10,21 +10,17 @@ use {
     process: core.process
     roots: "Roots"
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 {
-        term.eprint("usage: jet Tools/agent/orchestrator/StreamB10.jet A_BATCH B_BATCH SUB...")
-        process.exit(1)
-    }
+    if args.len() < 2 -> process.fail(1, "usage: jet Tools/agent/orchestrator/StreamB10.jet A_BATCH B_BATCH SUB...")
     integ: "{roots.main()}/integ"
     loop {
-        census: (files.read("{integ}/{args[0]}/census.out") ?? "").lines()
-        if census.any(line -> line.starts_with("runtime rc=0")) -> break
-        if census.any(line -> line.starts_with("runtime rc=1") || ((line.starts_with("build rc=") || line.starts_with("check rc=")) && !line.contains("rc=0"))) {
+        census: files.read_or("{integ}/{args[0]}/census.out", "")
+        if census.has_line_prefix("runtime rc=0") -> break
+        if census.has_line("^(runtime rc=1|build rc=[1-9]|check rc=[1-9])") {
             print("streamB: {args[0]} has no compiler")
             process.exit(2)
         }

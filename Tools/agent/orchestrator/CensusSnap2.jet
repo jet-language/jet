@@ -28,14 +28,7 @@ use {
     process: core.process
     roots: "Roots"
     sys: core.sys
-    term: core.term
     time: core.time
-}
-
-// Ends the run with `code` after `message` on stderr.
-quit: fn(message: String, code: Int) -> Never {
-    term.eprint(message)
-    process.exit(code)
 }
 
 // A finished pass's exit status: 124 when its time ran out.
@@ -62,26 +55,26 @@ pass: fn(spec: ProcessSpec, out: String, errors: String{""}) -> Int {
 
 // The rows of a keep-going report, its header aside.
 rows: fn(tsv: String) -> Int {
-    count: (files.read(tsv) ?? "").lines().len()
+    count: files.read_or(tsv, "").lines().len()
     if count > 0 -> count - 1 else -> 0
 }
 
 // Prints the first `limit` lines census-errors.mjs gives for a keep-going report.
 census_errors: fn(g: String, tsv: String, limit: Int) {
-    loop line in (Sh{"node {"{g}/census-errors.mjs"} {tsv} ."}.spec().stderr(.Stdout).run().output.lines().slice(0, limit)) -> print(line)
+    loop line in (Sh{"node {"{g}/census-errors.mjs"} {tsv} ."}.spec().stderr(.Stdout).run().output.first_lines(limit)) -> print(line)
 }
 
-// A build row's kind, code and message.
-row_key: fn(line: String) -> String {
-    fields: line.split("\t").to_list().concat(["", "", ""])
+// A build row's kind, code and message, from its fields.
+row_key: fn(cells: [String]) -> String {
+    fields: cells.concat(["", "", ""])
     "{fields[0]}\t{fields[2]}\t{fields[3]}"
 }
 
 // Prints the build report's ten commonest rows by kind, code and message,
 // each with its count, most frequent first (ties in reverse byte order).
 build_rows: fn(tsv: String) {
-    lines: (files.read(tsv) ?? "").lines()
-    keys := loop line in lines.slice(1, lines.len()) -> row_key(line)
+    records: files.read_or(tsv, "").tsv_records()
+    keys := loop cells in records.slice(1, records.len()) -> row_key(cells)
     keys.sort()
     counted := [(count: Int, key: String)]{}
     loop key in keys {
@@ -109,8 +102,7 @@ runtime: fn(g: String, self_jet: String, out: String, id: String) {
     packed: Sh{"bash {"{g}/runtime-pack-check.sh"} {self_jet} . {"{out}/runtime"} {id}"}.spec().stderr(.Stdout).run()
     loop line in packed.output.lines() -> print(line)
     if rc(packed) != 0 -> process.exit(1)
-    if files.is_symlink(beside) -> files.remove(beside)
-    files.symlink(files.canonicalize("{out}/runtime/out"), beside)
+    files.symlink(files.canonicalize("{out}/runtime/out"), beside, replace: true)
 }
 
 // The hosted Jetpack pass with the compiler just built.
@@ -123,7 +115,7 @@ jetpack: fn(g: String, self_jet: String, out: String, id: String) {
         .env("JET_TOOLCHAIN_ROOT", ".").env("JETPACK_WORKER", "precommit").env("JET_STATE_ROOT", "{out}/jetpack-state")
         .timeout(time.duration_seconds(1200)), log)
     files.remove_all(home)
-    text: files.read(log) ?? ""
+    text: files.read_or(log, "")
     if text.contains("JETPACK HOSTED OK") -> return print("jetpack rc=0")
     print("jetpack rc=1 (see {log})")
     loop line in text.lines().filter(line -> line.starts_with("Error") || line.starts_with("  -->")).slice(0, 20) -> print(line)
@@ -165,13 +157,13 @@ run: fn() {
     prepared: roots.env_or("CENSUS_TREE", "")
     tree: if prepared == "" -> "{roots.scratch()}/discovery/r14p/snap" else -> prepared
     compiler: files.canonicalize(roots.env_or("CENSUS_JET_DIR", roots.seed()))
-    id: roots.env_or("CENSUS_JET_IDENTITY", (files.read("{compiler}/IDENTITY") ?? "").trim())
+    id: roots.env_or("CENSUS_JET_IDENTITY", files.read_or("{compiler}/IDENTITY", "").trim())
     at: roots.env_or("CENSUS_OUT", "{roots.scratch()}/discovery/r14p/census")
     files.remove_all(at) ?? ()
     files.create_dir_all(at)
     if prepared == "" -> snapshot(roots.worktree(), tree, named)
     // From here on, a relative root or report names a path from the tree, as in the original.
-    files.chdir(tree) ?? quit("census: cd {tree}: {err}", 2)
+    if files.chdir(tree) == .Err(err) -> process.fail(2, "census: cd {tree}: {err}")
     seed: "{compiler}/jet"
     check_rc: pass(jetenv(g, seed, Sh{"check --threads 12 Compiler/JetCli"}, ["JET_COMPILER_IDENTITY": id, "JET_TOOLCHAIN_ROOT": roots.env_or("CENSUS_TOOLCHAIN_ROOT", "."), "JET_KEEP_GOING": "1", "JET_KEEP_GOING_REPORT": "{at}/check-keep-going.tsv"]), "{at}/check.out", "{at}/check.err")
     print("check rc={check_rc}")
@@ -187,7 +179,7 @@ run: fn() {
     if build_rc != 0 || build_rows_count != 0 {
         // The head of the build's stderr, about 600 bytes of it.
         shown := 0
-        loop line in (files.read("{at}/build.err") ?? "").lines() {
+        loop line in files.read_or("{at}/build.err", "").lines() {
             if shown >= 600 -> break
             print(line)
             shown += line.len() + 1

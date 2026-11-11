@@ -27,7 +27,6 @@ use {
     process: core.process
     roots: "Roots"
     sys: core.sys
-    term: core.term
     time: core.time
 }
 
@@ -69,7 +68,7 @@ files_of: fn(l: Lander, patch: String) -> [String] {
         found.extend(parts.slice(at, at + 2))
         at += 2
     }
-    loop line in (files.read(patch) ?? "").lines() {
+    loop line in files.read_or(patch, "").lines() {
         if line.starts_with("rename from ") -> found.push(line.removeprefix("rename from "))
     }
     paths := [String]{}
@@ -101,7 +100,7 @@ revert_job: fn(l: Lander, job: String) {
 
 // The queue's job directories, sorted.
 jobs_in: fn(queue: String) -> [String] {
-    names := loop entry in (files.list_dir(queue) ?? []) -> entry.name
+    names := loop entry in files.list_dir_or(queue, []) -> entry.name
     names.sort()
     loop name in names.filter(name -> !name.starts_with(".") && files.is_dir("{queue}/{name}")) -> "{queue}/{name}"
 }
@@ -132,8 +131,7 @@ run_pre: fn(l: Lander, paths: [String]) -> ProcessReceipt IOError! {
 
 // The precommit's last 20 lines, then the failure line.
 pre_failed: fn(pre: ProcessReceipt) -> String {
-    lines: pre.output.trim_end().lines()
-    "{lines.slice(if lines.len() > 20 -> lines.len() - 20 else -> 0, lines.len()).join("\n")}\nlane-commit: precommit failed; reverted"
+    "{pre.output.trim_end().last_lines(20).join("\n")}\nlane-commit: precommit failed; reverted"
 }
 
 commit_job: fn(l: Lander, job: String) {
@@ -222,7 +220,7 @@ drain: fn(l: Lander) {
     loop job in jobs_in(l.queue) {
         if !files.exists("{job}/ready") || files.exists("{job}/result") -> next
         // A job whose caller died is dropped, never landed.
-        if !alive((files.read("{job}/pid") ?? "").trim()) {
+        if !alive(files.read_or("{job}/pid", "").trim()) {
             files.remove_all(job)
             next
         }
@@ -269,10 +267,7 @@ Draining: struct {
 
 run: fn() {
     args: process.args()
-    if args.len() < 3 {
-        term.eprint("usage: jet Tools/agent/orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
-        process.exit(1)
-    }
+    if args.len() < 3 -> process.fail(1, "usage: jet Tools/agent/orchestrator/LaneCommit.jet LANE MESSAGE PATCH")
     lane: args[0]
     run_dir: roots.run_dir()
     l: Lander{

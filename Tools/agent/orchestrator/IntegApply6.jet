@@ -20,7 +20,6 @@ use {
     files: core.files
     process: core.process
     roots: "Roots"
-    term: core.term
     time: core.time
 }
 
@@ -56,7 +55,7 @@ based: fn(tree: String, worktree: String) -> Bool {
 // The generator a file's header names in its first 40 lines, one trailing `.`
 // dropped; "" when none does.
 generator_of: fn(path: String) -> String {
-    loop line in (files.read(path) ?? "").lines().slice(0, 40) {
+    loop line in files.read_or(path, "").first_lines(40) {
         if !GENERATED_HEADER.is_match(line) -> next
         found: GENERATOR_NAME.find(line) ?? ""
         return found.slice(13, found.len()).removesuffix(".")
@@ -76,7 +75,7 @@ marker_mode: fn(path: String) -> String {
     generated := false
     bad := false
     seen := false
-    loop line in (files.read(path) ?? "").lines() {
+    loop line in files.read_or(path, "").lines() {
         if line.contains("unsafe-ratchet:begin") || line.contains("BEGIN GENERATED") -> generated = true
         if CONFLICT_MARKER.is_match(line) {
             bad = bad || !generated
@@ -143,7 +142,7 @@ failed: fn(integ: String, name: String, note: String{""}) {
 apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
-    listed: (loop line in (Sh{"git apply --numstat {"{s}/patch"}"}.run().output.lines()) -> line.split("\t").to_list().concat(["", "", ""])[2])
+    listed: (loop cells in (Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records()) -> cells.get(2) ?? "")
     files.write("{integ}/{n}.files", (loop path in listed -> "{path}\n").join(""))
     excluded := [String]{}
     loop f in listed.filter(f -> f != "") {
@@ -169,7 +168,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
     his: lead(n)
     // The SUBs its meta's stack lines name (`stack: a, b`; a bare number is a SUB of the same lead); with no
     // meta file, a SUB stacks on the previous SUB of the same lead in this batch.
-    meta: files.read("{s}/meta") ?? ""
+    meta: files.read_or("{s}/meta", "")
     stacked := [String]{}
     loop line in meta.lines().filter(line -> line.starts_with("stack:")) {
         loop d in line.removeprefix("stack:").replace(",", " ").words().filter(d -> d != "none") -> stacked.push(if d.contains("-") -> d else -> "{his}-{d}")
@@ -274,10 +273,7 @@ regenerate: fn(tree: String, integ: String) {
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 {
-        term.eprint("usage: jet Tools/agent/orchestrator/IntegApply6.jet TREE I SUB...")
-        process.exit(1)
-    }
+    if args.len() < 2 -> process.fail(1, "usage: jet Tools/agent/orchestrator/IntegApply6.jet TREE I SUB...")
     tree: args[0]
     integ: args[1]
     g: "{roots.state()}/scratch/Main"

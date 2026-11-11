@@ -9,7 +9,6 @@ use {
     files: core.files
     process: core.process
     roots: "Roots"
-    term: core.term
 }
 
 // The number after `"KEY":` in a testkit summary line, 0 when it has none.
@@ -19,15 +18,12 @@ count: fn(summary: String, key: String) -> Int {
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 || args.len() > 3 {
-        term.eprint("usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
-        process.exit(2)
-    }
+    if args.len() < 2 || args.len() > 3 -> process.fail(2, "usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
     out: args[1]
     given: args.get(2) ?? "jet"
     // A JET given as a relative path still names it from the worktree.
     jet: if given.contains("/") && !given.starts_with("/") -> "{files.cwd()}/{given}" else -> given
-    rows: (loop line in files.read(args[0]).lines() -> line.split("\t").to_list()).filter(cells -> cells.len() >= 3)
+    rows: files.read(args[0]).tsv_records().filter(cells -> cells.len() >= 3)
     files.create_dir_all(out)
     cpus: loop cpu in 0..<12 -> cpu
     specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(roots.worktree()).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
