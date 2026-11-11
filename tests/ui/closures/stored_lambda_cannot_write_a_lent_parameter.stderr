@@ -1,0 +1,8 @@
+Error [jet.ReadOnlyValueNotOwned]: `values` was not moved here, so a stored lambda cannot write it
+  --> tests/ui/closures/stored_lambda_cannot_write_a_lent_parameter.jet:2:5
+    |
+  2 |     () -> values.push(1)
+    |     ^^^^^^^^^^^^^^^^^^^^
+ Why: `values` is lent for writing only until this call returns, and a stored lambda can run after that
+ Fix: Make the parameter owned (`values: &&[Int]`) and return the result, or write `values` inside this call
+More: jet-lang.dev/e/E0120
