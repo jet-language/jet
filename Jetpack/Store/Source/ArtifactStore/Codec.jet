@@ -1,11 +1,11 @@
 // Byte envelopes and filesystem primitives of the artifact store (Rust
 // `jet_store` encode/decode, `read_file`, `atomic_write` and the sync
 // helpers). A durable store write goes through a temporary file, an fsync, a
-// rename, and a directory sync. Lock and lease files, recency touches and
-// cache entries skip the syncs: a crash loses only what a later run recreates
-// or recomputes, and on a busy disk one sync can wait for every dirty page of
-// the filesystem. Every read verifies that the file it opened is still the
-// file at the path.
+// rename, and a directory sync. Lock and lease files, recency touches, cache
+// entries and the layout directories skip the syncs: a crash loses only what a
+// later run recreates or recomputes, and on a busy disk one sync can wait for
+// every dirty page of the filesystem. Every read verifies that the file it
+// opened is still the file at the path.
 use {
     jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text]
     files: core.files
@@ -218,7 +218,7 @@ store_artifact_replace_file: fn(path: String, bytes: [U8], durable: Bool) Artifa
     file_name: files.basename(path)
     if path == "" || path == "/" -> return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
     if file_name == "" -> return Err(ArtifactStoreError.InvalidKey(path))
-    store_artifact_ensure_dir(parent)
+    store_artifact_ensure_dir(parent, durable: durable)
     temporary: files.join(parent, ".{file_name}.tmp-{sys.pid()}-{store_artifact_unique_token()}")
     if store_artifact_replace_with(temporary, path, parent, bytes, durable) == {
         .Ok(_) -> {}
@@ -273,8 +273,11 @@ store_artifact_append: fn(path: String, bytes: [U8], durable: Bool) ArtifactStor
 }
 
 // Create one store directory (its parent must exist), refusing a link or a
-// non-directory in its place.
-store_artifact_ensure_dir: fn(path: String) ArtifactStoreError! -[FS]> {
+// non-directory in its place. A created directory is synced into its parent
+// only when `durable`: the layout directories and the parents of cache
+// entries are recreated by any later run, and on a busy disk each sync waits
+// for a journal commit (8 of them took 22.5 s opening one cold store).
+store_artifact_ensure_dir: fn(path: String, durable: Bool) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink -> return Err(ArtifactStoreError.Config("store directory is a symlink: {path}"))
@@ -284,11 +287,13 @@ store_artifact_ensure_dir: fn(path: String) ArtifactStoreError! -[FS]> {
         .Err(error) -> {
             if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
             if files.create_dir_all(path) == {
-                .Ok(_) -> store_artifact_sync_dir(files.dirname(path))
+                .Ok(_) -> {
+                    if durable -> store_artifact_sync_dir(files.dirname(path))
+                }
                 .Err(created) -> {
                     // A concurrent opener of the same store created it first.
                     if created == {
-                        .AlreadyExists(_) -> return store_artifact_ensure_dir(path)
+                        .AlreadyExists(_) -> return store_artifact_ensure_dir(path, durable: durable)
                         .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(ArtifactStoreError.IO(created))
                     }
                 }

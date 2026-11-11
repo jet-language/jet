@@ -960,14 +960,17 @@ ArtifactStore: struct {
 
     host_limit_path: fn(self) -> String Never! { files.join(self.root(), "host-limit") }
 
+    // The layout directories, created without syncs: a crash may lose a new
+    // one with what it held, which the store reads as misses, and any later
+    // run recreates it.
     ensure_layout: fn(self) ArtifactStoreError! -[FS]> {
         files.create_dir_all(self.root())
         layout: [String]{"cas", "ac", "lto", "locks", "leases", "quarantine", "build-records"}
         loop name in layout {
-            store_artifact_ensure_dir(files.join(self.root(), name))
+            store_artifact_ensure_dir(files.join(self.root(), name), durable: false)
         }
         records: files.join(self.root(), "build-records")
-        store_artifact_ensure_dir(files.join(records, "records"))
+        store_artifact_ensure_dir(files.join(records, "records"), durable: false)
     }
 
     // Best-effort quarantine after a failed verification: a lock or rename
@@ -988,7 +991,7 @@ ArtifactStore: struct {
     quarantine_locked: fn(self, key: ArtifactEntryKey, path: String, reason: String) ArtifactStoreError! -[FS, Env, Rand]> {
         if !files.lexists(path) -> return
         quarantine: files.join(self.root(), "quarantine")
-        store_artifact_ensure_dir(quarantine)
+        store_artifact_ensure_dir(quarantine, durable: false)
         destination: files.join(quarantine, "{key.kind_name()}-{key.storage_key()}-{store_artifact_unique_token()}")
         if files.rename(path, destination) == {
             .Ok(_) -> {

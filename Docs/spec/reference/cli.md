@@ -767,7 +767,8 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 `driver.result` holding `emit`, `driver.release` as the compile's
 intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
-`cli.authority`) and the native backend's (`native.sources`,
+`cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
+which a cold store lays out first) and the native backend's (`native.sources`,
 `native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
 `native.foreign` (the wait for the program's C closure and the runtime's
 bytes, which its own thread realizes and reads while the object builds; for

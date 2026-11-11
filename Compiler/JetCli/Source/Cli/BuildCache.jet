@@ -49,12 +49,16 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
                 }
             }
             else -> {
+                // A cold store makes its layout here (trace span "store.open").
+                trace_sink: result.trace_sink
+                if trace_sink == .Val(sink) -> sink.begin("store.open", "", -1, -1)
                 if ArtifactStore.from_env() == {
                     .Ok(opened) -> { store = Val(opened) }
                     .Err(error) -> {
                         if verbose -> log = "{log}[build] cache off -> {error.message()}\n"
                     }
                 }
+                if trace_sink == .Val(sink) -> sink.end("store.open", 1)
             }
         }
     }
