@@ -1634,6 +1634,17 @@ run: fn() {
     assert(language_of("Tools/x/run", "plain") == None)
 }
 
+#Test("a JavaScript regex literal is one token, and a backtick or slash inside it opens nothing") {
+    // run-cold-context.mjs:239's pattern holds three backticks (#5072 c54).
+    source: "const r = /(?:^|\\s)(\\d+)\\.\\s+`([^`]+)`/gm;\nconst q = a / b / c;\nif (/[/`]/.test(s)) f(`t`)\nreturn /x/i\n"
+    list: tokens(source, .JavaScript)
+    assert_eq(list.len(), 29)
+    assert(list[3].kind == .Text)
+    assert_eq(list[9].text, "/")
+    assert(list[16].kind == .Text)
+    assert(list[28].kind == .Text)
+}
+
 #Test("the Jet decision table counts if (or a multi-arm if's arms but else), loop, &&, || and ??, and the deepest control nesting") {
     jet: "check: fn(a: Int) -> Int {{\n    if a == {{\n        1 -> return 1\n        2 -> {{\n            loop i in 0..<a {{\n                if i > 0 && a > 1 -> return i\n            }}\n        }}\n        else -> return 0\n    }}\n    a ?? 0\n}}\n"
     assert_eq(proxies(tokens(jet, .Jet), .Jet), Proxies{branches: 6, depth: 3})
