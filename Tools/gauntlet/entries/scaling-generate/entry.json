@@ -1,0 +1,359 @@
+{
+  "name": "scaling-generate",
+  "mode": "tool",
+  "description": "The compiler scaling gate's corpus generator generate.mjs (with package.mjs, corpora.mjs, domains.mjs and mixed.mjs) and its Jet twin Generate.jet (with Packages.jet, Corpora.jet, Domains.jet and Mixed.jet), #5072 c7: list the shapes, write every stress shape and every domain shape at a small size and two mixed packages into a new directory, and refuse an unknown shape, a zero size, a bad seed, an out-of-range mixed input and an existing output. Each writing case's check.jet states the printed JSON line (the entry relative to the case directory), every written file with its size and digest, and whether the printed source_sha256 is the digest of the written package; the refusals print nothing and exit 2. The fixtures hold `existing/main.jet`, the output a regeneration must not overwrite.",
+  "tool": {
+    "original": "Tools/perf/scaling/generate.mjs",
+    "jet": "Tools/perf/scaling/Generate.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": [
+          "--list"
+        ],
+        "expected": "expected/list.out"
+      },
+      {
+        "args": [
+          "modules",
+          "4",
+          "--seed",
+          "2",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/modules.out"
+      },
+      {
+        "args": [
+          "small-fns",
+          "5",
+          "--seed",
+          "3",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/small-fns.out"
+      },
+      {
+        "args": [
+          "huge-fns",
+          "6",
+          "--seed",
+          "4",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/huge-fns.out"
+      },
+      {
+        "args": [
+          "deep-nesting",
+          "7",
+          "--seed",
+          "5",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/deep-nesting.out"
+      },
+      {
+        "args": [
+          "wide-enums",
+          "8",
+          "--seed",
+          "6",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/wide-enums.out"
+      },
+      {
+        "args": [
+          "impls-traits",
+          "9",
+          "--seed",
+          "7",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/impls-traits.out"
+      },
+      {
+        "args": [
+          "generics",
+          "10",
+          "--seed",
+          "8",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/generics.out"
+      },
+      {
+        "args": [
+          "comptime",
+          "11",
+          "--seed",
+          "9",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/comptime.out"
+      },
+      {
+        "args": [
+          "data-tables",
+          "12",
+          "--seed",
+          "10",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/data-tables.out"
+      },
+      {
+        "args": [
+          "imports",
+          "13",
+          "--seed",
+          "11",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/imports.out"
+      },
+      {
+        "args": [
+          "call-chains",
+          "14",
+          "--seed",
+          "12",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/call-chains.out"
+      },
+      {
+        "args": [
+          "errors",
+          "15",
+          "--seed",
+          "13",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/errors.out"
+      },
+      {
+        "args": [
+          "diagnostics",
+          "16",
+          "--seed",
+          "14",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/diagnostics.out"
+      },
+      {
+        "args": [
+          "strings",
+          "17",
+          "--seed",
+          "15",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/strings.out"
+      },
+      {
+        "args": [
+          "fan-in",
+          "18",
+          "--seed",
+          "16",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/fan-in.out"
+      },
+      {
+        "args": [
+          "web",
+          "400",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/web.out"
+      },
+      {
+        "args": [
+          "game",
+          "450",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/game.out"
+      },
+      {
+        "args": [
+          "cli",
+          "500",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/cli.out"
+      },
+      {
+        "args": [
+          "data",
+          "550",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/data.out"
+      },
+      {
+        "args": [
+          "gui",
+          "600",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/gui.out"
+      },
+      {
+        "args": [
+          "embedded",
+          "650",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/embedded.out"
+      },
+      {
+        "args": [
+          "compiler",
+          "700",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/compiler.out"
+      },
+      {
+        "args": [
+          "scientific",
+          "750",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/scientific.out"
+      },
+      {
+        "args": [
+          "generic-lib",
+          "800",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/generic-lib.out"
+      },
+      {
+        "args": [
+          "generated",
+          "850",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/generated.out"
+      },
+      {
+        "args": [
+          "mixed",
+          "--code-lines",
+          "1200",
+          "--seed",
+          "5",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/mixed.out"
+      },
+      {
+        "args": [
+          "mixed",
+          "--seed",
+          "4294967295",
+          "--code-lines",
+          "600",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/mixed-top-seed.out"
+      },
+      {
+        "args": [
+          "bogus",
+          "3",
+          "out"
+        ],
+        "exit": 2,
+        "expected": "expected/unknown-shape.out"
+      },
+      {
+        "args": [
+          "modules",
+          "0",
+          "out"
+        ],
+        "exit": 2,
+        "expected": "expected/zero-n.out"
+      },
+      {
+        "args": [
+          "modules",
+          "3",
+          "--seed",
+          "-1",
+          "out"
+        ],
+        "exit": 2,
+        "expected": "expected/bad-seed.out"
+      },
+      {
+        "args": [
+          "mixed",
+          "--code-lines",
+          "0",
+          "--seed",
+          "1",
+          "out"
+        ],
+        "exit": 2,
+        "expected": "expected/mixed-zero-lines.out"
+      },
+      {
+        "args": [
+          "mixed",
+          "--code-lines",
+          "5",
+          "--seed",
+          "4294967296",
+          "out"
+        ],
+        "exit": 2,
+        "expected": "expected/mixed-seed-range.out"
+      },
+      {
+        "args": [
+          "modules",
+          "2",
+          "existing"
+        ],
+        "exit": 2,
+        "expected": "expected/existing-output.out"
+      }
+    ]
+  }
+}

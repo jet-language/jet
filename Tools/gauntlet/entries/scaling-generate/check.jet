@@ -1,0 +1,67 @@
+// The job of a scaling-generate case, as facts (the harness runs it in the
+// case directory with the file holding the program's output): every field of
+// the printed JSON line, with the entry relative to the case directory, then
+// the package the program wrote: each file with its size and digest, and
+// whether the package digest over them is the printed `source_sha256`.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+// The `.jet` files under `directory`, relative to `root`.
+jet_files: fn(directory: String, root: String) -[FS]> [String] {
+    found := [String]{}
+    loop item in files.list_dir(directory) ?? panic("`{directory}` cannot be listed: {err}") {
+        path: files.join(directory, item.name)
+        if {
+            item.is_dir -> found.extend(jet_files(path, root))
+            item.name.ends_with(".jet") -> found.push(files.relative(path, root))
+        }
+    }
+    found
+}
+
+// Prints each written file and returns the package digest: each file's name
+// and bytes, by name.
+written: fn(directory: String) -[FS, IO]> String {
+    names := jet_files(directory, directory)
+    names.sort()
+    print("files written: {names.len()}")
+    data := [U8]{}
+    loop name in names {
+        text: files.read_bytes(files.join(directory, name)) ?? panic("`{name}` cannot be read: {err}")
+        print("  {name} {text.len()} bytes sha256 {crypto.sha256(text).hex()}")
+        data.extend(name.bytes())
+        data.push(U8{0})
+        data.extend(text)
+        data.push(U8{0})
+    }
+    crypto.sha256(data).hex()
+}
+
+run: fn() {
+    here: files.cwd() ?? panic("no working directory: {err}")
+    printed: files.read(process.args()[0]) ?? panic("no output file: {err}")
+    line: json.parse(printed) ?? panic("the output is not JSON: {err}")
+    directory := ""
+    claimed := ""
+    if line == .Object(fields) {
+        loop field in fields {
+            if field.key == "entry" && field.value == .Text(path) {
+                print("entry: {files.relative(path, here)} ({if path.starts_with("/") -> "absolute" else -> "relative"})")
+                directory = files.dirname(path)
+                next
+            }
+            // copy: the claimed digest outlives the parsed line's borrow
+            if field.key == "source_sha256" && field.value == .Text(digest) -> claimed = digest.copy()
+            print("{field.key}: {json.dumps(field.value) ?? "?"}")
+        }
+    }
+    if directory == "" {
+        print("no entry")
+        return
+    }
+    print("source_sha256 is the written package's digest: {written(directory) == claimed}")
+}

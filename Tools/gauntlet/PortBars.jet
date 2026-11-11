@@ -3,6 +3,10 @@
 // does its original's job at least as fast, and so may replace it.
 //
 //   jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR]
+//   jet Tools/gauntlet/PortBars.jet --measure [--entry NAME] [--repo DIR]
+//
+// `--measure` runs no case: it prints each side's tokens, branches, control
+// nesting depth and files (with each file's tokens) under SOURCE RULES.
 //
 // A tool entry (Tools/gauntlet/entries/<name>/entry.json, "mode": "tool")
 // names the original as `tool.original` and its Jet twin as `tool.jet`, with
@@ -66,6 +70,15 @@
 // is one token. A JavaScript regex literal counts as its bytes. A Jet
 // program's `#Test(…) {…}` blocks are its proof, not its program: neither
 // the tokens nor the proxies count them.
+//
+// SOURCE RULES. Both bars measure a program, not one file: the program's
+// file, then every repository module it imports, transitively and once each,
+// counted by the same rules. A module counts when its import names it
+// relative to the importing file and it resolves to a file inside the
+// repository: JavaScript `import … from './x.mjs'` (or '../…'); a shell
+// `. "$(dirname "$0")/x.sh"` or `source` line; Python `from .x import …`;
+// Jet `use name: "Module"` (`Module.jet` beside the file). Core, Node
+// built-ins and installed packages are never counted.
 //
 // PROXY RULES. Branches are decisions: Jet `if` (a multi-arm `if {` or
 // `if x == {` counts its arms but `else`), `loop`, `&&`, `||` and `??`;
@@ -701,6 +714,129 @@ language_of: fn(path: String, first_line: String) -> Language? Never! {
     None
 }
 
+// ---- sources ----
+
+// A program as the token and proxy bars measure it (SOURCE RULES): its file,
+// then each repository module it imports, transitively and once each, with
+// the token count of each file.
+Program: struct {
+    paths: [String]
+    counts: [Int]
+    tokens: [Token]
+}
+
+// `path` with its `.` and `..` segments resolved, or "" when it climbs out of
+// the repository.
+normalized: fn(path: String) -> String Never! {
+    parts := [String]{}
+    loop part in path.split("/").to_list() {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if parts.len() == 0 -> return ""
+            _ := parts.pop()
+            next
+        }
+        parts.push(part.copy())
+    }
+    parts.join("/")
+}
+
+// The text inside the quotes `text` starts with, or "".
+quoted: fn(text: String) -> String Never! {
+    quote: if {
+        text.starts_with("'") -> "'"
+        text.starts_with("\"") -> "\""
+        else -> return ""
+    }
+    text.removeprefix(quote).partition(quote).head.copy()
+}
+
+// The modules a Python `from .module import …` line imports, as paths
+// relative to its file, joined by "\n"; "" for any other line.
+python_import: fn(line: String) -> String Never! {
+    if !line.starts_with("from .") || !line.contains(" import ") -> return ""
+    split: line.removeprefix("from ").partition(" import ")
+    rest := split.head.trim()
+    dots := 0
+    loop rest.starts_with(".") {
+        rest = rest.removeprefix(".")
+        dots += 1
+    }
+    up: "../".repeat(dots - 1)
+    if rest != "" -> return "{up}{rest.replace(".", "/")}.py"
+    names := [String]{}
+    loop name in split.tail.split(",").to_list() -> names.push("{up}{name.trim()}.py")
+    names.join("\n")
+}
+
+// The repository modules `text` imports, as written relative to its file.
+imports_of: fn(text: String, language: Language) -> [String] Never! {
+    out := [String]{}
+    in_use_block := false
+    loop raw in text.split("\n").to_list() {
+        line: raw.trim()
+        spec: if language == {
+            .JavaScript -> {
+                written: if {
+                    !(line.starts_with("import") || line.starts_with("export") || line.starts_with("}}")) -> ""
+                    line.contains(" from ") -> quoted(line.partition(" from ").tail.trim())
+                    else -> quoted(line.removeprefix("import").trim())
+                }
+                if written.starts_with("./") || written.starts_with("../") -> written else -> ""
+            }
+            .Shell -> {
+                word: if line.starts_with(". ") || line.starts_with("source ") -> line.partition(" ").tail.trim().replace("\"", "").replace("'", "") else -> ""
+                if {
+                    word.starts_with("$(dirname $0)/") -> word.removeprefix("$(dirname $0)/")
+                    word.starts_with("$(dirname ${{BASH_SOURCE[0]}})/") -> word.removeprefix("$(dirname ${{BASH_SOURCE[0]}})/")
+                    else -> ""
+                }
+            }
+            .Python -> python_import(line)
+            .Jet -> {
+                if line == "use {{" -> in_use_block = true
+                if in_use_block && line == "}}" -> in_use_block = false
+                named: if {
+                    in_use_block || line.starts_with("use ") -> quoted(line.partition(":").tail.trim())
+                    else -> ""
+                }
+                if named == "" || named.ends_with(".jet") -> named else -> "{named}.jet"
+            }
+        }
+        if spec != "" -> out.push(spec)
+    }
+    out
+}
+
+// The program at `path` in `repo`, written in `language`.
+program: fn(repo: String, path: String, language: Language) -[FS]> Program Never! {
+    found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}}
+    index := 0
+    loop index < found.paths.len() {
+        file: found.paths[index].copy()
+        text: files.read(files.join(repo, file)) ?? ""
+        listed: tokens(text, language)
+        counted: if language == .Jet -> without_tests(listed) else -> listed
+        found.counts.push(counted.len())
+        found.tokens.extend(counted)
+        loop written in imports_of(text, language) {
+            loop spec in written.split("\n").to_list() {
+                target: normalized("{files.dirname(file)}/{spec}")
+                if target != "" && !found.paths.contains(target) && files.is_file(files.join(repo, target)) -> found.paths.push(target)
+            }
+        }
+        index += 1
+    }
+    found
+}
+
+// Each file of `found` with its token count.
+program_files: fn(found: Program) -> String Never! {
+    parts := [String]{}
+    loop index in 0..<found.paths.len() -> parts.push("{found.paths[index]} {found.counts[index]}")
+    parts.join(", ")
+}
+
 // ---- proxies ----
 
 branch_words: fn(language: Language) -> [String] Never! {
@@ -1176,15 +1312,31 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     report.bars.push(speed_bar(wall_original, wall_jet, peak_original, peak_jet, problems))
 
     original_text: files.read(files.join(repo, entry.original)) ?? ""
-    twin_text: files.read(files.join(repo, entry.twin)) ?? ""
     language: language_of(entry.original, first_line(original_text))
     unmeasured: if language == None -> "no token or proxy rule for the original `{entry.original}`'s language" else -> ""
-    original_tokens: tokens(original_text, language ?? .Shell)
-    twin_tokens: without_tests(tokens(twin_text, .Jet))
+    original: program(repo, entry.original, language ?? .Shell)
+    twin: program(repo, entry.twin, .Jet)
     record: "{entry.dir}/{REVIEW_FILE}"
-    report.bars.push(reasoning_bar(record, review_at(repo, record), proxies(original_tokens, language ?? .Shell), proxies(twin_tokens, .Jet), unmeasured))
-    report.bars.push(tokens_bar(original_tokens.len(), twin_tokens.len(), entry.token_gaps, unmeasured))
+    report.bars.push(reasoning_bar(record, review_at(repo, record), proxies(original.tokens, language ?? .Shell), proxies(twin.tokens, .Jet), unmeasured))
+    report.bars.push(tokens_bar(original.tokens.len(), twin.tokens.len(), entry.token_gaps, unmeasured))
     report
+}
+
+// The `--measure` rows of entry `name`: for each side its tokens, branches,
+// control nesting depth and files (SOURCE RULES), without running a case.
+measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
+    entry: read_entry(repo, name)
+    if entry.problems.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {entry.problems.join("; ")}"}
+    original_text: files.read(files.join(repo, entry.original)) ?? ""
+    language: language_of(entry.original, first_line(original_text)) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
+    sides: [Program]{program(repo, entry.original, language), program(repo, entry.twin, .Jet)}
+    languages: [Language]{language, .Jet}
+    out := [String]{}
+    loop side in 0..<2 {
+        measured: proxies(sides[side].tokens, languages[side])
+        out.push("{name}\t{SIDES[side]}\t{sides[side].tokens.len()}\t{measured.branches}\t{measured.depth}\t{program_files(sides[side])}")
+    }
+    out
 }
 
 // The bars `report` loses, by name.
@@ -1230,7 +1382,7 @@ cannot_run: fn(message: String) -[Exec, IO]> Never {
     process.exit(64)
 }
 
-usage: fn() -[Exec, IO]> Never { cannot_run("usage: jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR]") }
+usage: fn() -[Exec, IO]> Never { cannot_run("usage: jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR] [--measure]") }
 
 run: fn() {
     args: process.args()
@@ -1238,9 +1390,15 @@ run: fn() {
     only := ""
     runs := DEFAULT_RUNS
     jet := process.env_get("JET") ?? "jet"
+    measure := false
     index := 0
     loop {
         if index >= args.len() -> break
+        if args[index] == "--measure" {
+            measure = true
+            index += 1
+            next
+        }
         if index + 1 >= args.len() -> usage()
         value: args[index + 1]
         if {
@@ -1261,6 +1419,13 @@ run: fn() {
     } else {
         names = tool_entries(repo) ?? return cannot_run(err.message)
     }
+    if measure {
+        print("entry\tside\ttokens\tbranches\tdepth\tfiles")
+        loop name in names {
+            loop line in measure_lines(repo, name) -> print(line)
+        }
+        return
+    }
     work: files.mkdtemp("port-bars") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
     failed := 0
     print("entry\tbar\tresult\tdetail")
@@ -1275,6 +1440,38 @@ run: fn() {
 }
 
 // ---- tests ----
+
+#Test("a program's tokens and proxies span the repository modules it imports, transitively and once each, on both sides") {
+    dir: files.mkdtemp("port-bars-sources") ?? panic("a temporary directory cannot be made: {err}")
+    plant(dir, "Tools/fx/a.mjs", "import fs from 'node:fs';\nimport {{ b }} from './b.mjs';\nimport {{\n  c,\n}} from \"../fy/c.mjs\";\nimport '../../../outside.mjs';\nif (b) c();\n")
+    plant(dir, "Tools/fx/b.mjs", "import {{ c }} from '../fy/c.mjs';\nexport const b = 1;\n")
+    plant(dir, "Tools/fy/c.mjs", "import {{ b }} from '../fx/b.mjs';\nexport function c() {{ if (b) return 2; }}\n")
+    plant(dir, "Tools/fx/run.sh", "#!/bin/sh\n. \"$(dirname \"$0\")/../roots.sh\"\necho ok\n")
+    plant(dir, "Tools/roots.sh", "if true; then root=x; fi\n")
+    plant(dir, "Tools/fx/Twin.jet", "use {{\n    files: core.files\n    helper: \"Helper\"\n}}\nuse header: \"counter.h\"\nrun: fn() {{ print(helper.two()) }}\n")
+    plant(dir, "Tools/fx/Helper.jet", "two: fn() -> Int {{ if true -> 2 else -> 1 }}\n#Test(\"two\") {{ assert(two() == 2) }}\n")
+    plant(dir, "Tools/fx/pkg/tool.py", "from .util import go\nfrom . import extra\ngo()\n")
+    plant(dir, "Tools/fx/pkg/util.py", "def go():\n    if True:\n        pass\n")
+    plant(dir, "Tools/fx/pkg/extra.py", "x = 1\n")
+    javascript: program(dir, "Tools/fx/a.mjs", .JavaScript)
+    assert_eq(javascript.paths, ["Tools/fx/a.mjs", "Tools/fx/b.mjs", "Tools/fy/c.mjs"])
+    each := 0
+    loop path in javascript.paths -> each += tokens(files.read(files.join(dir, path)) ?? "", .JavaScript).len()
+    assert_eq(javascript.tokens.len(), each)
+    assert_eq(javascript.counts.len(), 3)
+    assert_eq(proxies(javascript.tokens, .JavaScript), Proxies{branches: 2, depth: 0})
+    shell: program(dir, "Tools/fx/run.sh", .Shell)
+    assert_eq(shell.paths, ["Tools/fx/run.sh", "Tools/roots.sh"])
+    assert_eq(proxies(shell.tokens, .Shell), Proxies{branches: 1, depth: 1})
+    twin: program(dir, "Tools/fx/Twin.jet", .Jet)
+    assert_eq(twin.paths, ["Tools/fx/Twin.jet", "Tools/fx/Helper.jet"])
+    assert_eq(twin.counts[1], without_tests(tokens(files.read(files.join(dir, "Tools/fx/Helper.jet")) ?? "", .Jet)).len())
+    assert_eq(proxies(twin.tokens, .Jet), Proxies{branches: 1, depth: 0})
+    python: program(dir, "Tools/fx/pkg/tool.py", .Python)
+    assert_eq(python.paths, ["Tools/fx/pkg/tool.py", "Tools/fx/pkg/util.py", "Tools/fx/pkg/extra.py"])
+    assert_eq(normalized("Tools/fx/../../../x.mjs"), "")
+    files.remove_all(dir) ?? ()
+}
 
 #Test("each language's token rule counts words, symbols and whole strings, never comments or the #! line") {
     assert_eq(tokens("run: fn() {{ print(\"{{a.join(\", \")}} done\") }} // note\n", .Jet).len(), 11)

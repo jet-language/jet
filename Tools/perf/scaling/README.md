@@ -15,6 +15,12 @@ Tools/agent/JetEnv.jet node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR --output report.md
 ```
 
+`jet Tools/perf/scaling/Generate.jet` (with Packages.jet, Corpora.jet,
+Domains.jet and Mixed.jet) is the corpus generator's Jet twin: same
+arguments, same written bytes, same JSON line. The gauntlet entry
+`Tools/gauntlet/entries/scaling-generate` pairs the two; generate.mjs stays
+the generator of record until the twin passes every port bar.
+
 Set `RUST_JET` and `JETC0` to the current dev head's shared pair recorded in
 `$JET_STATE_ROOT/dev-artifacts.json`, after that head includes these counters.
 Changing compiler binaries requires fresh receipt roots. Older candidates may
