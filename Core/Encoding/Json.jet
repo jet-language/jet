@@ -9,9 +9,12 @@
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
-// order is the document order. `canonical` is the one byte-exact form, RFC 8785
+// order is the document order. `stringify` writes the text JavaScript's
+// `JSON.stringify(value, null, indent)` writes (ECMAScript numbers, NaN and
+// the infinities as null). `canonical` is the one byte-exact form, RFC 8785
 // JCS keys sorted by UTF-16 code units, ECMAScript shortest
 // numbers, and explicit `EncodingError`s for values JCS cannot encode.
+// `at<T>` reads a typed value at a `/`-separated path.
 // Native typed-decode carriers are inspected only inside audited Core regions;
 // strict parse errors stay on their original EncodingError location rail.
 //
@@ -195,6 +198,23 @@ canonical: fn(value: Dyn) -> String EncodingError! {
     Ok(stream.text_from_bytes(out) ?? "")
 }
 
+/// The text JavaScript's `JSON.stringify(value, null, indent)` writes for the
+/// same value: numbers as ECMAScript `Number::toString` spells them (shortest
+/// round trip, no trailing `.0`, exponent form from `1e+21` and below
+/// `1e-6`, `-0` as `0`), NaN and the infinities as `null`, JSON.stringify's
+/// string escapes, and objects in insertion order. With `indent` above zero
+/// (at most 10, as JavaScript clamps it) every element and member sits on its
+/// own line, `indent` spaces deeper per level; empty arrays and objects stay
+/// `[]` and `{}`. A JavaScript object lists integer-like keys first; a `Dyn`
+/// object keeps the order its keys were added. An ordered object literal is
+/// `Dyn{[String: Dyn]{"name": "jet", "sizes": [1, 2], "inner": ["ok": true]}}`.
+stringify: fn<T: Encode>(value: T, indent: Int{0}) -> String Never! {
+    out := [U8]{}
+    step: if indent > 10 -> 10 else if indent < 0 -> 0 else -> indent
+    write_stringify(out, value.encode(), step, 0)
+    String.from_bytes_lossy(out)
+}
+
 /// A bounded pull reader over a consumed file. The source pull engine owns
 /// framing, limits and sticky errors; text already in memory uses `parse` and
 /// `events`. A repeated key in one object is a
@@ -249,6 +269,34 @@ pointer: fn(tree: Dyn, path: String) -> Dyn EncodingError! {
         return Err(value_error(EncodingErrorKind.Limit, "", "JSON Pointer has more than max_depth {safe_limits().max_depth} steps"))
     }
     pointer_select(tree, segments, 0)
+}
+
+/// The value at `path` read as `T`: the typed `decode<T>` of the selected
+/// subtree, so `at<String>`, `at<Int>`, `at<[Dyn]>` and `at<[String]>` read a
+/// string, an integer, a list and a list of strings. `path` is `/`-separated
+/// member names and array indices (`"receipts/3/metrics/p50"`) with JSON
+/// Pointer's `~0` and `~1` escapes; a leading `/` is allowed and `""` is the
+/// whole value. Each failure is a `FieldError` whose path is the path read,
+/// with the element inside it for a list (`tags[1]`), and whose reason names
+/// the missing step or the expected and actual types; displayed, a failure
+/// reads: at `metrics/name`: expected Int, found text "cold".
+at: fn<T: Decode>(tree: Dyn, path: String) -> T [FieldError]! {
+    pointer_path: if path == "" || path.starts_with("/") -> path.copy() else -> "/{path}"
+    segments: pointer_segments(pointer_path) ?? return Err([FieldError]{FieldError{path: path.copy(), reason: err.reason}})
+    if segments.len() > safe_limits().max_depth {
+        return Err([FieldError]{FieldError{path: path.copy(), reason: "the path has more than max_depth {safe_limits().max_depth} steps"}})
+    }
+    node: pointer_select(tree, segments, 0) ?? return Err([FieldError]{FieldError{path: path.copy(), reason: err.reason}})
+    value: node.decode<T>() ?? return Err(err.map(e -> FieldError{path: at_path(path, e.path), reason: e.reason}))
+    Ok(value)
+}
+
+// A path decode reported inside the value read at `path`, joined to it.
+at_path: fn(path: String, inner: String) -> String Never! {
+    if inner == "" -> return path.copy()
+    if path == "" -> return inner.copy()
+    if inner.starts_with("[") -> return "{path}{inner}"
+    "{path}/{inner}"
 }
 
 /// RFC 6902 JSON Patch under `EncodingLimits.safe()`.
@@ -1478,6 +1526,60 @@ write_json_float: fn(out: &[U8], n: Float) EncodingError! {
     write_ascii(out, "{n}")
     Ok()
 }
+
+// One value as JSON.stringify writes it, `step` spaces per level and `depth`
+// levels in (`step` 0 is the compact form).
+write_stringify: fn(out: &[U8], value: Dyn, step: Int, depth: Int) Never! {
+    if value == {
+        .Null -> write_ascii(out, "null")
+        .Bool(v) -> write_ascii(out, if v -> "true" else -> "false")
+        // A JavaScript number is a binary64: an Int it cannot hold rounds.
+        .Int(n) -> write_stringify_number(out, if stream.int_is_binary64(n) -> Float{n} else -> Float.parse("{n}") ?? math.NAN)
+        .Float(n) -> write_stringify_number(out, n)
+        .Number(text) -> write_stringify_number(out, Float.parse(text) ?? math.NAN)
+        .Text(s) -> write_json_string(out, s)
+        .Bytes(bytes) -> write_json_string(out, base64.encode(bytes))
+        .DateTime(_) -> write_json_string(out, value.to_text() ?? "")
+        .Array(items) -> {
+            out.push(U8{91})
+            loop i in 0..<items.len() {
+                if i > 0 -> out.push(U8{44})
+                write_stringify_break(out, step, depth + 1)
+                write_stringify(out, items[i], step, depth + 1)
+            }
+            if items.len() > 0 -> write_stringify_break(out, step, depth)
+            out.push(U8{93})
+        }
+        .Object(_) -> {
+            out.push(U8{123})
+            count := 0
+            loop pair in stream.object_entries(value) {
+                if count > 0 -> out.push(U8{44})
+                write_stringify_break(out, step, depth + 1)
+                write_json_string(out, pair.key)
+                out.push(U8{58})
+                if step > 0 -> out.push(U8{32})
+                write_stringify(out, pair.value, step, depth + 1)
+                count += 1
+            }
+            if count > 0 -> write_stringify_break(out, step, depth)
+            out.push(U8{125})
+        }
+    }
+}
+
+// A finite number in ECMAScript spelling; NaN and the infinities are null.
+write_stringify_number: fn(out: &[U8], n: Float) Never! {
+    if math.is_finite(n) -> write_ascii(out, stream.jcs_number(n)) else -> write_ascii(out, "null")
+}
+
+// A line break and `step * depth` spaces; nothing in the compact form.
+write_stringify_break: fn(out: &[U8], step: Int, depth: Int) Never! {
+    if step == 0 -> return
+    out.push(U8{10})
+    loop _ in 0..<(step * depth) -> out.push(U8{32})
+}
+
 // Bytes render as their byte values, `[1,255]`, the same text every tier writes.
 write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {
     out.push(U8{91})
@@ -2035,4 +2137,72 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     updated: patch(doc, changes) ?? panic("object patch")
     assert_eq(to_string(updated) ?? panic("patched object"), "{{\"a\":3,\"b\":2}}")
     assert_eq(to_string(doc) ?? panic("original object"), "{{\"a\":1,\"b\":2}}")
+}
+
+// The expected texts are node's JSON.stringify output for the same values
+// (node 22: JSON.stringify(numbers), JSON.stringify(object, null, 2), …).
+#Test("stringify writes the text node's JSON.stringify(value, null, indent) writes") {
+    numbers: Dyn.Array([Dyn]{
+        Dyn.Int(0), Dyn.Int(1), Dyn.Int(-7), Dyn.Int(9007199254740993), Dyn.Int(1000000000000000000000000000000),
+        Dyn.Float(0.1), Dyn.Float(1.5), Dyn.Float(-2.25), Dyn.Float(1.0 / 3.0), Dyn.Float(5e-324), Dyn.Float(1e-7),
+        Dyn.Float(0.000001), Dyn.Float(0.000001234), Dyn.Float(1.234e-7), Dyn.Float(123456789.125), Dyn.Float(1e21),
+        Dyn.Float(1e20), Dyn.Float(1.7976931348623157e308), Dyn.Float(-0.0), Dyn.Float(math.NAN), Dyn.Float(math.INFINITY),
+        Dyn.Float(-math.INFINITY), stream.typed_number("1.50"), stream.typed_number("1e400"), stream.typed_number("-0.0")
+    })
+    assert_eq(stringify(numbers), "[0,1,-7,9007199254740992,1e+30,0.1,1.5,-2.25,0.3333333333333333,5e-324,1e-7,0.000001,0.000001234,1.234e-7,123456789.125,1e+21,100000000000000000000,1.7976931348623157e+308,0,null,null,null,1.5,null,0]")
+    controls: String.from_bytes_lossy([U8]{97, 1, 31, 127, 34, 92, 10, 9, 8, 12, 13})
+    del: String.from_bytes_lossy([U8]{127})
+    object: Dyn{[String: Dyn]{
+        "name": "jet",
+        "list": [Dyn]{1, 2.5, "x", true, Dyn.Null, Dyn.Array([Dyn]{}), Dyn.object()},
+        "nested": ["b": ["c": Dyn.Array([Dyn]{})], "a": -0.0],
+        "esc": "{controls}é😀/",
+        "zeta": Dyn.object()
+    }}
+    assert_eq(stringify(object), "{{\"name\":\"jet\",\"list\":[1,2.5,\"x\",true,null,[],{{}}],\"nested\":{{\"b\":{{\"c\":[]}},\"a\":0}},\"esc\":\"a\\u0001\\u001f{del}\\\"\\\\\\n\\t\\b\\f\\ré😀/\",\"zeta\":{{}}}}")
+    assert_eq(stringify(object, 2), "{{\n  \"name\": \"jet\",\n  \"list\": [\n    1,\n    2.5,\n    \"x\",\n    true,\n    null,\n    [],\n    {{}}\n  ],\n  \"nested\": {{\n    \"b\": {{\n      \"c\": []\n    }},\n    \"a\": 0\n  }},\n  \"esc\": \"a\\u0001\\u001f{del}\\\"\\\\\\n\\t\\b\\f\\ré😀/\",\n  \"zeta\": {{}}\n}}")
+    assert_eq(stringify(object, 4), "{{\n    \"name\": \"jet\",\n    \"list\": [\n        1,\n        2.5,\n        \"x\",\n        true,\n        null,\n        [],\n        {{}}\n    ],\n    \"nested\": {{\n        \"b\": {{\n            \"c\": []\n        }},\n        \"a\": 0\n    }},\n    \"esc\": \"a\\u0001\\u001f{del}\\\"\\\\\\n\\t\\b\\f\\ré😀/\",\n    \"zeta\": {{}}\n}}")
+    assert_eq(stringify(object, 12), stringify(object, 10))
+    assert_eq(stringify(object, -1), stringify(object))
+    assert_eq(stringify(Dyn.Float(-0.0)), "0")
+    assert_eq(stringify(Dyn.Float(math.NAN)), "null")
+    assert_eq(stringify(Dyn.Float(1e21)), "1e+21")
+    assert_eq(stringify(Dyn.Array([Dyn]{}), 2), "[]")
+    assert_eq(stringify(Dyn.object(), 2), "{{}}")
+}
+
+#Test("a typed [String: Dyn] map literal is an ordered Dyn object, nested map literals too") {
+    tree: Dyn{[String: Dyn]{"zeta": 1, "alpha": "two", "inner": ["k": true, "a": 1]}}
+    assert_eq(stringify(tree), "{{\"zeta\":1,\"alpha\":\"two\",\"inner\":{{\"k\":true,\"a\":1}}}}")
+}
+
+// #5072 c53: a failed typed read names the path it read and the expected and
+// actual types.
+#Test("at reads a typed value at a path and a failure names the path and both types") {
+    tree: parse("{{\"receipts\":[{{\"metrics\":{{\"p50\":1.5,\"name\":\"cold\",\"tags\":[\"a\",\"b\"],\"mixed\":[\"a\",2],\"n\":42}}}}]}}") ?? panic("JSON")
+    assert_eq(at<String>(tree, "receipts/0/metrics/name") ?? panic("string"), "cold")
+    assert_eq(at<Int>(tree, "receipts/0/metrics/n") ?? panic("integer"), 42)
+    assert_eq(at<[String]>(tree, "receipts/0/metrics/tags") ?? panic("string list"), [String]{"a", "b"})
+    assert_eq((at<[Dyn]>(tree, "receipts") ?? panic("list")).len(), 1)
+    assert_eq(at<Int>(tree, "/receipts/0/metrics/n") ?? panic("pointer spelling"), 42)
+    rows: [(path: String, shown: String)]{
+        (path: "receipts/0/metrics/name", shown: "at `receipts/0/metrics/name`: expected Int, found text \"cold\""),
+        (path: "receipts/0/metrics/p50", shown: "at `receipts/0/metrics/p50`: JSON number `1.5` is not an exact integer"),
+        (path: "receipts/3/metrics/p50", shown: "at `receipts/3/metrics/p50`: array index 3 is out of range for length 1"),
+        (path: "receipts/0/metrics/p99", shown: "at `receipts/0/metrics/p99`: no object member named `p99`")
+    }
+    loop row in rows {
+        if at<Int>(tree, row.path) == {
+            .Ok(_) -> panic("{row.path} read as Int")
+            .Err(errors) -> assert_eq("{errors[0]}", row.shown)
+        }
+    }
+    if at<[String]>(tree, "receipts/0/metrics/mixed") == {
+        .Ok(_) -> panic("mixed read as [String]")
+        .Err(errors) -> assert_eq("{errors[0]}", "at `receipts/0/metrics/mixed[1]`: expected Text, found number 2")
+    }
+    if at<[Dyn]>(tree, "receipts/0/metrics") == {
+        .Ok(_) -> panic("object read as a list")
+        .Err(errors) -> assert_eq("{errors[0]}", "at `receipts/0/metrics`: expected a list, found an object")
+    }
 }

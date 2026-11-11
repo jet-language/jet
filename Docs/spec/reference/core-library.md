@@ -3547,6 +3547,12 @@ order. `parse`, `decode`, and `reader` reject a repeated object name with its
 path and position; `parse_allow_duplicates` is the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
+An ordered `Dyn` object is written as a typed map literal,
+`Dyn{[String: Dyn]{"name": "jet", "sizes": [1, 2], "inner": ["ok": true]}}`:
+each value of any encodable type becomes its `Dyn`, a nested map literal
+becomes a nested ordered object, and the keys keep the order written. A
+`[String: Dyn]` map value outside that literal encodes with its keys sorted.
+
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `json.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse one strict JSON value. |
@@ -3554,8 +3560,10 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String !EncodingError` | Emit compact JSON; a non-finite `Float` is an `EncodingError`. |
 | `json.to_string_pretty(value)` | `String !EncodingError` | Emit two-space pretty JSON; a non-finite `Float` is an `EncodingError`. |
 | `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
+| `json.stringify(value, indent)` | `String` | Emit the text JavaScript's `JSON.stringify(value, null, indent)` writes: ECMAScript `Number::toString` numbers (`1e+21`, `-0` as `0`, an `Int` rounded to binary64), NaN and infinities as `null`, JSON.stringify's escapes, objects in insertion order (a `Dyn` object does not move integer-like keys first). `indent` defaults to `0` (compact); `1` to `10` spaces put each element and member on its own line, and a larger value counts as `10`. |
 | `json.parse_allow_duplicates(text)` | `Dyn !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
+| `json.at<T>(tree, path)` | `T ![FieldError]` | Read the value at a `/`-separated path (`"receipts/3/metrics/p50"`, pointer escapes, an optional leading `/`) as `T` by typed decode: `at<String>`, `at<Int>`, `at<[Dyn]>`, `at<[String]>`. Each `FieldError` carries the path read (a list element appends `[i]`) and names the missing step or the expected and actual types: ``at `metrics/name`: expected Int, found text "cold"``. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
 | `json.reader(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
