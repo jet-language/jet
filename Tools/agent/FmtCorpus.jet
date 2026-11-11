@@ -37,6 +37,13 @@
 //   its receipts stay as run, so their pins don't move;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
+// One bad source never stalls a run: each formatter run has a time limit
+// (FMT_LIMIT_BASE_MS, plus FMT_LIMIT_PER_SOURCE_MS per source), and a run
+// that passes it, dies on a signal or fails without naming a refused source
+// is split in halves until the source it hangs or crashes on runs alone.
+// That source is set aside, the run goes on, and every such source is
+// reported at the end with what happened; the run then exits 1.
+//
 // Usage (from anywhere in the checkout):
 //   jet Tools/agent/FmtCorpus.jet --list [PREFIX...]
 //   jet Tools/agent/FmtCorpus.jet --excluded [PREFIX...]
@@ -57,6 +64,7 @@ use {
     process: core.process
     sys: core.sys
     term: core.term
+    time: core.time
 }
 
 TOOL: "/Tools/agent/FmtCorpus.jet"
@@ -97,6 +105,12 @@ GENERATED_HEAD_LINES: 5
 
 // Sources per formatter run.
 BATCH: 400
+
+// A formatter run may take FMT_LIMIT_BASE_MS plus FMT_LIMIT_PER_SOURCE_MS for
+// each source it formats; past that, it hangs.
+FMT_LIMIT_BASE_MS: 10000
+
+FMT_LIMIT_PER_SOURCE_MS: 100
 
 // Where `jet fmt` respelled a few bytes, the non-blank bytes either side may
 // skip (ALIGN_REACH) before ALIGN_WINDOW of them agree again.
@@ -143,11 +157,18 @@ Corpus: struct {
     sites: [PinSite]
 }
 
-// What the formatter said about a corpus: the sources it would change and the
-// sources it could not parse.
+// What the formatter said about a corpus: the sources it would change, the
+// sources it could not parse, and the sources it hung or crashed on.
 FmtOutcome: struct {
     dirty: [String]
     unparsed: [String]
+    failed: [FmtFailure]
+}
+
+// A source the formatter hung or crashed on, and what happened.
+FmtFailure: struct {
+    path: String
+    what: String
 }
 
 // A source position: a line from 1 and a character column from 1, or 0 for a
@@ -777,23 +798,36 @@ Formatter: struct {
 
 // `jet fmt` over `sources`. The formatter stops at the first source it can't
 // parse and names it; that source is set aside as unparsed, and the sources
-// before and after it run again. Returns the number of formatter runs.
+// before and after it run again. A run that hangs or crashes is split in
+// halves until the source it fails on runs alone; that source is set aside
+// as failed. Returns the number of formatter runs.
 run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     if sources.len() == 0 -> return Ok(0)
     checking: formatter.flags.contains("--check")
     argv := [String]{formatter.jet.copy(), "fmt"}
     loop flag in formatter.flags -> argv.push(flag.copy())
     loop source in sources -> argv.push(source.copy())
-    receipt: process.cmd(argv).cwd(formatter.root).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+    limit_ms: FMT_LIMIT_BASE_MS + FMT_LIMIT_PER_SOURCE_MS * sources.len()
+    receipt: process.cmd(argv).cwd(formatter.root).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(limit_ms)).run() ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+    // Under `--check`, exit 1 means a source would change.
+    finished: if checking -> [Int]{0, 1} else -> [Int]{0}
+    failure: if receipt.timed_out -> "hang: `jet fmt` ran past {limit_ms} ms" else -> fmt_crash(receipt.signal, receipt.code, finished, receipt.errors)
+    if failure != "" {
+        if sources.len() == 1 {
+            outcome.failed.push(FmtFailure{path: sources[0].copy(), what: failure})
+            return Ok(1)
+        }
+        half: sources.len() /% 2
+        first: run_fmt(formatter, sources[0..<half], outcome) ?? return Err(err)
+        second: run_fmt(formatter, sources[half..<sources.len()], outcome) ?? return Err(err)
+        return Ok(1 + first + second)
+    }
     if fmt_refused_source(receipt.errors) == .Val(refused) {
         at: sources.index_of(refused) ?? return Err(CorpusError{message: "`{formatter.jet} fmt` refused `{refused}`, which this run did not pass it:\n{receipt.errors}"})
         outcome.unparsed.push(refused.copy())
         before: run_fmt(formatter, sources[0..<at], outcome) ?? return Err(err)
         after: run_fmt(formatter, sources[at + 1..<sources.len()], outcome) ?? return Err(err)
         return Ok(1 + before + after)
-    }
-    if receipt.code != 0 && !(checking && receipt.code == 1) {
-        return Err(CorpusError{message: "`{formatter.jet} fmt` failed ({receipt.code}): {receipt.errors}"})
     }
     if checking {
         loop line in receipt.output.lines() {
@@ -804,9 +838,26 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
     Ok(1)
 }
 
+// Why a formatter run crashed, or "" when it didn't: a signal stopped it, or
+// it exited with a code outside `finished` without naming the source it
+// refused.
+fmt_crash: fn(signal: Int?, code: Int, finished: [Int], errors: String) -> String Never! {
+    if signal == .Val(number) -> return "crash: `jet fmt` stopped on signal {number}"
+    if finished.contains(code) || fmt_refused_source(errors) != None -> return ""
+    "crash: `jet fmt` exited {code}: {first_line(errors)}"
+}
+
+// The first line of `text` that holds more than blank space, trimmed.
+first_line: fn(text: String) -> String Never! {
+    loop line in text.lines() {
+        if line.trim() != "" -> return line.trim()
+    }
+    "(no message)"
+}
+
 // `run_fmt` over `sources` in batches of BATCH.
 fmt_corpus: fn(formatter: Formatter, sources: [String]) -[Exec, Time.Wait]> FmtOutcome CorpusError! {
-    outcome := FmtOutcome{dirty: [String]{}, unparsed: [String]{}}
+    outcome := FmtOutcome{dirty: [String]{}, unparsed: [String]{}, failed: [FmtFailure]{}}
     batch := [String]{}
     loop source in sources {
         batch.push(source.copy())
@@ -817,6 +868,11 @@ fmt_corpus: fn(formatter: Formatter, sources: [String]) -[Exec, Time.Wait]> FmtO
     }
     _: run_fmt(formatter, batch, outcome) ?? return Err(err)
     Ok(outcome)
+}
+
+// Reports each source the formatter hung or crashed on, after `stage`.
+report_failures: fn(failed: [FmtFailure], stage: String) -[IO]> {
+    loop failure in failed -> term.eprint("{failure.path}: {stage}: {failure.what}")
 }
 
 // One line per rule: its count of left-out sources, in first-seen order.
@@ -876,12 +932,14 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
     checker: Formatter{root: root.copy(), jet: jet.copy(), flags: check_flags}
     form: if simplify.len() > 0 -> "jet fmt --simplify" else -> "jet fmt"
     checked: fmt_corpus(checker, found.sources) ?? return Err(err)
-    parsed: found.sources.len() - checked.unparsed.len()
+    failed: checked.failed.len()
+    parsed: found.sources.len() - checked.unparsed.len() - failed
     unparsed: checked.unparsed.len()
     if mode == "--check" {
         loop path in checked.dirty -> print(path)
-        if checked.dirty.len() > 0 {
-            term.eprint("fmt-corpus: {checked.dirty.len()} of {parsed} sources are not in `{form}` form ({unparsed} don't parse, {left_out} left out); run `jet Tools/agent/FmtCorpus.jet --write{form.remove_prefix("jet fmt")}`")
+        report_failures(checked.failed, "`{form} --check`")
+        if checked.dirty.len() > 0 || failed > 0 {
+            term.eprint("fmt-corpus: {checked.dirty.len()} of {parsed} sources are not in `{form}` form ({unparsed} don't parse, {failed} hang or crash the formatter, {left_out} left out); run `jet Tools/agent/FmtCorpus.jet --write{form.remove_prefix("jet fmt")}`")
             return Ok(1)
         }
         print("fmt-corpus: ok ({parsed} sources in `{form}` form, {unparsed} don't parse, {left_out} left out)")
@@ -897,9 +955,13 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
             originals[path.copy()] = read_tracked(root, path) ?? return Err(err)
         }
     }
-    _: fmt_corpus(Formatter{root: root.copy(), jet: jet.copy(), flags: simplify}, checked.dirty) ?? return Err(err)
+    wrote: fmt_corpus(Formatter{root: root.copy(), jet: jet.copy(), flags: simplify}, checked.dirty) ?? return Err(err)
     meaning: tree_changes(root, jet, checked.dirty, trees)
     kept := [String:Bool]{}
+    loop failure in wrote.failed {
+        kept[failure.path.copy()] = true
+        _: before.remove(failure.path)
+    }
     loop change in meaning {
         files.write("{root}/{change.path}", originals.get(change.path) ?? "") ?? return Err(CorpusError{message: "cannot restore {change.path}: {err}"})
         kept[change.path.copy()] = true
@@ -918,10 +980,14 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
     loop problem in pins.problems -> term.eprint(problem)
     loop path in again.dirty -> term.eprint("{path}: a second `jet fmt` pass changes it again")
     loop path in again.unparsed -> term.eprint("{path}: `jet fmt` wrote a source it can't parse")
+    report_failures(checked.failed, "`{form} --check`")
+    report_failures(wrote.failed, "`{form}`, so it stays as written")
+    report_failures(again.failed, "a second `{form} --check`")
     unstable: again.dirty.len() + again.unparsed.len()
+    hung: failed + wrote.failed.len() + again.failed.len()
     summary: "formatted {formatted.len()} of {parsed} sources ({unparsed} don't parse, {left_out} left out); moved {pins.pins} line pins in {pins.files} files"
-    if unstable > 0 || pins.problems.len() > 0 || meaning.len() > 0 {
-        term.eprint("fmt-corpus: {summary}, but {meaning.len()} sources would change meaning, {unstable} sources are not stable and {pins.problems.len()} pins stay as written")
+    if unstable > 0 || pins.problems.len() > 0 || meaning.len() > 0 || hung > 0 {
+        term.eprint("fmt-corpus: {summary}, but {meaning.len()} sources would change meaning, {unstable} sources are not stable, {hung} sources hang or crash the formatter and {pins.problems.len()} pins stay as written")
         return Ok(1)
     }
     print("fmt-corpus: {summary}")
@@ -1177,6 +1243,18 @@ run: fn() {
     errors: "Error [jet.InvalidStatement]: A unit-fallible signature has no `->`\n  --> tests/ui/bare.jet:4:27\n    |\n"
     assert_eq(fmt_refused_source(errors) ?? "", "tests/ui/bare.jet")
     assert_eq(fmt_refused_source("") ?? "none", "none")
+}
+
+#Test("a formatter run crashes on a signal or an exit no refusal explains") {
+    refusal: "Error [jet.InvalidStatement]: no\n  --> tests/ui/bare.jet:4:27\n"
+    checking: [Int]{0, 1}
+    writing: [Int]{0}
+    assert_eq(fmt_crash(Val(11), 0, writing, ""), "crash: `jet fmt` stopped on signal 11")
+    assert_eq(fmt_crash(None, 101, writing, "\n  thread panicked: overflow\nmore\n"), "crash: `jet fmt` exited 101: thread panicked: overflow")
+    assert_eq(fmt_crash(None, 2, writing, refusal), "")
+    assert_eq(fmt_crash(None, 1, checking, ""), "")
+    assert_eq(fmt_crash(None, 1, writing, ""), "crash: `jet fmt` exited 1: (no message)")
+    assert_eq(fmt_crash(None, 0, writing, ""), "")
 }
 
 #Test("prefixes select whole path segments") {
