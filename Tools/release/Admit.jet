@@ -1739,7 +1739,10 @@ merge_plan: fn(ctx: Ctx) -[Exec, Time.Wait]> MergePlan Never! {
         plan.resolutions.push(Resolution{path: path.copy(), pick: if carried -> "dev" else -> "by hand"})
     }
     plan.origin = git_in(ctx.root, [String]{"rev-parse", "--verify", "-q", "refs/remotes/origin/master"}).out
-    plan.fast_forward = plan.origin == "" || git_in(ctx.root, [String]{"merge-base", "--is-ancestor", plan.origin, ctx.sha}).rc == 0
+    // The release merges dev into master (--no-ff): master carries board commits
+    // dev lacks, so dev never fast-forwards it. The merge's first parent is local
+    // master, so pushing it fast-forwards origin/master when local master holds it.
+    plan.fast_forward = plan.origin == "" || git_in(ctx.root, [String]{"merge-base", "--is-ancestor", plan.origin, "refs/heads/master"}).rc == 0
     plan
 }
 
@@ -1802,7 +1805,7 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
     resolutions := [String]{}
     loop found in plan.resolutions -> resolutions.push("{found.path} (take {found.pick})")
     lines.extend([String]{"", "## Master merge", "- predicted conflicts: {if plan.conflicts.len() > 0 -> resolutions.join(", ") else -> "none"}"})
-    lines.push(if plan.fast_forward -> "- push: fast-forwards origin/master" else -> "- push: origin/master {short(plan.origin, 10)} is not an ancestor of {short(ctx.sha, 10)}; the push would not fast-forward")
+    lines.push(if plan.fast_forward -> "- push: the merge of {short(ctx.sha, 10)} into master fast-forwards origin/master" else -> "- push: origin/master {short(plan.origin, 10)} is not an ancestor of local master; update master from origin before the merge")
     "{lines.join("\n")}\n"
 }
 
@@ -1987,7 +1990,7 @@ print_commands: fn(ctx: Ctx, dest: String, plan: MergePlan) Never! -[IO]> {
         }
         lines.push("  git commit --no-edit")
     }
-    lines.push(if plan.fast_forward -> "  git push origin master" else -> "  # do not push: origin/master {short(plan.origin, 10)} is not an ancestor of {short(ctx.sha, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.")
+    lines.push(if plan.fast_forward -> "  git push origin master" else -> "  # local master lacks origin/master {short(plan.origin, 10)}: run git merge --ff-only origin/master before the merge above, then git push origin master; never force-push master.")
     print(lines.join("\n"))
 }
 

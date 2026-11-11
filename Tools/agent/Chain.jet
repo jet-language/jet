@@ -31,6 +31,10 @@
 // full+threads need the tree's preflight receipt for the seed (`Land.jet
 // receipt check`); --check-gate only checks it. --dry-run builds nothing,
 // takes no slot and prints each stage's key and whether the store holds it.
+// Every mode, --check-gate and --dry-run included, first makes sure the
+// canonical root's mount point $JET_SCRATCH_ROOT/discovery/r14 exists (it
+// creates it) and stops with exit 2 when it cannot: a scratch cleanup that
+// removed it once failed a release's s1 at the bind.
 //
 // Every stage has a key: SHA-256 over its material (kind, builder sha, its
 // pack hash, the `inputs` hash of the tree files the stage reads, identity,
@@ -1187,6 +1191,12 @@ chain_run: fn(c: &Chain, options: ChainOptions, seedpub: String) -[Env, Exec, FS
             if planned.members.len() > 0 -> print("  check members: {planned.members.join(" ")}")
         }
     }
+    // The canonical root's mount point: every stage binds there (inroot), so
+    // a gate or dry run that cannot make it would pass a chain that cannot build.
+    files.create_dir_all(c.r.r14) ?? {
+        term.eprint("Chain.jet: cannot create the canonical root's mount point {c.r.r14}: {err}")
+        return 2
+    }
     // Self-hosting needs the tree's preflight receipt for this seed; check,
     // s1 and --dry-run are ungated.
     if options.gate || !options.dry {
@@ -1412,6 +1422,11 @@ inroot: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
         at += 1
     }
     if at + 1 >= args.len() -> usage()
+    // The mount point may be gone (a scratch cleanup): make it before the bind.
+    files.create_dir_all(args[2]) ?? {
+        term.eprint("chain: cannot create the canonical root {args[2]}: {err}")
+        return 97
+    }
     if !bind(args[0], args[2]) || !bind(args[1], args[3]) {
         term.eprint("chain: canonical root bind failed")
         return 97
