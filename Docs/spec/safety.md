@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1426,
+  "total": 1425,
   "counts": {
     "Compiler": 748,
-    "Core": 177,
+    "Core": 176,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -1135,7 +1135,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1728,
+      "line": 1732,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6168,42 +6168,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Http/Client.jet",
-      "line": 659,
+      "line": 660,
       "column": 5,
       "reason": "checked resolver octets and port transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 133,
+      "line": 134,
       "column": 5,
       "reason": "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 138,
+      "line": 139,
       "column": 5,
       "reason": "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 254,
+      "line": 255,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 542,
+      "line": 543,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 557,
+      "line": 558,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
@@ -6686,16 +6686,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Tui/Tui.jet",
-      "line": 104,
+      "line": 105,
       "column": 5,
       "reason": "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Tui/Tui.jet",
-      "line": 130,
-      "column": 5,
-      "reason": "Core TUI samples the same stdout terminal fact consumed by terminal style/progress"
     },
     {
       "package": "Docs",
@@ -6945,7 +6938,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Systems/Process/OSCPUTime.jet",
-      "line": 34,
+      "line": 40,
       "column": 5,
       "reason": "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel"
     },
@@ -6980,7 +6973,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Systems/Process/OSScheduling.jet",
-      "line": 35,
+      "line": 38,
       "column": 5,
       "reason": "posix set_scheduling: this program moves itself to batch time sharing and back"
     },
@@ -7085,7 +7078,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Publication/Tests/Index.jet",
-      "line": 293,
+      "line": 299,
       "column": 5,
       "reason": "the test owns the planted lock file it ages"
     },
@@ -7120,7 +7113,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/agent/cache/Lanes.jet",
-      "line": 312,
+      "line": 311,
       "column": 21,
       "reason": "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc"
     },
@@ -7155,7 +7148,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/packaging/NativeCCompiler.jet",
-      "line": 121,
+      "line": 117,
       "column": 9,
       "reason": "re-raise the compiler's terminating signal on this process, as the parent shell expects"
     },
@@ -10213,13 +10206,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 748 |
-| Core | 177 |
+| Core | 176 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 8 |
 | tests | 435 |
-| **total** | **1426** |
+| **total** | **1425** |
 
 ### Regions
 
@@ -10355,7 +10348,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2162:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1728:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1732:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 71:1 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
 | Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 82:5 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
@@ -11074,12 +11067,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Files/Files.jet | 604:1 | "the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened" |
 | Core | Core/Files/Files.jet | 610:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 678:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
-| Core | Core/Http/Client.jet | 659:5 | "checked resolver octets and port transferred into the socket carrier" |
-| Core | Core/Jobs/Jobs.jet | 133:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
-| Core | Core/Jobs/Jobs.jet | 138:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
-| Core | Core/Jobs/Jobs.jet | 254:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/Jobs/Jobs.jet | 542:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/Jobs/Jobs.jet | 557:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/Http/Client.jet | 660:5 | "checked resolver octets and port transferred into the socket carrier" |
+| Core | Core/Jobs/Jobs.jet | 134:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
+| Core | Core/Jobs/Jobs.jet | 139:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
+| Core | Core/Jobs/Jobs.jet | 255:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 543:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 558:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
 | Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
@@ -11148,8 +11141,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Sys/Sys.jet | 1569:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1388:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1409:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
-| Core | Core/Tui/Tui.jet | 104:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
-| Core | Core/Tui/Tui.jet | 130:5 | "Core TUI samples the same stdout terminal fact consumed by terminal style/progress" |
+| Core | Core/Tui/Tui.jet | 105:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_comptime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
@@ -11185,12 +11177,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
-| Examples | Examples/Systems/Process/OSCPUTime.jet | 34:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
+| Examples | Examples/Systems/Process/OSCPUTime.jet | 40:5 | "posix set_wall_clock: a time before 1970 is refused before it reaches the kernel" |
 | Examples | Examples/Systems/Process/OSIDs.jet | 17:5 | "posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel" |
 | Examples | Examples/Systems/Process/OSMknod.jet | 29:5 | "make a device file in the temporary directory and remove it" |
 | Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
 | Examples | Examples/Systems/Process/OSScheduling.jet | 26:5 | "posix set_scheduling: the out-of-range priority never reaches the kernel" |
-| Examples | Examples/Systems/Process/OSScheduling.jet | 35:5 | "posix set_scheduling: this program moves itself to batch time sharing and back" |
+| Examples | Examples/Systems/Process/OSScheduling.jet | 38:5 | "posix set_scheduling: this program moves itself to batch time sharing and back" |
 | Examples | Examples/Systems/Process/ProcessExitCleanup.jet | 23:5 | "the exit callback has no captured state" |
 | Examples | Examples/Systems/Process/ProcessExitUnmapped.jet | 21:13 | "this child reports a Jet defect status on purpose" |
 | Examples | Examples/Systems/Process/SystemPrivilegedEntry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
@@ -11205,17 +11197,17 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 67:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 122:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 146:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
-| Jetpack | Jetpack/Publication/Tests/Index.jet | 293:5 | "the test owns the planted lock file it ages" |
+| Jetpack | Jetpack/Publication/Tests/Index.jet | 299:5 | "the test owns the planted lock file it ages" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/run.jet | 111:5 | "host replay uses a stack cell as a stand-in for the board register" |
-| Tools | Tools/agent/cache/Lanes.jet | 312:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
+| Tools | Tools/agent/cache/Lanes.jet | 311:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/agent/orchestrator/LaneCommit.jet | 202:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
-| Tools | Tools/packaging/NativeCCompiler.jet | 121:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
+| Tools | Tools/packaging/NativeCCompiler.jet | 117:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
@@ -11752,7 +11744,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
 {"file":"Core/Testing/Testing.jet","function":"testing_byte","proof":"__string_byte performs an unchecked native byte read. Its local helper testing.jet:353-355 is reached by testing_boundary only with 0 < position < text.count_bytes()(:362-363), by testing_diff_lines with cursor < end <= length(:387-393), by testing_append_bytes over a bounded prefix(:408-409,412-457), and testing_ascii_name over 0..<count_bytes(:508-509). These establish nonnegative in-storage indices before U64 conversion; none expose the index-taking helper as a public Core member or allow the String borrow to escape."},
 {"file":"Core/Testing/Testing.jet","function":"testing_owned_text","proof":"__bytes_into_text at testing.jet:376 requires valid UTF-8. The only callers are testing_unified_diff(:503) and testing_ascii_name(:517). Diff output appends complete String bytes or scalar-aligned prefixes chosen by testing_boundary(:362-366,423-424,450-451); marker fragments are ASCII. Name output(:508-515) appends only ASCII alphanumerics, hyphen or underscore. Each exact owned list is copied into a String with no mutation between construction and transfer; arbitrary caller bytes cannot reach this local helper."},
 {"file":"Core/Tui/Tui.jet","function":"capability_env_bytes","proof":"__cap_env_bytes at tui.jet:101 borrows a String name and returns an owned optional byte list. Its provider Ui.rs:514-515 obtains var_os and consumes OsString into encoded bytes; no borrowed environment storage is returned and source does not assume UTF-8 (capability_text uses checked String.from_bytes at :112). Arbitrary names cannot manufacture a native pointer or invalidate returned storage."},
-{"file":"Core/Tui/Tui.jet","function":"capability_stdout_terminal","proof":"The gate at tui.jet:126-127 invokes __stdout_terminal with no caller-supplied values and returns only a copied Bool host terminal fact at :129. It lends no memory, descriptor ownership or callback to the caller; host terminal presence or absence cannot change the typed result's validity."},
   {"file":"Core/Encoding/Cbor.jet","function":"validate","proof":"The cbor.jet:95 gate only matches Dyn's private Number/TypedText variants to reject them(:97-98), and recursively validates initialized Array/Object payloads(:99-104). Discriminant matching precedes payload access; ordered Object storage is borrowed through object_entries while value remains live. No raw address, variant transmute or payload reference escapes in the error/unit result."},
   {"file":"Core/Encoding/Cbor.jet","function":"encode_value","proof":"The cbor.jet:157 gate grants access to private Dyn.Bytes only after its matching branch(:171); all byte reads iterate the owned list length(:173). Object entry views are taken only in the Object branch(:179-180) and retain the value borrow throughout bounded index ordering. encode(:111) validates the tree first, rejecting internal Number/TypedText. The caller's exclusively borrowed output receives copied bytes, never native payload references."},
   {"file":"Core/Encoding/CborStream.jet","function":"retain_key","proof":"__bytes_into_text at cbor_stream.jet:208 copies stored, which :205 fills with exactly text.count_bytes() bytes obtained through bounds-checked stream.byte_at from a valid String. It neither truncates a scalar nor edits its encoding. Only that exact copy becomes the retained key; arbitrary wire bytes cannot reach this transfer."},
