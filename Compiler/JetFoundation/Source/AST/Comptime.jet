@@ -268,9 +268,11 @@ comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites
 }
 
-// Rust jet-comptime `walk_identifiers`: every identifier an expression reads.
+// Rust jet-comptime `walk_identifiers`: every identifier an expression reads,
+// lambda bodies included, as a lambda reads its enclosing names.
 // A syntax walk only: function and type names are identifiers too, so a
-// consumer filters the names against its own declarations.
+// consumer filters the names against its own declarations; a lambda's own
+// parameter is reported like any other name.
 comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, false, sites)
@@ -392,9 +394,20 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
             ast_comptime_walk_expr(head, calls, sites)
             loop step in steps -> ast_comptime_walk_expr(step.value, calls, sites)
         }
-        // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
-        // (absent from the Rust walk) and compile-time names have no children.
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
+        .Lambda(lambda, _) -> {
+            // Call names stay shallow over a lambda body (`WalkOpts::PLAIN`).
+            if calls -> return
+            if lambda.body == {
+                .Expr(value) -> ast_comptime_walk_expr(value, calls, sites)
+                .Block(body) -> ast_comptime_walk_stmts(body, calls, sites)
+            }
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _) -> {
+            ast_comptime_walk_expr(receiver, calls, sites)
+            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
+        }
+        // Literals and compile-time names have no children.
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 

@@ -115,13 +115,9 @@ sema_cli_schema_field_default: fn(field: Field) -> CLIDefault {
 // `items` (CliEntry.jet sema_cli_entry_spec). None when one has no
 // command shape, as the generated parser has none.
 sema_cli_schema_commands: fn(definition: StructDef, items: [Item]) -> [CLISubcommandSchema]? {
-    computed := [String]{}
-    loop field in definition.fields {
-        if field.computed != None -> computed.push(sema_computed_field_getter(field.name))
-    }
     commands := [CLISubcommandSchema]{}
     loop function in definition.methods {
-        if computed.contains(function.name) -> next
+        if sema_computed_field_getter_function(function) -> next
         inputs: sema_cli_schema_params(function.params, "") ?? return None
         commands.push(CLISubcommandSchema{name: unicode.lower(function.name), description: sema_cli_entry_doc(function.markers), inputs: inputs})
     }

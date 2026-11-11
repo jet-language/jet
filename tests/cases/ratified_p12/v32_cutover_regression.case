@@ -1,0 +1,36 @@
+# V32 (#4276 c16): the inspected contradiction, a `#Memo` computed field that
+# evaluated its formula on every read, is absent from the public product path.
+# The canonical consumer runs through `jet` on every staged engine with the
+# same stdout, stderr and exit; the evaluation count on stderr is the witness,
+# so a read that bypasses the kept answer and evaluates again fails it. The
+# retired re-evaluating getter has no compatibility alias, and the refusals are
+# located registered errors.
+fixture: d_fieldmemo1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step release: jet run --release main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step args: jet check args/main.jet
+exit: 1
+stderr: ~ "--> main.jet:3:5" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0382" # one registered code
+step impure: jet check impure/main.jet
+exit: 1
+stderr: ~ "--> main.jet:3:5" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0938" # one registered code

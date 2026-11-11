@@ -1,0 +1,35 @@
+# D-FIELDMEMO1 (#4276 c3): `#Memo` above a computed field keeps the answer of
+# its first read. A repeat read is answered from the one `#Memo` store, which
+# keys the answer by the sibling fields the formula reads: a write to one of
+# them drops it and the next read evaluates again, a write to any other field
+# keeps it. An unmarked computed field evaluates on every read, and its read of
+# a marked sibling is a hit. `debug` shows each evaluation on stderr. A field
+# `#Memo` takes no cache arguments, and an impure formula is refused.
+fixture: d_fieldmemo1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_fieldmemo1_contract.stdout.expected
+stderr: = d_fieldmemo1_contract.stderr.expected
+step args: jet check args/main.jet
+exit: 1
+stderr: ~ "`#Memo` cannot mark `attack`." # the field form takes no cache arguments
+stderr: ~ "--> main.jet:3:5" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0382" # one registered code
+step impure: jet check impure/main.jet
+exit: 1
+stderr: ~ "`#Memo` requires a pure function" # an effectful formula has no store
+stderr: ~ "but the formula of field `shout` uses `IO`" # the field, not a generated name
+stderr: ~ "--> main.jet:3:5" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0938" # one registered code

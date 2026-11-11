@@ -1,0 +1,32 @@
+// D-FIELDMEMO1: `#Memo` above a computed field keeps its first answer.
+Stats: struct {
+    strength: Int
+    gear_mod: Int
+    level: Int
+    #Memo attack: Int -> debug(strength * 2 + gear_mod)
+    threat: Int -> debug(attack + level)
+}
+
+Party: struct {
+    scores: [Int]
+    #Memo
+    total: Int -> debug(scores.len() * 10)
+}
+
+run: fn() {
+    stats := Stats{strength: 10, gear_mod: 3, level: 1}
+    print("attack {stats.attack}")
+    print("attack {stats.attack}")
+    stats.level = 5
+    print("attack after level {stats.attack}")
+    stats.gear_mod = 8
+    print("attack after gear {stats.attack}")
+    print("attack {stats.attack}")
+    print("threat {stats.threat}")
+    print("threat {stats.threat}")
+    party := Party{scores: [4, 7]}
+    print("total {party.total}")
+    print("total {party.total}")
+    party.scores.push(9)
+    print("total after push {party.total}")
+}

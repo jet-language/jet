@@ -2270,6 +2270,9 @@ sema_marker_rules_no_prelude_error: fn(name: String, span: Span, fix: String) ->
 // contract is proven from the declared signature before lowering. A lazy
 // `Iter`/`ViewIter` argument or result carries live computation state
 // (E0940); every other argument must be hashable and not a list (E0939).
+// A `#Memo` computed field's helper (Derives.jet
+// sema_computed_field_memo_helper_func) takes the fields its formula reads;
+// its store compares them by value, so each needs equality, not a hash.
 // The first refused parameter ends the check, as in the Rust reference.
 // Purity (E0938) is judged by the solved effect row, not here.
 sema_check_memoized_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
@@ -2282,12 +2285,20 @@ sema_check_memoized_function: fn(func: Func, environment: SemaScopeEnvironment, 
     }
     if memo == None -> return
     marker: memo ?? panic("checked #Memo marker disappeared")
+    field_helper: sema_computed_field_getter_function(func)
     loop parameter_index in 0..<func.params.len() {
         declared: if func.params[parameter_index].variadic -> Type.List{element: func.params[parameter_index].ty} else -> func.params[parameter_index].ty
         ty: sema_function_resolve_declared(environment, program, declared, environment.module_identity, generic_params)
         if sema_expression_zip_is_iter(ty) {
             diagnostics.push(sema_error("E0940", marker.span, "`#Memo` cannot cache lazy `Iter` values", "a lazy iterator carries live computation state instead of one completed result", "materialize the iterator before the memoized boundary"))
             return
+        }
+        if field_helper {
+            if !sema_type_equatable(environment, program, ty) {
+                diagnostics.push(sema_error("E0939", marker.span, "`#Memo` field reads `{func.params[parameter_index].name}`, which has no equality", "a kept field answer is reused while every field its formula reads is equal to its value at the first read, so each one must compare by value", "read only fields that compare by value, or drop `#Memo`"))
+                return
+            }
+            next
         }
         if ty == .List(_) || !sema_type_hashable(environment, program, ty) {
             diagnostics.push(sema_error("E0939", marker.span, "`#Memo` parameter `{func.params[parameter_index].name}` is not hashable", "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule", "use an Int, Bool, Char, String, or named hashable value as the argument"))

@@ -260,15 +260,11 @@ SemaCLIEntrySpec: struct {
 sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) -> SemaCLIEntrySpec? {
     standard: sema_registration_cli_standard(definition.type_markers)
     description: sema_cli_entry_doc(definition.type_markers)
-    computed := [String]{}
-    loop field in definition.fields {
-        if field.computed != None -> computed.push(sema_computed_field_getter(field.name))
-    }
     // Without commands the entry parses into the locals of
     // sema_cli_entry_direct: input `slot` holds `__v{slot}` or `__f{slot}`.
     direct := definition.cli_bindings.len() == 0
     loop function in definition.methods {
-        if !computed.contains(function.name) -> direct = false
+        if !sema_computed_field_getter_function(function) -> direct = false
     }
     root := [SemaCLIInput]{}
     if standard {
@@ -321,7 +317,7 @@ sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) 
     declared := [SemaCLICommand]{}
     commands := [String]{}
     loop function in definition.methods {
-        if computed.contains(function.name) -> next
+        if sema_computed_field_getter_function(function) -> next
         has_self: loop param in function.params {
             if param.name == "self" -> break true
         } ?? false

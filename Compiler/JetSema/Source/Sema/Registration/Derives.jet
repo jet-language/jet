@@ -44,6 +44,7 @@ use {
         Lambda,
         LambdaBody,
         LambdaParam,
+        MARKER_MEMO,
         Marker,
         MarkerCallArg,
         NamedCtValue,
@@ -74,7 +75,9 @@ use {
         VariantField,
         VariantPayload,
         ast_comptime_value_type,
+        ast_empty_call_arg_flags,
         ast_func,
+        comptime_walk_identifiers,
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
@@ -2546,8 +2549,14 @@ sema_computed_field_getter: fn(field: String) -> String Never! {
     "__computed_{field}"
 }
 
+// The memoized helper a `#Memo` computed field's getter calls.
+sema_computed_field_memo_helper: fn(field: String) -> String Never! {
+    "{sema_computed_field_getter(field)}__memo"
+}
+
 // A computed field's getter body is the user's formula, so it checks as
-// user code: its calls propagate failures like any written method.
+// user code: its calls propagate failures like any written method. A `#Memo`
+// field's helper is generated the same way.
 sema_computed_field_getter_function: fn(func: Func) -> Bool Never! {
     func.compiler_generated && func.name.starts_with("__computed_")
 }
@@ -2588,6 +2597,15 @@ sema_computed_formula_reads_only: fn(formula: Expr, fields: [Field], depth: Int)
 // getter method `__computed_name(self) -> T`, whose formula reads the
 // sibling fields it names as `self.<field>`; a read of `value.name` checks
 // as a call of that getter (Places `sema_expression_computed_field_read`).
+//
+// A `#Memo` field keeps its first read: its formula becomes the
+// helper `__computed_name__memo`, marked with the field's `#Memo`, whose
+// parameters are the sibling fields the formula reads, and the getter calls
+// the helper with their current values. The one `#Memo` store (JetIR
+// BuildMemo.jet) keys the answer by those values, so a repeat read is a hit
+// and a write to any field the formula reads misses and evaluates again; a
+// write to any other field leaves the answer. The helper is pure exactly when
+// a `#Memo` function must be (E0938).
 sema_derive_computed_getters: fn(items: &[Item]) {
     loop index in 0..<items.len() {
         if &items[index] == .Struct(definition) {
@@ -2620,7 +2638,14 @@ sema_derive_computed_getters: fn(items: &[Item]) {
                     }}
                     getter.return_type = Val(field.ty.copy())
                     getter.return_type_span = Val(field.ty_span)
-                    getter.body = [Stmt]{Stmt.Return{value: Val(sema_inline_rewrite_expr(rewrite, formula)), span: field.name_span}}
+                    value := sema_inline_rewrite_expr(rewrite, formula)
+                    // A field `#Memo` with arguments is refused (E0382) and keeps no store.
+                    if sema_checked_marker(field.serde_markers, MARKER_MEMO) == .Val(marker) && marker.args.len() == 0 {
+                        helper: sema_computed_field_memo_helper_func(definition, field, marker, formula)
+                        value = sema_computed_field_memo_call(definition, field, helper)
+                        getters.push(helper)
+                    }
+                    getter.body = [Stmt]{Stmt.Return{value: Val(value), span: field.name_span}}
                     if sema_computed_formula_reads_only(formula, definition.fields, 0) {
                         getter.declared_effects = Val([EffectRowEntry]{})
                         getter.is_pure = true
@@ -2630,6 +2655,73 @@ sema_derive_computed_getters: fn(items: &[Item]) {
             }
             loop getter in getters -> definition.methods.push(getter)
         }
+    }
+}
+
+// The `#Memo` helper of computed `field` (sema_derive_computed_getters): one
+// parameter per sibling field `formula` reads, in declaration order, and the
+// formula itself as its body, where the bare names now read the parameters,
+// as the getter's rewrite reads them through `self`. A formula that reads
+// `self` also takes the receiver, so the whole value is part of the key.
+sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, marker: Marker, formula: Expr) -> Func {
+    named := [String]{}
+    loop site in comptime_walk_identifiers(formula) -> named.push(site.name)
+    helper := ast_func(sema_computed_field_memo_helper(field.name), field.name_span, field.name_span)
+    helper.compiler_generated = true
+    helper.markers = [Marker]{marker.copy()}
+    params := [Param]{}
+    if named.contains("self") -> params.push(sema_computed_field_param("self", Type.Named{name: ""}, field.name_span))
+    loop sibling in definition.fields {
+        if sibling.name != field.name && named.contains(sibling.name) -> params.push(sema_computed_field_param(sibling.name, sibling.ty.copy(), sibling.name_span))
+    }
+    helper.params = params
+    helper.return_type = Val(field.ty.copy())
+    helper.return_type_span = Val(field.ty_span)
+    helper.body = [Stmt]{Stmt.Return{value: Val(formula.copy()), span: field.name_span}}
+    if sema_computed_formula_reads_only(formula, definition.fields, 0) {
+        helper.declared_effects = Val([EffectRowEntry]{})
+        helper.is_pure = true
+    }
+    helper
+}
+
+// The getter body of a `#Memo` field: a call of its `helper` with the current
+// value of each sibling the helper takes, on the receiver when it takes `self`,
+// else on the struct type.
+sema_computed_field_memo_call: fn(definition: StructDef, field: Field, helper: Func) -> Expr {
+    span: field.name_span
+    receiver := Expr.Ident{name: definition.name, span: span, id: AST_NODE_GENERATED}
+    owner_args := [Type]{}
+    loop parameter in definition.type_params -> owner_args.push(Type.Named{name: parameter.name})
+    args := [CallArg]{}
+    loop parameter in helper.params {
+        self_value: Expr.Ident{name: "self", span: span, id: AST_NODE_GENERATED}
+        if parameter.name == "self" {
+            receiver = self_value
+            owner_args = [Type]{}
+            next
+        }
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Field{base: self_value, member: parameter.name, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+    }
+    Expr.MethodCall{receiver: receiver, method: helper.name, method_span: span, owner_type_args: owner_args, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
+}
+
+// A read parameter `name: ty` of a generated computed-field function.
+sema_computed_field_param: fn(name: String, ty: Type, span: Span) -> Param Never! {
+    Param{
+        convention: AccessConvention.Read,
+        root: false,
+        name: name,
+        name_span: span,
+        public_label: None,
+        zone: ParamZone.Either,
+        ty: ty,
+        ty_span: span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        declared_footprint: None,
     }
 }
 
