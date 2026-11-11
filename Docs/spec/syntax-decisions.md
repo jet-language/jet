@@ -3829,6 +3829,33 @@ permissions.
 effects follow the rule of every effect, and only the root package's build
 function receives the `Compiler` value (`b.compiler(app)`).
 
+**D-META-LADDER1=A — Meta effects and one root-only `Compiler` value**
+*(ratified 2026-11-09, cards #6129 and #3526; supersedes D-META-OPTIN2 and
+D-META-CONTROL2)*: compile-time power grows in three steps: reading facts,
+markers that add code, and a `Compiler` value that adds code anywhere and
+rewrites function bodies. `Meta: enum { Generate, Include, Rewrite, Types,
+Raw }` is an ordinary effect family in Core's compiler library (`#FX` with no
+machine effect). It is allowed unless written code denies it, and each action
+checks every case it uses: a marker that writes declarations is
+`-[Meta.Generate]>`, and adding a type from text checks `Generate`, `Types`
+and `Raw` together. No `Meta` case hides FS, Exec or FFI; host work keeps its
+own effects and gates.
+
+Only the root package's own build source makes the value, through
+`b.compiler(app)`, checked by loader and lock identity, so a forwarded `Build`
+cannot get around it. Passing the value delegates control, and every handoff
+is recorded in provenance. A value kept past its build fails closed. Root and
+organization denials, and a locked dependency's `allow_rewrite` consent
+(D-META-CROSSPKG1), apply to every deferred action. The operations are
+ordinary calls: `meta.events(watch:, handler)` watches and grants no change,
+`meta.add(code, scope:)` adds code, and `meta.rewrite_body(f, code)` replaces
+a body. `#code { … }` builds a `Code` value with D-META-HASH1 hygiene, and
+`#{f.body}` pastes a `Code` inside it. Jet has no macros: no call-site
+expansion is registered. A handler's actions are rechecked together with the
+callers they affect, and a failed handler publishes none of them. Handlers
+share D-PREP-FUEL1's step budget and the round limit, and cache keys cover
+source, compiler, reflected inputs, lock, authority and consent.
+
 **D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
 subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,
 `line`, `column`, `function`; it displays as `file:line:column`). `$here` is
