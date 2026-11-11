@@ -84,6 +84,7 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [EncodingJSONLStream](JSON/EncodingJSONLStream.jet)
 - [EncodingJSONStream](JSON/EncodingJSONStream.jet)
 - [JSON](JSON/JSON.jet)
+- [JSONAt](JSON/JSONAt.jet) — json.at<T>: the typed value at a `/`-separated path of a parsed Dyn.
 - [JSONCanonical](JSON/JSONCanonical.jet) — json.canonical is RFC 8785 JCS: the exact bytes to hash or sign.
 - [JSONDuplicateKeys](JSON/JSONDuplicateKeys.jet)
 - [JSONIntegerFidelity](JSON/JSONIntegerFidelity.jet) — JSON keeps full integer values through dynamic and typed Codable paths, rejects trailing commas, and decodes unit enum wires.
@@ -92,5 +93,6 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [JSONPatch](JSON/JSONPatch.jet) — json.patch: RFC 6902 JSON Patch applied atomically.
 - [JSONPointer](JSON/JSONPointer.jet) — json.pointer: RFC 6901 selection over a parsed Dyn.
 - [JSONSelective](JSON/JSONSelective.jet)
+- [JSONStringify](JSON/JSONStringify.jet) — json.stringify: the text JavaScript's JSON.stringify(value, null, indent) writes.
 - [JSONTyped](JSON/JSONTyped.jet) — Typed JSON keeps Decimal and Int number tokens exact.
 - [JSONTypedFile](JSON/JSONTypedFile.jet)

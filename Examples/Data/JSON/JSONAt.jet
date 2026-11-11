@@ -1,0 +1,21 @@
+// json.at<T>: the typed value at a `/`-separated path of a parsed Dyn (a
+// leading `/` is optional). A failed read is a FieldError that names the path
+// it read and both types; a list element's failure names its index.
+use json: core.encoding.json
+
+run: fn() {
+    tree: json.parse("{{\"receipts\":[{{\"metrics\":{{\"p50\":1.5,\"name\":\"cold\",\"tags\":[\"a\",\"b\"],\"mixed\":[\"a\",2],\"n\":42}}}}]}}") ?? panic("parse")
+    print(json.at<String>(tree, "receipts/0/metrics/name") ?? panic("name"))
+    print("{json.at<Int>(tree, "/receipts/0/metrics/n") ?? panic("n")}")
+    print((json.at<[String]>(tree, "receipts/0/metrics/tags") ?? panic("tags")).join(" "))
+    loop path in [String]{"receipts/0/metrics/name", "receipts/0/metrics/p50"} {
+        if json.at<Int>(tree, path) == {
+            .Ok(n) -> print("{n}")
+            .Err(errors) -> print("{errors[0]}")
+        }
+    }
+    if json.at<[String]>(tree, "receipts/0/metrics/mixed") == {
+        .Ok(_) -> print("read")
+        .Err(errors) -> print("{errors[0]}")
+    }
+}

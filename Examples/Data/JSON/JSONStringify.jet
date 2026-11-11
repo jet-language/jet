@@ -1,0 +1,11 @@
+// json.stringify: the text JavaScript's JSON.stringify(value, null, indent)
+// writes. Numbers take ECMAScript's spelling, NaN and the infinities are null,
+// and an ordered Dyn object literal keeps its keys in the written order.
+use json: core.encoding.json
+
+run: fn() {
+    tree: Dyn{[String: Dyn]{"zeta": 1, "alpha": "two", "inner": ["k": true, "a": 1]}}
+    print(json.stringify(tree))
+    print(json.stringify(tree, 2))
+    print(json.stringify(Dyn.Array([Dyn]{Dyn.Float(1e21), Dyn.Float(1e-7), Dyn.Float(-0.0), Dyn.Int(9007199254740993)})))
+}
