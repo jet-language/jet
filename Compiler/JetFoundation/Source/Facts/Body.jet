@@ -735,6 +735,9 @@ BodyLambda: struct {
     materialized_captures: [String]
     frozen_captures: [String]
     uses_stack_sentry: Bool
+    // As FnBody.effect_scope, for a lambda with its own written row; an
+    // inline loop body has none (it builds into its owner's code).
+    effect_scope: String{""}
 }
 
 BodyLambdaBody: enum {
@@ -794,6 +797,14 @@ FnBody: struct {
     // one, else empty: the IR builder marks each slot of such a type fixed
     // (JetIR IRFunction.slot_fixed).
     fixed_tags: [String]{[String]{}}
+    // The run-time half of a written row that scopes FS or Net (JetRuntime
+    // Authority.jet "Effect-scope frames"): the function's name, then the
+    // row's FS and Net entries, one per line (a denial keeps its `!`), for a
+    // function whose row scopes one of them; `@` and the published effect
+    // for a Core scope publisher (effect_scope_published_effect); else "".
+    // The IR builder enters it as a frame on entry and leaves it on every
+    // exit (JetIR ir_effect_scope_frame).
+    effect_scope: String{""}
     // The function's nodes, statements and expression-type column.
     tree: BodyTree
 }

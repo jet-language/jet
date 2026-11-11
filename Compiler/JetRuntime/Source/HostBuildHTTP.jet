@@ -114,6 +114,12 @@ bh_range_error: fn(error: I64) -> I64 { bh_static_error(error, rt_static_text("o
     data: rt_text_data(host)
     bracketed: length >= I64{2} && rt_text_byte(data) == I64{91} && rt_text_byte(wrapping(wrapping(data + length) - I64{1})) == I64{93}
     name: if bracketed -> rt_text_copy(wrapping(data + I64{1}), length - I64{2}) else -> host
+    // Every hop's host (a redirect's too): the effect scopes in force admit
+    // it first (Authority.jet).
+    if !effect_scope_admit_host(name, error) {
+        if bracketed -> jet_rt_string_drop(name)
+        return I64{0}
+    }
     scratch: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(scratch, I64{24})
     resolved: net_resolve_rows(name, native_port, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))

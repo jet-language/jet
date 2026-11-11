@@ -60,6 +60,7 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
     b.cells = ir_window_cells(m, p, b, captured)
     ir_cell_params(m, b)
     ir_sentry_frame(m, p, b)
+    ir_effect_scope_frame(m, b, function.effect_scope)
     if ir_failed(b) -> return
     ir_stmts(m, p, b, function.body)
     if ir_failed(b) || b.failures.len() > 0 -> return
@@ -6908,6 +6909,7 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
         }
     }
     b.ret = returned
+    ir_effect_scope_frame(m, b, lambda.effect_scope)
     if lambda.executable == {
         .Expr(value) -> ir_return(m, p, b, Val(value), span)
         .Block(body) -> {

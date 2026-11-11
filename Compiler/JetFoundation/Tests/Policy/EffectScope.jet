@@ -1,15 +1,78 @@
 // The one covers rule for scoped effects (Policy/EffectScope.jet): the path,
-// host and value laws, the bare and scoped orders, and the scope a Core
-// publisher's constant argument names.
+// host and value laws, the bare and scoped orders, the scope a Core
+// publisher's constant argument names, and the run-time frame descriptor a
+// written row gives.
 use jet_foundation.[
     authority_covers,
     effect_scope_covers,
+    effect_scope_descriptor,
     effect_scope_name,
     effect_scope_of_argument,
     effect_scope_published_effect,
     effect_scope_split,
     sema_effect_covers,
 ]
+
+// `held > need: covers`, the table the runtime's rule answers the same way
+// (tests/cases/effects/effect_scope_covers_is_one_relation_at_every_tier).
+COVERS_TABLE: [String]{
+    "FS.Read(\"templates/\") > FS.Read(\"templates/home.html\"): true",
+    "FS.Read(\"templates\") > FS.Read(\"templates/a/b.txt\"): true",
+    "FS.Read(\"./templates/\") > FS.Read(\"templates/x/../y.txt\"): true",
+    "FS.Read(\"templates/\") > FS.Read(\"templates2/a.txt\"): false",
+    "FS.Read(\"templates/\") > FS.Read(\"templates/../secret.txt\"): false",
+    "FS.Read(\"templates/\") > FS.Read(\"../templates/a.txt\"): false",
+    "FS.Read(\"Data/\") > FS.Read(\"data/a\"): false",
+    "FS.Read(\"..\") > FS.Read(\"../a\"): true",
+    "FS.Read(\"..\") > FS.Read(\"../..\"): false",
+    "FS.Read(\".\") > FS.Read(\"../a\"): false",
+    "FS.Read(\"\") > FS.Read(\"a\"): true",
+    "FS.Read(\"a/../../b\") > FS.Read(\"../b/c\"): true",
+    "FS.Read(\"//data\") > FS.Read(\"/data/x\"): true",
+    "FS.Read(\"/data\") > FS.Read(\"/database/a\"): false",
+    "FS.Read(\"/data\") > FS.Read(\"data/a\"): false",
+    "FS.Read(\"/\") > FS.Read(\"/etc/hosts\"): true",
+    "FS.Read(\"/\") > FS.Read(\"etc/hosts\"): false",
+    "FS.Read(\"/..\") > FS.Read(\"/etc\"): true",
+    "Net(\"api.example.com\") > Net(\"API.Example.com.\"): true",
+    "Net(\"api.example.com\") > Net(\" api.example.com\"): false",
+    "Net(\"api.example.com\") > Net(\"api.example.com \"): false",
+    "Net(\"api.example.com\") > Net(\"evilapi.example.com\"): false",
+    "Net(\"example.com\") > Net(\"api.example.com\"): false",
+    "Net(\"a.com.\") > Net(\"a.com\"): true",
+    "Net(\"a.com..\") > Net(\"a.com\"): false",
+    "GPU(\"npu\") > GPU(\"npu\"): true",
+    "GPU(\"npu\") > GPU(\"NPU\"): false",
+    "FS > FS.Read(\"a.txt\"): true",
+    "FS.Read > FS.Read(\"a.txt\"): true",
+    "FS.Read(\"assets/\") > FS.Read: false",
+    "FS.Read(\"assets/\") > FS.Write(\"assets/a\"): false",
+    "FS(\"assets/\") > FS.Read(\"assets/a\"): true",
+    "FS.Read > FS.ReadExtra: false",
+}
+
+#Test("rows, holds and the runtime answer the covers table alike") {
+    loop row in COVERS_TABLE {
+        pair: row.split_once(" > ") ?? panic("a table row is `held > need: covers`")
+        need: pair.after.cut_last(": ") ?? panic("a table row ends in its answer")
+        expected: need.after == "true"
+        assert(effect_scope_covers(pair.before, need.before) == expected, "effect rows: {row}")
+        assert(sema_effect_covers(pair.before, need.before) == expected, "library grants: {row}")
+        assert(authority_covers(pair.before, need.before) == expected, "authority holds: {row}")
+    }
+}
+
+#Test("a written row's run-time frame names its FS and Net entries") {
+    assert_eq(effect_scope_descriptor("read_scoped", "fn:app::read_scoped", false, Val([String]{"FS.Read(\"data/\")", "IO"})), "read_scoped\nFS.Read(\"data/\")")
+    assert_eq(effect_scope_descriptor("read_open", "fn:app::read_open", false, Val([String]{"FS.Read(\"data/\")", "!FS.Read(\"data/private/\")"})), "read_open\nFS.Read(\"data/\")\n!FS.Read(\"data/private/\")")
+    assert_eq(effect_scope_descriptor("fetch", "fn:app::fetch", false, Val([String]{"Net(\"api.example.com\")", "Time.Wait", "FS.Read"})), "fetch\nNet(\"api.example.com\")\nFS.Read")
+    assert_eq(effect_scope_descriptor("read", "fn:<corelib>/core.files::read", true, Val([String]{"FS.Read"})), "@FS.Read")
+    assert_eq(effect_scope_descriptor("get", "fn:<corelib>/core.http::get", false, Val([String]{"Net", "Time.Wait"})), "@Net")
+    assert(effect_scope_descriptor("load", "fn:app::load", false, Val([String]{"FS.Read", "IO"})) == "", "a bare row names no scope")
+    assert(effect_scope_descriptor("map", "fn:app::map", false, Val([String]{"FS.Read(\"data/\")", "..E"})) == "", "an open row has no closed ceiling")
+    assert(effect_scope_descriptor("gpu", "fn:app::gpu", false, Val([String]{"GPU(\"npu\")"})) == "", "a value scope stays static")
+    assert(effect_scope_descriptor("plain", "fn:app::plain", false, None) == "", "no row, no frame")
+}
 
 #Test("a scoped effect splits into its bare effect and its scope") {
     split: effect_scope_split("FS.Read(\"templates/\")")

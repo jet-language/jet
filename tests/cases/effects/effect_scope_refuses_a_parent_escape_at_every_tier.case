@@ -1,0 +1,18 @@
+# A row scoped to `data/` and a call whose constant prefix is `data/`: the
+# checker proves the prefix lies inside the row, and the runtime checks the
+# file the call reaches, so `data/../secret.txt` is refused at O0, O1 and O2
+# and the read's fallback prints, never the secret.
+fixture: effect_scope_refuses_a_parent_escape_at_every_tier.fixture
+env: NO_COLOR=1
+step: jet run scope.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=basic scope.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=full scope.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"

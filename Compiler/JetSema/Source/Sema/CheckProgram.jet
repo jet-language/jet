@@ -90,6 +90,7 @@ use jet_foundation.[
     compiler_threads_failure_text,
     compiler_threads_partition,
     compiler_transfer_rows,
+    effect_scope_descriptor,
     expr_span,
     symbol_id,
     checked_symbol_local,
@@ -2304,6 +2305,13 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     loop marker in func.markers {
         if marker.name == MARKER_SCALAR -> scalar = true
     }
+    written_row := [String]?{None}
+    if func.declared_effects == .Val(row) {
+        names := [String]{}
+        loop entry in row -> names.push(entry.name.copy())
+        written_row = Val(names)
+    }
+    effect_scope: effect_scope_descriptor(func.name, owner_id.key, func.params.len() > 0 && func.params[0].name == "path", written_row)
     built := TFunc{
         name: func.name,
         module_name: module_name,
@@ -2345,6 +2353,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         typed_goals: context.typed_goals.copy(),
         index_proofs: context.index_proofs.copy(),
         pre: if contract.complete -> contract.pre.copy() else -> [TContract]{},
+        effect_scope: effect_scope,
     }
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.

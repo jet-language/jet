@@ -1490,6 +1490,12 @@ __client_dial_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL,
         return Err(.Timeout{phase: "transport"})
     }
     addresses: provider.jet_http_build_resolve(destination.host, destination.port) ?? {
+        // An effect scope in force refused the host before any lookup
+        // (spec.md "Effect scopes"): a policy failure, not a resolver one.
+        if err.starts_with("E0740: ") || err.starts_with("E0749: ") {
+            wire.ending = "unmapped"
+            return Err(.Policy{reason: err})
+        }
         wire.ending = __client_resolve_portable(err)
         return Err(.Resolve{host: "<redacted>"})
     }

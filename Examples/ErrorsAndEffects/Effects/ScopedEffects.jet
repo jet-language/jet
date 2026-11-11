@@ -5,7 +5,8 @@ package: {
 // An effect argument names a scope: a folder, a host or a device. The checker
 // proves every constant path a body reads is inside its row's scope, by whole
 // path components, so `-[FS.Read("ScopedEffects.jet")]>` lets `first_line`
-// read that one file and nothing else.
+// read that one file and nothing else; while the function runs, the runtime
+// checks each file it actually reaches against the same row.
 use files: core.files
 
 first_line: fn() -[FS.Read("ScopedEffects.jet")]> String {

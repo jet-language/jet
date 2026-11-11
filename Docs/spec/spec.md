@@ -2177,11 +2177,17 @@ effect rows, denials and run grants, from three fixed laws
 
 - A path covers by whole components after normalization: `templates/` covers
   `templates/home.html` but not `templates2/`, and `templates/../secret.txt`
-  is `secret.txt`.
+  is `secret.txt`. A `..` kept above a relative start never climbs into a
+  scope: `..` does not cover `../..`, nor `.` cover `../a`.
 - A host covers by exact match after lower-casing and dropping one trailing
-  `.`: `api.example.com` never covers `evilapi.example.com`. Internationalized
-  names are compared as written.
+  `.`: `api.example.com` never covers `evilapi.example.com`. Every other byte,
+  whitespace too, is part of the host. Internationalized names are compared
+  as written.
 - Any other argument covers by equality.
+
+The runtime's Authority values (`with`, `without`) cover by the same laws
+(`jet_authority_covers`), and one normalization table checks that the two
+answer alike.
 
 A bare effect covers every scoped instance of itself and its leaves, so `FS`
 and `FS.Read` both cover `FS.Read("assets/")`. A scoped effect never covers
@@ -2212,6 +2218,27 @@ a need that only overlaps it, such as `FS.Read("assets/")` under a denied
 `assets/private/`, builds. Run grants (`--allow`, `--deny`) use the same
 spelling and rule, and a mediated call checks its run-time path against them
 (see "Application authority").
+
+A constant prefix proves where a call starts, not where it lands:
+`files.read("data/{name}")` with `name` set to `../secret.txt` leaves
+`data/`. So a closed written row with a scoped `FS` or `Net` entry is also
+mediated at run time, at every optimization level. While the function runs,
+its row is in force, for every callee and every task it spawns. Each file a
+`core.files` path call reaches, and each host an `http.get` reaches,
+including every redirect hop, is checked before the system call or the
+lookup against every row in force. A file is resolved as the kernel resolves
+it: from the working directory, with each link of its existing part followed
+(a call that acts on a link itself resolves only its folder) and `..`
+applied. A scope's folder is resolved the same way and covers by whole
+components. A row that allows some effect of the resource's root (`FS` or
+`Net`) must allow one covering it, else the call fails with E0740. A denial
+in the row that covers it fails the call with E0749. The failure is the
+call's own error, `IOError.PermissionDenied` with the refusal as its cause,
+or `HTTPError.Policy` with the refusal as its reason, and the call does
+nothing. A path replaced between the check and the system call is the
+kernel's to confine (`--allow`, Landlock). An open row (`..E`), the listed
+scopes of a library effect and value scopes (`GPU("npu")`) stay build-time
+only. An inline loop body runs under its function's row.
 
 ### Application authority
 

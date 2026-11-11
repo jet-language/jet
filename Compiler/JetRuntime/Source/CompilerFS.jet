@@ -41,7 +41,13 @@ compiler_fs_cause: fn(operation: I64, code: I64) -> I64 {
     jet_rt_string_drop(scope)
     cause
 }
-compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool {
+// Whether a leaf may pass `path` to the kernel: no NUL byte, and the effect
+// scopes in force admit it (Authority.jet effect_scope_admit_path) as an
+// operation that follows a final link; compiler_fs_link_path is the one that
+// does not. Else the leaf's IOError goes through `error`.
+compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool { compiler_fs_admit(path, operation, true, error) }
+compiler_fs_link_path: fn(path: I64, operation: I64, error: I64) -> Bool { compiler_fs_admit(path, operation, false, error) }
+compiler_fs_admit: fn(path: I64, operation: I64, follow: Bool, error: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(path) {
         if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
@@ -50,7 +56,7 @@ compiler_fs_path: fn(path: I64, operation: I64, error: I64) -> Bool {
         }
         at += I64{1}
     }
-    true
+    effect_scope_admit_path(path, follow, operation, error)
 }
 compiler_fs_fault: fn(path: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Read")) -> return false
@@ -232,7 +238,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     I64{1}
 }
 #Export(c) jet_files_read_link_os: fn(path: I64, output: I64, error: I64) -> I64 {
-    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    if !compiler_fs_link_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     scratch: jet_rt_alloc(I64{32}, I64{8})
     capacity := I64{256}
     loop {

@@ -85,7 +85,8 @@ effect_scope_path_parts: fn(path: String) -> [String] Never! {
 }
 
 // The path law: `bound` covers `need` when its components are a prefix of
-// the need's.
+// the need's and the need does not climb past them with a kept `..` (`..`
+// never covers `../..`, nor `.` covers `../a`).
 effect_scope_path_covers: fn(bound: String, need: String) -> Bool Never! {
     held: effect_scope_path_parts(bound)
     asked: effect_scope_path_parts(need)
@@ -93,14 +94,15 @@ effect_scope_path_covers: fn(bound: String, need: String) -> Bool Never! {
     loop index in 0..<held.len() {
         if held[index] != asked[index] -> return false
     }
-    true
+    held.len() == asked.len() || asked[held.len()] != ".."
 }
 
 // A host lower-cased, with the one trailing `.` of a fully qualified name
-// dropped.
+// dropped; any other byte, whitespace too, is part of the host, as the
+// runtime's authority_host_covers reads it.
 effect_scope_host: fn(host: String) -> String Never! {
     bytes := [U8]{}
-    loop byte in host.trim().bytes() {
+    loop byte in host.bytes() {
         if byte >= (U8{65}) && byte <= (U8{90}) {
             bytes.push(byte + (U8{32}))
         } else {
@@ -153,6 +155,41 @@ effect_scope_published_effect: fn(callee_key: String, path_first: Bool, declared
     if effect_scope_kind(leaf) != "path" || !leaf.contains(".") || effect_scope_is_scoped(leaf) -> return None
     // copy: the caller keeps its declared row.
     Val(leaf.copy())
+}
+
+// The run-time effect-scope descriptor (FnBody.effect_scope) of function
+// `name`, symbol key `key`, whose first parameter is `path` when
+// `path_first`, from its written row `row` (None: no row). A Core scope
+// publisher's is its marker, `@` and the effect it publishes. A closed row
+// with a scoped `FS` or `Net` entry (an allow or a `!` denial) gives the
+// name, then the row's `FS` and `Net` entries one per line, each spelled as
+// effect_scope_name spells it and a denial keeping its `!`. Every other
+// function has none (""): an open row (`..E`) has no closed ceiling, and
+// a library effect's listed scopes stay static.
+effect_scope_descriptor: fn(name: String, key: String, path_first: Bool, row: [String]?) -> String Never! {
+    written_row: row ?? return ""
+    allowed := [String]{}
+    loop entry in written_row {
+        if !entry.starts_with("!") && !entry.starts_with("..") -> allowed.push(entry.trim().copy())
+    }
+    if effect_scope_published_effect(key, path_first, allowed) == .Val(published) -> return "@{published}"
+    entries := [String]{}
+    scoped := false
+    loop entry in written_row {
+        if entry.starts_with("..") -> return ""
+        denied: entry.starts_with("!")
+        written: if denied -> entry.slice(1..<entry.len()) else -> entry
+        split: effect_scope_split(written)
+        if effect_scope_kind(split.base) == "value" -> next
+        spelled := split.base.copy()
+        if split.scope == .Val(scope) {
+            scoped = true
+            spelled = effect_scope_name(split.base, scope)
+        }
+        entries.push(if denied -> "!{spelled}" else -> spelled)
+    }
+    if !scoped -> return ""
+    "{name}\n{entries.join("\n")}"
 }
 
 // The scope a publisher's argument names for `effect`, from the argument's

@@ -241,6 +241,12 @@ fs_open_at: fn(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, link
         _ := fs_held_closed(operation, error)
         return I64{-1}
     }
+    // A path open (no held directory) is the path publishers' leaf: the
+    // effect scopes in force admit it first (Authority.jet).
+    if (key < I64{0} && !effect_scope_admit_path(name, links != I64{1}, operation, error)) {
+        jet_rt_string_drop(shown)
+        return I64{-1}
+    }
     scratch: jet_rt_alloc(I64{16}, I64{8})
     result := I64{-1}
     if fs_held_parent(key, name, operation, shown, scratch, error) {
@@ -518,7 +524,7 @@ fs_stat_facts_at: fn(key: I64, name: I64, follow: Bool, scratch: I64, error: I64
     birth: wrapping(scratch + I64{128})
     errno: wrapping(scratch + I64{152})
     if (key < I64{0}) {
-        if !compiler_fs_path(name, HOST_IO_OP_READ, error) -> return false
+        if !compiler_fs_admit(name, HOST_IO_OP_READ, follow, error) -> return false
         statx: fs_statx_facts(name, follow, facts, birth, errno)
         if (statx > I64{0}) -> return true
         if (statx == I64{0}) -> jet_fs_stat_raw(name, follow, facts, errno)
