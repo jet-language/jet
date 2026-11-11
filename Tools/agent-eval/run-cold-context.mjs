@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// The original of gauntlet tool entry run-cold-context; its Jet twin is
+// RunColdContext.jet beside it.
+
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -222,7 +225,7 @@ export function validateCapsule(capsule) {
     "## 6. Ten runnable canonical programs",
     "## 7. Cold-agent rules",
     "&T",
-    "^T",
+    "&&T",
     "value.copy()",
     "-[",
     "Ok(value)",

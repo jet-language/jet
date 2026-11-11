@@ -1,0 +1,212 @@
+== out/score.json
+{
+  "schema": "jet.cold-agent.scoreboard.v1",
+  "status": "recorded",
+  "contexts": [
+    "control"
+  ],
+  "required_families": [
+    "openai",
+    "anthropic"
+  ],
+  "capsule": {
+    "path": "capsule.md",
+    "bytes": 2131,
+    "sha256": "28c48d9f77a75b1ebbb13dfea0bfa540b3c9786f496148ead3700534a30653ae"
+  },
+  "control": {
+    "path": "llms.txt",
+    "source_bytes": 2577,
+    "source_sha256": "dd570b7aeb8c7c6cf2becea47333d3cb2bf1609da032287f678b740abcbb6059",
+    "context_budget_bytes": 2131,
+    "context_sha256": "66889016c3ea99ebfa477a10d5821eeb472ce6476500a1b8ac160b9f46e10c96"
+  },
+  "fixtures": {
+    "task_file": {
+      "path": "tasks.json",
+      "bytes": 2597,
+      "sha256": "14e595a722b1db48212974e1d73b6b125bb945485dda5f71b8cd437904111d13"
+    },
+    "adapter_file": {
+      "path": "adapters.json",
+      "bytes": 894,
+      "sha256": "c968f132ca5cf2a3e9e5aad0ce2d63bb09b9a2461556335875f6408bb175c161"
+    }
+  },
+  "harness": {
+    "path": <harness>
+    "bytes": <harness>
+    "sha256": <harness>
+    "adapter_timeout_ms": 600000
+  },
+  "adapters": [
+    {
+      "id": "anthropic-fake",
+      "family": "anthropic",
+      "transport": "command",
+      "command_sha256": "817a5403d0d29a8e366372c8ab83ba92badd38b802ae322c2294dbc6b9b3bf9c"
+    },
+    {
+      "id": "openai-fake",
+      "family": "openai",
+      "transport": "command",
+      "command_sha256": "1c92e04a249c7447051d2ccf84299470ea1623fc2ba144b19fa241561ff36747"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "cli",
+      "domain": "cli",
+      "mode": "batch",
+      "spec_sha256": "da6d73182836b5cead1e6e5631d942ff2c43e36fe015ca3908696d9ab1c1085c",
+      "expected_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f"
+    },
+    {
+      "id": "data-transform",
+      "domain": "data-transform",
+      "mode": "batch",
+      "spec_sha256": "b81059fa5dd0079dbae8268fda4ded33d8d92dd8b1dc92b8c848d425ca8d0bf6",
+      "expected_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3"
+    },
+    {
+      "id": "hello",
+      "domain": "hello",
+      "mode": "batch",
+      "spec_sha256": "27dc62cd0af8eff2c3260dde03bbdd54130238ea15ed6e450425bc7e7f98baeb",
+      "expected_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0"
+    },
+    {
+      "id": "http",
+      "domain": "http-service",
+      "mode": "http",
+      "spec_sha256": "f9dfafa7a58c69656bc8113cb1e25bd933d32acaa0021563d1b3f21cff249af9",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "rows": [
+    {
+      "adapter": "anthropic-fake",
+      "family": "anthropic",
+      "context": "control",
+      "task": "cli",
+      "source_sha256": null,
+      "compile_score": 0,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "error": "model-output"
+    },
+    {
+      "adapter": "anthropic-fake",
+      "family": "anthropic",
+      "context": "control",
+      "task": "data-transform",
+      "source_sha256": "2a323a67ac0bd4fbdfecbbdbc72def7fa39dddc1744adfb4bfb4c9d8069ef42e",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3",
+      "expected_stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3"
+    },
+    {
+      "adapter": "anthropic-fake",
+      "family": "anthropic",
+      "context": "control",
+      "task": "hello",
+      "source_sha256": "cd69fa6c122e81e5a0e93e8c32263c12566b19ca9b4cef3beb6a03e432e6d8f9",
+      "compile_score": 1,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0",
+      "expected_stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0",
+      "error": "run:exit-3"
+    },
+    {
+      "adapter": "anthropic-fake",
+      "family": "anthropic",
+      "context": "control",
+      "task": "http",
+      "source_sha256": "d6b68b845658d235dc4ebe06fccedc0b5e06ca4da25f3d6dd88f45ca55335f39",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "adapter": "openai-fake",
+      "family": "openai",
+      "context": "control",
+      "task": "cli",
+      "source_sha256": "815d95b72a68a03c74fb338c7c0e171d4110f5277c9d0a201829345a84113caa",
+      "compile_score": 0,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "stderr_sha256": "d2dad7166b874a2709903baa7da83bedb90ef22187be6fe3443a7347084ba79d",
+      "error": "compile:exit-1"
+    },
+    {
+      "adapter": "openai-fake",
+      "family": "openai",
+      "context": "control",
+      "task": "data-transform",
+      "source_sha256": "0b1dd39dc1971c208d1b707b08f5e1739c00a5cafbfa3fe1237b3908012bc2cc",
+      "compile_score": 1,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "f0c6d21e7082400f8eb7b6bbcb3655c6ca1ba159f6d05991c2c6685b58e0fc1a",
+      "expected_stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3",
+      "error": "run:stdout-mismatch"
+    },
+    {
+      "adapter": "openai-fake",
+      "family": "openai",
+      "context": "control",
+      "task": "hello",
+      "source_sha256": null,
+      "compile_score": 0,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "error": "model-output"
+    },
+    {
+      "adapter": "openai-fake",
+      "family": "openai",
+      "context": "control",
+      "task": "http",
+      "source_sha256": "949403c4ac469fad5b17433723b34c7936c5ced80d1a34bb0e0d6cffb721a2b9",
+      "compile_score": 1,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "error": "run:probe-1"
+    }
+  ],
+  "summary": {
+    "capsule": {
+      "cases": 0,
+      "passes": 0,
+      "compile_passes": 0,
+      "run_passes": 0,
+      "pass_rate": null
+    },
+    "control": {
+      "cases": 8,
+      "passes": 2,
+      "compile_passes": 5,
+      "run_passes": 2,
+      "pass_rate": 0.25
+    }
+  },
+  "blocked_reasons": []
+}

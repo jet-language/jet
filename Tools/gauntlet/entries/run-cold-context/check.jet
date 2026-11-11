@@ -1,0 +1,33 @@
+// What a run-cold-context case produced (PortBars.jet and the gauntlet
+// harness run this in the case directory with the file holding the program's
+// output): its stdout, then the scoreboard and baseline it wrote, if any.
+// The harness descriptor names the program that ran, so its path, size and
+// digest print as `<harness>`; artifact paths are relative to the repository,
+// which places them under the case directory, so they print as file names.
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    loop line in files.read(process.args()[0]).lines() -> print(line)
+    loop name in ["out/score.json", "out/base.json"] {
+        if !files.exists(name) -> next
+        print("== {name}")
+        harness := false
+        loop line in files.read(name).lines() {
+            trimmed: line.trim()
+            if line == "  \"harness\": {{" -> harness = true
+            if line == "  }}," -> harness = false
+            if harness && (trimmed.starts_with("\"path\": ") || trimmed.starts_with("\"bytes\": ") || trimmed.starts_with("\"sha256\": ")) {
+                print("{line.split(":").to_list()[0]}: <harness>")
+                next
+            }
+            if trimmed.starts_with("\"path\": \"") && line.contains("/") {
+                print("{line.split("\"path\": \"").to_list()[0]}\"path\": \"{line.split("/").to_list().last() ?? line}")
+                next
+            }
+            print(line)
+        }
+    }
+}
