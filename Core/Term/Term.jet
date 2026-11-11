@@ -10,6 +10,7 @@ package: {
 }
 use {
     core: core
+    rt: jet.runtime.term
     core.files.[FileReader]
 }
 // core.term — the connected terminal.
@@ -42,7 +43,7 @@ StdinHandle: struct {
     // Stdout.is_tty and Stderr.is_tty. It reads no input and never fails; the read
     // receiver lets a temporary ask (`stdin().is_tty()`).
     is_tty: fn(self) -[IO]> Bool Never! {
-        core.term.__terminal8_stdin_tty()
+        rt.terminal8_stdin_tty()
     }
 }
 
@@ -93,7 +94,7 @@ Stdout: struct {
     }
     // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
     is_tty: fn(self) -[IO]> Bool Never! {
-        core.term.__stdout_terminal()
+        rt.stdout_terminal()
     }
 }
 
@@ -113,7 +114,7 @@ Stderr: struct {
         stdio_flush(true)
     }
     is_tty: fn(self) -[IO]> Bool Never! {
-        core.term.__stderr_terminal()
+        rt.stderr_terminal()
     }
 }
 
@@ -157,8 +158,8 @@ print: fn(text: String) Never! -[IO, Time.Wait]> {
 // `flush`; stdio_write passes true for any nonempty text), whose cause text
 // is dropped unread.
 eprint: fn(text: String) Never! -[IO, Time.Wait]> {
-    if core.term.__stdio_fault("IO.Write") -> return
-    _: core.term.__stdio_write("{text}\n", false, true, true)
+    if rt.stdio_fault("IO.Write") -> return
+    _: rt.stdio_write("{text}\n", false, true, true)
 }
 
 // jet_std_io_input: the prompt is written and stdout flushed, then one line
@@ -170,10 +171,10 @@ readline: fn(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
 }
 
 input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
-    if !core.term.__terminal8_stdin_tty() || !core.term.__terminal8_stdout_tty() -> return Err(terminal_invalid("secret input needs a terminal"))
+    if !rt.terminal8_stdin_tty() || !rt.terminal8_stdout_tty() -> return Err(terminal_invalid("secret input needs a terminal"))
     cause: terminal_secret_write(prompt)
     if cause != None -> return Err(terminal_other(.Flush, Val("stdout"), cause))
-    if !core.term.__terminal8_mode_enter(false) {
+    if !rt.terminal8_mode_enter(false) {
         _: terminal_secret_write("\n")
         return Err(terminal_other(.Read, Val("stdin"), "could not disable terminal echo"))
     }
@@ -186,24 +187,24 @@ input_secret: fn(prompt: String) -[IO, Time.Wait]> String IOError! {
 
 read_all_input: fn() -[IO, Time.Wait]> String IOError! {
     terminal_read_preflight()
-    result: core.term.__terminal8_read_all()
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
-    Ok(result.text)
+    result: rt.terminal8_read_all()
+    if result.read_error != None -> return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
+    Ok(result.input)
 }
 
 read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     if delimiter.is_empty() -> return Err(terminal_other(.Read, Val("stdin"), "empty delimiter"))
     terminal_read_preflight()
-    result: core.term.__terminal8_read_until(delimiter)
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
-    Ok(result.text)
+    result: rt.terminal8_read_until(delimiter)
+    if result.read_error != None -> return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
+    Ok(result.input)
 }
 
 __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
-    result: core.term.__terminal8_take(n)
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
+    result: rt.terminal8_take(n)
+    if result.read_error != None -> return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
     Ok(result.bytes)
 }
 
@@ -294,17 +295,17 @@ stderr: fn() -> Stderr Never! { Stderr{fd: 2} }
 buffered: fn() -> StdinHandle Never! { stdin() }
 
 terminal_width: fn() -[IO]> Int Never! {
-    from_env: positive_dimension(core.term.__terminal8_env("COLUMNS"))
+    from_env: positive_dimension(rt.terminal8_env("COLUMNS"))
     if from_env != None -> return from_env
-    size: core.term.__terminal8_stty()
+    size: rt.terminal8_stty()
     if size != None -> return size.w
     80
 }
 
 terminal_height: fn() -[IO]> Int Never! {
-    from_env: positive_dimension(core.term.__terminal8_env("LINES"))
+    from_env: positive_dimension(rt.terminal8_env("LINES"))
     if from_env != None -> return from_env
-    size: core.term.__terminal8_stty()
+    size: rt.terminal8_stty()
     if size != None -> return size.h
     24
 }
@@ -326,7 +327,7 @@ style_force: fn(style: String, text: String) -> String Never! {
 
 
 read_key: fn() -[IO, Time.Wait]> Key Never! {
-    raw: core.term.__terminal8_key_bytes()
+    raw: rt.terminal8_key_bytes()
     decode_key(raw.bytes, raw.platform)
 }
 
@@ -335,18 +336,18 @@ WinSize: struct {
     h: Int
 }
 progress: fn(label: String) IOError! -[IO, Time.Wait]> {
-    if core.term.__terminal8_machine_output() -> return Ok()
+    if rt.terminal8_machine_output() -> return Ok()
     // Without a terminal on stderr the label is a plain stdout line, so a
     // piped run still records its progress.
-    if !core.term.__terminal8_stderr_tty() {
+    if !rt.terminal8_stderr_tty() {
         terminal_write_preflight("stdout")
-        line_cause: core.term.__terminal8_write_stdout("{label}\n", true)
+        line_cause: rt.terminal8_write_stdout("{label}\n", true)
         if line_cause != None -> return Err(terminal_other(.Flush, Val("stdout"), line_cause))
         return Ok()
     }
     terminal_write_preflight("stderr")
     carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
-    cause: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
+    cause: rt.terminal8_write_stderr("{carriage_return}{label}", true)
     if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
     Ok()
 }
@@ -439,14 +440,14 @@ terminal_invalid: fn(cause: String) -> IOError Never! {
 }
 
 terminal_write_preflight: fn(resource: String) IOError! -[IO, Time.Wait]> {
-    if core.term.__terminal8_fault("IO.Write") -> return Err(terminal_other(.Write, Val(resource), "fault injected: IO.Write"))
-    if core.term.__terminal8_fault("IO.Flush") -> return Err(terminal_other(.Flush, Val(resource), "fault injected: IO.Flush"))
+    if rt.terminal8_fault("IO.Write") -> return Err(terminal_other(.Write, Val(resource), "fault injected: IO.Write"))
+    if rt.terminal8_fault("IO.Flush") -> return Err(terminal_other(.Flush, Val(resource), "fault injected: IO.Flush"))
     Ok()
 }
 
 terminal_prompt: fn(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
     terminal_write_preflight("stdout")
-    cause: core.term.__terminal8_write_stdout(text, true)
+    cause: rt.terminal8_write_stdout(text, true)
     if cause != None {
         if choose -> return Err(terminal_other(.Write, Val("stdout"), cause))
         return Err(terminal_other(.Flush, None, cause))
@@ -455,27 +456,28 @@ terminal_prompt: fn(text: String, choose: Bool) IOError! -[IO, Time.Wait]> {
 }
 
 terminal_read_preflight: fn() IOError! -[IO, Time.Wait]> {
-    if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    if rt.terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
     Ok()
 }
 terminal_line: fn() -[IO, Time.Wait]> String? IOError! {
-    if core.term.__terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
-    result: core.term.__terminal8_line()
-    if result.cause != None -> return Err(terminal_other(.Read, Val("stdin"), result.cause ?? ""))
+    if rt.terminal8_fault("IO.Read") -> return Err(terminal_other(.Read, Val("stdin"), "fault injected: IO.Read"))
+    result: rt.terminal8_line()
+    if result.read_error != None -> return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
     if result.eof -> return Ok(None)
     Ok(Val(chomp(result.line)))
 }
 
 terminal_secret_write: fn(text: String) -[IO, Time.Wait]> String? Never! {
-    if core.term.__terminal8_fault("IO.Write") -> return Val("fault injected: IO.Write")
-    if core.term.__terminal8_fault("IO.Flush") -> return Val("fault injected: IO.Flush")
-    core.term.__terminal8_write_stdout(text, true)
+    if rt.terminal8_fault("IO.Write") -> return Val("fault injected: IO.Write")
+    if rt.terminal8_fault("IO.Flush") -> return Val("fault injected: IO.Flush")
+    rt.terminal8_write_stdout(text, true)
 }
 
 terminal_secret_read: fn() -[IO, Time.Wait]> (eof: Bool, line: String, cause: String?) Never! {
-    _guard: core.mem.scope.guard(() -> core.term.__terminal8_mode_leave())
-    if core.term.__terminal8_fault("IO.Read") -> return (eof: false, line: "", cause: Val("fault injected: IO.Read"))
-    core.term.__terminal8_line()
+    _guard: core.mem.scope.guard(() -> rt.terminal8_mode_leave())
+    if rt.terminal8_fault("IO.Read") -> return (eof: false, line: "", cause: Val("fault injected: IO.Read"))
+    read: rt.terminal8_line()
+    (eof: read.eof, line: read.line, cause: read.read_error)
 }
 
 choose_menu: fn(prompt: String, options: [String]) -> String Never! {
@@ -509,12 +511,12 @@ positive_dimension: fn(value: String?) -> Int? Never! {
 }
 
 terminal_style_enabled: fn() -[IO]> Bool Never! {
-    mode: core.term.__terminal8_color_mode()
+    mode: rt.terminal8_color_mode()
     if mode == 1 -> return true
     if mode == 2 -> return false
-    if core.term.__terminal8_env_has("NO_COLOR") -> return false
-    if core.term.__terminal8_env_has("FORCE_COLOR") -> return true
-    core.term.__terminal8_stdout_tty()
+    if rt.terminal8_env_has("NO_COLOR") -> return false
+    if rt.terminal8_env_has("FORCE_COLOR") -> return true
+    rt.terminal8_stdout_tty()
 }
 
 legacy_style_code: fn(style: String) -> String Never! {
@@ -675,7 +677,7 @@ stdio_error: fn(operation: IOOperation, resource: String, cause: String) -> IOEr
 }
 
 stdio_checkpoint: fn(operation: IOOperation, resource: String, selector: String) IOError! {
-    if core.term.__stdio_fault(selector) {
+    if rt.stdio_fault(selector) {
         return Err(stdio_error(operation, resource, "fault injected: {selector}"))
     }
     Ok()
@@ -689,8 +691,8 @@ stdio_result: fn(cause: String?, operation: IOOperation, resource: String) IOErr
 }
 
 stdio_terminal: fn(stderr: Bool) -> Bool Never! {
-    if stderr -> return core.term.__stderr_terminal()
-    core.term.__stdout_terminal()
+    if stderr -> return rt.stderr_terminal()
+    rt.stdout_terminal()
 }
 
 // The Rust original holds one lock across write_all and flush. The raw
@@ -699,20 +701,20 @@ stdio_write: fn(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
     flush: !text.is_empty() || newline || stdio_terminal(stderr)
-    stdio_result(core.term.__stdio_write(text, newline, stderr, flush), .Write, resource)
+    stdio_result(rt.stdio_write(text, newline, stderr, flush), .Write, resource)
 }
 
 stdio_bytes: fn(bytes: [U8], stderr: Bool) IOError! -[IO]> {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
     flush: bytes.len() > 0 || stdio_terminal(stderr)
-    stdio_result(core.term.__stdio_bytes(bytes, stderr, flush), .Write, resource)
+    stdio_result(rt.stdio_bytes(bytes, stderr, flush), .Write, resource)
 }
 
 stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Flush, resource, "IO.Flush")
-    stdio_result(core.term.__stdio_flush(stderr), .Flush, resource)
+    stdio_result(rt.stdio_flush(stderr), .Flush, resource)
 }
 
 #Test("stdio source tokens retain declared fields and record equality") {

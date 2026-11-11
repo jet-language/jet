@@ -120,7 +120,7 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
 #Export(c) jet_stdio_stdout_tty_raw: fn() -> Bool { host_is_tty(I64{1}) }
 #Export(c) jet_stdio_stderr_tty_raw: fn() -> Bool { host_is_tty(I64{2}) }
 
-// core.term.__stdio_write/__stdio_bytes/__stdio_flush (Core/Term/Term.jet
+// jet.runtime.term stdio_write/stdio_bytes/stdio_flush (Core/Term/Term.jet
 // stdio_write/stdio_bytes/stdio_flush): the source wrapper decides `flush`.
 #Export(c) jet_term_stdio_write_raw: fn(text: I64, newline: Bool, stderr: Bool, flush: Bool, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_text_failure(text, newline, stderr, flush), some)
@@ -134,7 +134,7 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_flush_failure(stderr), some)
 }
 
-// core.term.__stdout_terminal/__stderr_terminal and __terminal8_*_tty.
+// jet.runtime.term stdout_terminal/stderr_terminal and terminal8_*_tty.
 #Export(c) jet_term_stdin_is_terminal: fn() -> Bool { host_is_tty(I64{0}) }
 #Export(c) jet_term_stdout_is_terminal: fn() -> Bool { host_is_tty(I64{1}) }
 #Export(c) jet_term_stderr_is_terminal: fn() -> Bool { host_is_tty(I64{2}) }

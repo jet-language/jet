@@ -1352,7 +1352,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
         diagnostics.push(sema_call_core_unknown_item("core.process", "argv", span))
         return None
     }
-    if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
+    if record.module_name == "core.term" && record.member == "__stdin_line" {
         if !sema_call_core_checked_source(environment) {
             diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
             return None

@@ -11,6 +11,7 @@ package: {
 use {
     tui_sys: core.sys
     core: core
+    rt: jet.runtime.term
     ui: core.ui
     core.ui.[Rect, UINode]
     math: core.math
@@ -125,13 +126,7 @@ capability_raw_flag: fn(value: [U8]?) -> Bool Never! {
     false
 }
 
-capability_stdout_terminal: fn() -> Bool Never! {
-    result := false
-    #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
-        result = core.term.__stdout_terminal()
-    }
-    result
-}
+capability_stdout_terminal: fn() -> Bool Never! { rt.stdout_terminal() }
 
 capability_inputs: fn() -> TUICapabilityInputs Never! {
     // env::var: invalid UTF-8 is absent.
