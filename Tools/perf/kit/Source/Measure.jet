@@ -310,6 +310,18 @@ safe_integer: fn(value: Dyn?) -> Int? Never! {
     Val(Int.from_float(number) ?? return None)
 }
 
+// The recorded run as a caller holds it in JSON: a pid or time that is not a
+// safe integer fails readTrace's identity check.
+completed_from: fn(exit_code: Int?, pid: Dyn?, started: Dyn?, finished: Dyn?) -> Completed Never! {
+    unsafe: MAX_SAFE_INTEGER + 1
+    Completed{
+        exit_code: exit_code
+        pid: safe_integer(pid) ?? 0
+        started_unix_ms: safe_integer(started) ?? unsafe
+        finished_unix_ms: safe_integer(finished) ?? unsafe
+    }
+}
+
 read_failure: fn(file: String, error: IOError) -> MeasureError Never! {
     if error == .NotFound(_) -> return measure_error("ENOENT: no such file or directory, open '{file}'")
     measure_error("{error}")

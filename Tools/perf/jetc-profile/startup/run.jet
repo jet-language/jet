@@ -1,0 +1,381 @@
+// The startup cell of the native host shape, the twin of startup.mjs: reads a
+// pair directory's matched plain and optimized compiles of one pinned input
+// snapshot and writes the receipt comparing their median wall, compile and
+// pre-parse times.
+//
+// PAIR_DIRECTORY holds pair.json (schema, source_sha256, entry, machine,
+// build_profile), inputs/ (the regular-file snapshot that source_sha256
+// hashes) and plain/ and optimized/ with the same trial-N directories. Each
+// trial holds rc, invocation.json, receipt (the canonical key=value receipt),
+// trace.json (the completed compile trace), out.rs and time.txt (GNU time -v).
+// The receipt is also printed; the exit is 1 unless every median wins.
+//
+//   jet Tools/perf/jetc-profile/startup PAIR_DIRECTORY NEW_RECEIPT_FILE
+package: {
+    name: "jetc_profile_startup"
+    version: "0.0.1"
+    deps: {
+        jet_perf_kit: ../../kit,
+    }
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+    jet_perf_kit.[MeasureError, completed_from, digits_end, digits_text, field, is_text, js_round, js_space_len, js_string, js_trim, json_quote, json_stringify, measure_error, number_from_text, read_failure, read_trace, safe_integer, same, text_of, truthy]
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    term: core.term
+}
+
+SCHEMA: "jet.native-host-shape-pair.v1"
+USAGE: "usage: startup.mjs PAIR_DIRECTORY NEW_RECEIPT_FILE"
+ELAPSED: "Elapsed (wall clock) time (h:mm:ss or m:ss):"
+METRICS: [String]{"wall_ns", "compile_ns", "pre_parse_ns"}
+ZERO: Float{0.0}
+MINUTE: Float{60.0}
+HOUR: Float{3600.0}
+BILLION: Float{1000000000.0}
+MAX_SAFE: Float{9007199254740991.0}
+
+// The canonical receipt as startupReceipt reads it: absent numbers are NaN.
+Receipt: struct {
+    complete: Bool
+    report_count: Float
+    source_bytes: Float
+    selected_factory_tier: String?
+    actual_factory_tier: String?
+    compiler_identity: String?
+}
+
+Timing: struct {
+    wall_ns: Int
+    compile_ns: Int
+    pre_parse_ns: Int
+}
+
+Trial: struct {
+    receipt: Receipt
+    source_sha256: String
+    artifact_sha256: String
+    timing: Timing
+}
+
+Compared: struct {
+    receipt: Dyn
+    win: Bool
+}
+
+// An uncaught JavaScript error: the message on stderr and exit 1.
+crash: fn(message: String) -[Exec, IO]> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+hex64: fn(text: String) -> Bool Never! {
+    if text.bytes().len() != 64 -> return false
+    loop byte in text.bytes() {
+        code: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// Number.isSafeInteger.
+safe_float: fn(value: Float) -> Bool Never! {
+    math.is_finite(value) && !(math.abs(value - math.floor(value)) > ZERO) && math.abs(value) <= MAX_SAFE
+}
+
+// `a !== b` of two numbers: true when either is NaN.
+differs: fn(a: Float, b: Float) -> Bool Never! { !(math.abs(a - b) <= ZERO) }
+
+read_text: fn(file: String) -[FS]> String MeasureError! {
+    Ok(files.read(file) ?? return Err(read_failure(file, err)))
+}
+
+read_json: fn(file: String) -[FS]> Dyn MeasureError! {
+    text: read_text(file)
+    Ok(json.parse(text) ?? return Err(MeasureError{message: "{err}", syntax: true}))
+}
+
+// fs.realpathSync: a missing path is node's lstat ENOENT.
+real_path: fn(path: String) -[Env, FS]> String MeasureError! {
+    resolved: files.canonicalize(path) ?? {
+        if err == .NotFound(_) -> return Err(measure_error("ENOENT: no such file or directory, lstat '{files.collapse(files.absolute(path) ?? path)}'"))
+        return Err(measure_error("{err}"))
+    }
+    Ok(resolved)
+}
+
+get: fn(event: Dyn, key: String) -> Dyn? Never! { field(Val(event), key) }
+
+// startupReceipt: one key=value per non-empty line, the last of a key kept.
+startup_receipt: fn(text: String) -> Receipt MeasureError! {
+    fields := [String: String]{}
+    loop line in text.split("\n") {
+        if line == "" -> next
+        parts: line.partition("=")
+        if parts.sep == "" || parts.head == "" -> return Err(measure_error("invalid canonical startup receipt"))
+        fields[parts.head.copy()] = parts.tail.copy()
+    }
+    Ok(Receipt{
+        complete: fields.get("complete") == Val("true")
+        report_count: if fields.get("report_count") == .Val(count) -> number_from_text(count) else -> math.NAN
+        source_bytes: if fields.get("source_bytes") == .Val(bytes) -> number_from_text(bytes) else -> math.NAN
+        selected_factory_tier: fields.get("selected_factory_tier")
+        actual_factory_tier: fields.get("actual_factory_tier")
+        compiler_identity: fields.get("compiler_identity")
+    })
+}
+
+// startupInputHash's walk: [name, sha256] of every regular file in name order.
+walk_inputs: fn(root: String, relative: String, out: &[String]) MeasureError! -[FS]> {
+    listed: files.list_dir(files.join(root, relative)) ?? return Err(measure_error("{err}"))
+    names := [String]{}
+    loop entry in listed -> names.push(entry.name.copy())
+    names.sort()
+    loop name in names {
+        child: if relative == "" -> name.copy() else -> "{relative}/{name}"
+        path: files.join(root, child)
+        info: files.stat(path) ?? return Err(measure_error("{err}"))
+        if info.is_dir {
+            walk_inputs(root, child, out)
+            next
+        }
+        if !info.is_file -> return Err(measure_error("startup inputs must be an immutable regular-file snapshot"))
+        bytes: files.read_bytes(path) ?? return Err(measure_error("{err}"))
+        out.push("[{json_quote(child)},{json_quote(crypto.sha256(bytes).hex())}]")
+    }
+    Ok()
+}
+
+startup_input_hash: fn(root: String) -[FS]> String MeasureError! {
+    entries := [String]{}
+    walk_inputs(root, "", entries)
+    if entries.len() == 0 -> return Err(measure_error("startup input snapshot is empty"))
+    Ok(crypto.sha256("[{entries.join(",")}]").hex())
+}
+
+boundaries: fn(events: [Dyn], cat: String, name: String, ph: String) -> [Dyn] Never! {
+    out := [Dyn]{}
+    loop event in events {
+        if is_text(get(event, "cat"), cat) && is_text(get(event, "name"), name) && is_text(get(event, "ph"), ph) -> out.push(event.copy())  // copy: the trace keeps its events
+    }
+    out
+}
+
+text_between: fn(bytes: [U8], from: Int, to: Int) -> String Never! {
+    out := [U8]{}
+    loop at in from..<to -> out.push(bytes[at])
+    String.from_bytes(out) ?? ""
+}
+
+colon_at: fn(bytes: [U8], at: Int) -> Bool Never! { at < bytes.len() && Int.from_u8(bytes[at]) == 58 }
+
+// The end of `\d+(?:\.\d+)?` whose digits end at `end`.
+fraction_end: fn(bytes: [U8], end: Int) -> Int Never! {
+    if end >= bytes.len() || Int.from_u8(bytes[end]) != 46 -> return end
+    after: digits_end(bytes, end + 1)
+    if after > end + 1 -> after else -> end
+}
+
+// `\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)` at the start of `bytes`, in seconds.
+clock_seconds: fn(bytes: [U8]) -> Float? Never! {
+    at := 0
+    loop at < bytes.len() && js_space_len(bytes, at) > 0 -> at += js_space_len(bytes, at)
+    first_end: digits_end(bytes, at)
+    if first_end == at || !colon_at(bytes, first_end) -> return None
+    second_end: digits_end(bytes, first_end + 1)
+    if second_end == first_end + 1 -> return None
+    first: number_from_text(text_between(bytes, at, first_end))
+    second_text: text_between(bytes, first_end + 1, second_end)
+    third_end: if colon_at(bytes, second_end) -> digits_end(bytes, second_end + 1) else -> second_end
+    if third_end > second_end + 1 {
+        return Val(first * HOUR + number_from_text(second_text) * MINUTE + number_from_text(text_between(bytes, second_end + 1, fraction_end(bytes, third_end))))
+    }
+    Val(first * MINUTE + number_from_text(text_between(bytes, first_end + 1, fraction_end(bytes, second_end))))
+}
+
+// The first match of GNU time's elapsed line.
+elapsed_seconds: fn(text: String) -> Float? Never! {
+    parts: text.split(ELAPSED).to_list()
+    loop at in 1..<parts.len() {
+        seconds: clock_seconds(parts[at].bytes()) ?? next
+        return Val(seconds)
+    }
+    None
+}
+
+// startupTiming: the one compile span and the pinned entry's parse span of
+// one thread, and GNU time's wall clock.
+startup_timing: fn(events: [Dyn], time_text: String, entry: String) -> Timing MeasureError! {
+    begins: boundaries(events, "compile", "compile", "B")
+    ends: boundaries(events, "compile", "compile", "E")
+    parse_begins: boundaries(events, "parse", entry, "B")
+    parse_ends: boundaries(events, "parse", entry, "E")
+    if begins.len() != 1 || ends.len() != 1 || parse_begins.len() != 1 || parse_ends.len() != 1 {
+        return Err(measure_error("missing or ambiguous compile/selected-entry parse boundaries"))
+    }
+    invalid: measure_error("invalid compile/selected-entry parse boundaries")
+    begin: begins[0]
+    loop event in ([Dyn]{ends[0], parse_begins[0], parse_ends[0]}) {
+        if !same(get(event, "pid"), get(begin, "pid")) || !same(get(event, "tid"), get(begin, "tid")) -> return Err(invalid)
+    }
+    start: safe_integer(get(begin, "ts")) ?? return Err(invalid)
+    end: safe_integer(get(ends[0], "ts")) ?? return Err(invalid)
+    parse: safe_integer(get(parse_begins[0], "ts")) ?? return Err(invalid)
+    parse_end: safe_integer(get(parse_ends[0], "ts")) ?? return Err(invalid)
+    if !(start < parse && parse <= parse_end && parse_end <= end) -> return Err(invalid)
+    seconds: elapsed_seconds(time_text) ?? return Err(measure_error("missing process wall time"))
+    if !math.is_finite(seconds) || !(seconds > ZERO) -> return Err(measure_error("invalid process wall time"))
+    Ok(Timing{
+        wall_ns: Int.from_float(js_round(seconds * BILLION)) ?? 0
+        compile_ns: (end - start) * 1000
+        pre_parse_ns: (parse - start) * 1000
+    })
+}
+
+timing_of: fn(timing: Timing, name: String) -> Int Never! {
+    if name == {
+        "wall_ns" -> timing.wall_ns
+        "compile_ns" -> timing.compile_ns
+        else -> timing.pre_parse_ns
+    }
+}
+
+// The median of the arm's `name` timings.
+median: fn(rows: [Trial], name: String) -> Int Never! {
+    sorted := [Int]{}
+    loop row in rows -> sorted.push(timing_of(row.timing, name))
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+check_identity: fn(rows: [Trial]) MeasureError! {
+    first: rows[0].receipt.compiler_identity
+    if first == None || first == Val("") || first == Val("unavailable") -> return Err(measure_error("compiler identity unavailable"))
+    loop row in rows {
+        if row.receipt.compiler_identity != first -> return Err(measure_error("compiler identity changed within an arm"))
+    }
+    Ok()
+}
+
+// compareStartup: the receipt's leading fields and whether every median wins.
+compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value: Dyn)] MeasureError! {
+    if plain.len() < 3 || plain.len() != optimized.len() -> return Err(measure_error("require at least three matched startup trials"))
+    oracle: plain[0]
+    rows := plain.copy()  // copy: plain is read again below
+    rows.extend(optimized.copy())  // copy: optimized is read again below
+    loop row in rows {
+        receipt: row.receipt
+        if !receipt.complete || differs(receipt.report_count, ZERO) || !safe_float(receipt.source_bytes) || !(receipt.source_bytes > ZERO) || receipt.selected_factory_tier != Val("Aot") || receipt.actual_factory_tier != Val("Aot") {
+            return Err(measure_error("startup compile did not complete through the canonical AOT factory"))
+        }
+        if !hex64(row.artifact_sha256) || row.artifact_sha256 != oracle.artifact_sha256 || differs(receipt.source_bytes, oracle.receipt.source_bytes) -> return Err(measure_error("paired emitted artifact differs"))
+        if !hex64(row.source_sha256) || row.source_sha256 != oracle.source_sha256 -> return Err(measure_error("paired actual project inputs differ"))
+        loop name in METRICS {
+            if timing_of(row.timing, name) <= 0 -> return Err(measure_error("missing or invalid startup timing"))
+        }
+    }
+    check_identity(plain)
+    check_identity(optimized)
+    metrics := [(key: String, value: Dyn)]{}
+    wins := true
+    loop name in METRICS {
+        base: median(plain, name)
+        candidate: median(optimized, name)
+        verdict: if candidate < base -> "win" else -> "loss"
+        if candidate >= base -> wins = false
+        row := [(key: String, value: Dyn)]{}
+        row.push((key: "plain_ns", value: Dyn.Text("{base}")))
+        row.push((key: "optimized_ns", value: Dyn.Text("{candidate}")))
+        row.push((key: "verdict", value: Dyn.Text(verdict)))
+        metrics.push((key: name.copy(), value: Dyn.Object(row)))
+    }
+    out := [(key: String, value: Dyn)]{}
+    out.push((key: "schema", value: Dyn.Text(SCHEMA)))
+    out.push((key: "trials", value: Dyn.Int(plain.len())))
+    out.push((key: "artifact_sha256", value: Dyn.Text(oracle.artifact_sha256.copy())))
+    out.push((key: "metrics", value: Dyn.Object(metrics)))
+    out.push((key: "verdict", value: Dyn.Text(if wins -> "win" else -> "loss")))
+    Ok(out)
+}
+
+// The arm's trial-N directories in name order.
+trial_names: fn(root: String, arm: String) -[FS]> [String] MeasureError! {
+    listed: files.list_dir(files.join(root, arm)) ?? return Err(measure_error("{err}"))
+    names := [String]{}
+    loop entry in listed {
+        if entry.name.starts_with("trial-") && digits_text(entry.name.slice(6..<entry.name.len())) -> names.push(entry.name.copy())
+    }
+    names.sort()
+    Ok(names)
+}
+
+read_trial: fn(dir: String, pair: Dyn, input_root: String, entry: String) -[Env, FS]> Trial MeasureError! {
+    exit_code: js_trim(read_text(files.join(dir, "rc")))
+    if exit_code != "0" -> return Err(measure_error("startup process failed"))
+    invocation: read_json(files.join(dir, "invocation.json"))
+    // realpathSync(undefined) resolves the path "undefined".
+    root_text: if get(invocation, "source_root") == None -> "undefined" else -> text_of(get(invocation, "source_root")) ?? return Err(measure_error("The \"path\" argument must be of type string"))
+    source_root: real_path(root_text)
+    if source_root != input_root || !same(get(invocation, "source_sha256"), get(pair, "source_sha256")) || !same(get(invocation, "entry"), get(pair, "entry")) {
+        return Err(measure_error("startup trial did not use the actual matched input snapshot and entry"))
+    }
+    receipt: startup_receipt(read_text(files.join(dir, "receipt")))
+    if !receipt.complete || differs(receipt.report_count, ZERO) -> return Err(measure_error("startup compile did not complete"))
+    trace_file: files.join(dir, "trace.json")
+    trace_bytes: files.read_bytes(trace_file) ?? return Err(read_failure(trace_file, err))
+    if !is_text(get(invocation, "trace_sha256"), crypto.sha256(trace_bytes).hex()) -> return Err(measure_error("startup trace differs from the recorded completed process"))
+    completed: completed_from(Val(0), get(invocation, "process_pid"), get(invocation, "process_started_unix_ms"), get(invocation, "process_finished_unix_ms"))
+    events: read_trace(trace_file, Val(completed))
+    artifact_file: files.join(dir, "out.rs")
+    artifact: files.read_bytes(artifact_file) ?? return Err(read_failure(artifact_file, err))
+    Ok(Trial{
+        receipt: receipt
+        source_sha256: text_of(get(invocation, "source_sha256")) ?? ""
+        artifact_sha256: crypto.sha256(artifact).hex()
+        timing: startup_timing(events, read_text(files.join(dir, "time.txt")), entry)
+    })
+}
+
+read_arm: fn(root: String, arm: String, trials: [String], pair: Dyn, input_root: String, entry: String) -[Env, FS]> [Trial] MeasureError! {
+    out := [Trial]{}
+    loop name in trials -> out.push(read_trial(files.join(files.join(root, arm), name), pair, input_root, entry))
+    Ok(out)
+}
+
+// compareStartupDirectory.
+compare_directory: fn(root: String) -[Env, FS]> Compared MeasureError! {
+    pair: read_json(files.join(root, "pair.json"))
+    if !is_text(get(pair, "schema"), SCHEMA) || !hex64(js_string(get(pair, "source_sha256"))) || !truthy(get(pair, "machine")) || !truthy(get(pair, "build_profile")) {
+        return Err(measure_error("startup pair must record shared source hash, machine, and build profile"))
+    }
+    input_root: real_path(files.join(root, "inputs"))
+    if !is_text(get(pair, "source_sha256"), startup_input_hash(input_root)) -> return Err(measure_error("startup input snapshot differs from the paired source hash"))
+    pinned: measure_error("startup pair must pin its relative source entry")
+    entry: text_of(get(pair, "entry")) ?? return Err(pinned)
+    if files.is_absolute(entry) || files.relative(real_path(files.join(input_root, entry)), input_root) != entry || !files.is_file(files.join(input_root, entry)) -> return Err(pinned)
+    trials: trial_names(root, "plain")
+    if trials.join("\n") != trial_names(root, "optimized").join("\n") -> return Err(measure_error("unmatched startup trial directories"))
+    plain: read_arm(root, "plain", trials, pair, input_root, entry)
+    optimized: read_arm(root, "optimized", trials, pair, input_root, entry)
+    out := compare_startup(plain, optimized)
+    wins: out[4].value == Dyn.Text("win")
+    out.push((key: "pair", value: pair))
+    out.push((key: "trial_directories", value: Dyn.Array(trials.map(name -> Dyn.Text(name.copy())))))
+    Ok(Compared{receipt: Dyn.Object(out), win: wins})
+}
+
+run: fn() {
+    argv: process.args()
+    if argv.len() < 2 || argv[0] == "" || argv[1] == "" -> crash(USAGE)
+    root: files.collapse(files.absolute(argv[0]) ?? crash("{err}"))
+    compared: compare_directory(root) ?? crash(err.message)
+    text: json_stringify(compared.receipt, 2)
+    if files.lexists(argv[1]) -> crash("EEXIST: file already exists, open '{argv[1]}'")
+    files.write(argv[1], "{text}\n") ?? crash(read_failure(argv[1], err).message)
+    print(text)
+    if !compared.win -> process.exit(1)
+}

@@ -14,7 +14,7 @@ package: {
 
 use {
     files: core.files
-    jet_perf_kit.[Completed, KIT_ZERO, MAX_SAFE_INTEGER, MeasureError, MeasureOptions, Sample, counters_json, cpu_at, field, items, json_stringify, kill_tree, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
+    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, Sample, completed_from, counters_json, cpu_at, field, items, json_stringify, kill_tree, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
     json: core.encoding.json
     process: core.process
     time: core.time
@@ -41,25 +41,15 @@ samples_of: fn(value: Dyn) -> [Sample] {
     out
 }
 
-// The recorded run as the caller holds it: a value that is not a safe
-// integer fails readTrace's identity check.
-completed_of: fn(value: Dyn) -> Completed {
-    unsafe: MAX_SAFE_INTEGER + 1
-    Completed{
-        exit_code: safe_integer(field(Val(value), "exitCode"))
-        pid: safe_integer(field(Val(value), "pid")) ?? 0
-        started_unix_ms: safe_integer(field(Val(value), "startedUnixMs")) ?? unsafe
-        finished_unix_ms: safe_integer(field(Val(value), "finishedUnixMs")) ?? unsafe
-    }
-}
-
 show_trace: fn(argv: [String]) -[Exec, FS, IO]> {
     events: read_trace(argv[1], None) ?? fail(err)
     print(json_stringify(Dyn.Array(events), 0))
 }
 
 show_strict: fn(argv: [String]) -[Exec, FS, IO]> {
-    events: read_trace(argv[1], Val(completed_of(read_json(argv[2])))) ?? fail(err)
+    identity: read_json(argv[2])
+    completed: completed_from(safe_integer(field(Val(identity), "exitCode")), field(Val(identity), "pid"), field(Val(identity), "startedUnixMs"), field(Val(identity), "finishedUnixMs"))
+    events: read_trace(argv[1], Val(completed)) ?? fail(err)
     print("{events.len()} events")
 }
 
