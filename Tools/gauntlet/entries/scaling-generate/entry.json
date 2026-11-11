@@ -1,10 +1,10 @@
 {
   "name": "scaling-generate",
   "mode": "tool",
-  "description": "The compiler scaling gate's corpus generator generate.mjs (with package.mjs, corpora.mjs, domains.mjs and mixed.mjs) and its Jet twin Generate.jet (with Packages.jet, Corpora.jet, Domains.jet and Mixed.jet), #5072 c7: list the shapes, write every stress shape and every domain shape at a small size and two mixed packages into a new directory, and refuse an unknown shape, a zero size, a bad seed, an out-of-range mixed input and an existing output. Each writing case's check.jet states the printed JSON line (the entry relative to the case directory), every written file with its size and digest, and whether the printed source_sha256 is the digest of the written package; the refusals print nothing and exit 2. The fixtures hold `existing/main.jet`, the output a regeneration must not overwrite.",
+  "description": "The compiler scaling gate's corpus generator generate.mjs (with package.mjs, corpora.mjs, domains.mjs and mixed.mjs) and its Jet twin generate/run.jet (over the jet_scaling_corpora package: Packages.jet, Corpora.jet, Domains.jet and Mixed.jet), #5072 c7: list the shapes, write every stress shape and every domain shape at a small size and two mixed packages into a new directory, and refuse an unknown shape, a zero size, a bad seed, an out-of-range mixed input and an existing output. Each writing case's check.jet states the printed JSON line (the entry relative to the case directory), every written file with its size and digest, and whether the printed source_sha256 is the digest of the written package; the refusals print nothing and exit 2. The fixtures hold `existing/main.jet`, the output a regeneration must not overwrite.",
   "tool": {
     "original": "Tools/perf/scaling/generate.mjs",
-    "jet": "Tools/perf/scaling/Generate.jet",
+    "jet": "Tools/perf/scaling/generate/run.jet",
     "fixtures": "fixtures",
     "cases": [
       {
@@ -180,12 +180,34 @@
       },
       {
         "args": [
+          "wide-enums",
+          "8",
+          "--seed",
+          "17",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/wide-enums-8-seed17.out"
+      },
+      {
+        "args": [
           "web",
           "400",
           "out"
         ],
         "check": "check.jet",
         "expected": "expected/web.out"
+      },
+      {
+        "args": [
+          "web",
+          "80",
+          "--seed",
+          "17",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/web-80-seed17.out"
       },
       {
         "args": [
@@ -291,6 +313,18 @@
         ],
         "check": "check.jet",
         "expected": "expected/mixed-top-seed.out"
+      },
+      {
+        "args": [
+          "mixed",
+          "--code-lines",
+          "300",
+          "--seed",
+          "17",
+          "out"
+        ],
+        "check": "check.jet",
+        "expected": "expected/mixed-300-seed17.out"
       },
       {
         "args": [

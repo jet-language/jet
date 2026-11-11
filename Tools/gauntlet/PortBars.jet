@@ -82,7 +82,11 @@
 // relative to the importing file and it resolves to a file inside the
 // repository: JavaScript `import … from './x.mjs'` (or '../…'); a shell
 // `. "$(dirname "$0")/x.sh"` or `source` line; Python `from .x import …`;
-// Jet `use name: "Module"` (`Module.jet` beside the file). Core, Node
+// Jet `use name: "Module"` (`Module.jet` beside the file). A Jet package path
+// dependency (`deps: { kit: ../kit, }` in the file's inline `package:` block)
+// counts each file of the package's Source directory that declares a name the
+// file's `use` lines take from it (`kit.[a, b]`, `kit.a`), then each file
+// there declaring a word such a counted file uses. Core, Node
 // built-ins and installed packages are never counted.
 //
 // PROXY RULES. Branches are decisions, counted by one table per language that
@@ -934,21 +938,137 @@ imports_of: fn(text: String, language: Language) -> [String] Never! {
     out
 }
 
+// The path dependencies of a Jet file's inline `package:` block, each
+// "name\tpath" with the path as written relative to the file.
+package_deps: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    in_deps := false
+    loop raw in text.split("\n").to_list() {
+        line: raw.trim()
+        if line == "deps: {{" {
+            in_deps = true
+            next
+        }
+        if !in_deps -> next
+        if line.starts_with("}}") -> return out
+        pair: line.removesuffix(",").partition(":")
+        written: pair.tail.trim()
+        path: if written.starts_with("\"") -> quoted(written) else -> written
+        if path != "" -> out.push("{pair.head.trim()}\t{path}")
+    }
+    out
+}
+
+// The names a Jet file's `use` lines take from package `name`: each of
+// `name.[a, b]`, and `a` of `name.a`.
+package_names: fn(text: String, name: String) -> [String] Never! {
+    out := [String]{}
+    prefix: "{name}."
+    in_use_block := false
+    loop raw in text.split("\n").to_list() {
+        line: raw.trim()
+        if line == "use {{" {
+            in_use_block = true
+            next
+        }
+        if in_use_block && line == "}}" -> in_use_block = false
+        if !in_use_block && !line.starts_with("use ") -> next
+        bare: line.removeprefix("use ").trim()
+        target: if bare.starts_with(prefix) -> bare else -> bare.partition(":").tail.trim()
+        if !target.starts_with(prefix) -> next
+        rest: target.removeprefix(prefix)
+        if !rest.starts_with("[") {
+            out.push(rest.partition(".").head.trim())
+            next
+        }
+        loop word in rest.removeprefix("[").partition("]").head.split(",").to_list() {
+            if word.trim() != "" -> out.push(word.trim())
+        }
+    }
+    out
+}
+
+// The top-level names a Jet source declares: each line that starts with a
+// word directly followed by `:`.
+declared: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    loop line in text.split("\n").to_list() {
+        if !line.contains(":") -> next
+        name: line.partition(":").head
+        bytes: name.bytes()
+        word := bytes.len() > 0
+        loop byte in bytes {
+            if !is_word_byte(Int.from_u8(byte)) -> word = false
+        }
+        if word -> out.push(name.copy())
+    }
+    out
+}
+
+// The files of the package at `dir`'s Source directory that declare one of
+// `wanted`, in name order.
+package_sources: fn(repo: String, dir: String, wanted: [String]) -[FS]> [String] Never! {
+    source: "{dir}/Source"
+    listed: files.list_dir(files.join(repo, source)) ?? return [String]{}
+    out := [String]{}
+    loop item in listed {
+        if item.is_dir || !item.name.ends_with(".jet") -> next
+        path: "{source}/{item.name}"
+        text: files.read(files.join(repo, path)) ?? next
+        hit := false
+        loop name in declared(text) {
+            if wanted.contains(name) -> hit = true
+        }
+        if hit -> out.push(path)
+    }
+    out.sort()
+    out
+}
+
 // The program at `path` in `repo`, written in `language`.
 program: fn(repo: String, path: String, language: Language) -[FS]> Program Never! {
     found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}}
+    // The package directory each path belongs to, "" for none.
+    owners := [String]{""}
     index := 0
     loop index < found.paths.len() {
         file: found.paths[index].copy()
         text: files.read(files.join(repo, file)) ?? ""
         listed: tokens(text, language)
         counted: if language == .Jet -> without_tests(listed) else -> listed
+        words := [String]{}
+        loop at in 0..<counted.len() {
+            if counted[at].kind == .Word -> words.push(counted[at].text.copy())
+        }
         found.counts.push(counted.len())
         found.tokens.extend(counted)
         loop written in imports_of(text, language) {
             loop spec in written.split("\n").to_list() {
                 target: normalized("{files.dirname(file)}/{spec}")
-                if target != "" && !found.paths.contains(target) && files.is_file(files.join(repo, target)) -> found.paths.push(target)
+                if target != "" && !found.paths.contains(target) && files.is_file(files.join(repo, target)) {
+                    found.paths.push(target)
+                    owners.push("")
+                }
+            }
+        }
+        if language == .Jet {
+            reached := [String]{}
+            owner: owners[index].copy()
+            if owner != "" {
+                loop target in package_sources(repo, owner, words) -> reached.push("{owner}\t{target}")
+            }
+            loop dep in package_deps(text) {
+                pair: dep.partition("\t")
+                dir: normalized("{files.dirname(file)}/{pair.tail}")
+                if dir == "" -> next
+                loop target in package_sources(repo, dir, package_names(text, pair.head)) -> reached.push("{dir}\t{target}")
+            }
+            loop pair in reached {
+                split: pair.partition("\t")
+                if !found.paths.contains(split.tail) {
+                    found.paths.push(split.tail.copy())
+                    owners.push(split.head.copy())
+                }
             }
         }
         index += 1
@@ -1687,6 +1807,19 @@ run: fn() {
     python: program(dir, "Tools/fx/pkg/tool.py", .Python)
     assert_eq(python.paths, ["Tools/fx/pkg/tool.py", "Tools/fx/pkg/util.py", "Tools/fx/pkg/extra.py"])
     assert_eq(normalized("Tools/fx/../../../x.mjs"), "")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a Jet twin counts the package sources it takes names from, and those they use") {
+    dir: files.mkdtemp("port-bars-package") ?? panic("a temporary directory cannot be made: {err}")
+    plant(dir, "Tools/kit/package.jet", "package: {{\n    name: \"kit\"\n    version: \"0.0.1\"\n}}\n")
+    plant(dir, "Tools/kit/Source/A.jet", "alpha: fn() -> Int {{ beta() }}\n")
+    plant(dir, "Tools/kit/Source/B.jet", "beta: fn() -> Int {{ 2 }}\n")
+    plant(dir, "Tools/kit/Source/C.jet", "gamma: fn() -> Int {{ 3 }}\n")
+    plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse {{\n    kit.[alpha]\n    math: core.math\n}}\n\nrun: fn() {{ print(alpha()) }}\n")
+    twin: program(dir, "Tools/fx/twin/run.jet", .Jet)
+    assert_eq(twin.paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/B.jet"])
+    assert_eq(package_names("use {{\n    kit.[alpha, beta]\n    one: kit.gamma\n}}\nuse kit.delta\n", "kit"), ["alpha", "beta", "gamma", "delta"])
     files.remove_all(dir) ?? ()
 }
 

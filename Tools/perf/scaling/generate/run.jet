@@ -1,0 +1,165 @@
+// Writes one package of the compiler scaling family (Corpora.jet) or the
+// `mixed` profile (Mixed.jet) of the jet_scaling_corpora package into a new
+// directory and prints one JSON line describing it; the twin of generate.mjs.
+//
+// Usage: jet Tools/perf/scaling/generate SHAPE N [--seed S] NEW_DIRECTORY
+//        jet Tools/perf/scaling/generate mixed --code-lines N --seed S NEW_DIRECTORY
+//        jet Tools/perf/scaling/generate --list
+// Every problem propagates to `run`, the one failure boundary (generate.mjs's
+// one catch), which prints its message to stderr and exits 2.
+package: {
+    name: "scaling_generate"
+    version: "0.0.1"
+    deps: {
+        jet_scaling_corpora: ../corpora,
+    }
+}
+
+use {
+    jet_scaling_corpora.[check_inputs, corpus, mixed_sources, shape_names, shape_of, shapes, write_files]
+    json: core.encoding.json
+    parse: core.text.parse
+    process: core.process
+}
+
+usage: fn() -> String {
+    lines: [String]{
+        "Usage: jet Tools/perf/scaling/generate SHAPE N [--seed S] NEW_DIRECTORY",
+        "       jet Tools/perf/scaling/generate mixed --code-lines N --seed S NEW_DIRECTORY",
+        "       jet Tools/perf/scaling/generate --list",
+        "N is the stress dimension for stress shapes and code lines for domain shapes.",
+        "Shapes: {shape_names()}",
+        "Both forms print one JSON line describing the written package.",
+    }
+    lines.join("\n")
+}
+
+count_of: fn(text: String) -> Int Err! { Int.parse(text) ?? return Err("{text} is too large\n{usage()}") }
+
+// The value after each flag of `names` (the last one wins) and the other
+// arguments, in order.
+Flags: struct {
+    values: [String:Int]
+    rest: [String]
+}
+
+numeric_flags: fn(args: [String], names: [String]) -> Flags Err! {
+    values := [String:Int]{}
+    rest := [String]{}
+    i := 0
+    loop i < args.len() {
+        arg: args[i]
+        if {
+            names.contains(arg) -> {
+                value: args.get(i + 1) ?? ""
+                if !parse.is_digit(value) -> return Err("{arg} needs a nonnegative integer\n{usage()}")
+                values[arg] = count_of(value)
+                i += 2
+            }
+            else -> {
+                // copy: the rest outlives the arguments' borrow
+                rest.push(arg.copy())
+                i += 1
+            }
+        }
+    }
+    Ok(Flags{values: values, rest: rest})
+}
+
+listing: fn() -> String {
+    shapes().map(shape -> {
+        kind: if shape.kind == .Stress -> "stress" else -> "domain"
+        unit: if shape.kind == .Stress -> "n" else -> "lines"
+        "{shape.name.pad_end(14, " ")} {kind.pad_end(7, " ")} base {"{shape.base}".pad_start(7, " ")} {unit}: {shape.dimension}"
+    }).join("\n")
+}
+
+// The printed line of a corpus, field for field as generate.mjs prints it.
+Expect: struct {
+    diagnostics: Int
+}
+
+Generated: struct {
+    entry: String
+    shape: String
+    n: Int
+    seed: Int
+    kind: String
+    code_lines: Int
+    files: Int
+    expect: Expect
+    source_sha256: String
+}
+
+// One corpus of the scaling family: entry, digest, expected diagnostics and
+// code lines.
+generate: fn(args: [String], name: String) -> String Err! {
+    flags: numeric_flags(args, ["--seed"])
+    if flags.rest.len() != 2 || !parse.is_digit(flags.rest[0]) -> return Err(usage())
+    n: count_of(flags.rest[0])
+    seed: flags.values.get("--seed") ?? 1
+    built: corpus(shape_of(name, n), n, seed, "files")
+    Ok(json.to_string(Generated{
+        entry: write_files(built.files, flags.rest[1]),
+        shape: name,
+        n: n,
+        seed: seed,
+        kind: if built.kind == .Stress -> "stress" else -> "domain",
+        code_lines: built.code_lines,
+        files: built.files.len(),
+        expect: Expect{diagnostics: built.diagnostics},
+        source_sha256: built.source_sha256,
+    }))
+}
+
+// The printed line of the `mixed` profile.
+MixedStats: struct {
+    physical_lines: Int
+    code_lines: Int
+    bytes: Int
+    functions: Int
+    types: Int
+    comptime_items: Int
+    sections: Int
+}
+
+MixedGenerated: struct {
+    entry: String
+    source_sha256: String
+    expected: String
+    stats: MixedStats
+}
+
+// The `mixed` profile: the entry, the package digest, the expected stdout
+// and the shape statistics.
+generate_mixed: fn(args: [String]) -> String Err! {
+    flags: numeric_flags(args, ["--code-lines", "--seed"])
+    code_lines: flags.values.get("--code-lines") ?? return Err(usage())
+    seed: flags.values.get("--seed") ?? return Err(usage())
+    if flags.rest.len() != 1 -> return Err(usage())
+    check_inputs(code_lines, seed)
+    built: mixed_sources(code_lines, seed)
+    stats: built.stats
+    Ok(json.to_string(MixedGenerated{
+        entry: write_files(built.files, flags.rest[0]),
+        source_sha256: built.source_sha256,
+        expected: built.expected,
+        stats: MixedStats{physical_lines: built.physical_lines, code_lines: built.code_lines, bytes: built.bytes, functions: stats.functions, types: stats.types, comptime_items: stats.comptime_items, sections: stats.sections},
+    }))
+}
+
+// The text a command line prints. With no arguments the shape is missing,
+// and so are N and the directory: the usage.
+command: fn(argv: [String]) -> String Err! {
+    first: argv.get(0) ?? ""
+    rest: argv.slice(min(1, argv.len()), argv.len())
+    if first == {
+        "--list" -> Ok(listing())
+        "mixed" -> generate_mixed(rest)
+        else -> generate(rest, first)
+    }
+}
+
+run: fn() {
+    print(command(process.args()) ?? process.fail(2, err.message))
+}

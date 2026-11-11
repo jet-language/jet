@@ -15,9 +15,10 @@ Tools/agent/JetEnv.jet node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR --output report.md
 ```
 
-`jet Tools/perf/scaling/Generate.jet` (with Packages.jet, Corpora.jet,
-Domains.jet and Mixed.jet) is the corpus generator's Jet twin: same
-arguments, same written bytes, same JSON line. The gauntlet entry
+`jet Tools/perf/scaling/generate` (over the `jet_scaling_corpora` package in
+`corpora/`: Packages.jet, Corpora.jet, Domains.jet and Mixed.jet) is the
+corpus generator's Jet twin: same arguments, same written bytes, same JSON
+line. The gauntlet entry
 `Tools/gauntlet/entries/scaling-generate` pairs the two; generate.mjs stays
 the generator of record until the twin passes every port bar.
 

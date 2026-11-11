@@ -1,4 +1,4 @@
-// The `mixed` profile of Generate.jet, the twin of mixed.mjs: one
+// The `mixed` profile of the generate twin, the twin of mixed.mjs: one
 // deterministic Jet package sized by nonblank, noncomment ("code") lines,
 // shaped like the assembled self-hosted compiler (Tower #4529, SPEED-PLAN.md
 // section 4.3): about 25 lines per function and 53 bytes per line, structs,
@@ -15,56 +15,25 @@
 // the source; the harness pins it as the golden. Every combine is reduced
 // modulo MODULUS, so the model and the program agree exactly.
 use {
-    packages: "Packages"
+    rx: core.regex
 }
 
-M: packages.MODULUS
 // Sections of about 820 lines, the mean size of an L5 source file.
 UNITS_PER_SECTION: 6
 MAX_SEED: 4294967295
-WORDS: ["alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "island", "juniper", "kestrel", "lantern", "meadow", "nectar", "orchid", "prairie"]
+MIXED_WORDS: ["alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "island", "juniper", "kestrel", "lantern", "meadow", "nectar", "orchid", "prairie"]
 PACKAGE_MANIFEST: "name: \"mixed_bench\"\nversion: \"0.1.0\"\nedition: \"2026\"\noutputs: {{ app: .Executable{{ entry: run }} }}\n"
 
 // Templates are written with short local names; the emitted source spells
 // them the way the compiler's code does, which brings lines to L5's length.
-rename: fn(word: String) -> String {
-    if word == {
-        "seed" -> "seed_value"
-        "accumulator" -> "running_total"
-        "index" -> "position"
-        "records" -> "built_records"
-        "shapes" -> "built_shapes"
-        "counts" -> "word_counts"
-        "table" -> "lookup_table"
-        "probes" -> "probe_keys"
-        "steps" -> "step_count"
-        "step" -> "step_value"
-        "marker" -> "marker_value"
-        "found" -> "found_value"
-        else -> word
-    }
+RENAMES: [String: String]{
+    "seed": "seed_value", "accumulator": "running_total", "index": "position", "records": "built_records",
+    "shapes": "built_shapes", "counts": "word_counts", "table": "lookup_table", "probes": "probe_keys",
+    "steps": "step_count", "step": "step_value", "marker": "marker_value", "found": "found_value",
 }
 
-is_word: fn(byte: U8) -> Bool { (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95} }
-
-// `line` with every whole word RENAMES names spelled its long way.
-renamed: fn(line: String) -> String {
-    bytes: line.bytes()
-    out := [U8]{}
-    at := 0
-    loop at < bytes.len() {
-        end := at
-        loop end < bytes.len() && is_word(bytes[end]) -> end += 1
-        if end == at {
-            out.push(bytes[at])
-            at += 1
-            next
-        }
-        out.extend(rename(String.from_bytes_lossy(bytes.slice(at, end))).bytes())
-        at = end
-    }
-    String.from_bytes_lossy(out)
-}
+// The whole words RENAMES names.
+renamed: fn() -> rx.Regex { rx.compile("\\b({RENAMES.keys().join("|")})\\b") ?? panic("the rename pattern compiles: {err}") }
 
 md: fn(value: Int) -> Int { value % M }
 
@@ -124,18 +93,11 @@ NumbersModel: struct {
     b: Int
 }
 
-Model: enum {
-    Records(RecordsModel)
-    Shapes(ShapesModel)
-    Words(WordsModel)
-    Options(OptionsModel)
-    Numbers(NumbersModel)
-}
-
+// A worker's source text and `value(seed)`, what that source returns.
 Worker: struct {
     name: String
     text: [String]
-    model: Model
+    value: fn(Int) -> Int
 }
 
 Generated: struct {
@@ -152,17 +114,6 @@ MixedPackage: struct {
     bytes: Int
     stats: Stats
     source_sha256: String
-}
-
-// What the generated worker returns for `seed`.
-evaluate: fn(model: Model, seed: Int) -> Int {
-    if model == {
-        .Records(p) -> records_value(p, seed)
-        .Shapes(p) -> shapes_value(p, seed)
-        .Words(p) -> words_value(p, seed)
-        .Options(p) -> options_value(p, seed)
-        .Numbers(p) -> numbers_value(p, seed)
-    }
 }
 
 scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int { md(identifier * p.score_a + weight * p.score_b + label) }
@@ -192,12 +143,7 @@ records_value: fn(p: RecordsModel, seed: Int) -> Int {
 shapes_value: fn(p: ShapesModel, seed: Int) -> Int {
     accumulator := md(seed * p.a)
     loop index in 0..<p.count {
-        step: if (seed + index) % 4 == {
-            0 -> ((seed + index * p.b) % 101) * p.d
-            1 -> index * 5 + (seed + p.c) % 53
-            2 -> "shape-{index}-{seed % 7}".len() * 7
-            else -> p.e
-        }
+        step: [((seed + index * p.b) % 101) * p.d, index * 5 + (seed + p.c) % 53, "shape-{index}-{seed % 7}".len() * 7, p.e][(seed + index) % 4]
         accumulator = md(accumulator * 31 + step)
     }
     accumulator
@@ -225,10 +171,7 @@ options_value: fn(p: OptionsModel, seed: Int) -> Int {
     accumulator := md(seed)
     loop round in 0..<p.rounds {
         probe: probes[round % 4] + (round /% 4) * p.spread
-        found: if table.get(probe) == {
-            .Val(value) -> value * 2
-            .None -> p.fallback
-        }
+        found: if table.get(probe) == .Val(value) -> value * 2 else -> p.fallback
         accumulator = md(accumulator + round + found)
     }
     accumulator = md(accumulator * p.factor + p.constant_value)
@@ -244,17 +187,13 @@ numbers_value: fn(p: NumbersModel, seed: Int) -> Int {
     }
     weight := p.b
     loop step in 0..<steps {
-        weight = if step % 3 == {
-            0 -> md(weight * p.a + step)
-            1 -> md(weight + step * step)
-            else -> md(weight + 7)
-        }
+        weight = [md(weight * p.a + step), md(weight + step * step), md(weight + 7)][step % 3]
     }
     md(weight * 1000 + steps + value)
 }
 
 // 1. Records built in a loop, scored through trait values.
-records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, score_a: Int, score_b: Int, r: &packages.Seeded) -> Worker {
+records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, score_a: Int, score_b: Int, r: &Seeded) -> Worker {
     name: "{unit_name}_build_records"
     count: r.int(3, 6)
     a: r.int(3, 29)
@@ -284,11 +223,12 @@ records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, s
         "    accumulator",
         "}}",
     }
-    Worker{name: name, text: text, model: .Records(RecordsModel{count: count, a: a, b: b, c: c, threshold: threshold, index: index, score_a: score_a, score_b: score_b})}
+    p: RecordsModel{count: count, a: a, b: b, c: c, threshold: threshold, index: index, score_a: score_a, score_b: score_b}
+    Worker{name: name, text: text, value: s -> records_value(p, s)}
 }
 
 // 2. Enum values built by a value match, consumed by a variant match.
-shapes_worker: fn(unit_name: String, shape: String, r: &packages.Seeded) -> Worker {
+shapes_worker: fn(unit_name: String, shape: String, r: &Seeded) -> Worker {
     name: "{unit_name}_match_shapes"
     count: r.int(4, 8)
     a: r.int(3, 41)
@@ -321,13 +261,14 @@ shapes_worker: fn(unit_name: String, shape: String, r: &packages.Seeded) -> Work
         "    accumulator",
         "}}",
     }
-    Worker{name: name, text: text, model: .Shapes(ShapesModel{count: count, a: a, b: b, c: c, d: d, e: e})}
+    p: ShapesModel{count: count, a: a, b: b, c: c, d: d, e: e}
+    Worker{name: name, text: text, value: s -> shapes_value(p, s)}
 }
 
 // 3. String keys, interpolation, and a map read through `??`.
-words_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
+words_worker: fn(unit_name: String, r: &Seeded) -> Worker {
     name: "{unit_name}_count_words"
-    words: [String]{r.pick(WORDS), r.pick(WORDS), r.pick(WORDS), r.pick(WORDS)}
+    words: [String]{r.pick(MIXED_WORDS), r.pick(MIXED_WORDS), r.pick(MIXED_WORDS), r.pick(MIXED_WORDS)}
     buckets: r.int(2, 5)
     rounds: r.int(3, 6)
     a: r.int(3, 9)
@@ -357,11 +298,12 @@ words_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
         "}}",
     }
     // copy: the model keeps the name the label starts from
-    Worker{name: name, text: text, model: .Words(WordsModel{words: words, buckets: buckets, rounds: rounds, a: a, limit: limit, start_label: unit_name.copy()})}
+    p: WordsModel{words: words, buckets: buckets, rounds: rounds, a: a, limit: limit, start_label: unit_name.copy()}
+    Worker{name: name, text: text, value: s -> words_value(p, s)}
 }
 
 // 4. Optional values mapped through closures, and a local closure.
-options_worker: fn(unit_name: String, constant_value: Int, r: &packages.Seeded) -> Worker {
+options_worker: fn(unit_name: String, constant_value: Int, r: &Seeded) -> Worker {
     name: "{unit_name}_map_options"
     k0: r.int(1, 30)
     k1: r.int(31, 60)
@@ -392,11 +334,11 @@ options_worker: fn(unit_name: String, constant_value: Int, r: &packages.Seeded) 
         "}}",
     }
     model: OptionsModel{keys: [Int]{k0, k1, k2}, values: [Int]{v0, v1, v2}, rounds: rounds, spread: spread, fallback: fallback, factor: factor, offset: offset, constant_value: constant_value}
-    Worker{name: name, text: text, model: .Options(model)}
+    Worker{name: name, text: text, value: s -> options_value(model, s)}
 }
 
 // 5. Integer loops and ordered arm tables.
-numbers_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
+numbers_worker: fn(unit_name: String, r: &Seeded) -> Worker {
     name: "{unit_name}_settle_numbers"
     limit: r.int(20, 60)
     a: r.int(2, 9)
@@ -423,12 +365,13 @@ numbers_worker: fn(unit_name: String, r: &packages.Seeded) -> Worker {
         "    (weight * 1000 + steps + value) % {M}",
         "}}",
     }
-    Worker{name: name, text: text, model: .Numbers(NumbersModel{limit: limit, a: a, b: b})}
+    p: NumbersModel{limit: limit, a: a, b: b}
+    Worker{name: name, text: text, value: s -> numbers_value(p, s)}
 }
 
 // One unit: a record struct, a shape enum, the section trait's impl, five
 // worker functions of different construct mixes, and the unit total.
-unit: fn(m: Int, u: Int, r: &packages.Seeded, stats: &Stats) -> Generated {
+mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
     unit_name: "section_{m}_unit_{u}"
     rec: "RecordM{m}U{u}"
     shape: "ShapeM{m}U{u}"
@@ -460,6 +403,7 @@ unit: fn(m: Int, u: Int, r: &packages.Seeded, stats: &Stats) -> Generated {
     start: if constant != "" -> constant else -> "{constant_value}"
     total := [String]{"{unit_name}_total: fn() -> Int {{", "    accumulator := {start} % {M}"}
     accumulator := md(constant_value)
+    words: renamed()
     loop (index, worker) in workers {
         // Every worker folds its result through the section's three-argument
         // blend (the call shape of the compiler's own helpers) and a short
@@ -483,11 +427,11 @@ unit: fn(m: Int, u: Int, r: &packages.Seeded, stats: &Stats) -> Generated {
             "}}",
         ])
         if index % 2 == 0 -> lines.push("// Worker {index} of {unit_name}.")
-        loop line in text -> lines.push(renamed(line))
+        loop line in text -> lines.push(words.replace_all_with(line, found -> RENAMES.get(found.text) ?? found.text))
         lines.push("")
         total.push("    accumulator = (accumulator * 7 + {worker.name}(accumulator + {index + 1})) % {M}")
         seed: accumulator + index + 1
-        result: evaluate(worker.model, seed)
+        result: worker.value(seed)
         checkpoint: blend(result, seed % 1000, first)
         label_length: "{worker.name}:{result % 1000}:{checkpoint % 1000}".len()
         trace_weight: blend(checkpoint, if label_length > label_limit -> label_length else -> 1, third)
@@ -523,16 +467,16 @@ section_header: fn(m: Int) -> [String] {
 }
 
 // The problem with a mixed package of `code_lines` code lines from `seed`.
-check_inputs: fn(code_lines: Int, seed: Int) packages.Problem! {
-    if code_lines < 1 -> return Err(packages.Problem{message: "--code-lines must be a positive safe integer"})
-    if seed < 0 || seed > MAX_SEED -> return Err(packages.Problem{message: "--seed must be an integer in 0..4294967295"})
+check_inputs: fn(code_lines: Int, seed: Int) Err! {
+    if code_lines < 1 -> return Err("--code-lines must be a positive safe integer")
+    if seed < 0 || seed > MAX_SEED -> return Err("--seed must be an integer in 0..4294967295")
 }
 
 // The package for `code_lines` code lines (check_inputs passed): package.jet
 // plus main.jet, filled section by section, unit by unit, until main.jet
 // reaches the target.
 mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
-    r := packages.seeded(seed, .Remainder)
+    r := seeded(seed, .Remainder)
     stats := Stats{functions: 1, types: 0, comptime_items: 0, sections: 0}
     lines := [String]{"// Deterministic mixed compile-throughput workload: --code-lines {code_lines} --seed {seed}", ""}
     section_totals := [Int]{}
@@ -541,7 +485,7 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
     loop code < code_lines {
         m: stats.sections
         header: section_header(m)
-        code += packages.code_of(header) + 1
+        code += code_of(header) + 1
         lines.extend(header)
         stats.functions += 4
         stats.types += 1
@@ -549,15 +493,15 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
         value := 0
         u := 0
         loop u < UNITS_PER_SECTION && (u == 0 || code < code_lines) {
-            generated: unit(m, u, r, stats)
-            code += packages.code_of(generated.lines)
+            generated: mixed_unit(m, u, r, stats)
+            code += code_of(generated.lines)
             total.push("    accumulator = (accumulator * 13 + {generated.total_name}()) % {M}")
             value = md(value * 13 + generated.value)
             lines.extend(generated.lines)
             u += 1
         }
         total.extend(["    accumulator", "}}", ""])
-        code += packages.code_of(total)
+        code += code_of(total)
         lines.extend(total)
         stats.functions += 1
         section_totals.push(value)
@@ -572,10 +516,10 @@ mixed_sources: fn(code_lines: Int, seed: Int) -> MixedPackage {
     lines.extend(["    print(\"mixed checksum {{checksum}} sections {stats.sections}\")", "}}"])
     // main.jet is `lines` joined, so its lines are `lines`.
     physical_lines: lines.len()
-    main_code_lines: packages.code_of(lines)
+    main_code_lines: code_of(lines)
     main: "{lines.join("\n")}\n"
     bytes: main.bytes().len()
     files: [String:String]{"package.jet": PACKAGE_MANIFEST, "main.jet": main}
-    digest: packages.source_digest(files)
+    digest: source_digest(files)
     MixedPackage{files: files, expected: "mixed checksum {checksum} sections {stats.sections}\n", physical_lines: physical_lines, code_lines: main_code_lines, bytes: bytes, stats: stats, source_sha256: digest}
 }

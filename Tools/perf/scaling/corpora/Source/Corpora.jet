@@ -12,8 +12,8 @@
 // generic library, generated code) sized by code lines.
 //
 // Adding a shape: write its builder `(n, r) -> files` (or a domain in
-// Domains.jet), name it in `build`, and register it in SHAPES with its
-// dimension, unit and default base. `files` maps package-relative paths to
+// Domains.jet) and register it in `shapes` with its dimension, default base
+// and builder. `files` maps package-relative paths to
 // text; the package's `run: fn()` must reach every generated function, so no
 // phase can skip work as dead code. The diagnostics shape alone expects
 // errors: n, the number a correct compiler reports.
@@ -23,16 +23,14 @@
 // dependencies (the bootstrap runner authorizes one source root), no bounded
 // trait method calls through a type parameter and no mutation inside `comptime`
 // (both unsupported by the generated compiler today).
-use {
-    domains: "Domains"
-    packages: "Packages"
-}
 
-M: packages.MODULUS
+use {
+    combinatorics: core.math.combinatorics
+}
 
 // ---------------------------------------------------------------- stress
 
-modules: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+modules: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop i in 0..<n {
@@ -54,37 +52,38 @@ modules: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             """
         entries.push("record_{i}_score")
     }
-    roots: packages.consumer_tree(files, entries, "modules")
-    packages.finish("modules", files, roots)
+    roots: consumer_tree(files, entries, "modules")
+    finish("modules", files, roots)
     files
 }
 
 small_body: fn(i: Int, a: Int, b: Int) -> String {
-    if i % 4 == {
-        0 -> "helper_{i}: fn(x: Int) -> Int {{ (x * {a} + {b}) % {M} }}"
-        1 -> """
+    bodies: [String]{
+        "helper_{i}: fn(x: Int) -> Int {{ (x * {a} + {b}) % {M} }}",
+        """
             helper_{i}: fn(x: Int) -> Int {{
                 if x % {a} == 0 -> return x /% {a}
                 x + {b}
             }}
-            """
-        2 -> """
+            """,
+        """
             helper_{i}: fn(x: Int) -> Int {{
                 label: "h{i}-{{x % {a}}}"
                 label.len() + {b}
             }}
-            """
-        else -> """
+            """,
+        """
             helper_{i}: fn(x: Int) -> Int {{
                 total := 0
                 loop k in 0..<{a % 4 + 1} -> total += x + k * {b}
                 total % {M}
             }}
-            """
+            """,
     }
+    bodies[i % 4]
 }
 
-small_fns: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+small_fns: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     per_file: (n + 15) /% 16
     items := [String]{}
@@ -95,14 +94,14 @@ small_fns: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         entries.push("helper_{i}")
     }
     loop k in 0..<16 -> files["fns/fns_{k}.jet"] = items.slice(min(n, k * per_file), min(n, (k + 1) * per_file)).join("\n\n")
-    roots: packages.consumer_tree(files, entries, "small")
-    packages.finish("small_fns", files, roots)
+    roots: consumer_tree(files, entries, "small")
+    finish("small_fns", files, roots)
     files
 }
 
 // Four functions of n/4 statements each: straight-line updates, branches and
 // a growing set of locals that later statements read.
-huge_fns: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+huge_fns: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop f in 0..<4 {
@@ -128,13 +127,13 @@ huge_fns: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         files["huge/huge_{f}.jet"] = body.join("\n")
         entries.push("huge_{f}")
     }
-    packages.finish("huge_fns", files, entries)
+    finish("huge_fns", files, entries)
     files
 }
 
 // Nesting depth n: statement blocks (if / loop / value-if) and one
 // parenthesized expression, each n deep, in four functions.
-deep_nesting: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+deep_nesting: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     body := [String]{}
     loop f in 0..<3 {
@@ -159,23 +158,18 @@ deep_nesting: fn(n: Int, r: &packages.Seeded) -> [String:String] {
     }
     body.extend(["nested_expr: fn(seed: Int) -> Int {{ {"(1 + ".repeat(n)}seed{")".repeat(n)} % {M} }}", ""])
     files["nested.jet"] = body.join("\n")
-    packages.finish("deep_nesting", files, ["nested_0", "nested_1", "nested_2", "nested_expr"])
+    finish("deep_nesting", files, ["nested_0", "nested_1", "nested_2", "nested_expr"])
     files
 }
 
 // One enum of n variants and four n-arm tables over it.
-wide_enums: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+wide_enums: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     kinds: ["Plain", "Count", "Span", "Named"]
     decl := [String]{"Opcode: enum {{"}
     loop i in 0..<n {
         v: "{kinds[i % 4]}{i}"
-        decl.push(if i % 4 == {
-            0 -> "    {v}"
-            1 -> "    {v}(Int)"
-            2 -> "    {v}(start: Int, width: Int)"
-            else -> "    {v}(String)"
-        })
+        decl.push(["    {v}", "    {v}(Int)", "    {v}(start: Int, width: Int)", "    {v}(String)"][i % 4])
     }
     decl.extend(["}}", ""])
     cost := [String]{"opcode_cost: fn(op: Opcode) -> Int {{", "    if op == {{"}
@@ -186,28 +180,18 @@ wide_enums: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         v: "{kinds[i % 4]}{i}"
         lower: "{kinds[i % 4].to_lower()}{i}"
         c: r.int(1, 97)
-        if i % 4 == {
-            0 -> {
-                cost.push("        .{v} -> {c}")
-                name.push("        .{v} -> \"{lower}\"")
-                from.push("        {i} -> Opcode.{v}")
-            }
-            1 -> {
-                cost.push("        .{v}(k) -> k * {c}")
-                name.push("        .{v}(_) -> \"{lower}\"")
-                from.push("        {i} -> Opcode.{v}({c})")
-            }
-            2 -> {
-                cost.push("        .{v}(start, width) -> start + width * {c}")
-                name.push("        .{v}(_, _) -> \"{lower}\"")
-                from.push("        {i} -> Opcode.{v}{{start: {c}, width: {i % 7 + 1}}}")
-            }
-            else -> {
-                cost.push("        .{v}(text) -> text.len() + {c}")
-                name.push("        .{v}(_) -> \"{lower}\"")
-                from.push("        {i} -> Opcode.{v}(\"op{i}\")")
-            }
+        // The cost, name and from-code arms of the variant.
+        arms: [[String]]{
+            ["        .{v} -> {c}", "        .{v} -> \"{lower}\"", "        {i} -> Opcode.{v}"],
+            ["        .{v}(k) -> k * {c}", "        .{v}(_) -> \"{lower}\"", "        {i} -> Opcode.{v}({c})"],
+            ["        .{v}(start, width) -> start + width * {c}", "        .{v}(_, _) -> \"{lower}\"", "        {i} -> Opcode.{v}{{start: {c}, width: {i % 7 + 1}}}"],
+            ["        .{v}(text) -> text.len() + {c}", "        .{v}(_) -> \"{lower}\"", "        {i} -> Opcode.{v}(\"op{i}\")"],
         }
+        arm: arms[i % 4]
+        // copy: the tables own their lines
+        cost.push(arm[0].copy())
+        name.push(arm[1].copy())
+        from.push(arm[2].copy())
         keyword.push("        \"{lower}\" -> {i}")
     }
     cost.extend(["    }}", "}}", ""])
@@ -226,7 +210,7 @@ wide_enums: fn(n: Int, r: &packages.Seeded) -> [String:String] {
 
         """
     files["opcodes.jet"] = "{decl.join("\n")}\n{cost.join("\n")}\n{name.join("\n")}\n{from.join("\n")}\n{keyword.join("\n")}\n{consumer}"
-    packages.finish("wide_enums", files, ["opcode_total"])
+    finish("wide_enums", files, ["opcode_total"])
     files
 }
 
@@ -237,13 +221,13 @@ trait_word: fn() -> String { "{"Capabil"}ity" }
 
 // n types, n/8 traits (at least 4), four trait impls and one inherent impl
 // per type, trait values consumed per trait.
-impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     trait_count: max(4, n /% 8)
     named: trait_word()
     traits := [[String]]{}
     loop k in 0..<trait_count {
-        traits.push(packages.lines("""
+        traits.push(lines("""
             {named}{k}: trait {{
                 measure_{k}: fn(self) -> Int
                 label_{k}: fn(self) -> String
@@ -256,7 +240,7 @@ impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             }}
             """))
     }
-    packages.pack(files, "traits/traits", traits)
+    pack(files, "traits/traits", traits)
     types := [[String]]{}
     entries := [String]{}
     loop i in 0..<n {
@@ -271,7 +255,7 @@ impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
                 "impl Entity{i}.{named}{k} {{", measure, "    label_{k}: fn(self) -> String {{ \"e{i}-c{k}-{{self.name}}\" }}", "}}", "",
             ])
         }
-        body.extend(packages.lines("""
+        body.extend(lines("""
             impl Entity{i} {{
                 bump: fn(&self) {{ self.id += {r.int(1, 9)} }}
                 weight: fn(self) -> Int {{ self.id + self.name.len() }}
@@ -287,16 +271,16 @@ impls_traits: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         types.push(body)
         entries.push("entity_{i}_use")
     }
-    packages.pack(files, "types/entities", types)
-    roots: packages.consumer_tree(files, entries, "impls")
-    packages.finish("impls_traits", files, roots)
+    pack(files, "types/entities", types)
+    roots: consumer_tree(files, entries, "impls")
+    finish("impls_traits", files, roots)
     files
 }
 
 // A fixed generic library instantiated with n distinct record types, all in
 // the entry file: generic code outside the entry file does not compile today
 // (Domains.jet explains the two compilers' errors).
-generics: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+generics: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     text := """
@@ -348,14 +332,14 @@ generics: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         entries.push("thing_{i}_use")
     }
     files["main.jet"] = text
-    roots: packages.consumer_tree(files, entries, "generics")
-    packages.finish("generics", files, roots)
+    roots: consumer_tree(files, entries, "generics")
+    finish("generics", files, roots)
     files
 }
 
 // n comptime constants (a third chained on the previous one) with n/2
 // record types whose methods read them.
-comptime_items: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+comptime_items: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -377,18 +361,18 @@ comptime_items: fn(n: Int, r: &packages.Seeded) -> [String:String] {
                 """
             else -> "limit_{i}_use: fn(seed: Int) -> Int {{ (seed + LIMIT_{i}) % {M} }}"
         }
-        items.push(packages.lines("{limit}\n\n{user}"))
+        items.push(lines("{limit}\n\n{user}"))
         entries.push(if i % 2 == 0 -> "gauge_{i}_use" else -> "limit_{i}_use")
     }
-    packages.pack(files, "consts/consts", items)
-    roots: packages.consumer_tree(files, entries, "comptime")
-    packages.finish("comptime", files, roots)
+    pack(files, "consts/consts", items)
+    roots: consumer_tree(files, entries, "comptime")
+    finish("comptime", files, roots)
     files
 }
 
 // n table elements: four Int tables, a record table and a string-keyed map,
 // as functions returning literal tables, plus one long string literal.
-data_tables: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     body := [String]{}
     quarter: max(16, n /% 4)
@@ -402,7 +386,7 @@ data_tables: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         body.extend(["    }}", "}}", ""])
     }
     rows: max(8, n /% 8)
-    body.extend(packages.lines("""
+    body.extend(lines("""
         Row: struct {{
             id: Int
             weight: Int
@@ -415,7 +399,7 @@ data_tables: fn(n: Int, r: &packages.Seeded) -> [String:String] {
     loop i in 0..<rows -> body.push("        Row{{id: {i}, weight: {r.int(0, 999)}, name: \"row-{i}\"}},")
     body.extend(["    }}", "}}", "", "name_table: fn() -> [String:Int] {{", "    [String:Int]{{"])
     loop i in 0..<rows -> body.push("        \"key-{i}\": {r.int(0, 999)},")
-    body.extend(packages.lines("""
+    body.extend(lines("""
             }}
         }}
 
@@ -439,14 +423,14 @@ data_tables: fn(n: Int, r: &packages.Seeded) -> [String:String] {
 
         """))
     files["tables.jet"] = body.join("\n")
-    packages.finish("data_tables", files, ["tables_total"])
+    finish("data_tables", files, ["tables_total"])
     files
 }
 
 // n files, each importing four Core modules. core.time is left out: the
 // generated compiler rejects Core/Time today (E0312/E0109 on LocalDate
 // comparisons).
-imports: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+imports: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     entries := [String]{}
     loop i in 0..<n {
@@ -461,13 +445,13 @@ imports: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             """
         entries.push("service_{i}_value")
     }
-    roots: packages.consumer_tree(files, entries, "imports")
-    packages.finish("imports", files, roots)
+    roots: consumer_tree(files, entries, "imports")
+    finish("imports", files, roots)
     files
 }
 
 // One call chain n deep across eight files.
-call_chains: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+call_chains: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     per_file: (n + 7) /% 8
     loop f in 0..<8 {
@@ -478,13 +462,13 @@ call_chains: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         }
         files["chain/chain_{f}.jet"] = body.join("\n")
     }
-    packages.finish("call_chains", files, ["chain_0"])
+    finish("call_chains", files, ["chain_0"])
     files
 }
 
 // n fallible functions: typed error families (one per 16 functions),
 // propagation, recovery by `??` and by result tables, inferred text errors.
-errors: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+errors: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -509,7 +493,7 @@ errors: fn(n: Int, r: &packages.Seeded) -> [String:String] {
 
             """ else -> ""
         limit: r.int(50, 500)
-        items.push(packages.lines("""
+        items.push(lines("""
             {family}parse_{i}: fn(x: Int) -> Int Fault{k}! {{
                 if x == 0 -> return Err(Fault{k}.Missing)
                 if x % {r.int(5, 17)} == 0 -> return Err(Fault{k}.Invalid(x))
@@ -539,14 +523,14 @@ errors: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             """))
         entries.push("recover_{i}")
     }
-    packages.pack(files, "errors/errors", items)
-    roots: packages.consumer_tree(files, entries, "errors")
-    packages.finish("errors", files, roots)
+    pack(files, "errors/errors", items)
+    roots: consumer_tree(files, entries, "errors")
+    finish("errors", files, roots)
     files
 }
 
 // n functions with one undefined name each: n diagnostics expected.
-diagnostics: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+diagnostics: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -554,14 +538,14 @@ diagnostics: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         items.push(["broken_{i}: fn(seed: Int) -> Int {{", "    base: seed * {r.int(2, 9)}", "    base + missing_value_{i}", "}}"])
         entries.push("broken_{i}")
     }
-    packages.pack(files, "broken/broken", items)
-    roots: packages.consumer_tree(files, entries, "diagnostics")
-    packages.finish("diagnostics", files, roots)
+    pack(files, "broken/broken", items)
+    roots: consumer_tree(files, entries, "diagnostics")
+    finish("diagnostics", files, roots)
     files
 }
 
 // n interpolation holes and 64n literal bytes, in n/16 functions.
-strings: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+strings: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     items := [[String]]{}
     entries := [String]{}
@@ -569,7 +553,7 @@ strings: fn(n: Int, r: &packages.Seeded) -> [String:String] {
     loop h in 0..<16 -> holes = "{holes}part{h}={{x + {h}}} "
     literal: "lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do ".repeat(16)
     loop i in 0..<max(1, n /% 16) {
-        items.push(packages.lines("""
+        items.push(lines("""
             text_{i}: fn(x: Int) -> Int {{
                 line: "{holes}"
                 literal: "{literal}"
@@ -578,14 +562,14 @@ strings: fn(n: Int, r: &packages.Seeded) -> [String:String] {
             """))
         entries.push("text_{i}")
     }
-    packages.pack(files, "texts/texts", items)
-    roots: packages.consumer_tree(files, entries, "strings")
-    packages.finish("strings", files, roots)
+    pack(files, "texts/texts", items)
+    roots: consumer_tree(files, entries, "strings")
+    finish("strings", files, roots)
     files
 }
 
 // n call sites into two shared helpers.
-fan_in: fn(n: Int, r: &packages.Seeded) -> [String:String] {
+fan_in: fn(n: Int, r: &Seeded) -> [String:String] {
     files := [String:String]{}
     files["shared.jet"] = """
         shared_scale: fn(x: Int) -> Int {{ (x * 3 + 1) % 1000003 }}
@@ -604,9 +588,9 @@ fan_in: fn(n: Int, r: &packages.Seeded) -> [String:String] {
         items.push(body)
         entries.push("callers_{g}")
     }
-    packages.pack(files, "callers/callers", items)
-    roots: packages.consumer_tree(files, entries, "fan_in")
-    packages.finish("fan_in", files, roots)
+    pack(files, "callers/callers", items)
+    roots: consumer_tree(files, entries, "fan_in")
+    finish("fan_in", files, roots)
     files
 }
 
@@ -614,62 +598,45 @@ fan_in: fn(n: Int, r: &packages.Seeded) -> [String:String] {
 
 ShapeKind: enum { Stress Domain }
 
+// A registered shape; `make(n, seed)` writes its files at size `n`.
 Shape: struct {
     name: String
     kind: ShapeKind
     dimension: String
     base: Int
+    make: fn(Int, Int) -> [String:String] Err!
 }
 
-stress: fn(name: String, dimension: String, base: Int) -> Shape { Shape{name: name, kind: .Stress, dimension: dimension, base: base} }
+stress: fn(name: String, dimension: String, base: Int, make: &&fn(Int, Int) -> [String:String] Err!) -> Shape { Shape{name: name, kind: .Stress, dimension: dimension, base: base, make: make} }
 
 shapes: fn() -> [Shape] {
     found := [Shape]{
-        stress("modules", "files in one package", 128),
-        stress("small-fns", "small functions", 1024),
-        stress("huge-fns", "statements in four functions", 2048),
-        stress("deep-nesting", "block and expression nesting depth", 16),
-        stress("wide-enums", "enum variants and arms per match table", 64),
-        stress("impls-traits", "types with four trait impls each (traits = n/8)", 128),
-        stress("generics", "distinct generic instantiations", 128),
-        stress("comptime", "comptime (prep) items with record types", 128),
-        stress("data-tables", "literal table elements", 2048),
-        stress("imports", "files importing five Core modules", 128),
-        stress("call-chains", "call depth", 256),
-        stress("errors", "fallible functions with propagation and recovery", 128),
-        stress("diagnostics", "reported errors", 128),
-        stress("strings", "interpolation holes (64 literal bytes each)", 1024),
-        stress("fan-in", "call sites into shared helpers", 1024),
+        stress("modules", "files in one package", 128, (n, seed) -> modules(n, seeded(seed, .Scaled))),
+        stress("small-fns", "small functions", 1024, (n, seed) -> small_fns(n, seeded(seed, .Scaled))),
+        stress("huge-fns", "statements in four functions", 2048, (n, seed) -> huge_fns(n, seeded(seed, .Scaled))),
+        stress("deep-nesting", "block and expression nesting depth", 16, (n, seed) -> deep_nesting(n, seeded(seed, .Scaled))),
+        stress("wide-enums", "enum variants and arms per match table", 64, (n, seed) -> wide_enums(n, seeded(seed, .Scaled))),
+        stress("impls-traits", "types with four trait impls each (traits = n/8)", 128, (n, seed) -> impls_traits(n, seeded(seed, .Scaled))),
+        stress("generics", "distinct generic instantiations", 128, (n, seed) -> generics(n, seeded(seed, .Scaled))),
+        stress("comptime", "comptime (prep) items with record types", 128, (n, seed) -> comptime_items(n, seeded(seed, .Scaled))),
+        stress("data-tables", "literal table elements", 2048, (n, seed) -> data_tables(n, seeded(seed, .Scaled))),
+        stress("imports", "files importing five Core modules", 128, (n, seed) -> imports(n, seeded(seed, .Scaled))),
+        stress("call-chains", "call depth", 256, (n, seed) -> call_chains(n, seeded(seed, .Scaled))),
+        stress("errors", "fallible functions with propagation and recovery", 128, (n, seed) -> errors(n, seeded(seed, .Scaled))),
+        stress("diagnostics", "reported errors", 128, (n, seed) -> diagnostics(n, seeded(seed, .Scaled))),
+        stress("strings", "interpolation holes (64 literal bytes each)", 1024, (n, seed) -> strings(n, seeded(seed, .Scaled))),
+        stress("fan-in", "call sites into shared helpers", 1024, (n, seed) -> fan_in(n, seeded(seed, .Scaled))),
     }
-    // copy: each shape owns the domain's name and dimension
-    loop domain in domains.all() -> found.push(Shape{name: domain.name.copy(), kind: .Domain, dimension: domain.dimension.copy(), base: 125000})
+    loop domain in all() {
+        // copy: each shape owns the domain's name and dimension
+        name: domain.name.copy()
+        found.push(Shape{name: domain.name.copy(), kind: .Domain, dimension: domain.dimension.copy(), base: 125000, make: (n, seed) -> domain_files(name, n, seeded(seed, .Scaled))})
+    }
     found
 }
 
 // copy: the joined names are built from owned strings
 shape_names: fn() -> String { shapes().map(shape -> shape.name.copy()).join(", ") }
-
-// The files of stress shape `name` at size `n`.
-build: fn(name: String, n: Int, r: &packages.Seeded) -> [String:String] {
-    if name == {
-        "modules" -> modules(n, r)
-        "small-fns" -> small_fns(n, r)
-        "huge-fns" -> huge_fns(n, r)
-        "deep-nesting" -> deep_nesting(n, r)
-        "wide-enums" -> wide_enums(n, r)
-        "impls-traits" -> impls_traits(n, r)
-        "generics" -> generics(n, r)
-        "comptime" -> comptime_items(n, r)
-        "data-tables" -> data_tables(n, r)
-        "imports" -> imports(n, r)
-        "call-chains" -> call_chains(n, r)
-        "errors" -> errors(n, r)
-        "diagnostics" -> diagnostics(n, r)
-        "strings" -> strings(n, r)
-        "fan-in" -> fan_in(n, r)
-        else -> domains.build(name, n, r)
-    }
-}
 
 Corpus: struct {
     kind: ShapeKind
@@ -680,17 +647,41 @@ Corpus: struct {
 }
 
 // The registered shape `name`, when `n` is a valid size for it.
-shape_of: fn(name: String, n: Int) -> Shape packages.Problem! {
-    shape: shapes().find(shape -> shape.name == name) ?? return Err(packages.Problem{message: "Unknown shape: {name} (shapes: {shape_names()})"})
-    if n < 1 -> return Err(packages.Problem{message: "N must be a positive safe integer"})
+shape_of: fn(name: String, n: Int) -> Shape Err! {
+    shape: shapes().find(shape -> shape.name == name) ?? return Err("Unknown shape: {name} (shapes: {shape_names()})")
+    if n < 1 -> return Err("N must be a positive safe integer")
     Ok(shape)
 }
 
+// How a corpus lays out its package: `files` (as generated: many files, the
+// realistic layout) or `single` (every file concatenated into main.jet, `use`
+// lines hoisted and deduplicated). Both are gated: a compiler that only
+// handles one file must fail the `files` series, not be excused from it.
+layouts: fn() -> [String] { ["files", "single"] }
+
 // The package of `shape` at size `n` (N for stress shapes, code lines for
-// domain shapes): files, expected diagnostics, code lines and digest.
-corpus: fn(shape: Shape, n: Int, seed: Int) -> Corpus {
-    r := packages.seeded(seed, .Scaled)
-    files: build(shape.name, n, r)
+// domain shapes) in `layout`: files, expected diagnostics, code lines and
+// digest.
+corpus: fn(shape: Shape, n: Int, seed: Int, layout: String) -> Corpus {
+    generated: shape.make(n, seed)
+    files: if layout == "single" -> single_file(generated) else -> generated
     diagnostics: if shape.name == "diagnostics" -> n else -> 0
-    Corpus{kind: shape.kind, files: files, diagnostics: diagnostics, code_lines: packages.code_lines(files), source_sha256: packages.source_digest(files)}
+    Corpus{kind: shape.kind, files: files, diagnostics: diagnostics, code_lines: code_lines(files), source_sha256: source_digest(files)}
+}
+
+// One package file: the other files in path order, then main.jet.
+single_file: fn(files: [String:String]) -> [String:String] {
+    // copy: the names are sorted apart from the map
+    names := files.keys().filter(name -> !["package.jet", "main.jet"].contains(name)).map(name -> name.copy()).to_list()
+    names.sort()
+    names.push("main.jet")
+    lines := [String]{}
+    loop name in names -> lines.extend("// ---- {name}\n{files[name]}".split("\n").to_list())
+    uses := combinatorics.unique(lines.filter(line -> line.starts_with("use ")))
+    uses.push("")
+    uses.extend(lines.filter(line -> !line.starts_with("use ")))
+    single := [String:String]{}
+    single["package.jet"] = files["package.jet"].copy()
+    single["main.jet"] = "{uses.join("\n")}\n"
+    single
 }

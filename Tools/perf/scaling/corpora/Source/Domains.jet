@@ -10,10 +10,10 @@
 // reaches the requested code lines, about 600 code lines per file.
 //
 // Adding a domain: write its common text and a unit function `(k, i, r, h)
-// -> Cluster` whose arm `k` is one kind (names carry `i`: one package is one
-// namespace), then register it in `all` and `unit_of`. `call(r, h, x)`
-// writes a call into a random earlier unit's helper (or a constant
-// expression for the first).
+// -> Cluster` whose table entry `k` is one kind (names carry `i`: one package
+// is one namespace), then register it in `all` and in `domain_files`' table.
+// `call(r, h, x)` writes a call into a random earlier unit's helper (or a
+// constant expression for the first).
 //
 // Generic functions and records work only in the package's entry file today:
 // outside it the Rust reference fails cost projection (E2104 "type-
@@ -23,10 +23,9 @@
 // generic-heavy domain is therefore one entry file (`.Entry`), the way the
 // compile-throughput cell's `mixed` program is one file.
 use {
-    packages: "Packages"
+    rx: core.regex
 }
 
-M: packages.MODULUS
 WORDS: ["alpha", "bravo", "cedar", "delta", "ember", "fjord", "grove", "harbor", "island", "juniper", "kestrel", "lantern"]
 PER_FILE: 600
 
@@ -49,11 +48,11 @@ Cluster: struct {
     lines: [String]
 }
 
-unit: fn(entry: String, helpers: [String], text: String) -> Cluster { Cluster{entry: entry, helpers: helpers, lines: packages.lines(text)} }
+unit: fn(entry: String, helpers: [String], text: String) -> Cluster { Cluster{entry: entry, helpers: helpers, lines: lines(text)} }
 
 // A call into a random earlier unit's helper, or a constant expression
 // while there is none.
-call: fn(r: &packages.Seeded, h: [String], x: String) -> String {
+call: fn(r: &Seeded, h: [String], x: String) -> String {
     if h.len() == 0 -> return "({x}) % {M}"
     "{r.pick(h)}({x})"
 }
@@ -65,125 +64,76 @@ table_rows: fn(values: [Int]) -> String {
     rows.join("\n")
 }
 
-draws: fn(r: &packages.Seeded, count: Int, hi: Int) -> [Int] {
+draws: fn(r: &Seeded, count: Int, hi: Int) -> [Int] {
     values := [Int]{}
     loop _ in 0..<count -> values.push(r.int(0, hi))
     values
 }
 
-// Bytes float_literals reads.
-QUOTE: U8{34}
-BACKSLASH: U8{92}
-DOT: U8{46}
-OPEN_BRACE: U8{123}
-CLOSE_BRACE: U8{125}
-SPACE: U8{32}
-TAB: U8{9}
-EQUALS: U8{61}
-BANG: U8{33}
-LESS: U8{60}
-GREATER: U8{62}
-DASH: U8{45}
-UNDERSCORE: U8{95}
-NUL: U8{0}
-
 // A decimal literal is a Decimal in Jet unless its context types it, and a
 // Decimal never mixes with a Float, so every decimal literal outside a string
-// is written `Float{...}`, except a comparison's right operand, which the
-// comparison types (and where `Float{` would open the `if` body).
-float_literals: fn(line: String) -> String {
-    bytes: line.bytes()
-    out := [U8]{}
-    start := 0
-    at := 0
-    loop at < bytes.len() {
-        close: if bytes[at] == QUOTE -> string_end(bytes, at) else -> -1
-        if close < 0 {
-            at += 1
-            next
-        }
-        out.extend(floated(bytes.slice(start, at)))
-        out.extend(bytes.slice(at, close))
-        start = close
-        at = close
-    }
-    out.extend(floated(bytes.slice(start, bytes.len())))
-    String.from_bytes_lossy(out)
+// is written `Float{...}`, except a comparison's right operand (after `==`,
+// `!=`, `<=`, `>=`, `<` or a `>` that is not `->`, and optional blanks),
+// which the comparison types (and where `Float{` would open the `if` body).
+FloatRules: struct {
+    // A string literal.
+    strings: rx.Regex
+    // A decimal literal that is not a comparison's right operand.
+    decimals: rx.Regex
 }
 
-// The index after the string literal opening at `at`, or -1 when it never
-// closes.
-string_end: fn(bytes: [U8], at: Int) -> Int {
-    j := at + 1
-    loop j < bytes.len() {
-        if bytes[j] == QUOTE -> return j + 1
-        escaped: bytes[j] == BACKSLASH
-        if escaped && j + 1 >= bytes.len() -> return -1
-        j += if escaped -> 2 else -> 1
-    }
-    -1
+float_rules: fn() -> FloatRules {
+    strings: rx.compile("\"(?:[^\"\\\\]|\\\\.)*\"") ?? panic("the string pattern compiles: {err}")
+    decimals: rx.compile("(?<![\\w.{{])(?<!(?:==|!=|<=|>=|<|(?<!-)>)\\s*)\\d+\\.\\d+(?![\\w.])") ?? panic("the decimal pattern compiles: {err}")
+    FloatRules{strings: strings, decimals: decimals}
 }
 
-is_digit: fn(byte: U8) -> Bool { byte >= U8{48} && byte <= U8{57} }
-
-is_word: fn(byte: U8) -> Bool { is_digit(byte) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == UNDERSCORE }
-
-// Whether `part` before `end` closes with a comparison operator (`==`, `!=`,
-// `<=`, `>=`, `<` or a `>` that is not `->`) and optional blanks.
-compared: fn(part: [U8], end: Int) -> Bool {
-    e := end
-    loop e > 0 && (part[e - 1] == SPACE || part[e - 1] == TAB) -> e -= 1
-    if e == 0 -> return false
-    last: part[e - 1]
-    before: if e >= 2 -> part[e - 2] else -> NUL
-    (last == EQUALS && (before == EQUALS || before == BANG || before == LESS || before == GREATER)) || last == LESS || (last == GREATER && before != DASH)
-}
-
-// `part` (code outside strings) with each decimal literal written Float{…}.
-floated: fn(part: [U8]) -> [U8] {
-    out := [U8]{}
-    p := 0
-    loop p < part.len() {
-        starts: is_digit(part[p]) && (p == 0 || !(is_word(part[p - 1]) || part[p - 1] == DOT || part[p - 1] == OPEN_BRACE))
-        q := p
-        loop starts && q < part.len() && is_digit(part[q]) -> q += 1
-        end := q + 1
-        loop starts && end < part.len() && is_digit(part[end]) -> end += 1
-        decimal: starts && q + 1 < part.len() && part[q] == DOT && is_digit(part[q + 1]) && (end == part.len() || !(is_word(part[end]) || part[end] == DOT))
-        if !decimal {
-            out.push(part[p])
-            p += 1
-            next
-        }
-        wrapped: !compared(part, p)
-        if wrapped -> out.extend("Float{{".bytes())
-        out.extend(part.slice(p, end))
-        if wrapped -> out.push(CLOSE_BRACE)
-        p = end
+float_literals: fn(line: String, rules: FloatRules) -> String {
+    codes: rules.strings.split(line)
+    quoted: rules.strings.find_all(line)
+    out := [String]{}
+    loop k in 0..<codes.len() {
+        out.push(rules.decimals.replace(codes[k], "Float{{$0}}"))
+        // copy: the string literal joins the line
+        if k < quoted.len() -> out.push(quoted[k].copy())
     }
-    out
+    out.join("")
 }
 
 // The package of `domain` at `target` code lines.
-build: fn(name: String, target: Int, r: &packages.Seeded) -> [String:String] {
+domain_files: fn(name: String, target: Int, r: &Seeded) -> [String:String] {
+    rules: float_rules()
     domain: all().find(domain -> domain.name == name) ?? panic("no domain {name}")
+    units: [String: fn(Int, Int, [String]) -> Cluster]{
+        "web": (k, i, h) -> web(k, i, r, h),
+        "game": (k, i, h) -> game(k, i, r, h),
+        "cli": (k, i, h) -> cli(k, i, r, h),
+        "data": (k, i, h) -> data(k, i, r, h),
+        "gui": (k, i, h) -> gui(k, i, r, h),
+        "embedded": (k, i, h) -> embedded(k, i, r, h),
+        "compiler": (k, i, h) -> compiler(k, i, r, h),
+        "scientific": (k, i, h) -> scientific(k, i, r, h),
+        "generic-lib": (k, i, h) -> generic_lib(k, i, r, h),
+        "generated": (k, i, h) -> generated(k, i, r, h),
+    }
+    unit_of: units[name]
     files := [String:String]{}
     entries := [String]{}
     helpers := [String]{}
-    code := packages.code_of(domain.common) + 8
+    code := code_of(domain.common) + 8
     file := [String]{}
     file_code := 0
     index := 0
     i := 0
     loop code < target {
-        made: unit_of(name, i % domain.kinds, i, r, helpers)
-        loop line in made.lines -> file.push(float_literals(line))
+        made: unit_of(i % domain.kinds, i, helpers)
+        loop line in made.lines -> file.push(float_literals(line, rules))
         file.push("")
         // copy: the entry name outlives the unit
         entries.push(made.entry.copy())
         // copy: the helper names outlive the unit
         loop helper in made.helpers -> helpers.push(helper.copy())
-        size: packages.code_of(made.lines)
+        size: code_of(made.lines)
         file_code += size
         code += size + 1
         if file_code >= PER_FILE && domain.layout == .Files {
@@ -194,36 +144,21 @@ build: fn(name: String, target: Int, r: &packages.Seeded) -> [String:String] {
         }
         i += 1
     }
-    common: domain.common.map(line -> float_literals(line))
-    if domain.layout == {
-        .Files -> {
+    common: domain.common.map(line -> float_literals(line, rules))
+    if {
+        domain.layout == .Files -> {
             if file.len() > 0 -> files["src/{domain.build_name}_{index}.jet"] = file.join("\n")
             files["common.jet"] = common.join("\n")
         }
-        .Entry -> files["main.jet"] = "{common.join("\n")}\n{file.join("\n")}"
+        else -> files["main.jet"] = "{common.join("\n")}\n{file.join("\n")}"
     }
-    roots: packages.consumer_tree(files, entries, domain.build_name)
-    packages.finish(domain.build_name, files, roots)
+    roots: consumer_tree(files, entries, domain.build_name)
+    finish(domain.build_name, files, roots)
     files
 }
 
-unit_of: fn(name: String, k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if name == {
-        "web" -> web(k, i, r, h)
-        "game" -> game(k, i, r, h)
-        "cli" -> cli(k, i, r, h)
-        "data" -> data(k, i, r, h)
-        "gui" -> gui(k, i, r, h)
-        "embedded" -> embedded(k, i, r, h)
-        "compiler" -> compiler(k, i, r, h)
-        "scientific" -> scientific(k, i, r, h)
-        "generic-lib" -> generic_lib(k, i, r, h)
-        else -> generated(k, i, r, h)
-    }
-}
-
 domain: fn(name: String, dimension: String, kinds: Int, common: String) -> Domain {
-    Domain{name: name, build_name: name, dimension: dimension, kinds: kinds, common: packages.lines(common), layout: .Files}
+    Domain{name: name, build_name: name, dimension: dimension, kinds: kinds, common: lines(common), layout: .Files}
 }
 
 all: fn() -> [Domain] {
@@ -236,7 +171,7 @@ all: fn() -> [Domain] {
         domain("embedded", "embedded: registers and bit fields, ring buffers, CRC tables, framing state machines", 4, EMBEDDED_COMMON),
         domain("compiler", "compiler/interpreter: lexers, ASTs and evaluators, stack VMs, type tables", 4, COMPILER_COMMON),
         domain("scientific", "scientific/numeric: polynomials, quadrature, matrices, ODE steps", 4, SCIENTIFIC_COMMON),
-        Domain{name: "generic-lib", build_name: "generic_lib", dimension: "generic-heavy library in one entry file: generic records and functions instantiated per model", kinds: 2, common: packages.lines(GENERIC_COMMON), layout: .Entry},
+        Domain{name: "generic-lib", build_name: "generic_lib", dimension: "generic-heavy library in one entry file: generic records and functions instantiated per model", kinds: 2, common: lines(GENERIC_COMMON), layout: .Entry},
         Domain{name: "generated", build_name: "generated", dimension: "generated code: message structs, registries, lookup tables, accessors", kinds: 4, common: [String]{}, layout: .Files},
     }
 }
@@ -283,9 +218,9 @@ WEB_COMMON: """
 
     """
 
-web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> {
+web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> {
             a: r.int(2, 97)
             unit("customer{i}_main", ["customer{i}_score"], """
                 Customer{i}: struct {{
@@ -335,8 +270,8 @@ web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                     (customer{i}_to_json(found).len() + customer{i}_active_count(rows) + bonus + {call(r, h, "seed")}) % {M}
                 }}
                 """)
-        }
-        1 -> unit("handler{i}_main", [String]{}, """
+        },
+        () -> unit("handler{i}_main", [String]{}, """
             lookup{i}: fn(id: Int) -> String APIError! {{
                 if id <= 0 -> return Err(APIError.Unauthorized)
                 if id % {r.int(5, 11)} == 0 -> return Err(APIError.NotFound("user {{id}}"))
@@ -375,8 +310,8 @@ web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
-        2 -> unit("template{i}_main", ["template{i}_width"], """
+            """),
+        () -> unit("template{i}_main", ["template{i}_width"], """
             render{i}_row: fn(cells: [String]) -> String {{
                 out := "<tr>"
                 loop cell in cells -> out = "{{out}}<td>{{cell}}</td>"
@@ -397,8 +332,8 @@ web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 page: render{i}_page("Report {i}", rows)
                 (page.len() + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        3 -> unit("query{i}_main", [String]{}, """
+            """),
+        () -> unit("query{i}_main", [String]{}, """
             Query{i}: struct {{
                 table: String
                 filters: [String]
@@ -427,8 +362,8 @@ web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 &query.order_by("created_at")
                 (query.to_sql().len() + {call(r, h, "seed + 3")}) % {M}
             }}
-            """)
-        else -> unit("permissions{i}_main", ["permissions{i}_level"], """
+            """),
+        () -> unit("permissions{i}_main", ["permissions{i}_level"], """
             Role{i}: enum {{
                 Guest
                 Member(Int)
@@ -464,8 +399,9 @@ web: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (allowed + {call(r, h, "allowed")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ----------------------------------------------------------------- game
@@ -501,9 +437,9 @@ GAME_COMMON: """
 
     """
 
-game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("system{i}_main", ["system{i}_frames"], """
+game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("system{i}_main", ["system{i}_frames"], """
             Body{i}: struct {{
                 position: Vec2
                 velocity: Vec2
@@ -545,8 +481,8 @@ game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop frame in 0..<system{i}_frames(seed) -> bodies = bodies{i}_step(bodies, 0.016 + Float.from_int(frame) * 0.001)
                 (to_score(bodies{i}_energy(bodies)) + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        1 -> unit("ai{i}_main", [String]{}, """
+            """),
+        () -> unit("ai{i}_main", [String]{}, """
             Mind{i}: enum {{
                 Idle
                 Patrol(Int)
@@ -593,8 +529,8 @@ game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (total + {call(r, h, "total + 1")}) % {M}
             }}
-            """)
-        2 -> {
+            """),
+        () -> {
             rows: table_rows(draws(r, 64, 999))
             unit("waves{i}_main", ["wave{i}_pick"], """
                 wave{i}_table: fn() -> [Int] {{
@@ -629,8 +565,8 @@ game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                     (total + {call(r, h, "seed")}) % {M}
                 }}
                 """)
-        }
-        3 -> unit("inventory{i}_main", [String]{}, """
+        },
+        () -> unit("inventory{i}_main", [String]{}, """
             Item{i}: struct {{
                 name: String
                 weight: Int
@@ -648,8 +584,8 @@ game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (heavy + best.value + best.name.len() + {call(r, h, "heavy")}) % {M}
             }}
-            """)
-        else -> unit("behaviors{i}_main", [String]{}, """
+            """),
+        () -> unit("behaviors{i}_main", [String]{}, """
             Turret{i}: struct {{
                 range: Float
                 rate: Float
@@ -668,8 +604,9 @@ game: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop agent in agents -> total = total + agent.tick(0.016) + Float.from_int(agent.label().len())
                 (to_score(total) + {call(r, h, "seed")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ------------------------------------------------------------------ cli
@@ -707,9 +644,9 @@ CLI_COMMON: """
 
     """
 
-cli: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("parse{i}_main", [String]{}, """
+cli: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("parse{i}_main", [String]{}, """
             parse{i}_args: fn(args: [String]) -> Options CLIError! {{
                 options := default_options()
                 index := 0
@@ -742,8 +679,8 @@ cli: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                     .Err(error) -> cli_error_text(error).len()
                 }}
             }}
-            """)
-        1 -> unit("command{i}_main", ["command{i}_weight"], """
+            """),
+        () -> unit("command{i}_main", ["command{i}_weight"], """
             Command{i}: enum {{
                 Build(String)
                 Test(Int)
@@ -779,8 +716,8 @@ cli: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
-        2 -> unit("table{i}_main", [String]{}, """
+            """),
+        () -> unit("table{i}_main", [String]{}, """
             Column{i}: struct {{
                 title: String
                 width: Int
@@ -807,8 +744,8 @@ cli: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop index in 0..<(seed % 4 + 2) -> &rows.push([String]{{"file{{index}}", "{{index * 1024}}", "{{seed % 7}}"}})
                 (table{i}_render(columns, rows).len() + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("config{i}_main", ["config{i}_default"], """
+            """),
+        () -> unit("config{i}_main", ["config{i}_default"], """
             config{i}_read: fn(settings: [String:String], key: String, fallback: Int) -> Int {{
                 text: settings.get(key) ?? ""
                 if text == "" -> return fallback
@@ -827,8 +764,9 @@ cli: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 timeout: config{i}_read(settings, "timeout", config{i}_default(seed))
                 (jobs * retries + timeout + {call(r, h, "jobs")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ----------------------------------------------------------------- data
@@ -860,9 +798,9 @@ DATA_COMMON: """
 
     """
 
-data: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("column{i}_main", [String]{}, """
+data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("column{i}_main", [String]{}, """
             column{i}_build: fn(seed: Int, count: Int) -> [Float] {{
                 values := [Float]{{}}
                 loop index in 0..<count -> &values.push(Float.from_int((seed * {r.int(3, 31)} + index * {r.int(3, 17)}) % 1000) * 0.1)
@@ -881,8 +819,8 @@ data: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 high: scores.filter((score) -> score > 0.0).len()
                 (to_score(mean(values) * 10.0) + high + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        1 -> unit("groups{i}_main", ["groups{i}_bucket"], """
+            """),
+        () -> unit("groups{i}_main", ["groups{i}_bucket"], """
             Sale{i}: struct {{
                 region: String
                 product: Int
@@ -905,8 +843,8 @@ data: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop (region, amount) in groups{i}_sum(rows) -> total = (total + region.len() + to_score(amount)) % {M}
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
-        2 -> unit("pipeline{i}_main", [String]{}, """
+            """),
+        () -> unit("pipeline{i}_main", [String]{}, """
             Reading{i}: struct {{
                 sensor: Int
                 value: Float
@@ -920,8 +858,8 @@ data: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 scaled: good.map((reading) -> reading.value * {r.int(1, 3)}.5)
                 (to_score(mean(scaled)) + good.len() + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("csv{i}_main", ["csv{i}_width"], """
+            """),
+        () -> unit("csv{i}_main", ["csv{i}_width"], """
             #Error
             RowError{i}: enum {{
                 Short(Int)
@@ -949,8 +887,9 @@ data: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ------------------------------------------------------------------ gui
@@ -969,9 +908,9 @@ GUI_COMMON: """
 
     """
 
-gui: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("layout{i}_main", [String]{}, """
+gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("layout{i}_main", [String]{}, """
             Widget{i}: enum {{
                 Label(String)
                 Button(text: String, id: Int)
@@ -1006,8 +945,8 @@ gui: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop rect in rects -> total += rect_area(rect) % 997
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
-        1 -> unit("reducer{i}_main", ["reducer{i}_step"], """
+            """),
+        () -> unit("reducer{i}_main", ["reducer{i}_step"], """
             State{i}: struct {{
                 count: Int
                 title: String
@@ -1043,8 +982,8 @@ gui: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop msg in messages -> state = update{i}(state, msg)
                 (state.count + state.title.len() + state.items.len() + state.selected + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        2 -> unit("style{i}_main", [String]{}, """
+            """),
+        () -> unit("style{i}_main", [String]{}, """
             Style{i}: struct {{
                 margin: Int
                 padding: Int
@@ -1078,8 +1017,8 @@ gui: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 css: style{i}_css(style{i}_emphasis(style{i}_default()))
                 (css.len() + seed % 7 + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("events{i}_main", [String]{}, """
+            """),
+        () -> unit("events{i}_main", [String]{}, """
             Event{i}: enum {{
                 Click(x: Int, y: Int)
                 Key(String)
@@ -1103,8 +1042,9 @@ gui: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop event in events -> handled += events{i}_handle(event, area)
                 (handled + {call(r, h, "handled")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ------------------------------------------------------------- embedded
@@ -1118,9 +1058,9 @@ EMBEDDED_COMMON: """
 
     """
 
-embedded: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("regs{i}_main", ["regs{i}_mask"], """
+embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("regs{i}_main", ["regs{i}_mask"], """
             REG{i}_CTRL: {r.int(16, 255)}
             REG{i}_STATUS: {r.int(16, 255)}
             REG{i}_DATA: {r.int(256, 4095)}
@@ -1139,8 +1079,8 @@ embedded: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 ready: read_field(REG{i}_STATUS, 2, 3)
                 (ctrl + ready + regs{i}_mask(REG{i}_DATA + seed) + {call(r, h, "ctrl")}) % {M}
             }}
-            """)
-        1 -> unit("ring{i}_main", [String]{}, """
+            """),
+        () -> unit("ring{i}_main", [String]{}, """
             Ring{i}: struct {{
                 data: [Int#16]
                 head: Int
@@ -1165,8 +1105,8 @@ embedded: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop k in 0..<{r.int(10, 30)} -> &ring.push((seed + k * {r.int(3, 11)}) % 256)
                 (ring.sum() + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        2 -> {
+            """),
+        () -> {
             rows: table_rows(draws(r, 64, 65535))
             unit("crc{i}_main", ["crc{i}_byte"], """
                 crc{i}_table: fn() -> [Int] {{
@@ -1190,8 +1130,8 @@ embedded: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                     (crc{i}_update({r.int(0, 65535)}, bytes) + {call(r, h, "seed")}) % {M}
                 }}
                 """)
-        }
-        else -> unit("frame{i}_main", [String]{}, """
+        },
+        () -> unit("frame{i}_main", [String]{}, """
             Frame{i}: enum {{
                 Sync
                 Header(Int)
@@ -1217,8 +1157,9 @@ embedded: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (done + {call(r, h, "done")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ------------------------------------------------------------- compiler
@@ -1234,9 +1175,9 @@ COMPILER_COMMON: """
 
     """
 
-compiler: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("lexer{i}_main", [String]{}, """
+compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("lexer{i}_main", [String]{}, """
             Tok{i}: enum {{
                 Num(Int)
                 Ident(String)
@@ -1298,8 +1239,8 @@ compiler: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop token in lex{i}(codes) -> total = (total * 3 + tok{i}_weight(token)) % {M}
                 (total + {call(r, h, "total")}) % {M}
             }}
-            """)
-        1 -> unit("eval{i}_main", ["eval{i}_fold"], """
+            """),
+        () -> unit("eval{i}_main", ["eval{i}_fold"], """
             Node{i}: enum {{
                 Lit(Int)
                 Var(String)
@@ -1332,8 +1273,8 @@ compiler: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 nodes: [Node{i}]{{Node{i}.Lit({r.int(1, 9)}), Node{i}.Var("x"), Node{i}.Add{{left: 0, right: 1}}, Node{i}.Var("y"), Node{i}.Mul{{left: 2, right: 3}}, Node{i}.Neg(4), Node{i}.Add{{left: 4, right: 5}}}}
                 (eval{i}(nodes, env) + {M} + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        2 -> unit("vm{i}_main", [String]{}, """
+            """),
+        () -> unit("vm{i}_main", [String]{}, """
             Op{i}: enum {{
                 Push(Int)
                 Add
@@ -1401,8 +1342,8 @@ compiler: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 program: [Op{i}]{{Op{i}.Push(seed % 10), Op{i}.Push({r.int(2, 9)}), Op{i}.Mul, Op{i}.Dup, Op{i}.Push(3), Op{i}.Sub, Op{i}.Swap, Op{i}.Drop, Op{i}.Push(0), Op{i}.Jz(11), Op{i}.Jmp(12), Op{i}.Halt}}
                 (vm{i}_run(program) + {M} + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("types{i}_main", [String]{}, """
+            """),
+        () -> unit("types{i}_main", [String]{}, """
             Ty{i}: enum {{
                 IntT
                 BoolT
@@ -1433,8 +1374,9 @@ compiler: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (matches + {call(r, h, "matches")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ----------------------------------------------------------- scientific
@@ -1446,9 +1388,9 @@ SCIENTIFIC_COMMON: """
 
     """
 
-scientific: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> {
+scientific: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> {
             coefficients := [String]{}
             loop _ in 0..<6 {
                 whole: r.int(0, 9)
@@ -1475,8 +1417,8 @@ scientific: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
 
                 poly{i}_main: fn(seed: Int) -> Int {{ (to_score(absf(poly{i}_newton(Float.from_int(seed % 10))) * 100.0) + {call(r, h, "seed")}) % {M} }}
                 """)
-        }
-        1 -> unit("integrate{i}_main", ["integrate{i}_steps"], """
+        },
+        () -> unit("integrate{i}_main", ["integrate{i}_steps"], """
             integrate{i}: fn(f: fn(Float) -> Float, low: Float, high: Float, steps: Int) -> Float {{
                 width: (high - low) / Float.from_int(steps)
                 total := 0.5 * (f(low) + f(high))
@@ -1491,8 +1433,8 @@ scientific: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 area: integrate{i}((x) -> x * x * scale + 1.0, 0.0, Float.from_int(seed % 5 + 1), integrate{i}_steps(seed))
                 (to_score(area) + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        2 -> unit("matrix{i}_main", [String]{}, """
+            """),
+        () -> unit("matrix{i}_main", [String]{}, """
             matrix{i}_mul: fn(a: [Float], b: [Float], n: Int) -> [Float] {{
                 out := [Float]{{}}
                 loop row in 0..<n {{
@@ -1520,8 +1462,8 @@ scientific: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 }}
                 (to_score(matrix{i}_trace(matrix{i}_mul(a, b, 4), 4)) + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("ode{i}_main", [String]{}, """
+            """),
+        () -> unit("ode{i}_main", [String]{}, """
             Oscillator{i}: struct {{
                 position: Float
                 velocity: Float
@@ -1540,8 +1482,9 @@ scientific: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 loop k in 0..<(seed % 20 + 10) -> state = ode{i}_step(state, 0.01)
                 (to_score(absf(state.position) * 1000.0) + {call(r, h, "seed")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ---------------------------------------------------------- generic-lib
@@ -1583,9 +1526,9 @@ GENERIC_COMMON: """
 
     """
 
-generic_lib: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> unit("model{i}_main", ["model{i}_rank"], """
+generic_lib: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> unit("model{i}_main", ["model{i}_rank"], """
             Model{i}: struct {{
                 id: Int
                 label: String
@@ -1606,8 +1549,8 @@ generic_lib: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 pair: keyed(best.label, total)
                 (labels.len() + found + total + unbox(box).id + box.version + pair.key.len() + pair.value + {call(r, h, "seed")}) % {M}
             }}
-            """)
-        else -> unit("cache{i}_main", [String]{}, """
+            """),
+        () -> unit("cache{i}_main", [String]{}, """
             cache{i}_lookup: fn<T>(entries: [Keyed<String, T>], key: String, fallback: T) -> T {{
                 loop entry in entries {{
                     if entry.key == key -> return entry.value
@@ -1624,15 +1567,16 @@ generic_lib: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                 ratio: cache{i}_lookup(floats, "g", Float{{2.5}})
                 (hit + text.len() + (Int.from_float(ratio) ?? 0) + {call(r, h, "hit")}) % {M}
             }}
-            """)
+            """),
     }
+    kinds[k]()
 }
 
 // ------------------------------------------------------------ generated
 
-generated: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
-    if k == {
-        0 -> {
+generated: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+    kinds: [fn() -> Cluster]{
+        () -> {
             types: ["Int", "String", "Bool"]
             fields := [String]{}
             zeros := [String]{}
@@ -1672,8 +1616,8 @@ generated: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
 
                 message{i}_main: fn(seed: Int) -> Int {{ (message{i}_encode(message{i}_sample(seed)).len() + message{i}_encode(message{i}_default()).len() + message{i}_field_name(seed % 18).len() + {call(r, h, "seed")}) % {M} }}
                 """)
-        }
-        1 -> {
+        },
+        () -> {
             variants := [String]{}
             to_code := [String]{}
             from_code := [String]{}
@@ -1705,8 +1649,8 @@ generated: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
 
                 registry{i}_main: fn(seed: Int) -> Int {{ (registry{i}_code(seed) + {call(r, h, "seed")}) % {M} }}
                 """)
-        }
-        2 -> {
+        },
+        () -> {
             rows: table_rows(draws(r, 128, 9999))
             unit("lut{i}_main", ["lut{i}_at"], """
                 // Generated lookup table {i}; do not edit.
@@ -1720,8 +1664,8 @@ generated: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
 
                 lut{i}_main: fn(seed: Int) -> Int {{ (lut{i}_at(seed) + lut{i}_at(seed + 64) + {call(r, h, "seed")}) % {M} }}
                 """)
-        }
-        else -> {
+        },
+        () -> {
             names: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
             fields := [String]{}
             accessors := [String]{}
@@ -1751,6 +1695,7 @@ generated: fn(k: Int, i: Int, r: &packages.Seeded, h: [String]) -> Cluster {
                     ({gets.join(" + ")} + {call(r, h, "seed")}) % {M}
                 }}
                 """)
-        }
+        },
     }
+    kinds[k]()
 }
