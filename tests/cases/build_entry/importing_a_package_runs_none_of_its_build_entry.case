@@ -1,0 +1,21 @@
+# #3526 c3 (D-META-LADDER1): importing a package, using what it exports and
+# running a build entry are distinct. Only the root's own build entry runs.
+# The `hooked` dependency's entry panics if anything runs it. The `importer`
+# root imports `hooked` and calls its function, and the build and the built
+# app both succeed. A dependency's entry is still checked: the `broken`
+# dependency's entry calls a name nothing declares, so its importer fails
+# with the dependency's own error.
+fixture: importing_a_package_runs_none_of_its_build_entry.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build importer/main.jet
+exit: 0
+stderr: !~ "the dependency's build entry ran" # import alone runs no entry
+step: {work}/importer/.jet/build/importer
+exit: 0
+stdout: = "value 2\n"
+step: jet build checker/main.jet
+exit: 1
+stderr: ~ "Nothing named `missing_in_dependency` exists here" # the entry is checked
+stderr: ~ broken.jet:4 # at the dependency's own line
+stderr: ~ E0626 # the importer fails on its dependency's errors

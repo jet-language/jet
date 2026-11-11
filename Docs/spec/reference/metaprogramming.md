@@ -203,6 +203,10 @@ and workspace policy permits them and the invocation supplies matching grants;
 dependency build scripts do not inherit root authority. The execution runtime
 rejects a selected action or probe when its grant is absent.
 
+Only the root package's own build entry runs. Importing a package and calling
+what it exports never runs that package's `build: fn`. Its entry is still
+checked with its package, so an error in it fails every importer (E0626).
+
 The graph and environment contracts that a build entry consumes are defined
 in the [Jetpack reference](jetpack-epoch5.md). Build-side inspection is
 read-only unless a ratified generation operation is used; a build entry cannot
