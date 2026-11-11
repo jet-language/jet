@@ -107,6 +107,9 @@ SemaTaintCatalog: struct {
     callable_name_slots: SemaTaintSlots
     field_slots: SemaTaintSlots
     field_name_slots: SemaTaintSlots
+    // The first field row of each struct, by "{module_identity}|{name}" and
+    // by bare name (the first struct of that name); its fields follow it.
+    struct_field_slots: SemaTaintSlots
     known_source_slots: SemaTaintSlots
 }
 
@@ -144,6 +147,8 @@ sema_taint_slot: fn(slots: SemaTaintSlots, key: String) -> Int? Never! {
 SemaTaintImportAlias: struct {
     alias: String
     module_name: String
+    // The imported module an alias names ("": a binding's local name).
+    module_identity: String
 }
 
 SemaTaintSnapshot: struct {
@@ -155,6 +160,9 @@ SemaTaintFlowState: struct {
     module_identity: String
     bindings: [SemaTaintBindingFact]
     imports: [SemaTaintImportAlias]
+    // The callable each bare name reaches beyond the module's own functions
+    // (sema_taint_callable_scope).
+    callable_scope: SemaTaintSlots
     diagnostics: [Diagnostic]
     // The bundle's switch coverage reports so far (sema_taint_coverage_reports).
     coverage_reports: [Diagnostic]
@@ -385,7 +393,7 @@ sema_taint_add_builtin_tags: fn(catalog: &SemaTaintCatalog) Never! {
 }
 
 sema_taint_catalog_init: fn() -> SemaTaintCatalog Never! {
-    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), known_source_slots: sema_taint_slots()}
+    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), struct_field_slots: sema_taint_slots(), known_source_slots: sema_taint_slots()}
     sema_taint_add_builtin_tags(catalog)
     catalog
 }
@@ -590,6 +598,8 @@ sema_taint_add_field: fn(catalog: &SemaTaintCatalog, module_identity: String, ow
     _: sema_taint_slot_add(catalog.field_slots, exact, slot)
     loose: "{owner}|{field.name}"
     _: sema_taint_slot_add(catalog.field_name_slots, loose, slot)
+    _: sema_taint_slot_add(catalog.struct_field_slots, "{module_identity}|{owner}", slot)
+    _: sema_taint_slot_add(catalog.struct_field_slots, owner, slot)
 }
 sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
     loop module_row_index in 0..<graph.modules.len() {
@@ -650,15 +660,67 @@ sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph,
     None
 }
 
+// The callable `name` of `owner` declared in `module_identity`, else, for a
+// method, the first `name` of any type called `owner`. A function (owner "")
+// resolves only exactly: sema_taint_bare_callable and
+// sema_taint_method_callable find its module.
 sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: String, owner: String, name: String) -> SemaTaintCallableFact? {
     exact: sema_taint_slot(catalog.callable_slots, "{module_identity}|{owner}|{name}")
     if exact == .Val(slot) {
         callable := catalog.callables[slot]
         return Val(callable)
     }
+    if owner == "" -> return None
     loose: sema_taint_slot(catalog.callable_name_slots, "{owner}|{name}") ?? return None
     callable := catalog.callables[loose]
     Val(callable)
+}
+
+// The function a bare call `name(...)` in the walked module reaches: none
+// for a local function value, else the module's own function, or the one an
+// import or the module's package binds the name to.
+sema_taint_bare_callable: fn(state: SemaTaintFlowState, name: String) -> SemaTaintCallableFact? {
+    if sema_taint_binding_index(state.bindings, name) != None -> return None
+    slot := sema_taint_slot(state.catalog.callable_slots, "{state.module_identity}||{name}")
+    if slot == None -> slot = sema_taint_slot(state.callable_scope, name)
+    found: slot ?? return None
+    callable := state.catalog.callables[found]
+    Val(callable)
+}
+
+// The callable `receiver.method(...)` reaches: a function of the module an
+// import alias names, else a method of the receiver's declared type.
+sema_taint_method_callable: fn(state: SemaTaintFlowState, receiver: Expr, method: String) -> SemaTaintCallableFact? {
+    if receiver == .Ident(alias, _, _) {
+        if sema_taint_binding_index(state.bindings, alias) == None {
+            loop item in state.imports {
+                if item.alias != alias || item.module_identity == "" -> next
+                return sema_taint_find_callable(state.catalog, item.module_identity, "", method)
+            }
+        }
+    }
+    owner: sema_taint_type_of_expr(state, receiver) ?? return None
+    sema_taint_find_callable(state.catalog, state.module_identity, owner, method)
+}
+
+// The functions a bare name in module `module_identity` reaches beyond its
+// own: each import binding's, by its name in the imported module, and each
+// package member's the module scope binds (sema_registration_bind_namespaces).
+sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCatalog, module_identity: String) -> SemaTaintSlots Never! {
+    scope := sema_taint_slots()
+    module_index: sema_registration_module_index(graph, module_identity) ?? return scope
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            slot: sema_taint_slot(catalog.callable_slots, "{import.target_module_identity}||{binding.original}") ?? next
+            _: sema_taint_slot_add(scope, binding.local, slot)
+        }
+    }
+    loop owner in graph.modules[module_index].namespace_bindings {
+        name: graph.modules[owner.module_index].symbols[owner.row].name
+        slot: sema_taint_slot(catalog.callable_slots, "{graph.modules[owner.module_index].module_identity}||{name}") ?? next
+        _: sema_taint_slot_add(scope, name, slot)
+    }
+    scope
 }
 
 // A field of `owner` declared in `module_identity` (or with no declaring
@@ -852,7 +914,7 @@ sema_taint_type_of_expr: fn(state: SemaTaintFlowState, expression: Expr) -> Stri
             if head == .Val(ty) -> return sema_taint_type_name(ty)
         }
         .Call(call, _) -> {
-            fact: sema_taint_find_callable(state.catalog, state.module_identity, "", call.name) ?? return None
+            fact: sema_taint_bare_callable(state, call.name) ?? return None
             return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, _, _) -> return sema_taint_type_of_expr(state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
@@ -868,14 +930,12 @@ sema_taint_type_of_expr: fn(state: SemaTaintFlowState, expression: Expr) -> Stri
     None
 }
 
-sema_taint_call_return_tags: fn(state: SemaTaintFlowState, owner: String, name: String) -> [String] Never! {
-    fact: sema_taint_find_callable(state.catalog, state.module_identity, owner, name) ?? return [String]{}
-    fact.return_tags
-}
-
-sema_taint_scrub: fn(state: SemaTaintFlowState, tags: &[String], owner: String, name: String) Never! {
-    fact: sema_taint_find_callable(state.catalog, state.module_identity, owner, name) ?? return
-    if fact.scrub_tag == {
+// The return tags of `fact`'s callee joined to `tags`, which a `#Scrub(Tag)`
+// callee then clears of its tag and the origins.
+sema_taint_apply_callable: fn(tags: &[String], fact: SemaTaintCallableFact?) Never! {
+    callable: fact ?? return
+    sema_taint_union(tags, callable.return_tags)
+    if callable.scrub_tag == {
         .Val(tag_value) -> {
             sema_taint_remove(tags, tag_value)
             sema_taint_clear_origins(tags)
@@ -898,8 +958,7 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
             tags := [String]{}
             loop argument in call.args -> sema_taint_union(tags, sema_taint_tags_of(state, argument.expr))
             sema_taint_union(tags, sema_taint_source_tags(state, [String]{call.name}))
-            sema_taint_union(tags, sema_taint_call_return_tags(state, "", call.name))
-            sema_taint_scrub(state, tags, "", call.name)
+            sema_taint_apply_callable(tags, sema_taint_bare_callable(state, call.name))
  
             return tags
         }
@@ -916,8 +975,7 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
             // by its type (`Store.read`), whatever the receiver is called.
             if sema_taint_type_of_expr(state, receiver) == .Val(owner) -> destinations.push("{owner}.{method}")
             sema_taint_union(tags, sema_taint_source_tags(state, destinations))
-            sema_taint_union(tags, sema_taint_call_return_tags(state, "", method))
-            sema_taint_scrub(state, tags, "", method)
+            sema_taint_apply_callable(tags, sema_taint_method_callable(state, receiver, method))
             if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(tags)
             if sema_taint_is_credential_verify(state, receiver, method) -> sema_taint_remove(tags, "Credential")
             return tags
@@ -1652,14 +1710,42 @@ sema_taint_check_binary_chain: fn(state: &SemaTaintFlowState, expression: Expr) 
     text := sema_taint_is_str(operand)
     index := nodes.len() - 1
     loop index >= 0 {
-        if nodes[index] == .Binary(op, _, right, span, _) {
+        if nodes[index] == .Binary(op, left, right, span, _) {
             fixed := sema_taint_fixed_in(state, right)
             text = text || sema_taint_is_str(right)
             sema_taint_check_operator(state, op, prefix, fixed, text, span)
+            sema_taint_check_struct_compare(state, op, left, right, span)
             if prefix == None -> prefix = fixed
         }
         index -= 1
     }
+}
+
+// E0737 when comparison `op` runs a struct's `equal` or `compare` (the
+// derived ones in Prelude/Derives.jet leave at the first field that differs)
+// and a side carries a fixed tag or its struct type declares one on a field.
+sema_taint_check_struct_compare: fn(state: &SemaTaintFlowState, op: BinOp, left: Expr, right: Expr, span: Span) {
+    if op == {
+        .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare -> {}
+        .Div | .FloorDiv | .Mod | .Rem | .Shl | .Shr | .Pow | .And | .Or | .Add | .Sub | .Mul | .BitAnd | .BitOr | .BitXor -> return
+    }
+    tag_value: sema_taint_either(sema_taint_struct_fixed(state, left), sema_taint_struct_fixed(state, right)) ?? return
+    sema_taint_e0737(state, tag_value, "a struct comparison (a struct's `==` and `compare` leave at the first field that differs)", span)
+}
+
+// The fixed tag a struct-typed `value` brings to a comparison: one a field of
+// its type declares, else its own.
+sema_taint_struct_fixed: fn(state: &SemaTaintFlowState, value: Expr) -> String? {
+    owner: sema_taint_type_of_expr(state, value) ?? return None
+    local: sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity}|{owner}")
+    first: local ?? sema_taint_slot(state.catalog.struct_field_slots, owner) ?? return None
+    at := first
+    loop at < state.catalog.fields.len() && state.catalog.fields[at].owner_type == owner && state.catalog.fields[at].module_identity == state.catalog.fields[first].module_identity {
+        declared: sema_taint_fixed_of(state, state.catalog.fields[at].tags)
+        if declared != None -> return declared
+        at += 1
+    }
+    sema_taint_fixed_in(state, value)
 }
 
 // Whether `ty`, through its tags, lists and options, holds an `Int` or a
@@ -1800,6 +1886,7 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     slot: state.crossed.len() - 1
     saved_module: state.module_identity.copy()
     saved_imports: state.imports.copy()
+    saved_scope: state.callable_scope.copy()
     saved_fixed: state.fixed_tags.copy()
     saved_bindings: state.bindings.copy()
     saved_diagnostics: state.diagnostics.copy()
@@ -1814,6 +1901,7 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     saved_cross_path: state.cross_path.copy()
     state.module_identity = module_identity.copy()
     state.imports = sema_taint_collect_imports(graph, module_identity)
+    state.callable_scope = sema_taint_callable_scope(graph, state.catalog, module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, module_identity)
     sema_taint_add(state.fixed_tags, tag_value)
     state.bindings = [SemaTaintBindingFact]{}
@@ -1847,6 +1935,7 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     if path == "" && (state.masked.len() > 0 || state.exits.len() > 0) -> path = "`{callee.name}`, where a `{tag_value}` value decides a branch or an early return"
     state.module_identity = saved_module
     state.imports = saved_imports
+    state.callable_scope = saved_scope
     state.fixed_tags = saved_fixed
     state.bindings = saved_bindings
     state.diagnostics = saved_diagnostics
@@ -1917,13 +2006,6 @@ sema_taint_any_fixed: fn(state: &SemaTaintFlowState, args: [CallArg]) -> Bool {
     false
 }
 
-// The module whose function `name` a call in the walked module reaches:
-// its own, or the one an import binds the name from ("": none).
-sema_taint_function_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, name: String) -> String {
-    if sema_taint_slot(state.catalog.callable_slots, "{state.module_identity}||{name}") != None -> return state.module_identity.copy()
-    sema_taint_import_module(graph, state.module_identity, name)
-}
-
 // `name(args)`: a function, or a local function value (no known body).
 sema_taint_check_call_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, call: Call) {
     if !sema_taint_any_fixed(state, call.args) -> return
@@ -1931,10 +2013,9 @@ sema_taint_check_call_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTai
         sema_taint_refuse_indirect(state, call.args)
         return
     }
-    module_identity: sema_taint_function_module(graph, state, call.name)
-    if module_identity == "" -> return
-    callee: sema_taint_body_of(graph, module_identity, "", call.name) ?? return
-    sema_taint_check_crossings(graph, state, module_identity, "", callee, call.args, 0)
+    fact: sema_taint_bare_callable(state, call.name) ?? return
+    callee: sema_taint_body_of(graph, fact.module_identity, "", fact.name) ?? return
+    sema_taint_check_crossings(graph, state, fact.module_identity, "", callee, call.args, 0)
 }
 
 // `callee(args)` on a callee expression: a named function when it names
@@ -1942,13 +2023,10 @@ sema_taint_check_call_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTai
 sema_taint_check_value_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, callee: Expr, args: [CallArg]) {
     if !sema_taint_any_fixed(state, args) -> return
     if callee == .Ident(name, _, _) {
-        if sema_taint_binding_index(state.bindings, name) == None {
-            module_identity: sema_taint_function_module(graph, state, name)
-            if module_identity != "" {
-                if sema_taint_body_of(graph, module_identity, "", name) == .Val(function) {
-                    sema_taint_check_crossings(graph, state, module_identity, "", function, args, 0)
-                    return
-                }
+        if sema_taint_bare_callable(state, name) == .Val(fact) {
+            if sema_taint_body_of(graph, fact.module_identity, "", fact.name) == .Val(function) {
+                sema_taint_check_crossings(graph, state, fact.module_identity, "", function, args, 0)
+                return
             }
         }
     }
@@ -1971,9 +2049,25 @@ sema_taint_check_method_crossing: fn(graph: SemaRegistrationGraph, state: &SemaT
         }
     }
     owner: sema_taint_type_of_expr(state, receiver) ?? return
-    fact: sema_taint_find_callable(state.catalog, state.module_identity, owner, method) ?? return
+    found: sema_taint_find_callable(state.catalog, state.module_identity, owner, method)
+    if found == None {
+        // A function held in a struct field has no known body to check.
+        if sema_taint_find_field(state.catalog, state.module_identity, owner, method) != None -> sema_taint_refuse_indirect(state, args)
+        return
+    }
+    fact: found
     if fact.owner != owner -> return
     function: sema_taint_body_of(graph, fact.module_identity, owner, method) ?? return
+    // A derived method's body (Prelude/Derives.jet) is no authored code to
+    // check through: a fixed value it takes steers it.
+    if function.compiler_generated {
+        if receiver_fixed == .Val(tag_value) -> sema_taint_e0737(state, tag_value, "a derived `{method}` (its generated body is not checked for fixed timing)", expr_span(receiver))
+        loop argument in args {
+            tag_value: sema_taint_fixed_in(state, argument.expr) ?? next
+            sema_taint_e0737(state, tag_value, "a derived `{method}` (its generated body is not checked for fixed timing)", argument.span)
+        }
+        return
+    }
     offset := 0
     if function.params.len() > 0 && function.params[0].name == "self" {
         offset = 1
@@ -2493,8 +2587,8 @@ sema_taint_collect_imports: fn(graph: SemaRegistrationGraph, module_identity: St
     module_row: graph.modules[module_index]
     loop import in module_row.imports {
         target_name := sema_taint_import_module_name(graph, import)
-        imports.push(SemaTaintImportAlias{alias: import.declaration.alias, module_name: target_name})
-        loop binding in import.bindings -> imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name})
+        imports.push(SemaTaintImportAlias{alias: import.declaration.alias, module_name: target_name, module_identity: import.target_module_identity})
+        loop binding in import.bindings -> imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name, module_identity: ""})
     }
     imports
 }
@@ -2595,6 +2689,7 @@ sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowS
     state.masked = [Span]{}
     state.module_identity = graph.modules[module_index].module_identity
     state.imports = sema_taint_collect_imports(graph, state.module_identity)
+    state.callable_scope = sema_taint_callable_scope(graph, state.catalog, state.module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, state.module_identity)
     loop item in graph.modules[module_index].program.items {
         if item == {
@@ -2604,7 +2699,12 @@ sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowS
                 loop field in definition.fields -> sema_taint_check_wide_type(state, field.ty, field.ty_span)
                 sema_taint_finish_body(graph, state, module_index, found)
                 loop method in definition.methods -> sema_taint_check_function(graph, state, module_index, method, definition.name, found)
+                // A derived provider's body (Prelude/Derives.jet) is no authored
+                // code: a fixed value steers it where a derived method is
+                // called (sema_taint_check_method_crossing) or a struct is
+                // compared (sema_taint_check_binary_chain).
                 loop trait_impl in definition.trait_impls {
+                    if trait_impl.compiler_generated -> next
                     loop method in trait_impl.methods -> sema_taint_check_function(graph, state, module_index, method, definition.name, found)
                 }
             }

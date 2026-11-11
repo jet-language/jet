@@ -811,7 +811,13 @@ A tag inside a type counts as the value's own. The elements' tag of
 `[#Secret U8]` or `[#Secret U8#4]`, an `Option`'s or `Result`'s payload tag,
 a Map's value tag and a tuple field's tag reach every read out of the value,
 a slice of it included. So `Option<#Secret U8>` keeps whether it holds a
-value secret too: `opt ?? d` on it is E0737.
+value secret too: `opt ?? d` on it is E0737. A struct field's tag reaches
+every read of that field. Comparing two struct values (`==`, `!=`, `<`, `>`,
+`<=`, `>=` or `<=>`) runs the struct's `equal` or `compare`, which leaves at
+the first field that differs. So it is E0737 when either value carries a
+`.Fixed` tag or its struct type declares one on a field. The derived
+`equal` and `compare` bodies are not checked themselves, and a call of a
+derived method that passes a `.Fixed` value is E0737.
 
 A `.Fixed` value keeps its meaning across calls, so the check gives the same
 answer at every optimization level, before any inlining. A call that passes
@@ -825,7 +831,12 @@ operators that cannot stop, takes it with no tag and no report. A parameter
 written with a `.Fixed` tag is checked in its own body instead. A call
 through a value with no known body cannot be checked, so a `.Fixed` argument
 to one is E0737. That covers a local function value and any other callee
-expression. A foreign import keeps the C rules (D-SECRET-CT1).
+expression. A call resolves to the function its name binds there: the
+module's own, an import's or the package's, or a method of the receiver's
+type. A same-named function elsewhere never stands in, so a local function
+value or another type's method neither reveals like a `#Scrub` function nor
+returns that function's tags. A foreign import keeps the C rules
+(D-SECRET-CT1).
 
 The compiler keeps this check after its own lowering too. In the IR, a
 fixed-width integer, `Bool` or `Char` whose type carries a `.Fixed` tag holds a

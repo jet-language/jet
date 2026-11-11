@@ -1,0 +1,14 @@
+Locker: struct {
+    word: U64
+    open: fn(self) -> U64 { self.word }
+}
+
+#Scrub(Secret)
+open: fn(k: #Secret U64) -> Bool { k != U64{0} }
+
+audit: fn(k: #Secret U64) {
+    if open(k) -> print("published")
+    locker: Locker{word: k}
+    w: locker.open()
+    if w == (U64{0}) -> print("zero")
+}

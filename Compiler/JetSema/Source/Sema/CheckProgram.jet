@@ -9725,7 +9725,7 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     }
     workers: compiler_threads_admit(threads, taint_weights.len() + weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 {
-        state := SemaTaintFlowState{catalog: catalog.move(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, coverage_reports: coverage.move(), fixed_tags: [String]{}}
+        state := SemaTaintFlowState{catalog: catalog.move(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, callable_scope: sema_taint_slots(), diagnostics: [Diagnostic]{}, coverage_reports: coverage.move(), fixed_tags: [String]{}}
         loop module_index in 0..<owned.modules.len() {
             found := [Diagnostic]{}
             sema_taint_check_module(owned, state, module_index, found)
@@ -9957,7 +9957,7 @@ sema_finalize_walkers: fn(shared_state: Shared<SemaFinalizeWalkShared>, queue: S
 // a module's first job otherwise hands its context back.
 sema_finalize_walk_claimed: fn(shared_state: Shared<SemaFinalizeWalkShared>, queue: Shared<SemaFinalizeCoreQueue>) -> SemaFinalizeWalked {
     inputs: shared_state.guard_read()
-    state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
+    state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: "", bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, callable_scope: sema_taint_slots(), diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
     stated := false
     claimed := SemaFinalizeWalked{taint: [SemaTaintWalked]{}, core: [SemaFinalizeCoreCollected]{}}
     taint_count: inputs.value.taint_order.len()
