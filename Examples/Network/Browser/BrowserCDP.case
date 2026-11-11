@@ -1,0 +1,11 @@
+# The example drives the scripted WebDriver BiDi mock, which answers each
+# command from BrowserCDP.bidi.json and prints each method it received.
+session bidi raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:bidi} BrowserCDP.bidi.json
+await: file BrowserCDP.bidi.ready timeout 30s
+step: built ws://127.0.0.1:{free-port:bidi}/session
+exit: 0
+stdout: = BrowserCDP.out
+close bidi
+exit: 0
+stdout: count "goog:cdp.sendCommand" = 1 # only the checked CDP command reached the browser
+stdout: $= "session.end\n" # the example ended its session last

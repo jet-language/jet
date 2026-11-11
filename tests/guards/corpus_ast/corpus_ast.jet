@@ -2,7 +2,7 @@
 // This package requires compiler packages with their Tests/ trees excluded.
 use {
     jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
-    jet_foundation.[CORE_MODULE_EXPORTS]
+    jet_foundation.[CORE_MODULE_EXPORTS, CORE_SOURCE_OWNED_ROWS]
     jet_parser.[parse_source, jfmt_stmt_span, jet_format_redundant_grouping]
     jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_pkg_model.[PackageFacts]
@@ -2226,4 +2226,113 @@ policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
     guards_enter_root()
     sites: policy_redundant_grouping_sites("Examples") ?? panic("{err.message}")
     assert(sites.len() == 0, "redundant grouping parentheses in Examples:\n{sites.join("\n")}")
+}
+// #3704: an example that imports a Core module runs the API it teaches. A
+// printed literal with no interpolation that names two or more of the module's
+// functions documents the surface without observing it. The names are the
+// module's top-level functions and methods, read from its Core source AST
+// through the generated source-owned rows.
+policy_core_api_names: fn(module_name: String, known: &[String: [String]]) -> [String] PolicyError! {
+    if known.get(module_name) == .Val(cached) -> return Ok(cached.copy())
+    names := [String]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name != module_name -> next
+        source: policy_ast_files.read(row.path) ?? return Err(PolicyError{message: "read {row.path}: {err}"})
+        // Core spells its private names with the reserved `__` prefix, which
+        // user-mode lexing reports; the declarations still parse.
+        loop item in parse_source(source.bytes()).program.items {
+            if item == .Func(function) && !function.name.starts_with("_") -> names.push(function.name.copy())
+            if item == .Struct(structure) {
+                loop method in structure.methods {
+                    if !method.name.starts_with("_") -> names.push(method.name.copy())
+                }
+            }
+        }
+    }
+    known[module_name] = names.copy()
+    Ok(names)
+}
+policy_word_byte: fn(byte: U8) -> Bool {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95
+}
+// The identifier words of `text`, in order.
+policy_literal_words: fn(text: String) -> [String] {
+    words := [String]{}
+    bytes: text.bytes()
+    start := 0
+    loop at in 0..<bytes.len() + 1 {
+        if at < bytes.len() && policy_word_byte(bytes[at]) -> next
+        if at > start -> words.push(policy_slice_bytes(text, start, at))
+        start = at + 1
+    }
+    words
+}
+// The text of a string literal with no interpolation.
+policy_plain_literal: fn(expression: Expr) -> String? {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(piece) { text = "{text}{piece}" } else { return None }
+        }
+        return Val(text)
+    }
+    None
+}
+policy_api_name_only_sites: fn(path: String, source: String, known: &[String: [String]]) -> [String] PolicyError! {
+    program: policy_parse_program(path, source) ?? return Ok([String]{})
+    modules := [String]{}
+    loop (_, imported) in policy_module_aliases(program) {
+        if !modules.contains(imported) -> modules.push(imported.copy())
+    }
+    sites := [String]{}
+    if modules.len() == 0 -> return Ok(sites)
+    expressions: policy_program_expressions(program)
+    // A name the program calls is observed, so a progress label may repeat it.
+    called := [String]{}
+    loop expression in expressions {
+        if policy_without_parens(expression) == .Call(call, _) -> called.push(call.name.copy())
+        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, _, _) -> called.push(method.copy())
+    }
+    loop expression in expressions {
+        printed := String?{None}
+        if policy_without_parens(expression) == .Call(call, _) {
+            if call.name == "print" && call.args.len() == 1 -> printed = policy_plain_literal(call.args[0].expr)
+        }
+        text: printed ?? next
+        // Prose that mentions an action is not a name list.
+        if policy_split_whitespace(text).len() > 1 -> next
+        words: policy_literal_words(text)
+        loop imported in modules {
+            api: policy_core_api_names(imported, known) ?? return Err(err)
+            named := [String]{}
+            loop word in words {
+                if api.contains(word) && !called.contains(word) && !named.contains(word) -> named.push(word.copy())
+            }
+            if named.len() >= 2 -> sites.push("{path}: print(\"{text}\") names {imported} functions {named.join(", ")} without calling them")
+        }
+    }
+    Ok(sites)
+}
+policy_api_name_only_corpus: fn(root: String) -> [String] PolicyError! {
+    known := [String: [String]]{}
+    sites := [String]{}
+    loop item in policy_ast_files.walk_files(root) {
+        entry: item ?? return Err(PolicyError{message: "walk {root}: {err}"})
+        if !entry.path.ends_with(".jet") || entry.path.ends_with("/package.jet") || entry.path.ends_with("/workspace.jet") -> next
+        source: policy_ast_files.read(entry.path) ?? return Err(PolicyError{message: "read {entry.path}: {err}"})
+        loop site in policy_api_name_only_sites(entry.path, source, known) ?? return Err(err) -> sites.push(site)
+    }
+    Ok(sites)
+}
+#Test("examples_observe_the_api_they_teach") {
+    guards_enter_root()
+    known := [String: [String]]{}
+    rejected: "use browser: core.web.browser\nrun: fn() {{\n    print(\"locators:get_by_role+get_by_text+click\")\n}}\n"
+    observed: "use browser: core.web.browser\nrun: fn() {{\n    profile: browser.profile(\"bidi-2025.5\") ?? panic(\"profile\")\n    print(\"profile:{{profile.name()}}\")\n    print(\"click the button, then wait\")\n}}\n"
+    planted: policy_api_name_only_sites("Examples/planted.jet", rejected, known) ?? panic("{err.message}")
+    assert(planted.len() == 1, "an API-name-only literal must fail: {planted}")
+    clean: policy_api_name_only_sites("Examples/planted.jet", observed, known) ?? panic("{err.message}")
+    assert(clean.len() == 0, "observed output and prose must pass: {clean}")
+    sites: policy_api_name_only_corpus("Examples") ?? panic("{err.message}")
+    assert(sites.len() == 0, "examples print API names instead of calling the API:\n{sites.join("\n")}")
 }

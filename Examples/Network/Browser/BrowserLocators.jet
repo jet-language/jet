@@ -1,10 +1,53 @@
 // Semantic locators, actions, and deterministic waits.
-// Connect to a BiDi endpoint, find controls by role/text/label/test id, wait,
-// fill, press, hover, click, then wait_gone.
+// A locator names a control by role, text, label, placeholder, test id, or
+// CSS, and finds nothing until a wait or an action resolves it. `wait` returns
+// once the control is present, `wait_gone` once it is absent, and `resolve`
+// returns the node the page matched.
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserLocators.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserLocators.bidi.json.
+package: {
+    name: "browser_locators"
+    authority: { allow: [Env, Net, Time] }
+}
+
 use browser: core.web.browser
 
-run: fn() {
-    // Live endpoints come from the host. This example only documents the API.
-    print("locators:get_by_role+text+label+placeholder+test_id+css")
-    print("actions:wait+wait_gone+click+hover+fill+press")
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
+}
+
+run: fn(args: Endpoint) {
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    context: session.context()
+    page: context.page()
+    page.goto("https://example.test/form")
+
+    save: page.get_by_role("button", "Save")
+    save.wait(timeout)
+    print("save button: {save.resolve()}")
+    save.hover()
+    save.click()
+
+    name: page.get_by_label("Name")
+    name.fill("Ada")
+    name.press("Tab")
+    print("name field: {name.resolve()}")
+
+    print("by text: {page.get_by_text("Save").resolve()}")
+    print("by placeholder: {page.get_by_placeholder("email").resolve()}")
+    print("by test id: {page.get_by_test_id("save").resolve()}")
+    print("by CSS: {page.get_by_css("button.save").resolve()}")
+
+    page.get_by_role("status", "Saving").wait_gone(timeout)
+    print("saving status gone")
+
+    page.close()
+    context.close()
+    session.close()
 }

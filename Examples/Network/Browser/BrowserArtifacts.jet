@@ -1,9 +1,56 @@
 // Storage, files, screenshots, and PDF.
-// Cookies and local/session storage, file upload, download folder, screenshot,
-// and print-to-PDF on the native BiDi path.
+// Cookies and local or session storage round-trip through the page; a file
+// input takes a path on the browser's host; a screenshot is PNG bytes and
+// print-to-PDF is PDF bytes; an allowed download arrives as an event whose
+// file name is reported only as a hash.
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserArtifacts.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserArtifacts.bidi.json.
+package: {
+    name: "browser_artifacts"
+    authority: { allow: [Env, Net, Time] }
+}
+
 use browser: core.web.browser
 
-run: fn() {
-    // Live endpoints come from the host. This example only documents the API.
-    print("artifacts:cookie+storage+set_files+allow_downloads+screenshot+pdf")
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
+}
+
+run: fn(args: Endpoint) {
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    session.allow_downloads("downloads")
+    context: session.context()
+    page: context.page()
+    page.goto("https://example.test/app")
+
+    page.set_cookie("theme", "dark", "example.test")
+    print("cookie theme: {page.cookie("theme") ?? "(none)"}")
+    page.clear_cookies()
+
+    page.storage_set("local", "draft", "hello")
+    print("local draft: {page.storage_get("local", "draft") ?? "(none)"}")
+    page.storage_clear("local")
+
+    page.get_by_css("input[type=file]").set_files("report.csv")
+    print("attached report.csv")
+
+    png: page.screenshot()
+    print("screenshot: {png.len()} bytes, {String.from_bytes(png[1..<4]) ?? "?"} signature")
+    pdf: page.pdf()
+    print("PDF: {pdf.len()} bytes, {String.from_bytes(pdf[0..<5]) ?? "?"} header")
+
+    session.subscribe("browsingContext.downloadWillBegin")
+    download: session.next_event(timeout)
+    print("{download.kind()}: {download.download_id()}, file name hash has {download.suggested_filename_hash().len()} digits")
+    print("trace redacted: {session.trace().redacted()}")
+
+    page.close()
+    context.close()
+    session.close()
 }

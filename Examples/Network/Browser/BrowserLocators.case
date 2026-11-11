@@ -1,0 +1,11 @@
+# The example drives the scripted WebDriver BiDi mock, which answers each
+# command from BrowserLocators.bidi.json and prints each method it received.
+session bidi raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:bidi} BrowserLocators.bidi.json
+await: file BrowserLocators.bidi.ready timeout 30s
+step: built ws://127.0.0.1:{free-port:bidi}/session
+exit: 0
+stdout: = BrowserLocators.out
+close bidi
+exit: 0
+stdout: has-line "input.performActions" # the hover, click, fill, and press reached the browser
+stdout: $= "session.end\n" # the example ended its session last

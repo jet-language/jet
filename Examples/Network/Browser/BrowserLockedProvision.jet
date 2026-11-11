@@ -1,9 +1,25 @@
 // Project-locked browser provisioning.
-// Lock a browser with Jetpack first:
-//   jetpack browser lock chromium --binary /path/to/chromium
-// Then read the pin with `browser.locked("chromium")` (needs FS+IO). Focused
-// coverage lives in tests/browser_lock.rs; this example documents the surface
-// offline.
+// `jetpack browser lock` pins a browser binary for the project: its engine,
+// version, BiDi protocol profile, and content hash. `browser.locked` reads that
+// pin, and `verify` refuses a binary whose bytes no longer match it, so a test
+// run never drives a browser the project did not lock.
+//
+// Lock a browser, then run:
+//   jetpack browser lock chromium --binary /path/to/chromium --version 140.0 --protocol bidi-2025.5
+//   jet run Examples/Network/Browser/BrowserLockedProvision.jet
+// The golden locks an executable stand-in first.
+package: {
+    name: "browser_locked_provision"
+    authority: { allow: [FS] }
+}
+
 use browser: core.web.browser
 
-run: fn() { print("locked:jetpack_browser_lock+browser.locked+engine+protocol+verify") }
+run: fn() {
+    locked: browser.locked("chromium")
+    print("engine: {locked.engine()}")
+    print("version: {locked.version()}")
+    print("protocol: {locked.protocol()}")
+    locked.verify()
+    print("binary matches its lock")
+}

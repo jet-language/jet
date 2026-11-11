@@ -1,0 +1,11 @@
+# The case writes an executable stand-in for a browser binary, locks it for the
+# staged project, then the example reads and verifies the pin.
+requires: os:unix
+env: JET_PROJECT_ROOT={work}
+append: chromium "#!/bin/sh\necho Chromium 140.0\n"
+chmod: chromium 0755
+step: jetpack browser lock chromium --binary {work}/chromium --version 140.0 --protocol bidi-2025.5
+exit: 0
+step: built
+exit: 0
+stdout: = BrowserLockedProvision.out

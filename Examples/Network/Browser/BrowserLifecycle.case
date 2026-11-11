@@ -1,0 +1,12 @@
+# The example drives the scripted WebDriver BiDi mock, which answers each
+# command from BrowserLifecycle.bidi.json and prints each method it received.
+session bidi raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:bidi} BrowserLifecycle.bidi.json
+await: file BrowserLifecycle.bidi.ready timeout 30s
+step: built ws://127.0.0.1:{free-port:bidi}/session
+exit: 0
+stdout: = BrowserLifecycle.out
+close bidi
+exit: 0
+stdout: count "browsingContext.create" = 2 # one tab and one page
+stdout: has-line "browsingContext.getTree" # the frames came from the live tree
+stdout: $= "session.end\n" # the example ended its session last

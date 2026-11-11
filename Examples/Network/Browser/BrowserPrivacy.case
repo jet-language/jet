@@ -1,0 +1,12 @@
+# The example drives the scripted WebDriver BiDi mock, which answers each
+# command from BrowserPrivacy.bidi.json and prints each method it received.
+session bidi raw: {jet} run --allow=Exec,FS.Read,FS.Write,Net,Time {root}/tests/fixtures/BrowserBidiMock.jet -- script {free-port:bidi} BrowserPrivacy.bidi.json
+await: file BrowserPrivacy.bidi.ready timeout 30s
+step: built ws://127.0.0.1:{free-port:bidi}/session
+exit: 0
+stdout: = BrowserPrivacy.out
+close bidi
+exit: 0
+stdout: count "browser.createUserContext" = 2 # one user context per browser context
+stdout: count "browser.removeUserContext" = 2 # each closed context removed its user context
+stdout: $= "session.end\n" # the example ended its session last

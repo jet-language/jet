@@ -1,9 +1,47 @@
 // Events, network inspection, and interception.
-// Subscribe to network events, inspect redacted request facts, add intercepts,
-// then continue / fail / fulfill paused requests.
+// Subscribe to network events, add an intercept for every request or for a
+// URL pattern, read each paused request's redacted facts, then continue, fail,
+// or fulfill it. A request URL is reported only as a hash, so a token in a
+// query string never reaches the program's output.
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserNetwork.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserNetwork.bidi.json.
+package: {
+    name: "browser_network"
+    authority: { allow: [Env, Net, Time] }
+}
+
 use browser: core.web.browser
 
-run: fn() {
-    // Live endpoints come from the host. This example only documents the API.
-    print("network:subscribe+inspect+intercept+continue|fail|fulfill")
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
+}
+
+run: fn(args: Endpoint) {
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    session.subscribe("network.beforeRequestSent")
+
+    every: session.add_intercept("beforeRequestSent")
+    page_script: session.next_event(timeout)
+    print("{page_script.kind()}: {page_script.request_id()} {page_script.request_method()} blocked={page_script.is_blocked()}")
+    print("URL hash has {page_script.url_hash().len()} digits")
+    session.continue_request(page_script.request_id())
+    print("continued {page_script.request_id()}")
+
+    api: session.add_intercept_url("beforeRequestSent", "https://api.example.test/*")
+    call: session.next_event(timeout)
+    session.fulfill_request(call.request_id(), 200, "{{\"items\":[]}}")
+    print("fulfilled {call.request_id()} ({call.request_method()}) with 200")
+    tracker: session.next_event(timeout)
+    session.fail_request(tracker.request_id())
+    print("failed {tracker.request_id()}")
+
+    api.remove()
+    every.remove()
+    session.close()
 }

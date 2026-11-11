@@ -1,8 +1,45 @@
-// Browser/context/page/tab/frame lifecycle.
-// Connect to a BiDi endpoint, open tabs, walk the frame tree, close cleanly.
+// Browser, context, page, tab, and frame lifecycle.
+// A session owns isolated contexts, a context owns its pages and tabs, and a
+// page's frames come from the live frame tree. Every close is explicit and
+// idempotent, and the session's receipt records whether everything it opened
+// was closed.
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserLifecycle.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserLifecycle.bidi.json.
+package: {
+    name: "browser_lifecycle"
+    authority: { allow: [Env, Net, Time] }
+}
+
 use browser: core.web.browser
 
-run: fn() {
-    // Live endpoints come from the host. This example only documents the API.
-    print("lifecycle:context.tab+page.frames+frame.close")
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
+}
+
+run: fn(args: Endpoint) {
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    context: session.context()
+
+    first: context.tab()
+    second: context.page()
+    main: first.main_frame()
+    frames: first.frames()
+    print("first tab has {frames.len()} frames, the main frame and {frames.len() - 1} children")
+
+    child: frames[1]
+    child.close()
+    child.close()
+    print("closed a child frame twice; the second close is a no-op")
+
+    second.close()
+    main.close()
+    context.close()
+    session.close()
+    print("receipt cleaned: {session.receipt().cleaned()}")
 }

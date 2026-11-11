@@ -1,44 +1,58 @@
 // Agent-facing browser automation cookbook.
-// Replace Node/Playwright scripts with this shape. Provision first:
-//   jetpack browser lock chromium --binary /path/to/chromium
-// Then connect to a BiDi endpoint the host supplies (never hard-code secrets).
+// One program in place of a Node and Playwright script: pin a client profile,
+// connect to the BiDi endpoint the host supplies (never a hard-coded secret),
+// open an isolated context, act through semantic locators, reach for CDP only
+// when the abilities offer it, and close everything so the redacted receipt
+// says the session cleaned up. A host browser is provisioned with
+// `jetpack browser lock` (BrowserLockedProvision.jet).
+//
+// Run against a WebDriver BiDi endpoint the host supplies:
+//   jet run Examples/Network/Browser/BrowserAgent.jet -- ws://127.0.0.1:9222/session
+// The golden runs it against tests/fixtures/BrowserBidiMock.jet, which answers
+// from BrowserAgent.bidi.json.
+package: {
+    name: "browser_agent"
+    authority: { allow: [Env, Net, Time] }
+}
+
 use browser: core.web.browser
 
-timeout_ok: fn(milliseconds: Int) -> String {
-    browser.timeout(milliseconds) ?? return "false"
-    return "true"
+#CLI
+Endpoint: struct {
+    #Doc("the WebDriver BiDi session URL") url: String
 }
 
-run: fn() {
-    // Offline agent checklist — the production path is profile → connect →
-    // isolated context → semantic locators → explicit cleanup + receipt.
-    print("agent:lock=jetpack_browser_lock")
-    print("agent:connect=browser.connect_profile(endpoint,profile,timeout)")
-    print("agent:beginner=get_by_role|text|label+wait+click|fill")
-    print("agent:network=subscribe+add_intercept+continue|fail|fulfill")
-    print("agent:artifacts=cookie+storage+set_files+screenshot+pdf")
-    print("agent:expert=protocol(cdp)_after_abilities.cdp")
-    print("agent:privacy=receipt.redacted+isolated_profiles+explicit_close")
-    print("agent:no_node_playwright_runtime")
-    print("agent:timeout_ok:{timeout_ok(5_000)}")
-    browser_bidi_profiles_lesson()
+// A profile pins the client's command contract; an unknown one is rejected.
+profile_verdict: fn(name: String) -> String {
+    _profile: browser.profile(name) ?? return "rejected"
+    "accepted"
 }
 
-// Browser profiles are pinned client command contracts.
+run: fn(args: Endpoint) {
+    loop name in ["bidi-2024.11", "bidi-2025.5", "rolling"] -> print("profile {name}: {profile_verdict(name)}")
+    profile: browser.profile("bidi-2025.5")
+    timeout: browser.timeout(500)
+    session: browser.connect_profile(args.url, profile, timeout)
+    abilities: session.abilities()
+    print("abilities: BiDi {abilities.bidi()}, CDP {abilities.cdp()}, profile {abilities.profile()}")
 
-profile_outcome: fn(name: String) -> String {
-    profile: browser.profile(name) ?? return "rejected"
-    return "accepted"
-}
+    context: session.context()
+    page: context.page()
+    page.goto("https://example.test/agent")
+    save: page.get_by_role("button", "Save")
+    save.wait(timeout)
+    save.click()
+    print("clicked {save.resolve()}")
+    page.set_cookie("session", "agent-token", "example.test")
 
-timeout_outcome: fn(milliseconds: Int) -> String {
-    timeout: browser.timeout(milliseconds) ?? return "rejected"
-    return "accepted"
-}
+    if abilities.cdp() {
+        cdp: session.protocol("cdp")
+        print("CDP Page.enable: {cdp.send("Page.enable", "{{}}")}")
+    }
 
-browser_bidi_profiles_lesson: fn() {
-    print("2024.11:{profile_outcome("bidi-2024.11")}")
-    print("2025.5:{profile_outcome("bidi-2025.5")}")
-    print("rolling:{profile_outcome("rolling")}")
-    print("timeout:{timeout_outcome(500)}")
+    page.close()
+    context.close()
+    session.close()
+    receipt: session.receipt()
+    print("receipt cleaned: {receipt.cleaned()}, redacted: {receipt.redacted()}, isolated: {receipt.isolated()}")
 }
