@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99519,
+    "rev": 99520,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85620,6 +85620,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "c8 scope widened (Main, 2026-11-11): besides the layout-directory fsyncs, a cold build with seed-t23 waited 458 s in jbd2_log_wait_commit before its first span, because the build executor publishes its CAS blobs (put_blob -> publish_blob) and action records (put_record -> publish_action) durably, 15 puts about 25 s apart under a busy journal (Jetpack/Store/Source/Build/ArtifactStore.jet). The executor already reads a missing blob or bad record as a cache miss (Build/Cache.jet:239, :535), so G11Speed-7b makes those executor-only publishes non-durable (native-runtime and receipt publishes stay durable), with a miss-not-fault test, or skips them when caching is off. c8 is met by -7 plus -7b with the n=3 cold-store measurement."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "G11Speed-1 (CheckedText impl index, fixes root F, c4) measured on the c1 cell, n=3, default mode, 750,411 lines, CPUs 20-31, --threads 12, cold and uncached, arms back to back on a contended host (load 51-96). Median before (seed-t22): 160.94 s wall, 820.3 CPU-s, 4,662 lines/s, 1,093 us CPU/line, parallelism 5.1, RSS 8.73 GB. After: 85.17 s, 236.7 CPU-s, 8,811 lines/s, 315 us CPU/line, parallelism 2.8, RSS 8.72 GB. sema.finalize 59.6 to 10.0 s wall; comptime 30.5 to 1.9 s. Next largest: ir.opt (21 s wall, 100 CPU-s, root B, c6) and 31 s outside the trace (root C, c5). The #5479 c5 gate (60 us/line) is still 5.3x away. Table: $JET_SCRATCH_ROOT/lanes/G11Speed/cell-n3.md."
         },
         {
@@ -85723,7 +85728,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-11T16:24:59.760Z",
+      "updated": "2026-11-11T17:33:57.006Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -197609,6 +197614,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:33:57.006Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pjwkhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-11T17:27:10.971Z",
       "by": "Main",
