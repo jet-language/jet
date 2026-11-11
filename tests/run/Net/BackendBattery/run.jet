@@ -5,6 +5,7 @@ use {
     http_client: core.http.client
     http: core.http
     http_server: core.http.server
+    json: core.encoding.json
     log: core.log
     testing: core.testing
     process: core.process
@@ -132,9 +133,13 @@ run: fn() {
     order_body: order_response.json<backend.OrderResponse>() ?? panic("order json")
     print("order:{order_response.status()}:{order_body.queued}:{order_body.request_id}")
 
+    // Latencies are measured, so the golden holds their order and the
+    // receipt's verdict rather than the milliseconds.
     load_report: backend.load_test(address)
-    print("load:users={load_report.users}:completed={load_report.completed}:ok={load_report.ok}:errors={load_report.errors}:transport={load_report.transport_errors}:p50={load_report.p50}:p95={load_report.p95}:p99={load_report.p99}:samples={load_report.samples.len()}")
-    print("load-receipt:{backend.load_receipt(load_report)}")
+    print("load:users={load_report.users}:completed={load_report.completed}:ok={load_report.ok}:errors={load_report.errors}:transport={load_report.transport_errors}:samples={load_report.samples.len()}")
+    print("load-latency:ordered={load_report.p50 <= load_report.p95 && load_report.p95 <= load_report.p99}")
+    receipt: json.decode<backend.LoadAssertionReceipt>(backend.load_receipt(load_report)) ?? panic("load receipt: {err}")
+    print("load-receipt:users={receipt.users}:samples={receipt.samples}:passed={receipt.passed}")
 
     request_count: metrics.guard_read().value.requests
     error_count: metrics.guard_read().value.errors

@@ -668,11 +668,16 @@ __router_mux: fn(router: HTTPRouter) -> HTTPMux Never! {
     router.__mux
 }
 
-// A request message, leniently: text without a blank line is taken as
-// newline-separated head lines, and an unparseable message is `GET /`.
+// A request message, leniently: lines may end in `\n` or `\r\n`, a message
+// without a blank line is all head lines, and an unparseable message is
+// `GET /`.
 parse: fn(raw: String) -> HTTPRequest Never! {
     bytes := raw.bytes()
-    if find_double_crlf(bytes) < 0 -> bytes = "{raw.replace("\n", "\r\n")}\r\n\r\n".bytes()
+    if find_double_crlf(bytes) < 0 {
+        lines: raw.replace("\r\n", "\n").replace("\n", "\r\n")
+        framed: if lines.contains("\r\n\r\n") -> lines else -> "{lines.removesuffix("\r\n")}\r\n\r\n"
+        bytes = framed.bytes()
+    }
     parse_request(bytes) ?? __request("GET", "/")
 }
 

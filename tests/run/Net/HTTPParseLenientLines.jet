@@ -1,0 +1,22 @@
+// `http.parse` reads `\n` or `\r\n` lines, with or without the blank line
+// that ends the head, and keeps a body after that blank line; only a message
+// it cannot read falls back to `GET /`.
+use {
+    http: core.http
+}
+
+show: fn(label: String, raw: String) {
+    request: http.parse(raw)
+    body: request.text(64) ?? "?"
+    print("{label}: {request.method()} {request.path()} host={request.header("host") ?? "-"} id={request.header("x-request-id") ?? "-"} body=[{body}]")
+}
+
+run: fn() {
+    show("no blank line", "GET /health HTTP/1.1\nHost: localhost\nx-request-id: a")
+    show("trailing newline", "GET /health HTTP/1.1\nHost: localhost\nx-request-id: b\n")
+    show("blank line", "GET /health HTTP/1.1\nHost: localhost\nx-request-id: c\n\n")
+    show("crlf head", "GET /health HTTP/1.1\r\nHost: localhost\r\nx-request-id: d")
+    show("crlf framed", "GET /health HTTP/1.1\r\nHost: localhost\r\nx-request-id: e\r\n\r\n")
+    show("body", "POST /orders HTTP/1.1\nHost: localhost\nContent-Length: 5\n\nhello")
+    show("unreadable", "not a request\n\n")
+}

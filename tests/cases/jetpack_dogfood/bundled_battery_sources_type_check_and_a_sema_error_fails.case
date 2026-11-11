@@ -1,0 +1,24 @@
+# The dogfood gate for the bundled batteries (#3173): every battery Jetpack
+# embeds (Jetpack/Provider/Source/Batteries/BatteryCatalog.jet) type-checks
+# from its package directory, and a copy with one sema error appended fails
+# the same check.
+fixture: bundled_battery_sources_type_check_and_a_sema_error_fails.fixture
+copy: {root}/Jetpack/Provider/Batteries batteries
+step: jet check batteries/backend/backend.jet
+exit: 0
+step: jet check batteries/cli/cli.jet
+exit: 0
+step: jet check batteries/data/data.jet
+exit: 0
+step: jet check batteries/embedded/embedded.jet
+exit: 0
+step: jet check batteries/games/games.jet
+exit: 0
+step: jet check batteries/gui/gui.jet
+exit: 0
+step: jet check batteries/web/web.jet
+exit: 0
+concat: batteries/backend/backend.jet batteries/backend/backend.jet sema_error.jet
+step: jet check batteries/backend/backend.jet
+exit: nonzero
+stderr: ~ "battery_gate_sema_error" # the appended function is the one reported
