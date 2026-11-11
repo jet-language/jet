@@ -3,9 +3,8 @@
 //
 // Each member X of an interface module jet.runtime.M (the generated
 // Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet) replaces the
-// Core leaf core.M.__X, or the leaf `leaf_aliases` names for it: its
-// `dispatcher_row` in Compiler/Prelude/Core.jet and its CoreCallRecord in
-// Compiler/JetFoundation/Source/Registry/CoreCallRows.jet.
+// Core leaf core.M.__X: its `dispatcher_row` in Compiler/Prelude/Core.jet and
+// its CoreCallRecord in Compiler/JetFoundation/Source/Registry/CoreCallRows.jet.
 // While both tables carry that leaf, the member's declared row must be the
 // effect sema gives a call of the record: its `effect_kind` unless its
 // `effect_leaf` refines that kind, and its `effect_leaf`, sorted; else no
@@ -13,11 +12,6 @@
 // half-done cutover and a difference too; a leaf neither carries is cut over
 // (or never existed) and has nothing to compare. The report names each member
 // with its export symbol and the record's runtime symbol.
-//
-// Members that bind one runtime symbol declare one row, unless `row_splits`
-// lists the symbol with the rule that gives each member its own caller's
-// row. An unlisted split, and a listed symbol whose members agree, are
-// differences.
 //
 // With `--before REV` the Core leaves are read at the git revision REV, so a
 // cutover that deleted them still compares each member with the leaf it
@@ -57,65 +51,6 @@ CoreLeaf: struct {
     effect_kind: String?
     effect_leaf: String?
     symbol: String
-}
-
-// A member named apart from the Core leaf it replaces: `member` is
-// jet.runtime.M.X, `leaf` is `core.N __Y`.
-LeafAlias: struct {
-    member: String
-    leaf: String
-}
-
-leaf_aliases: fn() -> [LeafAlias] Never! {
-    [LeafAlias]{
-        // core.net.tls's host reads, under the engine's Net root.
-        LeafAlias{member: "jet.runtime.net.tls_entropy", leaf: "core.net.tls __host_entropy"},
-        LeafAlias{member: "jet.runtime.net.tls_read_bytes", leaf: "core.net.tls __host_read_bytes"},
-        LeafAlias{member: "jet.runtime.net.tls_open_directory", leaf: "core.net.tls __host_open_directory"},
-        LeafAlias{member: "jet.runtime.net.tls_close_directory", leaf: "core.net.tls __host_close_directory"},
-        LeafAlias{member: "jet.runtime.net.tls_prove_mode", leaf: "core.net.tls __host_prove_mode"},
-        LeafAlias{member: "jet.runtime.net.tls_prove_record", leaf: "core.net.tls __host_prove_record"},
-        LeafAlias{member: "jet.runtime.net.tls_prove_take", leaf: "core.net.tls __host_prove_take"},
-        LeafAlias{member: "jet.runtime.net.tls_wall_sample", leaf: "core.net.tls __host_wall_sample"},
-        LeafAlias{member: "jet.runtime.net.tls_env_value", leaf: "core.net.tls __host_env_value"},
-        // core.watcher's pid watch handle.
-        LeafAlias{member: "jet.runtime.watcher.process_pid", leaf: "core.watcher __process_pid"},
-        // The compute, perf and jobs leaves bound in jet.runtime.sys and db.
-        LeafAlias{member: "jet.runtime.sys.simd_lanes", leaf: "core.compute __simd_lanes"},
-        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
-        LeafAlias{member: "jet.runtime.sys.set_perf_bits", leaf: "core.perf __write_bits"},
-        LeafAlias{member: "jet.runtime.db.job_publish_parts", leaf: "core.jobs __publish_parts"},
-        LeafAlias{member: "jet.runtime.db.job_sleep_ms", leaf: "core.jobs __sleep_ms"},
-    }
-}
-
-// A runtime symbol whose members declare different rows, and the rule that
-// gives each member its own Core caller's row.
-RowSplit: struct {
-    symbol: String
-    rule: String
-}
-
-row_splits: fn() -> [RowSplit] Never! {
-    [RowSplit]{
-        RowSplit{symbol: "jet_std_os_pid", rule: "core.files reads the pid under its FS root, core.sys.pid under Env"},
-        RowSplit{symbol: "jet_std_os_family", rule: "core.files reads the OS family as a pure platform fact, core.sys.family under Env"},
-        RowSplit{symbol: "jet_term_stdout_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
-        RowSplit{symbol: "jet_term_stderr_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
-        RowSplit{symbol: "jet_sys_current_dir_raw", rule: "core.sys reads it under Env, core.service resolves its store path under its own row"},
-        RowSplit{symbol: "jet_fs_temp_directory_raw", rule: "mktemp names Env for the temporary directory, the temp_* constructors FS"},
-        RowSplit{symbol: "jet_fs_temp_path_sample_raw", rule: "mktemp names Time for the name's clock sample, the temp_* constructors FS"},
-        RowSplit{symbol: "jet_time_raw_host_monotonic_ns", rule: "a fresh read declares Time, a Clock's own reading is pure (its owner holds Time)"},
-        // The TLS engine's host reads stay under its Net root, an explicit
-        // exception kept by Core/Net/SSL/Defs.jet ssl_time: a handshake needs
-        // Net alone, and the engine's certificate and session clock is not
-        // surfaced as Time.
-        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "core.time reads the wall clock under Time, core.service's record stamps are pure (its owner holds Time), the TLS engine's clock is under Net"},
-        RowSplit{symbol: "jet_random_os_entropy", rule: "crypto.random draws under Rand, a service authority token is pure, the TLS engine's draw is under Net"},
-        RowSplit{symbol: "jet_files_read_bytes_os", rule: "core.files reads under FS.Read, the TLS engine's certificate reads under Net"},
-        RowSplit{symbol: "jet_fs_directory_open", rule: "core.files opens under FS.Read, the TLS engine's CA directory under Net"},
-        RowSplit{symbol: "jet_fs_directory_close", rule: "an atomic write's parent closes under FS.Write, a Directory under FS.Read, the TLS engine's CA directory under Net"},
-    }
 }
 
 // The text of `key: "…"` in `line`, or None.
@@ -213,22 +148,15 @@ Report: struct {
 }
 
 // Every difference between the interface and the Core leaves it replaces.
-differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String], aliases: [LeafAlias]) -> Report Never! {
+differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [String]) -> Report Never! {
     found := [String]{}
     joined := 0
     loop member in members {
-        key := "core.{member.module_name.remove_prefix("jet.runtime.")} __{member.member}"
-        loop alias in aliases {
-            if alias.member == "{member.module_name}.{member.member}" {
-                key = alias.leaf.copy()
-                break
-            }
-        }
-        parts: key.partition(" ")
-        core_module: parts.head
-        leaf_name: parts.tail
+        module_name: member.module_name.remove_prefix("jet.runtime.")
+        core_module: "core.{module_name}"
+        leaf_name: "__{member.member}"
         where: "{member.module_name}.{member.member} ({member.symbol})"
-        has_row: dispatched.contains(key)
+        has_row: dispatched.contains("{core_module} {leaf_name}")
         matched := CoreLeaf?{None}
         loop leaf in leaves {
             if leaf.module_name == core_module && leaf.member == leaf_name {
@@ -246,39 +174,6 @@ differences: fn(members: [InterfaceMember], leaves: [CoreLeaf], dispatched: [Str
         if expected.join(",") != member.effects.join(",") -> found.push("{where}: declares {row_text(member.effects)}, but {core_module}.{leaf_name} ({leaf.symbol}) has {row_text(expected)}")
     }
     Report{joined: joined, differences: found}
-}
-
-// Every runtime symbol whose members declare different rows without a listed
-// rule, and every listed symbol whose members agree or that no member binds.
-split_differences: fn(members: [InterfaceMember], splits: [RowSplit]) -> [String] Never! {
-    found := [String]{}
-    symbols := [String]{}
-    loop member in members {
-        if !symbols.contains(member.symbol) -> symbols.push(member.symbol.copy())
-    }
-    loop symbol in symbols {
-        rows := [String]{}
-        bound := [String]{}
-        loop member in members {
-            if member.symbol != symbol -> next
-            row: row_text(member.effects)
-            if !rows.contains(row) -> rows.push(row.copy())
-            bound.push("{member.module_name}.{member.member} {row}")
-        }
-        listed := false
-        loop split in splits {
-            if split.symbol == symbol {
-                listed = true
-                break
-            }
-        }
-        if rows.len() > 1 && !listed -> found.push("{symbol}: its members declare different rows ({bound.join(", ")}) and row_splits lists no rule for it")
-        if rows.len() < 2 && listed -> found.push("{symbol}: row_splits lists it, but its members declare one row ({bound.join(", ")})")
-    }
-    loop split in splits {
-        if !symbols.contains(split.symbol) -> found.push("{split.symbol}: row_splits lists it ({split.rule}), but no interface member binds it")
-    }
-    found
 }
 
 read_text: fn(path: String) -[FS]> String RowsError! {
@@ -309,13 +204,10 @@ runtime_effect_rows_main: fn(args: [String]) -[Exec, FS, IO, Time, Time.Wait]> I
     leaves: core_leaves(source_text(CORE_CALL_ROWS, before) ?? return Err(err))
     dispatched: dispatcher_keys(source_text(DISPATCHER, before) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
-    report: differences(members, leaves, dispatched, leaf_aliases())
-    splits: row_splits()
-    found := report.differences.copy()
-    loop line in split_differences(members, splits) -> found.push(line.copy())
+    report: differences(members, leaves, dispatched)
+    found: report.differences
     if found.len() == 0 {
         print("runtime-effect-rows: ok ({members.len()} interface functions, {report.joined} joined to a Core leaf, 0 differences)")
-        print("runtime-effect-rows: {splits.len()} runtime symbols bound with different rows, each by a rule row_splits lists")
         return Ok(0)
     }
     loop line in found -> term.eprint(line)
@@ -349,43 +241,9 @@ run: fn() {
         CoreLeaf{module_name: "core.net", member: "__dns_txt_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_txt_lookup"},
         CoreLeaf{module_name: "core.net", member: "__dns_ptr_lookup", effect_kind: Val("Net"), effect_leaf: Val("Time.Wait"), symbol: "jet_net_dns_ptr_lookup"},
     }
-    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"}, [LeafAlias]{})
+    report: differences(members, leaves, [String]{"core.time __sleep_ns", "core.time __half", "core.net __dns_txt_lookup", "core.net __dns_ptr_lookup"})
     assert_eq(report.joined, 4)
     assert_eq(report.differences.join("|"), "jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): core.time.__task_timeout has a CoreCallRecord but no dispatcher_row|jet.runtime.time.task_timeout (jet_task_timeout_duration_ns): declares -[Time.Wait]>, but core.time.__task_timeout (jet_task_timeout_duration_ns) has -[Time]>|jet.runtime.time.half (jet_time_half): core.time.__half has a dispatcher_row but no CoreCallRecord|jet.runtime.net.dns_ptr_lookup (jet_net_dns_ptr_lookup): declares -[Time.Wait]>, but core.net.__dns_ptr_lookup (jet_net_dns_ptr_lookup) has -[Net, Time.Wait]>")
-}
-
-#Test("an aliased member joins the leaf its alias names") {
-    members: [InterfaceMember]{
-        InterfaceMember{module_name: "jet.runtime.sys", member: "perf_bits", effects: [String]{"Env"}, symbol: "jet_perf_read_bits"},
-        InterfaceMember{module_name: "jet.runtime.sys", member: "simd_lanes", effects: [String]{"GPU"}, symbol: "jet_compute_simd_lanes"},
-    }
-    leaves: [CoreLeaf]{
-        CoreLeaf{module_name: "core.perf", member: "__read_bits", effect_kind: Val("Env"), effect_leaf: None, symbol: "jet_perf_read_bits"},
-        CoreLeaf{module_name: "core.compute", member: "__simd_lanes", effect_kind: None, effect_leaf: None, symbol: "jet_compute_simd_lanes"},
-    }
-    aliases: [LeafAlias]{
-        LeafAlias{member: "jet.runtime.sys.perf_bits", leaf: "core.perf __read_bits"},
-        LeafAlias{member: "jet.runtime.sys.simd_lanes", leaf: "core.compute __simd_lanes"},
-    }
-    report: differences(members, leaves, [String]{"core.perf __read_bits", "core.compute __simd_lanes"}, aliases)
-    assert_eq(report.joined, 2)
-    assert_eq(report.differences.join("|"), "jet.runtime.sys.simd_lanes (jet_compute_simd_lanes): declares -[GPU]>, but core.compute.__simd_lanes (jet_compute_simd_lanes) has no effect")
-}
-
-#Test("members of one symbol declare one row unless row_splits lists it") {
-    members: [InterfaceMember]{
-        InterfaceMember{module_name: "jet.runtime.time", member: "wall_sample", effects: [String]{"Time"}, symbol: "jet_time_raw_wall_sample"},
-        InterfaceMember{module_name: "jet.runtime.net", member: "tls_wall_sample", effects: [String]{"Net"}, symbol: "jet_time_raw_wall_sample"},
-        InterfaceMember{module_name: "jet.runtime.sys", member: "pid", effects: [String]{"Env"}, symbol: "jet_std_os_pid"},
-        InterfaceMember{module_name: "jet.runtime.files", member: "process_id_raw", effects: [String]{"FS"}, symbol: "jet_std_os_pid"},
-        InterfaceMember{module_name: "jet.runtime.sys", member: "cpu_count", effects: [String]{}, symbol: "jet_sys_cpu_count"},
-    }
-    splits: [RowSplit]{
-        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "the TLS engine's clock is under Net"},
-        RowSplit{symbol: "jet_sys_cpu_count", rule: "stale"},
-        RowSplit{symbol: "jet_gone", rule: "unbound"},
-    }
-    assert_eq(split_differences(members, splits).join("|"), "jet_std_os_pid: its members declare different rows (jet.runtime.sys.pid -[Env]>, jet.runtime.files.process_id_raw -[FS]>) and row_splits lists no rule for it|jet_sys_cpu_count: row_splits lists it, but its members declare one row (jet.runtime.sys.cpu_count no effect)|jet_gone: row_splits lists it (unbound), but no interface member binds it")
 }
 
 #Test("the table rows parse from their generated lines") {

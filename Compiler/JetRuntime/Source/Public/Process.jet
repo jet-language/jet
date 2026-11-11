@@ -2,9 +2,9 @@
 // functions, the program's argv and its exit, in Jet types with their declared
 // effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (ProcessSignal.jet, HostStartup.jet, HostProcess.jet, ProcessPipeline.jet).
-// A tuple result's items cross in the checked tuple's label-sorted order,
-// which is the export's slot order.
+// (ProcessSignal.jet, HostStartup.jet, HostProcess.jet). A tuple result's
+// items cross in the checked tuple's label-sorted order, which is the
+// export's slot order.
 process: module {
     // A subscription holding no signal yet, with its own channel; its id. An
     // on_signal subscription (`cancels_root`) cancels the root task.
@@ -20,11 +20,6 @@ process: module {
     // signal, EINVAL for one no handler can catch).
     #Import(c) signal_disposition: fn(number: Int, ignore: Bool) -[Exec]> (available: Bool, disposition: Int, errno: Int) = "jet_process_signal_disposition_raw"
 
-    // Cancels the root task when the one signal `mask` names arrives (1
-    // SIGINT, 2 SIGHUP, 4 SIGTERM); any other mask is an Err. `priv`: only
-    // Core calls it (`process.on_signal`).
-    #Import(c) priv signal_arm: fn(mask: Int) -[Exec]> Err! = "jet_process_signal_arm_raw"
-
     // The program's words, argv[0] first; a non-UTF-8 word panics. `priv`:
     // only Core reads it (`process.args()` drops the program name), and a
     // user call is E0605.
@@ -34,9 +29,4 @@ process: module {
     // only Core calls it (`process.exit` maps a program's 101 to 1 first, and
     // `process.exit_unmapped` is the audited unmapped exit).
     #Import(c) priv exit: fn(code: Int) -[Exec.Exit]> = "jet_std_process_exit"
-
-    // Runs `steps` as one pipeline, each step's stdout feeding the next
-    // step's stdin, and answers its receipt. `priv`: only Core calls it
-    // (`process.pipeline`).
-    #Import(c) priv pipeline: fn(steps: [ProcessSpec]) -[Exec]> ProcessReceipt IOError! = "jet_std_process_pipeline"
 }
