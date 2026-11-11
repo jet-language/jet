@@ -2167,8 +2167,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
         state = "published"
     }
     link: "{base}/.latest.{sys.pid()}"
-    files.remove(link) ?? ()
-    files.symlink(sha, link) ?? ()
+    files.symlink(sha, link, replace: true) ?? ()
     files.rename(link, "{base}/latest") ?? ()
     prune_bases(base)
     seeding := process.cmd([String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
