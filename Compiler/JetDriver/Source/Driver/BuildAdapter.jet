@@ -525,21 +525,17 @@ jet_driver_build_fetch: fn(inputs: JetDriverSharedBuildInputs?, http_inputs: Jet
         }
         host: inputs ?? return BuildSessionReply.HostRequest{method: "fetch", args: [BuildSessionValue]{}}
         raw: url.slice(7..<url.len())
-        path := raw
-        if raw != "/dev/null" {
-            root: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err.message, span)
-            if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
-            if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
-            // copy: `raw` is a view into `url` (a slice), and `requested` must own its path because
-            // it becomes the fetch's cache key and its result path.
-            requested: if raw.starts_with("/") -> { raw.copy() } else -> { jet_driver_build_join(root.path, raw) }
-            target: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err.message, span)
-            if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
-            if !jet_driver_build_within(target.path, root.path) -> return jet_driver_build_fetch_error(url, "file URL resolves outside the compile-time source directory", span)
-            if !target.file || target.links != 1 -> return jet_driver_build_fetch_error(url, "file URL must name a regular, unshared file", span)
-            path = target.path
-        }
-        bytes = host.read(path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err.message, span)
+        root: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err.message, span)
+        if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
+        if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
+        // copy: `raw` is a view into `url` (a slice), and `requested` must own its path because
+        // it becomes the fetch's cache key and its result path.
+        requested: if raw.starts_with("/") -> { raw.copy() } else -> { jet_driver_build_join(root.path, raw) }
+        target: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err.message, span)
+        if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
+        if !jet_driver_build_within(target.path, root.path) -> return jet_driver_build_fetch_error(url, "file URL resolves outside the compile-time source directory", span)
+        if !target.file || target.links != 1 -> return jet_driver_build_fetch_error(url, "file URL must name a regular, unshared file", span)
+        bytes = host.read(target.path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err.message, span)
     }
     actual: build_input_crypto.sha256(bytes).hex()
     if actual != expected -> return jet_driver_build_input_fail("E3413", "fetch: sha256 mismatch for `{url}`", "expected `{expected}` but content hashes to `{actual}`", "update the `sha256:` pin to match the content, or verify the URL is correct", span)
