@@ -144,3 +144,10 @@ runs and one 39-minute full test pass. These rules bind every train:
     compiler, the runtime or Core is tested with the last train's compiler and
     lands on `dev` at once as its own commit, without joining a train. Sweep
     the inbox for such submissions at every landing.
+11. **Release every train.** After a train that changes a compiler, runtime
+    or Core build input lands, `jet run Tools/release/Main.jet -- admit
+    COMMIT` runs on that commit in the next free build slot, alternating with
+    trains. Admit writes the owner's current release, so the owner's `jet`
+    stays at most one train behind `dev`. A failed admit reports every lost
+    row in one pass, routes each root to its owner and leaves `dev` and the
+    previous release untouched; it never holds the next train.

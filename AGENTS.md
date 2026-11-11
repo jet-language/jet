@@ -408,6 +408,10 @@ keep it high:
   each one meets.
 - Criteria that already hold on `dev` are found by sweep, proved and met
   directly, with no new code.
+- Every landed compiler train becomes the owner's next a0.0.N release:
+  `Tools/release/Main.jet` `admit` runs on the landed commit in the next free
+  build slot, so the owner always uses a compiler at most one train behind
+  `dev`.
 
 The orchestrator may name one Lander and one Closer. The Lander runs the
 batch, landing and seed loop in the orchestrator's place, as a rolling train
