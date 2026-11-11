@@ -7,12 +7,11 @@
 // pin that names a formatted source. The formatter is the one of the compiler
 // `$JET` names (default `jet`).
 //
-// A format keeps meaning: `--write` compares each source's syntax tree
-// (`jet emit --ast`, which prints no positions, comments or layout) before
-// and after `jet fmt`. A source whose tree changed is written back as it was
-// and reported, and the run exits 1, so a formatter defect can't change what
-// the corpus means. `--simplify` rewrites spellings on purpose, so it skips
-// this comparison.
+// A format keeps meaning: `jet fmt` itself refuses a source whose formatted
+// text would parse to a different program (an internal compiler error naming
+// the first node that differs), so the source stays as written. This tool
+// reports each such source and exits 1, so a formatter defect can't change
+// what the corpus means.
 //
 // A line pin is `<file>.jet:<line>` or `<file>.jet:<line>:<column>` in a
 // tracked `.case` or expectation file (`.out`, `.stdout`, `.stderr`, `.err`,
@@ -158,11 +157,13 @@ Corpus: struct {
 }
 
 // What the formatter said about a corpus: the sources it would change, the
-// sources it could not parse, and the sources it hung or crashed on.
+// sources it could not parse, the sources it hung or crashed on, and why it
+// refused each source whose meaning its format would change.
 FmtOutcome: struct {
     dirty: [String]
     unparsed: [String]
     failed: [FmtFailure]
+    changed: [FmtFailure]
 }
 
 // A source the formatter hung or crashed on, and what happened.
@@ -796,11 +797,26 @@ Formatter: struct {
     flags: [String]
 }
 
-// `jet fmt` over `sources`. The formatter stops at the first source it can't
-// parse and names it; that source is set aside as unparsed, and the sources
-// before and after it run again. A run that hangs or crashes is split in
-// halves until the source it fails on runs alone; that source is set aside
-// as failed. Returns the number of formatter runs.
+// The words of the internal error `jet fmt` reports for a source whose format
+// would change its syntax tree.
+MEANING_CHANGE: "`jet fmt` would change the syntax tree of "
+
+// `jet fmt`'s reason for refusing a source whose meaning its format would
+// change, from the internal error on `errors`; None for any other refusal.
+fmt_meaning_change: fn(errors: String) -> String? Never! {
+    loop line in errors.lines() {
+        at: line.find(MEANING_CHANGE)
+        if at >= 0 -> return Val(line.slice(at..<line.len()).copy())
+    }
+    None
+}
+
+// `jet fmt` over `sources`. The formatter stops at the first source it
+// refuses and names it; that source is set aside, as unparsed or as one whose
+// meaning the format would change, and the sources before and after it run
+// again. A run that hangs or crashes is split in halves until the source it
+// fails on runs alone; that source is set aside as failed. Returns the number
+// of formatter runs.
 run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     if sources.len() == 0 -> return Ok(0)
     checking: formatter.flags.contains("--check")
@@ -824,7 +840,7 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
     }
     if fmt_refused_source(receipt.errors) == .Val(refused) {
         at: sources.index_of(refused) ?? return Err(CorpusError{message: "`{formatter.jet} fmt` refused `{refused}`, which this run did not pass it:\n{receipt.errors}"})
-        outcome.unparsed.push(refused.copy())
+        if fmt_meaning_change(receipt.errors) == .Val(change) -> outcome.changed.push(FmtFailure{path: refused.copy(), what: change}) else -> outcome.unparsed.push(refused.copy())
         before: run_fmt(formatter, sources[0..<at], outcome) ?? return Err(err)
         after: run_fmt(formatter, sources[at + 1..<sources.len()], outcome) ?? return Err(err)
         return Ok(1 + before + after)
@@ -857,7 +873,7 @@ first_line: fn(text: String) -> String Never! {
 
 // `run_fmt` over `sources` in batches of BATCH.
 fmt_corpus: fn(formatter: Formatter, sources: [String]) -[Exec, Time.Wait]> FmtOutcome CorpusError! {
-    outcome := FmtOutcome{dirty: [String]{}, unparsed: [String]{}, failed: [FmtFailure]{}}
+    outcome := FmtOutcome{dirty: [String]{}, unparsed: [String]{}, failed: [FmtFailure]{}, changed: [FmtFailure]{}}
     batch := [String]{}
     loop source in sources {
         batch.push(source.copy())
@@ -933,37 +949,33 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
     form: if simplify.len() > 0 -> "jet fmt --simplify" else -> "jet fmt"
     checked: fmt_corpus(checker, found.sources) ?? return Err(err)
     failed: checked.failed.len()
-    parsed: found.sources.len() - checked.unparsed.len() - failed
+    meaning: checked.changed.len()
+    parsed: found.sources.len() - checked.unparsed.len() - failed - meaning
     unparsed: checked.unparsed.len()
+    loop change in checked.changed -> term.eprint(change.what)
     if mode == "--check" {
         loop path in checked.dirty -> print(path)
         report_failures(checked.failed, "`{form} --check`")
-        if checked.dirty.len() > 0 || failed > 0 {
-            term.eprint("fmt-corpus: {checked.dirty.len()} of {parsed} sources are not in `{form}` form ({unparsed} don't parse, {failed} hang or crash the formatter, {left_out} left out); run `jet Tools/agent/FmtCorpus.jet --write{form.remove_prefix("jet fmt")}`")
+        if checked.dirty.len() > 0 || failed > 0 || meaning > 0 {
+            term.eprint("fmt-corpus: {checked.dirty.len()} of {parsed} sources are not in `{form}` form and {meaning} would change meaning ({unparsed} don't parse, {failed} hang or crash the formatter, {left_out} left out); run `jet Tools/agent/FmtCorpus.jet --write{form.remove_prefix("jet fmt")}`")
             return Ok(1)
         }
         print("fmt-corpus: ok ({parsed} sources in `{form}` form, {unparsed} don't parse, {left_out} left out)")
         return Ok(0)
     }
     before := pinned_sources(root, found, checked.dirty) ?? return Err(err)
-    // Without `--simplify` a format keeps each source's syntax tree; a source
-    // whose tree the formatter changed goes back to its text as written.
-    trees: if simplify.len() > 0 -> [String:String]{} else -> syntax_trees(root, jet, checked.dirty)
-    originals := [String:String]{}
-    loop path in checked.dirty {
-        if trees.has_key(path) {
-            originals[path.copy()] = read_tracked(root, path) ?? return Err(err)
-        }
-    }
     wrote: fmt_corpus(Formatter{root: root.copy(), jet: jet.copy(), flags: simplify}, checked.dirty) ?? return Err(err)
-    meaning: tree_changes(root, jet, checked.dirty, trees)
     kept := [String:Bool]{}
     loop failure in wrote.failed {
         kept[failure.path.copy()] = true
         _: before.remove(failure.path)
     }
-    loop change in meaning {
-        files.write("{root}/{change.path}", originals.get(change.path) ?? "") ?? return Err(CorpusError{message: "cannot restore {change.path}: {err}"})
+    // A source the write pass refused stays as written.
+    loop path in wrote.unparsed {
+        kept[path.copy()] = true
+        _: before.remove(path)
+    }
+    loop change in wrote.changed {
         kept[change.path.copy()] = true
         _: before.remove(change.path)
     }
@@ -974,71 +986,24 @@ corpus_main: fn(args: [String]) -[Env, Exec, FS, IO, Time.Wait]> Int CorpusError
     again: fmt_corpus(checker, formatted) ?? return Err(err)
     pins: move_pins(root, found, before) ?? return Err(err)
     loop path in formatted -> print(path)
-    loop change in meaning {
-        term.eprint("{change.path}: `{form}` changes its syntax tree, so it stays as written; `jet emit --ast` line {change.line}: `{change.old}` becomes `{change.new}`")
-    }
+    loop change in wrote.changed -> term.eprint(change.what)
     loop problem in pins.problems -> term.eprint(problem)
     loop path in again.dirty -> term.eprint("{path}: a second `jet fmt` pass changes it again")
     loop path in again.unparsed -> term.eprint("{path}: `jet fmt` wrote a source it can't parse")
+    loop change in again.changed -> term.eprint("a second `jet fmt` pass: {change.what}")
     report_failures(checked.failed, "`{form} --check`")
     report_failures(wrote.failed, "`{form}`, so it stays as written")
     report_failures(again.failed, "a second `{form} --check`")
-    unstable: again.dirty.len() + again.unparsed.len()
+    unstable: again.dirty.len() + again.unparsed.len() + again.changed.len()
     hung: failed + wrote.failed.len() + again.failed.len()
+    changed: meaning + wrote.changed.len()
     summary: "formatted {formatted.len()} of {parsed} sources ({unparsed} don't parse, {left_out} left out); moved {pins.pins} line pins in {pins.files} files"
-    if unstable > 0 || pins.problems.len() > 0 || meaning.len() > 0 || hung > 0 {
-        term.eprint("fmt-corpus: {summary}, but {meaning.len()} sources would change meaning, {unstable} sources are not stable, {hung} sources hang or crash the formatter and {pins.problems.len()} pins stay as written")
+    if unstable > 0 || pins.problems.len() > 0 || changed > 0 || hung > 0 {
+        term.eprint("fmt-corpus: {summary}, but {changed} sources would change meaning, {unstable} sources are not stable, {hung} sources hang or crash the formatter and {pins.problems.len()} pins stay as written")
         return Ok(1)
     }
     print("fmt-corpus: {summary}")
     Ok(0)
-}
-
-// A source whose syntax tree a format changed: the first `jet emit --ast`
-// line (from 1) that differs, before and after.
-TreeChange: struct {
-    path: String
-    line: Int
-    old: String
-    new: String
-}
-
-// `jet emit --ast` of `path`: its parsed tree without positions, comments or
-// layout. None when the source doesn't parse.
-syntax_tree: fn(root: String, jet: String, path: String) -[Exec, Time.Wait]> String? Never! {
-    receipt: process.cmd([String]{jet.copy(), "emit", "--ast", path.copy()}).cwd(root).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).run() ?? return None
-    if receipt.code != 0 -> return None
-    Val(receipt.output.copy())
-}
-
-// The syntax tree of each of `sources` that parses.
-syntax_trees: fn(root: String, jet: String, sources: [String]) -[Exec, Time.Wait]> [String:String] Never! {
-    trees := [String:String]{}
-    loop path in sources {
-        if syntax_tree(root, jet, path) == .Val(tree) -> trees[path.copy()] = tree
-    }
-    trees
-}
-
-// The first line where `old` and `new` differ, from 1, with both lines.
-first_difference: fn(path: String, old: String, new: String) -> TreeChange Never! {
-    before: old.split("\n").to_list()
-    after: new.split("\n").to_list()
-    at := 0
-    loop at < before.len() && at < after.len() && before[at] == after[at] -> at += 1
-    TreeChange{path: path.copy(), line: at + 1, old: if at < before.len() -> before[at].trim() else -> "(end)", new: if at < after.len() -> after[at].trim() else -> "(end)"}
-}
-
-// The sources among `sources` whose syntax tree in `trees` is not the same
-// after formatting, in the order of `sources`.
-tree_changes: fn(root: String, jet: String, sources: [String], trees: [String:String]) -[Exec, Time.Wait]> [TreeChange] Never! {
-    changes := [TreeChange]{}
-    loop path in sources {
-        old: trees.get(path) ?? next
-        new: syntax_tree(root, jet, path) ?? "(does not parse)"
-        if new != old -> changes.push(first_difference(path, old, new))
-    }
-    changes
 }
 
 // `text` without its code-frame lines.
@@ -1223,15 +1188,11 @@ run: fn() {
     assert_eq(rule_counts([String]{"b", "a", "b"}).join("|"), "2\tb|1\ta")
 }
 
-#Test("a syntax tree change names its first differing emit line") {
-    old: "pick: fn(n: Int) -> String\n  if\n    binary ==\n      ident n\n"
-    new: "pick: fn(n: Int) -> String\n  if\n    binary ==\n      int 1\n"
-    change: first_difference("a.jet", old, new)
-    assert_eq(change.line, 4)
-    assert_eq(change.old, "ident n")
-    assert_eq(change.new, "int 1")
-    assert_eq(first_difference("a.jet", "use x", "use x\nrun: fn()").new, "run: fn()")
-    assert_eq(first_difference("a.jet", "use x", "use x\nrun: fn()").old, "(end)")
+#Test("a meaning change is the internal error that names the source") {
+    errors: "internal compiler error: `jet fmt` would change the syntax tree of `tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`\n  --> tests/a.jet\nThis is a bug in jet, NOT in your program. Please report it,\n"
+    assert_eq(fmt_refused_source(errors) ?? "", "tests/a.jet")
+    assert_eq(fmt_meaning_change(errors) ?? "", "`jet fmt` would change the syntax tree of `tests/a.jet`, so the file stays as written; the first difference is in `If`: `x` became `y`")
+    assert_eq(fmt_meaning_change("Error [jet.X]: no\n  --> tests/b.jet:4:27\n") ?? "none", "none")
 }
 
 #Test("code frames are the gutter lines a diagnostic shows") {
