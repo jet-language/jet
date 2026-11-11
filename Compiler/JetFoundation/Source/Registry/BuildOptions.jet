@@ -190,7 +190,8 @@ BuildSettingOverride: struct {
 // `jet dev`, checked (log_filter_bad_pair); "" when none is given. `locked`
 // is `jet build --locked`: the build refuses a dependency whose effect row
 // the project lock doesn't cover, and writes no lock; it shapes no image, so
-// no cache key names it (build_options_key).
+// no cache key names it (build_options_key). `deep_checks` is the
+// `--deep-checks` request (DeepChecks), off unless a flag selects one.
 BuildOptions: struct {
     command: String
     profile: String
@@ -201,6 +202,166 @@ BuildOptions: struct {
     observe: Bool{false}
     log: String{""}
     locked: Bool{false}
+    deep_checks: DeepChecks{DeepChecks{}}
+}
+
+// The deep checks one compile keeps (`--deep-checks` of run, dev, test and
+// build). `all` is a bare `--deep-checks`: every deep check of the program
+// and its Jet libraries. `scopes` are the `--deep-checks=<scope>` values, in
+// argv order without repeats; each keeps the deep checks of the declarations
+// it names (deep_checks_selects), and each must name one that holds a deep
+// check, even beside a bare flag (deep_checks_unselected). Neither is the
+// default in every profile: every deep check is off.
+DeepChecks: struct {
+    all: Bool{false}
+    scopes: [String]{[String]{}}
+}
+
+DEEP_CHECKS_FLAG: "--deep-checks"
+
+// What argv asks of the deep checks, or the flag it refuses (E2119).
+DeepChecksRead: enum {
+    Read(request: DeepChecks)
+    Refused(argument: String)
+}
+
+// The deep-check request of `argv`, up to `--`: each bare `--deep-checks`
+// selects every deep check and each `--deep-checks=<scope>` adds its scope.
+// An empty or malformed scope is refused (deep_checks_malformed).
+deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
+    request := DeepChecks{}
+    prefix: "{DEEP_CHECKS_FLAG}="
+    loop argument in argv {
+        if argument == "--" -> break
+        if argument == DEEP_CHECKS_FLAG {
+            request.all = true
+            next
+        }
+        if !argument.starts_with(prefix) -> next
+        scope: argument.slice(prefix.len()..<argument.len())
+        if !deep_checks_scope_valid(scope) -> return DeepChecksRead.Refused{argument: argument.copy()} // copy: the refusal outlives argv.
+        if !request.scopes.contains(scope) -> request.scopes.push(scope.copy()) // copy: the request owns its scopes.
+    }
+    DeepChecksRead.Read{request: request}
+}
+
+// A scope is names joined by `.`, each of ASCII letters, digits, `_` and `-`
+// (a package name may hold `-`).
+deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
+    if scope == "" -> return false
+    loop segment in scope.split(".") {
+        bytes: segment.bytes()
+        if bytes.len() == 0 -> return false
+        loop byte in bytes {
+            n: Int.from_u8(byte)
+            letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+            digit: n >= 48 && n <= 57
+            if !letter && !digit && n != 95 && n != 45 -> return false
+        }
+    }
+    true
+}
+
+// Is the deep-check request off: no flag selects anything.
+deep_checks_off: fn(request: DeepChecks) -> Bool Never! {
+    !request.all && request.scopes.len() == 0
+}
+
+// The request's identity in a cache key: "" when off, else `all` then the
+// scopes in sorted order, so one selection written in any order has one key.
+deep_checks_key: fn(request: DeepChecks) -> String Never! {
+    if deep_checks_off(request) -> return ""
+    words := [String]{}
+    loop scope in request.scopes -> words.push(scope.copy()) // copy: sorted for the key; the request keeps argv order.
+    words.sort()
+    if request.all -> words.insert(0, "all")
+    words.join(",")
+}
+
+// The flags that write the request again, as deep_checks_read reads them.
+deep_checks_flags: fn(request: DeepChecks) -> [String] Never! {
+    words := [String]{}
+    if request.all -> words.push(DEEP_CHECKS_FLAG)
+    loop scope in request.scopes -> words.push("{DEEP_CHECKS_FLAG}={scope}")
+    words
+}
+
+// Does `scope` select the declaration at the dotted `path`: the path itself,
+// or one under it (`tree` selects `tree.run` and `tree.balance.Tree.fix`).
+deep_checks_selects: fn(scope: String, path: String) -> Bool Never! {
+    path == scope || path.starts_with("{scope}.")
+}
+
+// A scope that keeps no deep check. `selected` are the declarations it
+// names, none of which holds one; empty when it names no declaration.
+DeepChecksUnselected: struct {
+    scope: String
+    selected: [String]
+}
+
+// Every scope of `request` that keeps no deep check, in argv order, given the
+// dotted path of each declaration (`paths`) and of each that holds a deep
+// check (`holders`). A bare flag beside a scope excuses none.
+deep_checks_unselected: fn(request: DeepChecks, paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
+    found := [DeepChecksUnselected]{}
+    loop scope in request.scopes {
+        kept := false
+        loop path in holders {
+            if deep_checks_selects(scope, path) -> kept = true
+        }
+        if kept -> next
+        selected := [String]{}
+        loop path in paths {
+            if deep_checks_selects(scope, path) && !selected.contains(path) -> selected.push(path.copy()) // copy: the report owns its paths.
+        }
+        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected}) // copy: the report outlives the request.
+    }
+    found
+}
+
+// How many declarations a report names before `and N more`.
+DEEP_CHECKS_SHOWN: 3
+
+// The E2119 refusal of a malformed `--deep-checks=<scope>` flag
+// (deep_checks_read).
+deep_checks_malformed: fn(argument: String) -> Diagnostic Never! {
+    deep_checks_report("E2119", argument, "", "", "")
+}
+
+// The report of one scope that keeps no deep check: E2120 when it names no
+// declaration, E2121 when the declarations it names hold none. The fix offers
+// the scopes that do keep a deep check, ready to copy.
+deep_checks_unselected_report: fn(row: DeepChecksUnselected, holders: [String]) -> Diagnostic Never! {
+    held: if holders.len() == 0 -> "no declaration of this program holds one" else -> deep_checks_names(holders, "{DEEP_CHECKS_FLAG}=")
+    if row.selected.len() == 0 -> return deep_checks_report("E2120", "", row.scope, "", held)
+    deep_checks_report("E2121", "", row.scope, deep_checks_names(row.selected, ""), held)
+}
+
+// The first DEEP_CHECKS_SHOWN of `paths`, each after `prefix` in backticks,
+// then `and N more`.
+deep_checks_names: fn(paths: [String], prefix: String) -> String Never! {
+    shown := [String]{}
+    loop path in paths {
+        if shown.len() == DEEP_CHECKS_SHOWN -> break
+        shown.push("`{prefix}{path}`")
+    }
+    more: paths.len() - shown.len()
+    if more > 0 -> return "{shown.join(", ")} and {more} more"
+    shown.join(", ")
+}
+
+// One deep-check scope report, worded by its registry row with the holes
+// filled.
+deep_checks_report: fn(code: String, argument: String, scope: String, selected: String, holders: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("{code} is not registered")
+    what: deep_checks_text(row.what, argument, scope, selected, holders)
+    why: deep_checks_text(row.why, argument, scope, selected, holders)
+    fix: deep_checks_text(row.fix, argument, scope, selected, holders)
+    diagnostic_from_registry(code, None, what, why, fix)
+}
+
+deep_checks_text: fn(text: String, argument: String, scope: String, selected: String, holders: String) -> String Never! {
+    text.replace("{{argument}}", argument).replace("{{scope}}", scope).replace("{{selected}}", selected).replace("{{holders}}", holders)
 }
 
 // The first pair of a core.log level filter (the package's `log:` field,
@@ -420,8 +581,8 @@ JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
 JET_BUILD_DEFAULT_PROFILE: "dev"
 
 // The options' identity in a cache key: the profile, then each resolved row
-// that shapes the image, then each `--set` setting value, then `observe`
-// and `log`.
+// that shapes the image, then each `--set` setting value, then `observe`,
+// `log` and the deep checks a flag selects.
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
@@ -430,6 +591,8 @@ build_options_key: fn(options: BuildOptions) -> String Never! {
     loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
     if options.observe -> out = "{out};observe"
     if options.log != "" -> out = "{out};log={options.log}"
+    deep: deep_checks_key(options.deep_checks)
+    if deep != "" -> out = "{out};deep={deep}"
     out
 }
 

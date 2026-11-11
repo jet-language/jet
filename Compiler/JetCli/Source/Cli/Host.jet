@@ -93,6 +93,7 @@ use {
         build_options_value,
         build_options_check_removals,
         build_options_link_override,
+        deep_checks_flags,
         CtValue,
         Diagnostic,
         DiagnosticOrigin,
@@ -1747,7 +1748,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
-// (`jet run [--profile=…] [--optimize=…] [--log=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
+// (`jet run [--profile=…] [--optimize=…] [--log=…] [--deep-checks=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
 // A run confined by `--allow='FS.Read("<path>")'` (jet_cli_read_scope) reads
 // only those paths, and JET_READ_SCOPE names them, so the runtime's refusal
 // of any other read names the grant.
@@ -1763,6 +1764,7 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
     loop setting in options.settings -> relaunch.push("--set={setting.name}={setting.value}")
     if options.observe -> relaunch.push("--observe")
     if options.log != "" -> relaunch.push("--log={options.log}")
+    loop word in deep_checks_flags(options.deep_checks) -> relaunch.push(word)
     loop key in options.gates -> relaunch.push("--gate={policy_key_name(key)}=allow")
     if invocation == .Val(rows) {
         if rows.all -> relaunch.push("-A")

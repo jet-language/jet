@@ -99,6 +99,8 @@ use {
         sema_module_is_core_source,
         sema_source_file_at,
         SemaCompilerModuleSource,
+        sema_inline_member_module,
+        sema_inline_member_source_name,
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
@@ -106,6 +108,9 @@ use {
         AUTHORITY_PANIC_ROOT,
         body_fixed_timing,
         BuildSettingOverride,
+        DeepChecks,
+        deep_checks_unselected,
+        deep_checks_unselected_report,
         PolicyKey,
         policy_gate_allows,
         CompilerThreads,
@@ -2766,6 +2771,46 @@ jet_driver_test_modules: fn(load: JetDriverLoadResult, core_tests: String) -> [S
     members
 }
 
+// `--deep-checks` (JetDriverCompileRequest.deep_checks): an E2120 or E2121
+// for each scope that keeps no deep check (deep_checks_unselected), over the
+// dotted path of every checked function outside Core: its package name, file
+// module, inline module, owner type and name (`tree.balance.Tree.fix`). No
+// statement marks a deep check yet, so no function holds one and every scope
+// is refused.
+jet_driver_deep_check_scopes: fn(load: JetDriverLoadResult, functions: [FnBody], request: DeepChecks) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    if request.scopes.len() == 0 -> return diagnostics
+    packages := [String:String]{}
+    loop package in load.packages -> packages[package.identity] = package.name.copy() // copy: the load keeps its package rows.
+    modules := [String:Int]{}
+    loop (index, loaded) in load.modules {
+        if !jet_driver_unit_is_core(load.source_units[loaded.source_unit_index]) -> modules[loaded.module_identity] = index
+    }
+    paths := [String]{}
+    loop function in functions {
+        if function.synthetic -> next
+        at: modules.get(function.module_identity) ?? next
+        loaded: load.modules[at]
+        // The key is `fn:<module>:<owner>:<name>`; the module may hold `:`.
+        parts: function.key.split(":").to_list()
+        if parts.len() < 4 -> next
+        name: parts[parts.len() - 1]
+        owner: parts[parts.len() - 2]
+        lifted: if owner == "" -> name else -> owner
+        words := [String]{}
+        prefix: [String]{packages.get(loaded.package_identity) ?? "", loaded.declared_module.copy(), sema_inline_member_module(lifted)}
+        loop word in prefix {
+            if word != "" -> words.push(word.copy()) // copy: the path owns its words.
+        }
+        if owner != "" -> words.push(sema_inline_member_source_name(owner))
+        words.push(if owner == "" -> sema_inline_member_source_name(name) else -> name.copy())
+        paths.push(words.join("."))
+    }
+    holders := [String]{}
+    loop row in deep_checks_unselected(request, paths, holders) -> diagnostics.push(deep_checks_unselected_report(row, holders))
+    diagnostics
+}
+
 // The native Test harness plan over the checked functions `functions`: the
 // named tests of `test_modules` whose bodies checked, and their selected Check
 // Outputs, in declaration order. A Check Output whose callable did not check
@@ -4236,6 +4281,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if request.mode == JetDriverCompileMode.Test && !request.tests_optional && jet_driver_runnable_test_count(registration_graph) == 0 {
         load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
+    loop diagnostic in jet_driver_deep_check_scopes(load, checked_functions, request.deep_checks) -> load.diagnostics.push(diagnostic)
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
     if failed_stage != None && !kg.enabled -> return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
     // `jet check` stops before lowering: no C export rows, no Core

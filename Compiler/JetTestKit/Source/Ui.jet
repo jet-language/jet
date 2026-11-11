@@ -49,6 +49,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet run --deny=<rights>` of the file: the invocation's deny row
         // refuses a right the program reaches (E1803).
         {name: "run_deny", argv: ["run", "--deny=$arg", "$file"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        // `jet run --deep-checks=<scope>` of the file: a malformed scope
+        // (E2119), or one that keeps no deep check (E2120, E2121), is refused.
+        {name: "deep_checks", argv: ["run", "--deep-checks=$arg", "$file"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
         // `jet lint --a11y` is the only surface of E2930/E2931 and exits
         // nonzero when it finds one (syntax-decisions.md:3891).

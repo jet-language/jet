@@ -41,6 +41,9 @@ use {
         build_options_resolve,
         build_options_stock,
         build_options_value,
+        DeepChecks,
+        deep_checks_malformed,
+        deep_checks_read,
         JET_CLI_COMMANDS,
         JET_CLI_HANDLERS,
         JET_COMPILER_SERVICE_VERB,
@@ -1288,6 +1291,11 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         .Refused(plan) -> return JetCLIBuildOptions.Refused{plan: plan}
         .Given(given) -> gates = given.copy()
     }
+    deep_checks := DeepChecks{}
+    if deep_checks_read(jet_argv) == {
+        .Refused(argument) -> return JetCLIBuildOptions.Refused{plan: JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}}
+        .Read(request) -> deep_checks = request.copy()
+    }
     if build_option_flags(jet_argv) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
         .Resolved(given, _) -> flags = given.written
@@ -1358,6 +1366,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
             selected := options.copy()
             selected.settings = settings
             selected.gates = gates
+            selected.deep_checks = deep_checks
             return JetCLIBuildOptions.Selected{options: selected, notes: text}
         }
     }
@@ -1727,7 +1736,7 @@ jet_cli_native_source_plan: fn(jet_argv: [String], file: String, language: Strin
 // a single-dash word too, is refused by E2102: on `jet run` and the
 // `jet <file>` shorthand by jet_cli_check_flags, on `jet dev` by
 // jet_cli_run_entry.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port"}
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate", "--log", "--observe", "-e", "--sha256", "--port", "--deep-checks"}
 
 // `--log=<filter>` of `jet run` and `jet dev`, the last one before `--`: the
 // core.log level filter the program starts with, above JET_LOG

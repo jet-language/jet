@@ -11387,6 +11387,54 @@ CcProjectInputsTooLarge: struct {
     }
 }
 
+DeepCheckScopeMalformed: struct {
+    argument: String
+
+    impl Diagnostic {
+        code: "E2119"
+        stage: [.Jet]
+        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't names joined by `.` (#3029)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`{self.argument}` isn't a deep-check scope." }
+        why: fn(self) -> String { "A deep-check scope is a package name, then module, type and function names, joined by `.`; each name is letters, digits, `_` and `-`." }
+        fix: fn(self) -> String { "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree.run`." }
+    }
+}
+
+DeepCheckScopeUnknown: struct {
+    scope: String
+    holders: String
+
+    impl Diagnostic {
+        code: "E2120"
+        stage: [.Jet]
+        meaning: "A `--deep-checks=<scope>` flag names no package, module, type or function of the program (#3029)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`--deep-checks={self.scope}` names no package, module, type or function of this program." }
+        why: fn(self) -> String { "A scope keeps the deep checks of the declarations it names, and this one names none, so it would keep nothing." }
+        fix: fn(self) -> String { "Drop it, or name a scope that holds a deep check: {self.holders}." }
+    }
+}
+
+DeepCheckScopeHoldsNone: struct {
+    scope: String
+    selected: String
+    holders: String
+
+    impl Diagnostic {
+        code: "E2121"
+        stage: [.Jet]
+        meaning: "A `--deep-checks=<scope>` flag names declarations none of which holds a deep check (#3029)"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`--deep-checks={self.scope}` selects {self.selected}, and none of them holds a deep check." }
+        why: fn(self) -> String { "A scope keeps the deep checks of the declarations it names, and these hold none, so it would keep nothing." }
+        fix: fn(self) -> String { "Drop it, or name a scope that holds a deep check: {self.holders}." }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201"

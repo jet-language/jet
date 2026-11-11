@@ -1665,6 +1665,7 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
             compiled_request := contributed.request.move()
             if entry != None -> compiled_request.selected_entry = entry.copy()
+            compiled_request.deep_checks = options.deep_checks.copy()
             // `dead_code: remove` lowers only the entry package's reached
             // bodies; `keep` lowers them all, so the image can carry them
             // (Host.jet jet_cli_ir_checks).

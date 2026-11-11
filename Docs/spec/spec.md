@@ -4844,6 +4844,23 @@ doesn't hold is E2115.
 in a release image writes `--debug-info=true` or `debug_info: true` in a
 `release` profile.
 
+### Deep checks
+
+Every deep check is off by default, in every profile (D-DEEP-CHECK1). `jet
+run`, `jet dev`, `jet test` and `jet build` take `--deep-checks`: the bare
+flag keeps every deep check of the program and its Jet libraries, and
+`--deep-checks=<scope>` keeps those of one declaration and everything under
+it. A scope is a package name, then module, type and function names, joined
+by `.` (`--deep-checks=tree.run`); a file outside a package starts at its
+module. The flag repeats, and the scopes add up. An empty or malformed scope
+is E2119 before the compile starts. After checking, a scope that names no
+declaration is E2120, and one whose declarations hold no deep check is
+E2121, even beside a bare flag or another scope that keeps one; their fix
+offers the scopes that do. The selection is part of the compile's identity,
+so a cached image built with one selection never serves another; equal
+selections written in any order share it. Example:
+[`tests/ui/deep_checks_unmatched_scope`](../../tests/ui/deep_checks_unmatched_scope.jet).
+
 ### Size-oriented builds
 
 `small` (stock `false`) favors a smaller binary: with `true` the optimizer

@@ -8,6 +8,7 @@ use {
         AppRouteRoot,
         BuildSettingOverride,
         JET_BUILD_DEFAULT_PROFILE,
+        DeepChecks,
         CompilerThreads,
         compiler_threads_single,
         CompilerTraceSink,
@@ -345,6 +346,11 @@ JetDriverCompileRequest: struct {
     // The `--set name=value` writers, the command-line layer of that fold
     // (BuildFactChain.jet).
     setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    // The `--deep-checks` request (BuildOptions.deep_checks): the deep checks
+    // this compile keeps. Every scope must keep one, or the compile fails
+    // (Pipeline.jet jet_driver_deep_check_scopes). Off for a compile no
+    // options input reaches.
+    deep_checks: DeepChecks{DeepChecks{}}
     // The toolchain tree `toolchain:` comptime inputs read: the tree this
     // compile takes Core from, and the reader of which packages may read it
     // (JetDriverToolchainTree). None: jet compiles against its built-in Core,
