@@ -1,13 +1,13 @@
-// `jet.runtime.files` (#6615): the runtime's public directory entries
-// functions, in Jet types with their declared effect rows. Each member is a
-// runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
-// export that is its one body (RouteAFiles.jet). An entries context is a
-// key, and each path in it a slot. A key that is not live, or a slot that is
-// out of range or released, panics. A tuple result's items cross in the
-// checked tuple's label-sorted order, which is the export's slot order. A
-// failed step answers its error kind as `status`, with its OS code and its
-// reason, and `status_reason` is None when the step worked. A member with no
-// row is pure.
+// `jet.runtime.files` (#6615): the runtime's public directory entries and
+// directory walk functions, in Jet types with their declared effect rows.
+// Each member is a runtime binding (Guest.jet sema_guest_runtime_binding) of
+// the runtime export that is its one body (RouteAFiles.jet, FilesWalk.jet).
+// An entries context or a walk is a key, and each path in it a slot. A key
+// that is not live, or a slot that is out of range or released, panics. A
+// tuple result's items cross in the checked tuple's label-sorted order, which
+// is the export's slot order. A failed step answers its error kind as
+// `status`, with its OS code and its reason, and `status_reason` is None when
+// the step worked. A member with no row is pure.
 files: module {
     // Opens an entries context over `source`, which copies into
     // `destination` when `copying`; its key. Slot 0 is `source`.
@@ -49,4 +49,54 @@ files: module {
 
     // This process's id.
     #Import(c) process_id_raw: fn() -[FS]> Int = "jet_std_os_pid"
+
+    // Opens a walk of `root`, which reads rules files named `ignore` when
+    // `enabled`; its key. Slot 0 is `root`.
+    #Import(c) walk_context: fn(root: String, ignore: String, enabled: Bool) -[FS]> Int = "jet_walk8_open"
+
+    // Closes the walk `key`. An unknown key is a no-op.
+    #Import(c) walk_close: fn(key: Int) -[FS]> = "jet_walk8_close"
+
+    // The slot to validate for `slot`: `slot` itself, or a new slot holding
+    // "." when its path is empty.
+    #Import(c) walk_validation_path: fn(key: Int, slot: Int) -[FS]> Int = "jet_walk8_validation_path"
+
+    // `slot`'s path and each of its ancestors that is not empty, each in a
+    // new slot, innermost first.
+    #Import(c) walk_ancestors: fn(key: Int, slot: Int) -[FS]> [Int] = "jet_walk8_ancestors"
+
+    // Whether `slot` is a directory, and whether it is a symbolic link, by
+    // metadata that does not follow a link.
+    #Import(c) walk_metadata: fn(key: Int, slot: Int) -[FS]> (directory: Bool, link: Bool, status: Int, status_code: Int?, status_reason: String?) = "jet_walk8_metadata"
+
+    // `slot`'s path, with any invalid UTF-8 replaced.
+    #Import(c) walk_shown: fn(key: Int, slot: Int) -[FS]> String = "jet_walk8_shown"
+
+    // Releases `slot` and closes its directory stream if one is open. Slot 0,
+    // a slot out of range and a slot already released stay as they are.
+    #Import(c) walk_release: fn(key: Int, slot: Int) -[FS]> = "jet_walk8_release"
+
+    // Gives the root slot a new, empty rules matcher.
+    #Import(c) walk_matcher_new: fn(key: Int) -[FS]> = "jet_walk8_matcher_new"
+
+    // Adds the rules of the file `filename` in the directory `slot`, which
+    // must hold a matcher. A missing or non-regular rules file keeps the
+    // inherited rules.
+    #Import(c) walk_rules: fn(key: Int, slot: Int, filename: String) -[FS]> (status: Int, status_code: Int?, status_reason: String?) = "jet_walk8_rules"
+
+    // Whether the rules in force at `slot`, which must hold a matcher,
+    // ignore the path `relative`.
+    #Import(c) walk_ignored: fn(key: Int, slot: Int, relative: String, directory: Bool) -[FS]> Bool = "jet_walk8_ignored"
+
+    // Gives the directory `child` the rules in force at `parent`.
+    #Import(c) walk_inherit: fn(key: Int, child: Int, parent: Int) -[FS]> = "jet_walk8_inherit"
+
+    // Opens the directory `slot` for reading.
+    #Import(c) walk_read_dir: fn(key: Int, slot: Int) -[FS]> (status: Int, status_code: Int?, status_reason: String?) = "jet_walk8_read_dir"
+
+    // The next entry of the directory `slot`, which must be open, with "."
+    // and ".." skipped: whether the stream ended, the entry's slot (a
+    // directory's only, else 0), whether it is a directory or a file, its
+    // path and its path relative to the root, and whether it is a rules file.
+    #Import(c) walk_next: fn(key: Int, slot: Int) -[FS]> (at_end: Bool, child: Int, directory: Bool, file: Bool, path: String, relative: String, rules_file: Bool, status: Int, status_code: Int?, status_reason: String?) = "jet_walk8_next"
 }

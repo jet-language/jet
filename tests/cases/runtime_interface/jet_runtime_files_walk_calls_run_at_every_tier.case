@@ -1,0 +1,37 @@
+# A user package walks a directory tree through the jet.runtime.files walk
+# calls: it validates the root, reads its ancestors' metadata, and lists the
+# tree with the `.ignore` rules in force below the root. Each call lowers
+# through the route its interface signature projects (a List result, tuple
+# results with Option items) to the runtime export the row names, so the
+# program prints the same lines at O0, O1 and O2 and from the binary
+# `jet build` makes. A slot past the walk's slot table, or one already
+# released, panics instead of reading outside it.
+fixture: jet_runtime_files_walk_calls_run_at_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_walk_calls_run_at_every_tier.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_walk_calls_run_at_every_tier.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_walk_calls_run_at_every_tier.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = jet_runtime_files_walk_calls_run_at_every_tier.out
+step: jet run out_of_range.jet
+timeout: 60s
+exit: != 0
+stderr: ~ "live walk slot"
+step: jet run released.jet
+timeout: 60s
+exit: != 0
+stderr: ~ "live walk slot"

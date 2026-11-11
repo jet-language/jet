@@ -1,0 +1,51 @@
+// A user package walks a directory tree through the jet.runtime.files walk
+// calls, with the rules file `.ignore` in force below the root.
+use files: jet.runtime.files
+
+// The kept paths below the directory `slot`, depth first in path order. A
+// rules file and a path the rules in force ignore are left out; false after a
+// failed step.
+tree: fn(key: Int, slot: Int, output: &[String]) -[FS]> Bool {
+    rules: files.walk_rules(key, slot, ".ignore")
+    if rules.status_reason != None -> return false
+    opened: files.walk_read_dir(key, slot)
+    if opened.status_reason != None -> return false
+    kept := [(path: String, child: Int, directory: Bool)]{}
+    loop {
+        entry: files.walk_next(key, slot)
+        if entry.status_reason != None -> return false
+        if entry.at_end -> break
+        if entry.rules_file || files.walk_ignored(key, slot, entry.relative, entry.directory) {
+            if entry.child != 0 -> files.walk_release(key, entry.child)
+            next
+        }
+        if entry.directory -> files.walk_inherit(key, entry.child, slot)
+        kept.push((path: entry.path, child: entry.child, directory: entry.directory))
+    }
+    kept.sort_by((left: (path: String, child: Int, directory: Bool), right: (path: String, child: Int, directory: Bool)) -> left.path <=> right.path)
+    loop entry in kept {
+        output.push(entry.path)
+        if entry.directory {
+            if !tree(key, entry.child, output) -> return false
+            files.walk_release(key, entry.child)
+        }
+    }
+    true
+}
+
+run: fn() -[IO, FS]> {
+    key: files.walk_context("walktree", ".ignore", true)
+    print(files.walk_validation_path(key, 0) == 0)
+    ancestors: files.walk_ancestors(key, 0)
+    print(ancestors.len())
+    loop ancestor in ancestors {
+        metadata: files.walk_metadata(key, ancestor)
+        print("{files.walk_shown(key, ancestor)} {metadata.directory} {metadata.link}")
+        files.walk_release(key, ancestor)
+    }
+    files.walk_matcher_new(key)
+    paths := [String]{}
+    print(tree(key, 0, paths))
+    loop path in paths -> print(path)
+    files.walk_close(key)
+}

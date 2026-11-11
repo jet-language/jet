@@ -97,6 +97,18 @@ walk_slot: fn(context: I64, index: I64) -> I64 { rt_text_word(wrapping(context +
 walk_slot_data: fn(context: I64, index: I64) -> I64 { rt_text_word(walk_slot(context, index)) }
 walk_slot_length: fn(context: I64, index: I64) -> I64 { rt_text_word(wrapping(walk_slot(context, index) + I64{8})) }
 
+// Whether `index` is a slot the caller may name: in range and not released.
+// Any other index leaves the context and panics ("live walk slot"), as
+// entries_slot does, so no caller reads outside the slot table.
+walk_live: fn(context: I64, index: I64) -> Bool {
+    if (index >= I64{0} && index < rt_text_word(wrapping(context + I64{40}))) {
+        if (rt_text_word(walk_slot(context, index)) != I64{0}) -> return true
+    }
+    walk_leave(context)
+    walk_panic(rt_static_text("live walk slot"))
+    false
+}
+
 // Takes ownership of `bytes` (length+1, NUL-terminated): the first released
 // slot, else a new one.
 walk_slot_push: fn(context: I64, bytes: I64, length: I64) -> I64 {
@@ -395,6 +407,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 #Export(c) jet_walk8_validation_path: fn(key: I64, slot: I64) -> I64 {
     context: walk_enter(key)
     if (context == I64{0}) -> return I64{0}
+    if !walk_live(context, slot) -> return I64{0}
     result := slot
     if (walk_slot_length(context, slot) == I64{0}) {
         dot: jet_rt_alloc(I64{2}, I64{1})
@@ -410,6 +423,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 #Export(c) jet_walk8_ancestors: fn(key: I64, slot: I64, output: I64) -> I64 {
     context: walk_enter(key)
     if (context == I64{0}) -> return I64{0}
+    if !walk_live(context, slot) -> return I64{0}
     data: walk_slot_data(context, slot)
     keys: files_words_new()
     length := walk_slot_length(context, slot)
@@ -425,6 +439,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 #Export(c) jet_walk8_metadata: fn(key: I64, slot: I64, directory: I64, symlink: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
+    if !walk_live(context, slot) -> return
     data: walk_slot_data(context, slot)
     failure := WALK_NUL
     mode := I64{0}
@@ -442,6 +457,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
 #Export(c) jet_walk8_shown: fn(key: I64, slot: I64) -> I64 {
     context: walk_enter(key)
     if (context == I64{0}) -> return jet_rt_string_builder_new()
+    if !walk_live(context, slot) -> return jet_rt_string_builder_new()
     result: rt_text_lossy(walk_slot_data(context, slot), walk_slot_length(context, slot))
     walk_leave(context)
     result
@@ -519,6 +535,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 #Export(c) jet_walk8_rules: fn(key: I64, slot: I64, filename: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
+    if !walk_live(context, slot) -> return
     matcher: rt_text_word(wrapping(walk_slot(context, slot) + I64{16}))
     if (matcher == I64{0}) {
         walk_leave(context)
@@ -564,6 +581,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 #Export(c) jet_walk8_ignored: fn(key: I64, slot: I64, relative: I64, directory: Bool) -> Bool {
     context: walk_enter(key)
     if (context == I64{0}) -> return false
+    if !walk_live(context, slot) -> return false
     matcher: rt_text_word(wrapping(walk_slot(context, slot) + I64{16}))
     if (matcher == I64{0}) {
         walk_leave(context)
@@ -578,6 +596,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 #Export(c) jet_walk8_inherit: fn(key: I64, child: I64, parent: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
+    if (!walk_live(context, child) || !walk_live(context, parent)) -> return
     inherited: ignore_matcher_retain(rt_text_word(wrapping(walk_slot(context, parent) + I64{16})))
     target: wrapping(walk_slot(context, child) + I64{16})
     ignore_matcher_drop(rt_text_word(target))
@@ -589,6 +608,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
 #Export(c) jet_walk8_read_dir: fn(key: I64, slot: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
+    if !walk_live(context, slot) -> return
     data: walk_slot_data(context, slot)
     failure := WALK_NUL
     if !walk_has_nul(data, walk_slot_length(context, slot)) {
@@ -644,6 +664,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
 #Export(c) jet_walk8_next: fn(key: I64, slot: I64, end: I64, child: I64, directory: I64, file: I64, path: I64, relative: I64, ignore_file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) -> return
+    if !walk_live(context, slot) -> return
     target: wrapping(walk_slot(context, slot) + I64{24})
     stream: rt_text_word(target)
     if (stream == I64{0}) {
