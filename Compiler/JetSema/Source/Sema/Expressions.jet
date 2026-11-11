@@ -5664,9 +5664,27 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
         fork := Expr.MethodCall{receiver: value.copy(), method: "__fork", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         return sema_check_expression(fork, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    // A list or option that holds a Manual clock copies each element by
+    // that element's own semantic copy, so every clock it holds forks too.
+    if !sema_module_is_core_source(environment.module_identity) && sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) && sema_expr_copy_maps_elements(checked.ty) {
+        item: Expr.Ident{name: "__clock_item", span: span, id: AST_NODE_GENERATED}
+        each: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: "__clock_item", name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: Expr.Copy{value: item, span: span, id: AST_NODE_GENERATED}}, span: span, meta: ast_empty_lambda_meta()}
+        argument: CallArg{convention: AccessConvention.Read, expr: Expr.Lambda{lambda: each, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        mapped := Expr.MethodCall{receiver: value.copy(), method: "map", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
+        return sema_check_expression(mapped, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     window_copy: sema_call_compute_window_copy(checked, span, expected, environment, program, diagnostics)
     if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, context, diagnostics, sema_expr_copy_string_view(value, scopes), false)
+}
+
+// Whether a copy of `ty` maps its elements: a list's or an option's
+// elements each take their own semantic copy.
+sema_expr_copy_maps_elements: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .List(_) | .Option(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 // An unmarked move site that a later use reached is a
