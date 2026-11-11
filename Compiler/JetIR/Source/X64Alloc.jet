@@ -238,13 +238,43 @@ ir_x64_inline_unique: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 
 // Whether selecting instruction `at` makes no call, in its body or in a
 // slow path, and leaves r8 and r9 alone: structure, a constant, a memory
-// access, a frame address or byte copy, or a quiet value (ir_x64_quiet).
+// access, a frame address or byte copy, a quiet value (ir_x64_quiet), a
+// call of an `#FFI(asm)` template selected in place that keeps r8 and r9
+// (IRAsmLeaf.quiet; X64Select.jet ir_x64_asm_inline), or a tail call
+// (TailCalls.jet), which leaves the function: its arguments go to rdi,
+// rsi, rdx and rcx (ir_x64_tail_silent) and no value of this frame is
+// read after its jump.
 ir_x64_silent: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
     if f.op[at] == {
         .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
-        .Return -> f.b[at] != IR_TAIL_JUMP
-        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt | .IntBig -> ir_x64_quiet(m, f, consts, values, at)
+        .Return -> f.b[at] != IR_TAIL_JUMP || (at > 0 && ir_x64_tail_silent(m, f, at - 1))
+        .Call -> ir_x64_tail_silent(m, f, at) || ir_x64_asm_silent(m, f, at)
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt | .IntBig -> ir_x64_quiet(m, f, consts, values, at)
     }
+}
+
+// Whether `at` is a tail Call (its Return jumps, TailCalls.jet) whose
+// General arguments are at most four, so its loads into the argument
+// registers (X64Select.jet ir_x64_tail_jump) never write r8 or r9.
+ir_x64_tail_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.op[at] != .Call || at + 1 >= f.op.len() || f.op[at + 1] != .Return || f.b[at + 1] != IR_TAIL_JUMP -> return false
+    general := 0
+    loop position in f.b[at]..<(f.b[at] + f.c[at]) {
+        if ir_x64_slot_class(m, f, f.args[position]) == .General -> general += 1
+    }
+    general <= 4
+}
+
+// Whether Call `at` is a quiet `#FFI(asm)` template selected in place: an
+// operand-bound template (X64Select.jet ir_x64_asm_inlinable) whose code
+// keeps r8 and r9 (IRAsmLeaf.quiet). A stop poll's leaf has no template.
+ir_x64_asm_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return false
+    if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return false
+    key: m.functions[f.a[at]].key
+    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return false
+    leaf: m.functions[f.a[at]].asm ?? return false
+    leaf.quiet && leaf.code.len() > 0 && ir_x64_asm_inlinable(m, f, leaf, f.args, f.b[at], f.c[at], f.dst[at])
 }
 
 // Per slot: whether it is a `general` slot other than a parameter whose

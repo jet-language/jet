@@ -333,11 +333,13 @@ ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
-// bound to (`regs[i]`), and the register holding its result (-1 for none).
+// bound to (`regs[i]`), the register holding its result (-1 for none), and
+// whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet).
 IRAsmLeaf: struct {
     code: [U8]
     regs: [Int]
     result: Int
+    quiet: Bool{false}
 }
 
 // A word of a static object (IRModule.data_relocs) that holds an address:

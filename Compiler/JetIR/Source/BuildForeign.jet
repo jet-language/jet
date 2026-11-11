@@ -649,7 +649,7 @@ ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction,
     f := ir_function_new(foreign.name, key, "{symbol}__asm", foreign.source_file, line)
     loop (index, param) in foreign.params -> _ := ir_slot(f, params[index], IRSlotKind.Param, ir_intern_name(m, param.name), line)
     f.result = result
-    f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result})
+    f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result, quiet: assembled.quiet})
     id: m.functions.len()
     m.functions.push(f)
     name_rows_set(m.function_rows, key, id)

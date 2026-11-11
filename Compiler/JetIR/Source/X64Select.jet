@@ -631,8 +631,9 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
 ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     general := 0
     floats := 0
-    // Sources are callee-saved registers, frame homes and immediates, as
-    // for ir_x64_call.
+    // Sources are callee-saved registers, r8 and r9 (a silent tail call's,
+    // X64Alloc.jet ir_x64_tail_silent: its General arguments go to rdi,
+    // rsi, rdx and rcx only), frame homes and immediates.
     loop position in f.b[at]..<(f.b[at] + f.c[at]) {
         slot: f.args[position]
         class: ir_x64_slot_class(m, f, slot)
@@ -668,8 +669,9 @@ ir_x64_tail_jump: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
 // False, emitting nothing, for any other call.
 ir_x64_asm_inline: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
     if !ir_x64_asm_inlinable(m, f, leaf, args, start, count, dst) -> return false
-    // Sources are callee-saved registers, frame homes and immediates, as
-    // for ir_x64_call.
+    // Sources are callee-saved registers, r8 and r9 (a quiet template's,
+    // X64Alloc.jet ir_x64_asm_silent: four operands at most, so none is
+    // bound to them), frame homes and immediates.
     loop position in 0..<count -> ir_x64_load(e, m, f, al, args[start + position], leaf.regs[position])
     ir_x64_keep_xmms(e, f, al, true)
     if e.streams -> x64_sfence(e.code)
@@ -4546,7 +4548,7 @@ ir_x64_code_find: fn(code: [U8], want: [U8], from: Int) -> Int Never! {
 ir_x64_test_leaf: fn(source: String, names: [String], returns: Bool) -> IRAsmLeaf Never! {
     assembled: x64_assemble_template(source, names, returns, false)
     assert(assembled.error == None)
-    IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result}
+    IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result, quiet: assembled.quiet}
 }
 
 // The OS layer's byte and word access templates are each exactly one access
@@ -4917,6 +4919,63 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         if reg == X64_R8 -> held = true
     }
     assert(held)
+}
+
+// release(pointer) reads the TCB base, loads the word at base + pointer
+// and tail-calls slow(word): the shape of the allocator's free fast path.
+// Its calls are in-place templates that keep r8 and r9 and a tail call, so
+// it is a leaf: its values take r8 and r9 and it saves no callee-saved
+// register. A template that names r9, binds a fifth operand or calls does
+// not keep them.
+#Test("Quiet templates and a tail call keep a function a leaf") {
+    assert(x64_assemble_template("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true, false).quiet)
+    assert(x64_assemble_template("mov qword ptr [{{address}}], {{value}}", [String]{"address", "value"}, false, false).quiet)
+    assert(!x64_assemble_template("mov r9, {{value}}", [String]{"value"}, false, false).quiet)
+    assert(!x64_assemble_template("mov rax, {{e}} ; -> return", [String]{"a", "b", "c", "d", "e"}, true, false).quiet)
+    assert(!x64_assemble_template("call {{target}}", [String]{"target"}, false, false).quiet)
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    tls := ir_function_new("tls", "test:quiet.jet::tls#asm", "tls__asm", "quiet.jet", 1)
+    tls.result = word
+    tls.asm = Val(ir_x64_test_leaf("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true))
+    m.functions.push(tls)
+    load := ir_function_new("load", "test:quiet.jet::load#asm", "load__asm", "quiet.jet", 2)
+    _ := ir_slot(load, word, IRSlotKind.Param, ir_intern_name(m, "address"), 2)
+    load.result = word
+    load.asm = Val(ir_x64_test_leaf("mov rax, qword ptr [{{address}}] ; -> return", [String]{"address"}, true))
+    m.functions.push(load)
+    slow := ir_function_new("slow", "test:quiet.jet::slow", "", "quiet.jet", 3)
+    _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "word"), 3)
+    _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 3)
+    m.functions.push(slow)
+    f := ir_function_new("release", "test:quiet.jet::release", "", "quiet.jet", 4)
+    pointer: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "pointer"), 4)
+    base: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    row: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    value: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    at_tls: ir_emit(f, IROp.Call, base, 0, none, 0, 5)
+    _ := ir_emit(f, IROp.Add, row, base, pointer, IR_OVERFLOW_WRAP, 5)
+    address: ir_args(f, [Int]{row})
+    at_load: ir_emit(f, IROp.Call, value, 1, address, 1, 6)
+    handed: ir_args(f, [Int]{value})
+    at_tail: ir_emit(f, IROp.Call, -1, 2, handed, 1, 7)
+    _ := ir_emit(f, IROp.Return, -1, -1, IR_TAIL_JUMP, -1, 7)
+    m.functions.push(f)
+    released: m.functions[3]
+    no_consts := [Bool]{}
+    no_values := [Int]{}
+    loop _ in 0..<released.slot_type.len() {
+        no_consts.push(false)
+        no_values.push(0)
+    }
+    assert(ir_x64_silent(m, released, no_consts, no_values, at_tls))
+    assert(ir_x64_silent(m, released, no_consts, no_values, at_load))
+    assert(ir_x64_silent(m, released, no_consts, no_values, at_tail))
+    al: ir_x64_allocate(m, released)
+    assert_eq(al.saved.len(), 0)
+    assert(al.regs[pointer] == X64_R8 || al.regs[pointer] == X64_R9)
+    assert(al.regs[value] == X64_R8 || al.regs[value] == X64_R9)
 }
 
 // A big-integer constant is data: its base-1e9 limbs, least significant

@@ -6,6 +6,11 @@ X64AsmResult: struct {
     regs: [Int]
     result: Int
     error: String?
+    // The template keeps r8 and r9: its operands are at most four (in rdi,
+    // rsi, rdx and rcx), it makes no call and no line names r8 or r9 at
+    // any width, a clobber included. A value in r8 or r9 lives through its
+    // code in place (JetIR X64Alloc.jet ir_x64_silent). A rail never is.
+    quiet: Bool{false}
 }
 
 X64AsmState: struct {
@@ -505,5 +510,18 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
     if returns != (s.result >= 0) {
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: return anchor disagrees with the function signature")}
     }
-    X64AsmResult{code: s.code.bytes, regs: regs, result: s.result, error: None}
+    quiet := names.len() <= 4
+    loop raw in lines {
+        if x64_asm_names_r8_r9(raw) -> quiet = false
+    }
+    X64AsmResult{code: s.code.bytes, regs: regs, result: s.result, error: None, quiet: quiet}
+}
+
+// Whether template line `line` (its comment too) names r8 or r9 at any
+// width, or calls.
+x64_asm_names_r8_r9: fn(line: String) -> Bool Never! {
+    loop token in line.replace(",", " ").replace("[", " ").replace("]", " ").replace("+", " ").replace("*", " ").replace("\t", " ").split(" ") {
+        if token == "call" || token.starts_with("r8") || token.starts_with("r9") -> return true
+    }
+    false
 }
