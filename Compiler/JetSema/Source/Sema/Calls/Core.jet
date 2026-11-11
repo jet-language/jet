@@ -1363,8 +1363,9 @@ sema_call_core_checked_source: fn(environment: SemaScopeEnvironment) -> Bool Nev
 }
 
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // Outside checked Core source, only the plugin boundary inserts the wire.
-    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" && !sema_call_core_checked_source(environment) {
+    // Only the plugin boundary inserts the wire; Core reads it through
+    // jet.runtime.files.
+    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
         diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
         return None
     }

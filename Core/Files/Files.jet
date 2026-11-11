@@ -2819,7 +2819,7 @@ priv scope_reads: module {
     // `FS.Read("repo")` is the working directory; a root with a `..` part names none.
     scope_roots: fn(scope: FileScope, platform: host_path.PathPlatform) -> [ScopeRoot] Never! {
         roots := [ScopeRoot]{}
-        loop right in core.plugin.__authority_to_wire(scope.authority).split("\n") {
+        loop right in rt.authority_to_wire(scope.authority).split("\n") {
             if !right.starts_with("FS.Read(\"") || !right.ends_with("\")") -> next
             root: right.removeprefix("FS.Read(\"").removesuffix("\")")
             if root == "" -> next

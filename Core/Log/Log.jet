@@ -109,9 +109,9 @@ span: fn(name: String) -[Log]> LogSpan Never! {
     LogSpan{id: allocated.id, name: allocated.name}
 }
 
-enter: fn(span: LogSpan) Never! -[Log]> { core.log.__span_enter(span) }
+enter: fn(span: LogSpan) Never! -[Log]> { rt.span_enter(span) }
 
-close: fn(span: LogSpan) Never! -[Log]> { core.log.__span_close(span) }
+close: fn(span: LogSpan) Never! -[Log]> { rt.span_close(span) }
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
@@ -200,7 +200,7 @@ format_code: fn(name: String) -> Int Never! {
 }
 
 reject_setting: fn(message: String) -[Log]> {
-    core.log.__record_emit("error", message, [LogField]{})
+    rt.record_emit("error", message, [LogField]{})
 }
 
 disable: fn() Never! -[Log]> { rt.disabled_store(true) }
@@ -264,9 +264,9 @@ priv internal: module {
         if level != .Fatal && !enabled_for(level_rank(level), path) -> return
         tagged := [LogField]{LogField{key: "module", value: path, kind: "string", redacted: false}}
         loop item in normalize_fields(fields) -> tagged.push(item)
-        // This leaf retains sink selection, sampling, timestamps and telemetry
-        // fan-out until Jet runtime L6 replaces it. It is not a public-row call.
-        core.log.__record_emit(level_name(level), message, tagged)
+        // The runtime keeps sink selection, sampling, timestamps and
+        // telemetry fan-out.
+        rt.record_emit(level_name(level), message, tagged)
         if level == .Fatal {
             flush()
             rt.process_exit(1)
@@ -442,7 +442,7 @@ priv internal: module {
                 operator: if source == CONFIG_FLAG -> "--log" else -> "JET_LOG"
                 target: if path == "" -> "every module" else -> "`{path}`"
                 note: "log.set_level({rank_name(rank)}) at {at} for {target} is kept below {operator}, which sets {rank_name(kept)}"
-                if !rt.disabled_load() -> core.log.__record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
+                if !rt.disabled_load() -> rt.record_emit("warn", note, [LogField]{LogField{key: "module", value: at.module, kind: "string", redacted: false}})
                 return
             }
         }
