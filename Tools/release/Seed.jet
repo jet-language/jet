@@ -305,6 +305,22 @@ preflight_gate: fn(launcher: String, repo: String, seed_dir: String, sha: String
     Admission{admitted: receipt.code == 0 && receipt.signal == None, text: text}
 }
 
+// The compiler source identity of `tree` (`Tools/agent/CompilerPackages.jet
+// identity`, the identity Tools/agent/Land.jet's census receipts record), run
+// by the seed in `seed_dir` with the checkout `repo`'s package model; "" when
+// it does not run.
+source_identity: fn(repo: String, seed_dir: String, tree: String) -[Exec, FS, Time.Wait]> String Never! {
+    identity: read_text(files.join(seed_dir, "IDENTITY")) ?? return ""
+    argv: [String]{files.join(seed_dir, "jet"), files.join(repo, "Tools/agent/CompilerPackages.jet"), "--root", tree.copy(), "identity"}
+    ran: process.cmd(argv).cwd(tree).env("JET_COMPILER_IDENTITY", identity.trim()).env("JET_TOOLCHAIN_ROOT", repo).output_limit(16777216).run() ?? return ""
+    lines := [String]{}
+    loop line in ran.output.split("\n").to_list() {
+        if line.trim() != "" -> lines.push(line.trim().copy())
+    }
+    if ran.code != 0 || ran.signal != None || lines.len() != 1 -> return ""
+    lines[0].copy()
+}
+
 // Whether `path` is `root` or lies under it.
 inside: fn(root: String, path: String) -> Bool Never! {
     path == root || path.starts_with("{root.removesuffix("/")}/")

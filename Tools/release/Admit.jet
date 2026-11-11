@@ -1,7 +1,8 @@
 // `admit COMMIT`: the release gate of the a0.0.N compiler train.
 //
 //   jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
-//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse DIR] [--seeds DIR] [--work DIR] [--check-gate]
+//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse ROWS] [--seeds DIR] [--work DIR] [--check-gate]
+//   jet run Tools/release/Main.jet -- rows COMMIT --source IDENTITY --compiler IDENTITY --out FILE RESULTS...
 //
 // COMMIT is a commit on dev whose JET_VERSION (Jetpack/PackageModel Manifest.jet)
 // is the next release, a0.0.N. The current release is `SEEDS/current` (default
@@ -38,7 +39,10 @@
 //             differ from s2's (release_picks): those s2 fails, those a known-failing line
 //             owns (s2's or the release's ledger), and those whose files changed since the
 //             release's commit; any other row passes on s2 with the files and ledger the
-//             release had, and counts as passing on the release. A row the release passes
+//             release had, and counts as passing on the release. A release row an earlier
+//             run of this gate ran against the same release column carries over to this
+//             run (release_cache) unless a change since that run's commit reaches it
+//             (carried_stale). A row the release passes
 //             and s2 fails twice is lost; a lost row needs a
 //             disposition line `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in
 //             --dispositions. No failing row may be untracked: each one needs a known-failing
@@ -81,15 +85,21 @@
 // --filter narrows the suites for dry runs of the gate itself: such a run is never a
 // release (RELEASE.json scope `filtered`, which jet-use refuses) and is never tagged or
 // published.
-// --reuse DIR takes the suite rows of an earlier run of this gate (its work directory) instead
-// of running every row again. It applies only when that run gated the same seed and release column, built a
-// candidate with the same identity, and gated an ancestor of COMMIT whose diff to COMMIT
-// modifies files only under tests/ or Examples/ (or under paths no suite reads: Docs/,
-// .agents/, AGENTS.md, Tools/release/). Each changed file must sit at or under a directory that
-// holds a row. Every such row runs again on both sides, as does every untracked failure of the
-// earlier run (the one failure a reuse verifies instead of rerunning everything). Otherwise the
-// gate stops, and nothing is reused. DIR must not be COMMIT's own work directory, which the gate
-// clears first; copy its REPORT.md and evidence/ elsewhere.
+// --reuse ROWS takes the candidate's suite rows from a row file (ROWS_SCHEMA): an earlier
+// run's evidence/rows-candidate.json, a directory that holds one there, or a train's rows
+// (`rows`), instead of running every candidate row again. It applies only when the rows
+// name the compiler source identity of COMMIT (`Tools/agent/CompilerPackages.jet identity`
+// of its export, the identity a train's census receipt records) and an ancestor of COMMIT
+// whose diff to COMMIT modifies files only under tests/ or Examples/ (or under paths no
+// suite reads: Docs/, .agents/, AGENTS.md, Tools/release/). Each changed file must sit at
+// or under a directory that holds a row. Every such row runs again on the candidate, as
+// does every untracked failure among the rows (the one failure a reuse verifies instead
+// of rerunning everything); the release column follows as in a full run. Otherwise the
+// gate stops, and nothing is reused. ROWS must not lie in COMMIT's own work directory,
+// which the gate clears first.
+// `rows` writes the row file of a corpora run by another compiler than s2 (a train's,
+// built from the source IDENTITY its census receipt records, whose binary identity is
+// --compiler): RESULTS are the `jet test --results` files of that run on COMMIT's export.
 //
 // Environment: the roots of Tools/agent/roots.sh, JET_RELEASE_WORK (default
 // $JET_STATE_ROOT/release), JET_RELEASE_SLOT (empty runs without a build slot),
@@ -108,7 +118,7 @@ use {
 }
 
 SUITES: [String]{"golden", "ui", "cases"}
-ADMIT_USAGE: "usage: jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse DIR] [--seeds DIR] [--work DIR] [--check-gate]"
+ADMIT_USAGE: "usage: jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse ROWS] [--seeds DIR] [--work DIR] [--check-gate]\n       jet run Tools/release/Main.jet -- rows COMMIT --source IDENTITY --compiler IDENTITY --out FILE RESULTS..."
 // The jet sources that embed each pinned release asset (file, SHA-256, size):
 // the C toolchain pack of each host in CC_PACK_ASSETS, the sandbox's
 // bubblewrap of each Linux architecture in NATIVE_SANDBOX_BWRAP_ASSETS.
@@ -729,6 +739,8 @@ Ctx: struct {
     work_root: String
     work: String
     sha: String
+    // COMMIT's compiler source identity (source_identity of the export), "" when unknown.
+    source: String
     // The chain's seed (`current`), which builds s1.
     release: SeedRelease
     // The release column: the suites and the Jetpack census compare the
@@ -1248,12 +1260,52 @@ lost_shown: fn(lost: [LostRow], count: Int) -> String Never! {
     out.join(" | ")
 }
 
-// The rows an earlier run of this gate supplies (--reuse DIR): the commit it
-// gated, and the changed files each rerun row must cover. `error` stops every
+// The suite rows one compiler gave on one commit, in one file: this gate's
+// candidate column (evidence/rows-candidate.json, written by every unfiltered
+// run whose candidate rows are complete), a train's run with its own compiler
+// (`rows`), or the release column's carried rows (release_cache). `source` is
+// the compiler's source identity (`Tools/agent/CompilerPackages.jet identity`;
+// empty for a release's jet), `compiler` its binary identity, and `rows` the
+// testkit's result rows, each naming its suite.
+ROWS_SCHEMA: "jet.suite-rows.v1"
+
+RowFile: struct {
+    commit: String
+    source: String
+    compiler: String
+    rows: [SuiteRow]
+}
+
+row_file_text: fn(file: RowFile) -> String Never! {
+    items := [Dyn]{}
+    loop found in file.rows -> items.push(found.raw.copy())
+    record: Dyn.Object([String: Dyn]{"schema": text_dyn(ROWS_SCHEMA), "commit": text_dyn(file.commit), "sourceIdentity": text_dyn(file.source), "compiler": text_dyn(file.compiler), "rows": Dyn.Array(items)})
+    "{json.dumps(record) ?? "{{}}"}\n"
+}
+
+parse_row_file: fn(text: String) -> RowFile Problem! {
+    tree: json.parse(text) ?? return Err(problem(INPUT, "not JSON: {err}"))
+    if text_field(tree, "schema") != ROWS_SCHEMA -> return Err(problem(INPUT, "not a {ROWS_SCHEMA} row file"))
+    commit: text_field(tree, "commit")
+    if commit == "" -> return Err(problem(INPUT, "a row file that names no commit"))
+    Ok(RowFile{commit: commit, source: text_field(tree, "sourceIdentity"), compiler: text_field(tree, "compiler"), rows: rows_of(array_field(tree, "rows"))})
+}
+
+// The row file --reuse ROWS names: ROWS, or the evidence/rows-candidate.json
+// of a directory (a copy of an earlier run's work directory).
+reuse_file: fn(given: String) -[Env, FS]> String Never! {
+    path: files.absolute(given) ?? given.copy()
+    if files.is_dir(path) -> return files.join(path, "evidence/rows-candidate.json")
+    path
+}
+
+// The candidate rows --reuse supplies: the commit `prior` they ran on, its
+// rows, and the changed files each rerun row must cover. `error` stops every
 // suite.
 ReusePlan: struct {
     active: Bool
     prior: String
+    rows: [SuiteRow]
     paths: [String]
     error: String
 }
@@ -1268,21 +1320,6 @@ has_prefix: fn(path: String, prefixes: [String]) -> Bool Never! {
         if path.starts_with(prefix) -> return true
     }
     false
-}
-
-// The text after `prefix` on the first line of `text` that starts with it.
-report_field: fn(text: String, prefix: String) -> String Never! {
-    loop line in text.split("\n").to_list() {
-        if line.starts_with(prefix) -> return line.slice(prefix.len()..<line.len()).trim().copy()
-    }
-    ""
-}
-
-// One side's suite rows as an earlier run recorded them in its evidence.
-prior_rows: fn(dir: String, side: String, suite: String) -[FS]> [SuiteRow]? Never! {
-    parsed: json.parse(read_text(files.join(dir, "evidence/kit-{side}-{suite}.json")) ?? return None) ?? return None
-    if parsed == .Array(items) -> return Val(rows_of(items))
-    None
 }
 
 // The ids of `rows` a changed path can reach: a row whose own file changed,
@@ -1302,34 +1339,50 @@ rerun_ids: fn(rows: [SuiteRow], paths: [String]) -> [String] Never! {
     out
 }
 
-reuse_plan: fn(ctx: &Ctx) -[Exec, FS, Time.Wait]> ReusePlan Never! {
-    plan := ReusePlan{active: false, prior: "", paths: [String]{}, error: ""}
-    dir: ctx.options.reuse.copy()
-    if dir == "" -> return plan
-    plan.active = true
-    own: dir == ctx.work || dir == "{ctx.work}/"
-    text: if own -> "" else -> read_text(files.join(dir, "REPORT.md")) ?? ""
-    seed: report_field(text, "Seed: ")
-    built: report_field(text, "Candidate: ")
-    column: report_field(text, "Release column: ")
-    wanted: column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)
-    marker: "release gate of dev "
-    gated := ""
-    loop line in text.split("\n").to_list() {
-        parts: line.split(marker).to_list()
-        if line.starts_with("# ") && parts.len() == 2 {
-            gated = parts[1].trim().copy()
-            break
-        }
-    }
+// Why a row file cannot stand for COMMIT's candidate rows, each problem
+// once: rows of another compiler source than COMMIT's (`source`, "" when
+// COMMIT's is unknown), and a suite with no rows.
+row_file_problems: fn(file: RowFile, path: String, source: String) -> [String] Never! {
     problems := [String]{}
-    if text == "" -> problems.push("{dir} has no REPORT.md")
-    if text != "" && seed != "{ctx.release.name} ({ctx.release.identity})" -> problems.push("{dir} gated seed {seed}, not {ctx.release.name} ({ctx.release.identity})")
-    if text != "" && built != ctx.candidate.identity -> problems.push("{dir} built candidate {built}, not {ctx.candidate.identity}")
-    if text != "" && column != wanted -> problems.push("{dir} compared against {if column == "" -> "an unnamed release column" else -> column}, not {wanted}")
-    parsed: git_in(ctx.root, [String]{"rev-parse", "--verify", "{gated}^{{commit}}"})
-    if gated == "" || parsed.rc != 0 {
-        problems.push("{dir} names no commit of this repository")
+    if source == "" {
+        problems.push("this run could not read the compiler source identity of COMMIT, so no rows can match it")
+    } else if file.source != source {
+        problems.push("{path} holds the rows of compiler source {if file.source == "" -> "(none named)" else -> file.source}, not {source}")
+    }
+    loop suite in SUITES {
+        held := false
+        loop item in file.rows {
+            if item.suite == suite {
+                held = true
+                break
+            }
+        }
+        if !held -> problems.push("{path} holds no {suite} rows")
+    }
+    problems
+}
+
+reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
+    plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, error: ""}
+    if ctx.options.reuse == "" -> return plan
+    plan.active = true
+    path: reuse_file(ctx.options.reuse)
+    if inside(ctx.work, path) {
+        plan.error = "{path} lies in this run's own work directory, which the gate clears first; copy the row file elsewhere"
+        return plan
+    }
+    text: files.read(path) ?? {
+        plan.error = "{path} cannot be read: {err}"
+        return plan
+    }
+    file: parse_row_file(text) ?? {
+        plan.error = "{path}: {err.text}"
+        return plan
+    }
+    problems := row_file_problems(file, path, ctx.source)
+    parsed: git_in(ctx.root, [String]{"rev-parse", "--verify", "{file.commit}^{{commit}}"})
+    if parsed.rc != 0 {
+        problems.push("{path} names {file.commit}, no commit of this repository")
     } else {
         plan.prior = parsed.out.copy()
         if git_in(ctx.root, [String]{"merge-base", "--is-ancestor", plan.prior, ctx.sha}).rc != 0 -> problems.push("{short(plan.prior, 10)} is not an ancestor of {short(ctx.sha, 10)}")
@@ -1340,30 +1393,20 @@ reuse_plan: fn(ctx: &Ctx) -[Exec, FS, Time.Wait]> ReusePlan Never! {
     }
     changed: git_in(ctx.root, [String]{"diff", "--name-status", "--no-renames", plan.prior, ctx.sha})
     if changed.rc != 0 -> problems.push("git diff {short(plan.prior, 10)} {short(ctx.sha, 10)} failed: {changed.err}")
-    every := [SuiteRow]{}
-    sides: [String]{"release", "candidate"}
-    loop suite in SUITES {
-        loop side in sides {
-            found: prior_rows(dir, side, suite) ?? {
-                problems.push("{dir} holds no {side} rows for {suite}")
-                [SuiteRow]{}
-            }
-            if side == "candidate" -> every.extend(found.copy())
-        }
-    }
     loop line in changed.out.split("\n").to_list() {
         cells: line.split("\t").to_list()
         if cells.len() != 2 -> next
         status: cells[0]
-        path: cells[1]
+        changed_path: cells[1]
         if {
-            has_prefix(path, REUSE_QUIET) -> {}
-            !has_prefix(path, REUSE_ROWS) -> problems.push("{path} changed outside tests/ and Examples/")
-            status != "M" -> problems.push("{path} is added or deleted ({status}), so no earlier row covers it")
-            rerun_ids(every, [String]{path.copy()}).len() == 0 -> problems.push("{path} sits under no row's directory")
-            else -> plan.paths.push(path.copy())
+            has_prefix(changed_path, REUSE_QUIET) -> {}
+            !has_prefix(changed_path, REUSE_ROWS) -> problems.push("{changed_path} changed outside tests/ and Examples/")
+            status != "M" -> problems.push("{changed_path} is added or deleted ({status}), so no earlier row covers it")
+            rerun_ids(file.rows, [String]{changed_path.copy()}).len() == 0 -> problems.push("{changed_path} sits under no row's directory")
+            else -> plan.paths.push(changed_path.copy())
         }
     }
+    plan.rows = file.rows.copy()
     plan.error = problems.join("; ")
     plan
 }
@@ -1378,24 +1421,78 @@ merged_rows: fn(prior: [SuiteRow], fresh: [SuiteRow], ids: [String]) -> [SuiteRo
     out
 }
 
-// Where an earlier run of this gate keeps the release rows it ran of `suite`
-// for COMMIT under the same release, engine, filter and time limit.
-release_cache: fn(ctx: &Ctx, suite: String) -[FS]> String Never! {
+// Where the release column's rows carry over from one run of this gate to
+// the next, whatever commit each gates: one row file per release column (its
+// name, jet, identity and tree, its jetpack engine, the filter and the time
+// limit), holding every release row the last run against that column ran or
+// carried, as of the commit it gated.
+release_cache: fn(ctx: &Ctx) -[FS]> String Never! {
     engine: if ctx.baseline.jetpack != "" -> sha256_file(ctx.baseline.jetpack) else -> ""
-    key: cache_key([String]{ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.sha, suite, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
-    files.join(files.join(ctx.work_root, "cache"), "kit-{suite}-{key}.json")
+    key: cache_key([String]{ctx.baseline.name, ctx.baseline.jet_sha, ctx.baseline.identity, ctx.baseline.commit, engine, ctx.options.filter, if ctx.options.timeout > 0 -> "{ctx.options.timeout}" else -> "0"})
+    files.join(files.join(ctx.work_root, "cache"), "release-rows-{key}.json")
 }
 
-// The release rows release_cache holds for the suites of SUITES.
-cached_rows: fn(ctx: &Ctx) -[FS]> [SuiteRow] Never! {
-    rows := [SuiteRow]{}
-    loop suite in SUITES {
-        text: read_text(release_cache(ctx, suite)) ?? ""
-        if text == "" -> next
-        parsed: json.parse(text) ?? Dyn.Null
-        if parsed == .Array(items) -> rows.extend(rows_of(items))
+// The row IDs whose known-failing lines one ledger text has and the other
+// lacks.
+ledger_changes: fn(before: String, after: String) -> [String: Bool] Never! {
+    old: ledger_ids(before)
+    new: ledger_ids(after)
+    out := [String: Bool]{}
+    loop raw in "{before}\n{after}".split("\n").to_list() {
+        line: raw.trim()
+        fields: line.split("\t").to_list()
+        if line.starts_with("#") || fields.len() != 3 -> next
+        if old.has_key(fields[0]) != new.has_key(fields[0]) -> out[fields[0].copy()] = true
     }
-    rows
+    out
+}
+
+// The IDs of release `rows` that the files `paths`, changed since the commit
+// they ran on, may have changed (change_reason: the row's file or a file under
+// its directory, a changed tests/ or Examples/ file under no row's directory
+// whose name the row's `sources` hold, any change when its sources read the
+// checkout), and the IDs a known-failing line `ledger` added or removed owns.
+// No changed file leaves every row as it ran.
+carried_stale: fn(rows: [SuiteRow], paths: [String], sources: [String: String], ledger: [String: Bool]) -> [String: Bool] Never! {
+    stale := [String: Bool]{}
+    if paths.len() == 0 -> return stale
+    index: change_index(rows, paths)
+    loop item in rows {
+        if stale.has_key(item.id) -> next
+        if ledger_owns(ledger, item.id) || change_reason(item.id, sources.get(item.id) ?? "", index) != "" -> stale[item.id.copy()] = true
+    }
+    stale
+}
+
+// The release rows release_cache carries to this run: the rows it holds that
+// no change between their commit `from` ("" with no usable cache) and COMMIT
+// reaches (carried_stale), and how many it `dropped` as stale.
+Carried: struct {
+    rows: [SuiteRow]
+    from: String
+    dropped: Int
+}
+
+no_carry: fn() -> Carried Never! { Carried{rows: [SuiteRow]{}, from: "", dropped: 0} }
+
+carried_rows: fn(ctx: &Ctx, sources: [String: String]) -[Exec, FS, Time.Wait]> Carried Never! {
+    text: read_text(release_cache(ctx)) ?? return no_carry()
+    file: parse_row_file(text) ?? return no_carry()
+    if file.compiler != ctx.baseline.identity -> return no_carry()
+    if file.commit == ctx.sha -> return Carried{rows: file.rows.copy(), from: file.commit.copy(), dropped: 0}
+    diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", file.commit, ctx.sha})
+    if diff.rc != 0 -> return no_carry()
+    paths := [String]{}
+    loop line in diff.out.split("\n").to_list() {
+        if line.trim() != "" -> paths.push(line.trim().copy())
+    }
+    ledger: if paths.contains(KNOWN_LEDGER) -> ledger_changes(git_in(ctx.root, [String]{"show", "{file.commit}:{KNOWN_LEDGER}"}).out, read_text(files.join(ctx.tree, KNOWN_LEDGER)) ?? "") else -> [String: Bool]{}
+    stale: carried_stale(file.rows, paths, sources, ledger)
+    out := Carried{rows: [SuiteRow]{}, from: file.commit.copy(), dropped: 0}
+    loop item in file.rows {
+        if stale.has_key(item.id) -> out.dropped += 1 else -> out.rows.push(item.copy())
+    }
+    out
 }
 
 // The accepted-failing ledger of Compiler/package.jet's corpus profiles
@@ -1451,30 +1548,26 @@ names_any: fn(text: String, names: [String]) -> Bool Never! {
     false
 }
 
-// The row IDs of the candidate's `rows` the release column runs: every ID
-// with a row s2 fails (a host skip aside) or passes against a known-failing
-// line, every ID the release's ledger owns, and every ID whose files changed
-// since the release's commit: a changed path that is the row's file or lies
-// under its directory (rerun_ids), a changed tests/ or Examples/ file under
-// no row's directory whose name the row's sources hold, or anything at all
-// when the row's sources name the checkout (`{root}`). Any other row has the
-// files and ledger lines the release had and passes on s2, so it counts as
-// passing on the release (judged_release). An opt-in ID never runs: a
-// `--cases` list runs the opt-in rows that the full kit run leaves opt-in on
-// both sides.
-release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
+// What a set of changed paths reaches: the paths, every directory above
+// one, and the names of the changed tests/ or Examples/ files under no
+// directory of `rows`.
+ChangeIndex: struct {
+    changed: [String: Bool]
+    touched: [String: Bool]
+    names: [String]
+}
+
+change_index: fn(rows: [SuiteRow], paths: [String]) -> ChangeIndex Never! {
     ids := [String: Bool]{}
     dirs := [String: Bool]{}
-    opt_in := [String: Bool]{}
     loop item in rows {
         ids[item.id.copy()] = true
         dirs[files.dirname(item.id)] = true
-        if item.status == "OPT-IN" -> opt_in[item.id.copy()] = true
     }
     changed := [String: Bool]{}
     touched := [String: Bool]{}
     names := [String]{}
-    loop path in rule.paths {
+    loop path in paths {
         changed[path.copy()] = true
         held := false
         dir := files.dirname(path)
@@ -1487,19 +1580,44 @@ release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
         name: files.basename(path)
         if !names.contains(name) -> names.push(name.copy())
     }
+    ChangeIndex{changed: changed, touched: touched, names: names}
+}
+
+// Why the changes `index` holds reach row `id`, whose sources are `source`:
+// its file or a file under its directory changed, its sources name the
+// checkout (`{root}`), or they name a changed file; "" when none do.
+change_reason: fn(id: String, source: String, index: ChangeIndex) -> String Never! {
+    if {
+        index.changed.has_key(id) || index.touched.has_key(files.dirname(id)) -> "changed"
+        source.contains("{{root}}") -> "reading the checkout"
+        names_any(source, index.names) -> "naming a changed file"
+        else -> ""
+    }
+}
+
+// The row IDs of the candidate's `rows` the release column runs: every ID
+// with a row s2 fails (a host skip aside) or passes against a known-failing
+// line, every ID the release's ledger owns, and every ID whose files changed
+// since the release's commit (change_reason). Any other row has the
+// files and ledger lines the release had and passes on s2, so it counts as
+// passing on the release (judged_release). An opt-in ID never runs: a
+// `--cases` list runs the opt-in rows that the full kit run leaves opt-in on
+// both sides.
+release_picks: fn(rows: [SuiteRow], rule: ReleaseRule) -> [ReleasePick] Never! {
+    opt_in := [String: Bool]{}
+    loop item in rows {
+        if item.status == "OPT-IN" -> opt_in[item.id.copy()] = true
+    }
+    index: change_index(rows, rule.paths)
     out := [ReleasePick]{}
     picked := [String: Bool]{}
     loop item in rows {
         if picked.has_key(item.id) || opt_in.has_key(item.id) -> next
-        source: rule.sources.get(item.id) ?? ""
         reason: if {
             rule.every -> "every row"
             !passes(item.status) && item.status != "SKIP-HOST" -> "failing on s2"
             item.status == "UNEXPECTED-PASS" || ledger_owns(rule.known, item.id) -> "known-failing"
-            changed.has_key(item.id) || touched.has_key(files.dirname(item.id)) -> "changed"
-            source.contains("{{root}}") -> "reading the checkout"
-            names_any(source, names) -> "naming a changed file"
-            else -> ""
+            else -> change_reason(item.id, rule.sources.get(item.id) ?? "", index)
         }
         if reason == "" -> next
         picked[item.id.copy()] = true
@@ -1543,9 +1661,11 @@ judged_release: fn(ran: [SuiteRow], candidate: [SuiteRow]) -> [SuiteRow] Never! 
 }
 
 // The release column's rows for the candidate's: the IDs release_picks
-// names, from release_cache where an earlier run of this gate ran them, the
-// rest run now as a `--cases` list in --shards kit processes, kept in
-// release_cache when every process wrote its rows.
+// names, carried from release_cache where an earlier run of this gate ran
+// them and nothing since reached them (carried_rows), the rest run now as a
+// `--cases` list in --shards kit processes. When every process wrote its
+// rows, release_cache keeps every row still valid at COMMIT, the fresh ones
+// in place of the carried rows of their IDs.
 release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time.Wait]> SuiteRun Never! {
     diff: git_in(ctx.root, [String]{"diff", "--name-only", "--no-renames", ctx.baseline.commit, ctx.sha})
     paths := [String]{}
@@ -1556,32 +1676,36 @@ release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
     }
     rule: ReleaseRule{every: diff.rc != 0, paths: paths.copy(), known: ledger_ids(read_text(files.join(ctx.release_tree, KNOWN_LEDGER)) ?? ""), sources: row_sources(ctx.tree, candidate.rows)}
     picks: release_picks(candidate.rows, rule)
-    cached: cached_rows(ctx)
+    carried: carried_rows(ctx, rule.sources)
     have := [String: Bool]{}
-    loop item in cached -> have[item.id.copy()] = true
+    loop item in carried.rows -> have[item.id.copy()] = true
     all_ids := [String: Bool]{}
     loop item in candidate.rows -> all_ids[item.id.copy()] = true
     wanted := [String]{}
+    picked := [String: Bool]{}
     counts := [String: Int]{}
     loop pick in picks {
         counts[pick.reason.copy()] = (counts.get(pick.reason) ?? 0) + 1
+        picked[pick.id.copy()] = true
         if !have.has_key(pick.id) -> wanted.push(pick.id.copy())
     }
-    out := SuiteRun{rows: cached.copy(), error: ""}
+    out := SuiteRun{rows: [SuiteRow]{}, error: ""}
+    loop item in carried.rows {
+        if picked.has_key(item.id) -> out.rows.push(item.copy())
+    }
+    fresh := SuiteRun{rows: [SuiteRow]{}, error: ""}
     if wanted.len() > 0 {
         list: files.join(ctx.work, "kit/release-picks.txt")
         files.write(list, keys_text(wanted)) ?? ()
         batch: suite_batch(ctx, "release", CORPORA_PROFILE, "picked", [String]{"--cases={list}"}, if wanted.len() < ctx.options.shards -> wanted.len() else -> ctx.options.shards)
-        fresh: suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
+        fresh = suite_rows(ctx, batch, run_batch(batch.jobs.copy()))
         out.rows.extend(fresh.rows.copy())
         out.error = fresh.error.copy()
-        if fresh.error == "" {
-            loop suite in SUITES {
-                cache: release_cache(ctx, suite)
-                files.create_dir_all(files.dirname(cache)) ?? ()
-                files.write(cache, rows_json(suite_part(out, suite).rows)) ?? ()
-            }
-        }
+    }
+    if fresh.error == "" {
+        cache: release_cache(ctx)
+        files.create_dir_all(files.dirname(cache)) ?? ()
+        files.write(cache, row_file_text(RowFile{commit: ctx.sha.copy(), source: "", compiler: ctx.baseline.identity.copy(), rows: merged_rows(carried.rows, fresh.rows, wanted)})) ?? ()
     }
     reasons := [String]{}
     order: [String]{"every row", "failing on s2", "known-failing", "changed", "reading the checkout", "naming a changed file"}
@@ -1589,14 +1713,28 @@ release_rows: fn(ctx: &Ctx, candidate: SuiteRun) -[Env, Exec, FS, IO, Time, Time
         count: counts.get(reason) ?? 0
         if count > 0 -> reasons.push("{count} {reason}")
     }
+    carry: if carried.from == "" -> "none carried from the release cache" else -> "{picks.len() - wanted.len()} carried from the release cache of the run at {short(carried.from, 10)}, which dropped {carried.dropped} of its rows as stale"
     why: if diff.rc != 0 -> "; git diff {short(ctx.baseline.commit, 10)} {short(ctx.sha, 10)} failed, so every row runs: {diff.err}" else -> ""
-    row(ctx, "release-column", "NOTE", "{picks.len()} of {all_ids.len()} row IDs run on {ctx.baseline.name} ({if reasons.len() > 0 -> reasons.join(", ") else -> "none"}; {picks.len() - wanted.len()} from the release cache); the rest pass on s2 with the files and ledger lines the release had, so they count as passing there{why}")
+    row(ctx, "release-column", "NOTE", "{picks.len()} of {all_ids.len()} row IDs run on {ctx.baseline.name} ({if reasons.len() > 0 -> reasons.join(", ") else -> "none"}; {carry}); the rest pass on s2 with the files and ledger lines the release had, so they count as passing there{why}")
     out
 }
 
-// An earlier run's rows (--reuse): they stand, except those a changed file
-// reaches and the earlier run's untracked failures (the failures a reuse
-// exists to verify), which run again on both sides.
+// Both columns judged from the candidate's rows: the candidate's row file
+// (evidence/rows-candidate.json, what a later --reuse takes) when they are
+// complete and unfiltered, then the release column release_rows picks from
+// them, then judge_suites.
+judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    if candidate.error == "" && ctx.options.filter == "" {
+        files.write(files.join(ctx.work, "evidence/rows-candidate.json"), row_file_text(RowFile{commit: ctx.sha.copy(), source: ctx.source.copy(), compiler: ctx.candidate.identity.copy(), rows: candidate.rows.copy()})) ?? ()
+    }
+    release: if candidate.error == "" -> release_rows(ctx, candidate) else -> SuiteRun{rows: [SuiteRow]{}, error: "not run: the candidate's rows are incomplete"}
+    judge_suites(ctx, (loop suite in SUITES -> suite_part(release, suite)), (loop suite in SUITES -> suite_part(candidate, suite)))
+}
+
+// The candidate column from a row file (--reuse): its rows stand, except
+// those a changed file reaches and its untracked failures (the failures a
+// reuse exists to verify), which run again on the candidate. The release
+// column follows as in a full run (judge_columns).
 reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     plan: reuse_plan(ctx)
     if plan.error != "" {
@@ -1605,34 +1743,32 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     }
     reran := [String]{}
     verified := [String]{}
-    releases := [SuiteRun]{}
-    candidates := [SuiteRun]{}
+    errors := [String]{}
+    candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
     loop suite in SUITES {
-        before: prior_rows(ctx.options.reuse, "release", suite) ?? [SuiteRow]{}
-        after: prior_rows(ctx.options.reuse, "candidate", suite) ?? [SuiteRow]{}
+        after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
         ids := rerun_ids(after, plan.paths)
-        loop item in compare_suites(before, after, [SuiteRow]{}, ctx.dispositions).untracked {
-            if !ids.contains(item.id) {
+        loop item in after {
+            if is_untracked(item.status) && !ids.contains(item.id) {
                 ids.push(item.id.copy())
                 verified.push(item.id.copy())
             }
         }
-        release := SuiteRun{rows: before.copy(), error: ""}
-        candidate := SuiteRun{rows: after.copy(), error: ""}
+        rows := after.copy()
         if ids.len() > 0 {
             list: files.join(ctx.work, "kit/rerun-{suite}.txt")
             files.write(list, keys_text(ids)) ?? ()
-            fresh_before: suite_run(ctx, "release", suite, "rerun", [String]{"--cases={list}"})
-            fresh_after: suite_run(ctx, "candidate", suite, "rerun", [String]{"--cases={list}"})
-            release = SuiteRun{rows: merged_rows(before, fresh_before.rows, ids), error: fresh_before.error.copy()}
-            candidate = SuiteRun{rows: merged_rows(after, fresh_after.rows, ids), error: fresh_after.error.copy()}
+            fresh: suite_run(ctx, "candidate", suite, "rerun", [String]{"--cases={list}"})
+            rows = merged_rows(after, fresh.rows, ids)
+            if fresh.error != "" -> errors.push("{suite}: {fresh.error}")
         }
         reran.push("{suite} {ids.len()}")
-        releases.push(release)
-        candidates.push(candidate)
+        candidate.rows.extend(rows.copy())
     }
-    judge_suites(ctx, releases, candidates)
-    row(ctx, "reuse", "NOTE", "suite rows of {short(plan.prior, 10)} reused from {ctx.options.reuse}; {plan.paths.len()} changed file(s); rows run again: {reran.join(", ")}; earlier untracked failures verified again: {if verified.len() == 0 -> "none" else -> verified.join(" | ")}")
+    candidate.error = errors.join("; ")
+    judge_columns(ctx, candidate)
+    note: "candidate rows of {short(plan.prior, 10)} (compiler source {ctx.source}) reused from {reuse_file(ctx.options.reuse)}; {plan.paths.len()} changed file(s); rows run again: {reran.join(", ")}; untracked failures verified again: {if verified.len() == 0 -> "none" else -> verified.join(" | ")}"
+    row(ctx, "reuse", "NOTE", note)
     disposition_note(ctx)
 }
 
@@ -1799,6 +1935,7 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
     lines.push("Release column: {column_text(ctx.baseline.name, ctx.baseline.identity, ctx.baseline.jet_sha, ctx.baseline.commit)}")
     if ctx.built {
         lines.push("Candidate: {ctx.candidate.identity}")
+        lines.push("Candidate source: {if ctx.source == "" -> "unknown" else -> ctx.source}")
         lines.push("Candidate column: {column_text("s2", ctx.candidate.identity, ctx.candidate.sha, ctx.sha)}")
     }
     lines.extend([String]{"", "| check | status | detail |", "|---|---|---|"})
@@ -2040,7 +2177,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     loop dir in work_dirs -> files.create_dir_all(files.join(work, dir)) ?? ()
     ctx := Ctx{
         options: options.copy(), root: pre.root.copy(), seeds: pre.seeds.copy(), work_root: pre.work_root.copy(), work: work.copy(),
-        sha: pre.sha.copy(), release: pre.release.copy(), baseline: pre.baseline.copy(),
+        sha: pre.sha.copy(), source: "", release: pre.release.copy(), baseline: pre.baseline.copy(),
         vars: [Var]{set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
         dispositions: pre.dispositions.copy(), next: next_release_name(release_names(pre.seeds)),
         tree: files.join(work, "tree"), release_tree: files.join(work, "release-tree"), log: files.join(work, "release.log"),
@@ -2058,6 +2195,9 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
         term.eprint("admit: {short(ctx.sha, 10)} declares JET_VERSION `{declared}` in {JET_VERSION_SOURCE}, but the next release is {ctx.next}; set it to \"{ctx.next}\" on dev first")
         return 2
     }
+    // The compiler source identity a train's census receipt records for the same sources, which --reuse matches.
+    ctx.source = source_identity(ctx.root, ctx.release.dir, ctx.tree)
+    say("release", ctx.log, "compiler source of {short(ctx.sha, 10)}: {if ctx.source == "" -> "unknown (Tools/agent/CompilerPackages.jet identity failed)" else -> ctx.source}")
     files.write(files.join(ctx.tree, ".chain-base"), "{ctx.sha}\n") ?? ()
     if export_commit(ctx.root, ctx.baseline.commit, ctx.release_tree) == .Val(why) {
         term.eprint("admit: {why}")
@@ -2099,8 +2239,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
         loop suite in SUITES -> row(ctx, "suite:{suite}", "BLOCKED", "{if launch -> "not judged" else -> "not launched"}: the cheap checks above are not clean (preflight.json)")
     } else if early {
         candidate: suite_rows(ctx, batch, finished)
-        release: if candidate.error == "" -> release_rows(ctx, candidate) else -> SuiteRun{rows: [SuiteRow]{}, error: "not run: the candidate's rows are incomplete"}
-        judge_suites(ctx, (loop suite in SUITES -> suite_part(release, suite)), (loop suite in SUITES -> suite_part(candidate, suite)))
+        judge_columns(ctx, candidate)
         disposition_note(ctx)
     } else {
         reused_suites(ctx)
@@ -2199,4 +2338,78 @@ admit_in_slot: fn(args: [String], root: String, options: AdmitOptions, pre: Pre)
         return if inner.signal != None -> 1 else -> inner.code
     }
     run_gate(options, pre)
+}
+
+// `rows COMMIT --source IDENTITY --compiler IDENTITY --out FILE RESULTS...`:
+// writes the row file (ROWS_SCHEMA) of RESULTS, the `jet test --results` files
+// of one corpora run on COMMIT's export by the compiler --compiler names, built
+// from the sources --source names. It reports every problem, and writes no file
+// when there is any.
+rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Never! {
+    flags := [String: String]{}
+    commit := ""
+    results := [String]{}
+    problems := [String]{}
+    index := 0
+    loop index < args.len() {
+        arg: args[index]
+        if arg == "--source" || arg == "--compiler" || arg == "--out" {
+            if index + 1 >= args.len() {
+                problems.push("{arg} needs a value")
+                break
+            }
+            flags[arg.copy()] = args[index + 1].copy()
+            index += 2
+            next
+        }
+        if {
+            arg.starts_with("-") -> problems.push("unknown option {arg}")
+            commit == "" -> commit = arg.copy()
+            else -> results.push(arg.copy())
+        }
+        index += 1
+    }
+    source: flags.get("--source") ?? ""
+    compiler: flags.get("--compiler") ?? ""
+    out: flags.get("--out") ?? ""
+    if commit == "" -> problems.push("COMMIT is required")
+    if source == "" -> problems.push("--source IDENTITY is required")
+    if compiler == "" -> problems.push("--compiler IDENTITY is required")
+    if out == "" -> problems.push("--out FILE is required")
+    if results.len() == 0 -> problems.push("no RESULTS file")
+    full := ""
+    if commit != "" {
+        parsed: git_in(root, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"})
+        if parsed.rc != 0 -> problems.push("{commit} is no commit of {root}") else -> full = parsed.out.copy()
+    }
+    rows := [SuiteRow]{}
+    loop path in results {
+        text: read_text(path) ?? ""
+        found: rows_of(array_field(json.parse(text) ?? Dyn.Null, "results"))
+        if found.len() == 0 {
+            problems.push("{path} holds no testkit result rows")
+            next
+        }
+        rows.extend(found)
+    }
+    counts := [String]{}
+    loop suite in SUITES {
+        count := 0
+        loop item in rows {
+            if item.suite == suite -> count += 1
+        }
+        if count == 0 && results.len() > 0 -> problems.push("RESULTS hold no {suite} rows")
+        counts.push("{suite} {count}")
+    }
+    if problems.len() > 0 {
+        term.eprint(ADMIT_USAGE)
+        loop found in problems -> term.eprint("rows: {found}")
+        return 2
+    }
+    files.write(out, row_file_text(RowFile{commit: full.copy(), source: source.copy(), compiler: compiler.copy(), rows: rows.copy()})) ?? {
+        term.eprint("rows: cannot write {out}: {err}")
+        return 1
+    }
+    print("ROWS {out}: {rows.len()} rows ({counts.join(", ")}) of {short(full, 10)} by {compiler}, compiler source {source}")
+    0
 }

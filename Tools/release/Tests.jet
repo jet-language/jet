@@ -968,6 +968,65 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     assert_eq(merged[2].status, "PASS")
 }
 
+suite_kit_row: fn(suite: String, id: String, status: String) -> SuiteRow Never! {
+    suite_row(object([String: Dyn]{"suite": Dyn.Text(suite.copy()), "case": Dyn.Text(id.copy()), "tier": Dyn.Text("-"), "status": Dyn.Text(status.copy()), "detail": Dyn.Text("")}))
+}
+
+// What parse_row_file makes of `text`: the commit it names, or why it refuses.
+row_file_verdict: fn(text: String) -> String Never! {
+    file: parse_row_file(text) ?? return "refused: {err.text}"
+    "rows of {file.commit}"
+}
+
+#Test("a row file keeps its commit, compiler source, compiler and rows, and a foreign file is refused") {
+    rows: [SuiteRow]{suite_kit_row("golden", "tests/golden/a/run.jet", "PASS"), suite_kit_row("cases", "tests/cases/b.case", "FAIL")}
+    text: row_file_text(RowFile{commit: COMMIT, source: "jet@a0.0.45#src", compiler: "jet@a0.0.45#bin", rows: rows})
+    file: parse_row_file(text) ?? panic("row file: {err.text}")
+    assert_eq(file.commit, COMMIT)
+    assert_eq(file.source, "jet@a0.0.45#src")
+    assert_eq(file.compiler, "jet@a0.0.45#bin")
+    assert_eq((loop item in file.rows -> "{item.suite} {item.id} {item.status}"), [String]{"golden tests/golden/a/run.jet PASS", "cases tests/cases/b.case FAIL"})
+    assert_eq(row_file_verdict("[]"), "refused: not a {ROWS_SCHEMA} row file")
+    assert_eq(row_file_verdict("{{\"schema\":\"{ROWS_SCHEMA}\"}}"), "refused: a row file that names no commit")
+    assert(row_file_verdict("{{").starts_with("refused: not JSON: "))
+}
+
+#Test("reused rows must come from the commit's compiler source and hold every suite") {
+    rows: [SuiteRow]{suite_kit_row("golden", "tests/golden/a/run.jet", "PASS"), suite_kit_row("ui", "tests/ui/b.jet", "PASS"), suite_kit_row("cases", "tests/cases/c.case", "PASS")}
+    file: RowFile{commit: COMMIT, source: "jet@a0.0.45#src", compiler: "jet@a0.0.45#bin", rows: rows}
+    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#src"), [String]{})
+    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#other"), [String]{"rows.json holds the rows of compiler source jet@a0.0.45#src, not jet@a0.0.45#other"})
+    assert_eq(row_file_problems(file, "rows.json", ""), [String]{"this run could not read the compiler source identity of COMMIT, so no rows can match it"})
+    partial: RowFile{commit: COMMIT, source: "", compiler: "", rows: [SuiteRow]{rows[1].copy()}}
+    assert_eq(row_file_problems(partial, "rows.json", "jet@a0.0.45#src"), [String]{"rows.json holds the rows of compiler source (none named), not jet@a0.0.45#src", "rows.json holds no golden rows", "rows.json holds no cases rows"})
+}
+
+#Test("a carried release row goes stale only when a change since its run reaches it or its ledger line changed") {
+    rows: [SuiteRow]{
+        kit_row("tests/ui/edited/x.jet", "o0", "PASS"),
+        kit_row("tests/cases/p/x.case", "-", "PASS"),
+        kit_row("tests/cases/q/help.case", "-", "PASS"),
+        kit_row("tests/cases/r/core.case", "-", "PASS"),
+        kit_row("tests/ui/ledger/x.jet", "o0", "KNOWN-FAILING"),
+        kit_row("tests/ui/same/x.jet", "o0", "FAIL"),
+    }
+    sources: [String: String]{"tests/cases/q/help.case": "stdout: = ../../cli/help.txt\n", "tests/cases/r/core.case": "run: jet check {{root}}/Core\n"}
+    paths: [String]{"tests/ui/edited/x.jet", "tests/cases/p/fixtures/main.jet", "tests/cli/help.txt", KNOWN_LEDGER}
+    ledger: ledger_changes("tests/ui/ledger/x\t#1\twhy\ntests/ui/kept/x.jet\t#2\twhy\n", "# id\tcard\treason\ntests/ui/kept/x.jet\t#2\twhy\ntests/ui/new/x.jet\t#3\twhy\n")
+    assert_eq(ledger.len(), 2)
+    assert(ledger.has_key("tests/ui/ledger/x") && ledger.has_key("tests/ui/new/x.jet"))
+    stale: carried_stale(rows, paths, sources, ledger)
+    assert_eq((loop item in rows -> "{item.id} {stale.has_key(item.id)}"), [String]{
+        "tests/ui/edited/x.jet true",
+        "tests/cases/p/x.case true",
+        "tests/cases/q/help.case true",
+        "tests/cases/r/core.case true",
+        "tests/ui/ledger/x.jet true",
+        "tests/ui/same/x.jet false",
+    })
+    assert_eq(carried_stale(rows, [String]{}, sources, ledger).len(), 0)
+}
+
 #Test("a ledger names its row IDs and owns a project by its directory and a file entry by its stem") {
     known: ledger_ids("# id\tcard\treason\n\ntests/golden/a\t#1\twhy\ntests/ui/b.jet\t#2\twhy\ntests/cases/c.case\t#3\twhy\nshort\tline\n")
     assert_eq(known.len(), 3)

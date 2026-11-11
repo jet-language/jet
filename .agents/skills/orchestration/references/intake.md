@@ -167,7 +167,10 @@ runs and one 39-minute full test pass. These rules bind every train:
 14. **Direct lands run the guards they reach.** A direct land runs the
     submission's rows plus every `tests/guards` row whose inputs its paths
     touch, in shards, before it lands. A guard red found on `dev` later is
-    a lander defect.
+    a lander defect. A direct that touches `Core/`, `Compiler/` or
+    `Tools/agent/` also runs the cheap ratchets of its reach (CoreCoverage,
+    CoreSurfaceLedger and DiagnosticRows `--check`) and lands only when
+    all pass, so a direct never lands a census red.
 15. **The speed gate.** Every train times the seed's `jet build Compiler`
     and the built compiler's self-checks in user plus system CPU seconds,
     with per-phase seconds from the compiler's own trace, beside the
