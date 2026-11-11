@@ -16715,6 +16715,700 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-06",
       "retiredAt": "2026-11-10T07:27:48.499Z"
+    },
+    {
+      "id": "D-TEST-PROFILE1",
+      "cardId": "c0pgowhn",
+      "group": "project",
+      "title": "Named test profiles are package.jet data beside build profiles; only code suites need `fn test`",
+      "situation": "A bare `jet test` runs every `#Test`. Bigger projects want named runs, such as a quick one under a minute and a full one with golden files and two optimize levels. Today `--profile` names only build profiles, and package.jet has no `test:` field. Jet's own suites run on a separate test tool with its own step language. The vote decides where named test profiles are written. We recommend `test:` in package.jet, shaped like `build:`, with code only for suites that need it.",
+      "gist": "Where should named test runs, such as quick and full, be written?",
+      "lesson": "A test profile is a named set of choices: which suites to run, time and memory limits, and optimize levels. Build profiles are already plain data in package.jet. If test profiles sit right beside them in the same shape, `jet test --profile quick` reads like `jet build --profile release`.",
+      "explainer": "",
+      "story": "Lee joins the team and asks how CI runs the full suite. The answer is a 900-line script in another language. With profiles as data, she would read four lines of package.jet and run `jet test --profile full` herself.",
+      "inWild": "# Cargo: profiles are data in Cargo.toml.\n[profile.release]\nopt-level = 3",
+      "detail": "Provenance. Card c0pgowhn (#6035). This is the test-profile question from the D-PROJECT-FILE1 package, asked alone. It reads with D-MANIFEST-ONE1 A: package.jet is the one data file.\n\nAgainst #6035. PLAN-6035.md (lanes/Audit/drafts4) already assumes A, with the owner's 2026-10-28 answers Q1-Q6 applied. The card body's older wording says test.jet declares the profiles. Under A, test.jet still holds `fn test`, but only for suites that need code. Option B is that older wording. The G11 goal, one Jet-native test system, holds under A and B; C keeps the external scripts.\n\nProbes, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/proj. bp/: a package.jet with `build: { release: Build{ optimize: full } }` checks; `jet test` and `jet test --profile release` print \"adds two numbers: pass\". tp/: adding `test: {...}` is E1206 \"Unknown field `test:` in `package.jet`\". In bp/, `jet test --profile quick` is E2104 \"Build profile `quick` isn't declared\". dur.jet: `60s` is a Duration literal today.\n\nToday Tools/testkit is 8,589 lines with its own `.case` step language. Moving its 4,275 .case files to `#Test` is the #6035 plan and not part of this vote.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Data in package.jet",
+          "detail": "Profiles are records in package.jet, beside `build:`. Stock suites, such as a folder of golden files, are data too. The suite `tests`, every `#Test`, is built in.\n\nOnly a suite that needs code, such as a fuzz driver, is registered in test.jet's `fn test`. `jet check` reports a profile that names an unknown suite and lists the known ones.",
+          "technical": "Adds `test:` and `suites:` to the Package vocabulary (E1206 today). `--profile` is read before compiling (Front.jet:780-788); test and build profile names share one namespace with release, debug, dev, ci and hardened. `defaults: { test: quick }` picks the bare `jet test` profile. Code suites: `Test.suite(name, value)` in `fn test` (D-CMD-OVERRIDE1=C, narrowed).",
+          "code": "// The beginner path, the same under every option\n// run.jet\nfn add(a: Int, b: Int) -> Int { a + b }\n\n#Test(\"adds two numbers\") {\n    assert(add(1, 2) == 3)\n}\n\n// $ jet test\n// adds two numbers: pass\n\n// The expert path: package.jet\nname: \"shop\"\nbuild: { release: Build{ optimize: full } }\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden], optimize: [none, full] }\n}\nsuites: { golden: TestSuite{ golden_corpus: \"tests/golden\" } }\n\n// $ jet test --profile quick"
+        },
+        {
+          "key": "B",
+          "name": "Code in test.jet",
+          "detail": "test.jet holds `fn test`, as the role-file rule gives `fn build` its own file. It registers profiles and suites with calls.\n\n`--profile quick` cannot be checked until test.jet has compiled and run, and listing profiles means running code.",
+          "technical": "Grows the D-ROLEFILE1/D-CMDOVERRIDE1 `Test` API with `profile` and `suite`. Front.jet must defer `--profile` resolution for `jet test` until `fn test` runs.",
+          "code": "// The beginner path, the same under every option\n// run.jet\nfn add(a: Int, b: Int) -> Int { a + b }\n\n#Test(\"adds two numbers\") {\n    assert(add(1, 2) == 3)\n}\n\n// $ jet test\n// adds two numbers: pass\n\n// The expert path: test.jet\nuse core.testing as testing\n\nfn test(t: Test) {\n    t.profile(\"quick\", TestProfile{ suites: [\"tests\"], time_limit: 60s })\n    t.profile(\"full\", TestProfile{ suites: [\"tests\", \"golden\"], optimize: [.None, .Full] })\n    t.suite(\"golden\", testing.golden_corpus(\"tests/golden\"))\n}\n\n// $ jet test --profile quick"
+        },
+        {
+          "key": "C",
+          "name": "Flags only",
+          "detail": "`jet test` keeps only flags. Teams write their quick and full runs in scripts or CI files.\n\nThe choices live outside Jet, so nobody can list or check them.",
+          "technical": "Today's `jet test` flags (`--time`, `--corpus`, `--optimize`). Leaves Tools/testkit and the gate scripts in place.",
+          "code": "// The beginner path, the same under every option\n// run.jet\nfn add(a: Int, b: Int) -> Int { a + b }\n\n#Test(\"adds two numbers\") {\n    assert(add(1, 2) == 3)\n}\n\n// $ jet test\n// adds two numbers: pass\n\n// The expert path: flags in a CI script\n$ jet test --time=60 --optimize none\n$ jet test --corpus tests/golden --optimize full"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Cargo profiles are data; `cargo test --profile` picks one. Source: https://doc.rust-lang.org/cargo/reference/profiles.html",
+          "code": "[profile.ci]\ninherits = \"test\""
+        },
+        {
+          "lang": "Go",
+          "note": "`go test` has flags only; teams keep runs in Makefiles. Source: https://pkg.go.dev/cmd/go#hdr-Testing_flags",
+          "code": "go test -short -timeout 60s ./..."
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Vitest and Playwright declare test projects in config code. Source: https://vitest.dev/guide/projects",
+          "code": "export default defineConfig({ test: { projects: [...] } })"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A writes test profiles exactly like build profiles, as data Jet reads before compiling. Code is needed only for suites that really are code.",
+        "gains": [
+          "One shape for build and test profiles.",
+          "Profiles are listed and checked without running code."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes profile names unknown until code runs and gives test profiles a second shape."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves every named run in scripts outside Jet."
+          }
+        ],
+        "tradeoff": "test.jet keeps `fn test`, but only for code suites."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree. In probe/proj/bp: `jet test --profile release` passes and `jet test --profile quick` is E2104. In probe/proj/tp: `jet check` is E1206.",
+      "surface": {
+        "gist": "Where should named test runs, such as quick and full, be written?",
+        "lesson": "A test profile is a named set of choices: which suites to run, time and memory limits, and optimize levels. Build profiles are already plain data in package.jet. If test profiles sit right beside them in the same shape, `jet test --profile quick` reads like `jet build --profile release`.",
+        "trio": {
+          "current": {
+            "note": "Today package.jet has build profiles but no test profiles.",
+            "code": "// package.jet\nname: \"shop\"\nbuild: { release: Build{ optimize: full } }\ntest: { quick: TestProfile{ suites: [tests] } }   // E1206 today"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Cargo profiles are data in Cargo.toml; tools list them without running code. Source: https://doc.rust-lang.org/cargo/reference/profiles.html",
+            "code": "[profile.release]\nopt-level = 3"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Data in package.jet",
+            "gist": "`test:` sits beside `build:` with `TestProfile{...}` records; stock suites are data too.",
+            "gains": [
+              "Same shape as build profiles.",
+              "Profile names are known before any code compiles.",
+              "Tools and editors list profiles without running code."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "test: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden], optimize: [none, full] }\n}\nsuites: { golden: TestSuite{ golden_corpus: \"tests/golden\" } }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Code in test.jet",
+            "gist": "test.jet's `fn test(t: Test)` declares every profile and suite with calls.",
+            "gains": [
+              "Profiles can be computed.",
+              "All test setup in one code file."
+            ],
+            "losses": [
+              "Profile names are unknown until test.jet compiles and runs.",
+              "Build profiles are data but test profiles are code."
+            ],
+            "proposed": {
+              "code": "// test.jet\nfn test(t: Test) {\n    t.profile(\"quick\", TestProfile{ suites: [\"tests\"], time_limit: 60s })\n    t.suite(\"golden\", testing.golden_corpus(\"tests/golden\"))\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Flags only",
+            "gist": "No named profiles: each run spells its choices as `jet test` flags.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "Long command lines repeated in every script.",
+              "No single place lists how CI tests."
+            ],
+            "proposed": {
+              "code": "$ jet test --time=60 --optimize none\n$ jet test --corpus tests/golden --optimize full"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A writes test profiles exactly like build profiles, as data Jet reads before compiling. Code is needed only for suites that really are code.",
+          "gains": [
+            "One shape for build and test profiles.",
+            "Profiles are listed and checked without running code."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes profile names unknown until code runs and gives test profiles a second shape."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves every named run in scripts outside Jet."
+            }
+          ],
+          "tradeoff": "test.jet keeps `fn test`, but only for code suites."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:44:51.828Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-11T02:35:31.063Z"
+    },
+    {
+      "id": "D-TEACH-RECONCILE1",
+      "cardId": "c0pgowhn",
+      "group": "diagnostics",
+      "title": "One rule for foreign words and retired Jet spellings",
+      "situation": "Jet's compiler can spot another language's word, such as `fun`, or an old Jet spelling, such as `#Suppress`, and name the current form. In June the owner paused these teaching messages, but the port of the compiler to Jet brought most of them back. Today `fun add(...)` gets an error that points the wrong way, while `length()` teaches. Nine tests fail on missing teaching text, and 27 pass while pinning teaching the pause removed. The recommendation keeps the pause everywhere, with generic errors that name the legal Jet forms.",
+      "gist": "When code uses another language's word or a retired Jet spelling, should Jet name the replacement, and what happens to the tests that pin it?",
+      "lesson": "Jet paused its teaching messages in June, but the port to Jet brought 29 of them back. Nine tests fail because their teaching text is gone, while 27 others pass and pin teaching that the pause removed. One rule has to decide which messages Jet prints.",
+      "explainer": "",
+      "story": "Maya comes from Kotlin and writes `fun add(left: Int, right: Int) -> Int`. Jet tells her the line computes a value she does not use, so she wraps it in `print` and gets a stranger error. A minute later she writes `sizes.length()`, and Jet says `length` is another language's name for `len`. The two answers follow two different rules, and the first one sent her the wrong way.",
+      "inWild": "tests/ui/foreign_declaration_binding.jet:3: fun add(left: Int, right: Int) -> Int {\ntests/ui/suppress_retired.jet:4: #Suppress(MustUse) {\ntests/ui/tracked_origin_runtime_projection.jet:3: print(speed.origin())\ntests/ui/channel_retired_forms.jet:6: (sender, receiver) :: channel<Int>()\ntests/ui/foreign_method_names_list.jet:5: _ :: items.add(\"x\")",
+      "detail": "Five owner rulings disagree. The June pause, confirmed in July, removes teaching for foreign words and retired spellings until after the FFI epoch. The owner added that retired spellings leave the tests too. The August retirement rule makes a retirement that changes meaning a hard error with a fix line, and checks that the old form is gone from the repo. The August foreign-keyword rule teaches each known foreign keyword. The October foreign-teaching ballot kept the pause and asked only for better generic errors.\n\nMeasured at commit 125e2e8f89, 29 teaching rows still print, and three of them are already marked Retired in the registry. The 27 tests that pin them pass. Method lookup also still says `length` is another language's name for `len`. Nine tests fail. Three are foreign cases: `fun` and friends, `jet install`, and a list of foreign method names. Six are old Jet spellings: `tasks.channel<Int>()`, `Ability`, `#Suppress`, `.origin()` on a tracked value, a bare `?`, and the old HTTP response literal.\n\nThe bare `?` test also expects the `Int E!` suffix to be retired. That suffix is current syntax, and the compiler itself uses it, so that half of the test is stale under every option. The test keeps its bare `?` error and is re-recorded from real output. The `semaphore_teaching` test fails only on a trailing blank line, and it follows the same rule as the other teaching tests.\n\nTwo codes mean several things at once, and this is not a teaching question. E1206 is registered as a lint-selector error but is also printed for package file, allocator, path and lock errors. E0128 is registered as a zip length error but is also printed for distinct types, so `Meters{a + b}` says a `Meters` cannot be used where a `Meters` is expected. Under every option each meaning gets its own registered code.\n\nSome codes are never printed today. E0983 and nine lint codes are checks the Jet compiler has not built yet, so each keeps its test and gets a real check on the package and lint cards. E0043 (`jet install`) and E0037 (a print macro) are teaching codes and follow this ruling.\n\nNothing is deleted outright. A test that leaves the suite is moved to the held archive with a log row, and git history keeps it. A registry row that stops printing stays with status Retired, so `jet explain` still answers for old logs. About 115 tests have retired, foreign, teach, legacy, migration or deprecated in their path, and 92 of them pass. Each is checked once during the change.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Pause everywhere, with generic errors that name the legal forms",
+          "detail": "Jet stops recognizing foreign words and retired spellings, including the foreign method-name hints. Every unknown word, method, type or rule gets one generic error built from Jet's own grammar and library. It lists the legal forms at that spot and suggests current names by spelling and by signature. An unknown rule no longer stops the check, so the code inside it is still checked in the same run.\n\nTests that pin only teaching leave the suite. Tests that pin a current rule keep that rule but use an invented word instead of an old spelling.",
+          "technical": "Remove the recognizers behind the 29 printing teaching rows and the foreign branch of method lookup. Mark those rows, E0037 and E0043 Retired. The parser and checker still reject every form; before the tests leave, one recorded run shows each program still fails.\n\nAdd a check that no active registry row is named Foreign or Retired, apart from the FFI rows that describe calls into C. This replaces the fix-line half of the August retirement rule and the August foreign-keyword rule. The check that a retired form appears nowhere in the repo stays.",
+          "code": "// Simple\nfun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is not a Jet word.\n//   A declaration here starts with fn, struct, enum, trait, impl or use.\n\n// Complex\nfn total(sizes: [Int]) -> Int {\n    sum := 0\n    loop size; sizes {\n        sum += size\n    }\n    sum\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    #Suppress(MustUse) {\n        total(sizes)\n    }\n    print(sizes.length())\n}\n// error: `#Suppress` isn't a known applied rule. Checking continues inside it.\n// error: The result of `total` is thrown away.\n//   Fix: use it, bind it, or write `.drop(\"reason\")` if dropping it is intended.\n// error: `length` isn't a method on List. Did you mean `len`?\n\n// What every option leads the writer to:\nfn add(left: Int, right: Int) -> Int {\n    left + right\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    total(sizes).drop(\"only the count matters here\")\n    print(sizes.len())\n}"
+        },
+        {
+          "key": "B",
+          "name": "Pause foreign words, teach retired Jet spellings",
+          "detail": "Foreign words get the same generic errors as in A. A retired Jet spelling gets a hard error that names its replacement, from one retirement table. The six retired-spelling tests are fixed by restoring their messages, and the three foreign tests leave the suite.",
+          "technical": "Retire the foreign rows as in A. Keep the retired-spelling rows and port the six missing messages into one table of old form, new form and fix line. Pure renames get a machine fix, as the August retirement rule says. The retired spellings stay in the tests, which the June owner comment ruled out.",
+          "code": "// Simple\nfun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is not a Jet word.\n//   A declaration here starts with fn, struct, enum, trait, impl or use.\n\n// Complex\nfn total(sizes: [Int]) -> Int {\n    sum := 0\n    loop size; sizes {\n        sum += size\n    }\n    sum\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    #Suppress(MustUse) {\n        total(sizes)\n    }\n    print(sizes.length())\n}\n// error: `#Suppress` is retired.\n//   Fix: write `.drop(\"reason\")` on the value you mean to drop.\n// error: `length` isn't a method on List. Did you mean `len`?\n\n// What every option leads the writer to:\nfn add(left: Int, right: Int) -> Int {\n    left + right\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    total(sizes).drop(\"only the count matters here\")\n    print(sizes.len())\n}"
+        },
+        {
+          "key": "C",
+          "name": "Teach both from one table",
+          "detail": "Jet names the replacement for both foreign words and retired Jet spellings. All 29 printing rows stay, the nine failing tests are fixed by restoring their messages, and one table holds every taught word. This reopens the October ruling that kept the pause.",
+          "technical": "Move the 29 recognizers and the method-name hints into one table. Port the nine missing messages, including `fun`, `def` and `var` and `jet install`. Re-record `semaphore_teaching` without its trailing blank line. Someone must keep the table current for every language it covers.",
+          "code": "// Simple\nfun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is another language's word for a function.\n//   Fix: Jet writes `fn`.\n\n// Complex\nfn total(sizes: [Int]) -> Int {\n    sum := 0\n    loop size; sizes {\n        sum += size\n    }\n    sum\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    #Suppress(MustUse) {\n        total(sizes)\n    }\n    print(sizes.length())\n}\n// error: `#Suppress` is retired.\n//   Fix: write `.drop(\"reason\")` on the value you mean to drop.\n// error: `length` is another language's name. Jet calls it `len`.\n\n// What every option leads the writer to:\nfn add(left: Int, right: Int) -> Int {\n    left + right\n}\n\nfn run() {\n    sizes := [Int]{}\n    &sizes.push(4)\n    total(sizes).drop(\"only the count matters here\")\n    print(sizes.len())\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python suggests near names by spelling only, and keeps no table of other languages' words.",
+          "code": "[].apend(1)\n# AttributeError: 'list' object has no attribute 'apend'. Did you mean: 'append'?"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Two owner rulings say pause, and the latest one, in October, kept it. One rule ends today's mix, where `length` teaches and `fun` misleads. Generic errors that list legal forms help every unknown word, including typos, not only the words someone thought to list.",
+        "gains": [
+          "One rule for every unknown word, method, type and rule.",
+          "No retired or foreign spellings left in the tests, as the owner asked in June.",
+          "Generic errors stop pointing the wrong way, which helps typos as well as habits from other languages.",
+          "An unknown rule no longer hides the errors inside it."
+        ],
+        "losses": [
+          {
+            "loss": "A form whose meaning moved, such as `#Suppress`, gets no direct pointer to its replacement. This is irreducible: without a table of old forms, no rule can know what the old form meant.",
+            "mitigation": "Checking continues past the unknown form, so the next error in the same run names the current form, as `.drop(\"reason\")` does here."
+          },
+          {
+            "loss": "The change touches 29 recognizers and about 115 tests in one pass.",
+            "mitigation": "It lands as one change with the full test suite run before and after, and every removed test is kept in the held archive."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps retired spellings in the tests, which the owner ruled out in June, and it still leaves two rules for unknown words."
+          },
+          {
+            "key": "C",
+            "reason": "It reverses the October ruling, and it needs a table of other languages' words that someone must keep current."
+          }
+        ],
+        "tradeoff": "Clear, uniform errors for every unknown word, at the cost of no direct pointer for the few forms whose meaning moved."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the Prep-2 draft under the four-agent cap. Findings were that the October claim checks out (D-FOREIGN-TEACH1 chose Keep the pause), and the code splits apply under every option, so they do not tilt the vote."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When code uses another language's word or an old Jet spelling, should Jet name the replacement?",
+        "lesson": "Jet paused its teaching messages in June, but 29 came back when the compiler moved to Jet. Today `length()` teaches while `fun` gets a misleading error. Nine tests fail on missing teaching. One rule should decide what Jet says for every unknown word.",
+        "trio": {
+          "current": {
+            "note": "Today one foreign word misleads and another teaches.",
+            "code": "fun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: This line computes a value but doesn't do anything with it\n//   Fix: Use the value, e.g. `x :: ...` or `print(...)`\n\nprint(sizes.length())\n// error: `length` isn't a method on this value\n//   Fix: Did you mean `len`? `length` is another language's name"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Python suggests near names by spelling, with no table of other languages' words.",
+            "code": "[].apend(1)\n# AttributeError: 'list' object has no attribute 'apend'.\n# Did you mean: 'append'?"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Pause everywhere, better generic errors",
+            "gist": "No foreign or old-word teaching; errors list the legal forms and near names.",
+            "gains": [
+              "One rule for every unknown word.",
+              "Errors never point the wrong way.",
+              "Errors inside an unknown rule still show."
+            ],
+            "losses": [
+              "Old forms whose meaning moved get no direct pointer."
+            ],
+            "proposed": {
+              "code": "fun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is not a Jet word.\n//   A declaration starts with fn, struct, enum, trait, impl or use.\n\n#Suppress(MustUse) {\n    total(sizes)\n}\n// error: `#Suppress` isn't a known applied rule.\n// error: The result of `total` is thrown away. Fix: `.drop(\"reason\")`.\nprint(sizes.length())\n// error: `length` isn't a method on List. Did you mean `len`?"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Pause foreign words, teach old Jet spellings",
+            "gist": "Foreign words get generic errors; retired Jet spellings name their replacement.",
+            "gains": [
+              "Old Jet code gets a direct fix line."
+            ],
+            "losses": [
+              "Old spellings stay in the tests.",
+              "Two rules for unknown words."
+            ],
+            "proposed": {
+              "code": "fun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is not a Jet word.\n//   A declaration starts with fn, struct, enum, trait, impl or use.\n\n#Suppress(MustUse) {\n    total(sizes)\n}\n// error: `#Suppress` is retired.\n//   Fix: write `.drop(\"reason\")` on the value.\nprint(sizes.length())\n// error: `length` isn't a method on List. Did you mean `len`?"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Teach both from one table",
+            "gist": "Jet names the replacement for foreign words and old Jet spellings alike.",
+            "gains": [
+              "The most direct help for newcomers.",
+              "All nine failing tests are fixed."
+            ],
+            "losses": [
+              "Reverses the October ruling.",
+              "A table of other languages to keep current.",
+              "Old spellings stay in the tests."
+            ],
+            "proposed": {
+              "code": "fun add(left: Int, right: Int) -> Int {\n    left + right\n}\n// error: `fun` is another language's word for a function.\n//   Fix: Jet writes `fn`.\n\n#Suppress(MustUse) {\n    total(sizes)\n}\n// error: `#Suppress` is retired.\n//   Fix: write `.drop(\"reason\")` on the value.\nprint(sizes.length())\n// error: `length` is another language's name. Jet calls it `len`."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The owner chose the pause twice, most recently in October. One rule ends today's mix, and better generic errors help typos as well as foreign habits.",
+          "gains": [
+            "One rule for every unknown word.",
+            "No old spellings left in the tests.",
+            "Generic errors stop pointing the wrong way."
+          ],
+          "losses": [
+            {
+              "loss": "Old forms whose meaning moved get no direct pointer.",
+              "mitigation": "Checking continues past the unknown form, so the next error names the current form."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It keeps old spellings in the tests and leaves two rules."
+            },
+            {
+              "key": "C",
+              "reason": "It reverses the October ruling and needs a table of other languages."
+            }
+          ],
+          "tradeoff": "Uniform, honest errors, at the cost of no direct pointer for forms whose meaning moved."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T21:18:50.352Z",
+      "outcome": "A",
+      "comment": "Owner, on the ballot (q43o25er), 2026-11-04: A. No teaching of foreign words or retired Jet spellings anywhere; unknown words get the generic error that lists the legal forms.",
+      "ratifiedAt": "2026-11-05",
+      "retiredAt": "2026-11-11T02:35:31.063Z"
+    },
+    {
+      "id": "D-TEST-SUITE2",
+      "cardId": "c0pgowhn",
+      "group": "project",
+      "title": "How are the ui and cases corpus suites named, and how does a code suite report its rows?",
+      "situation": "D-TEST-PROFILE1=A made test profiles data in package.jet. Its example names one stock suite field, golden_corpus, and says code suites register with Test.suite(name, value) in fn test, without saying what value is. Jet's own ui and cases corpora need field names, and the jetpack, selfhost and perf suites need a signature. Today only golden_corpus is ratified, so the testkit package declares only golden, and ui, cases, jetpack, selfhost and perf are left out. This vote names the two corpus fields and fixes how a code suite reports its rows.",
+      "gist": "What are the ui and cases corpus fields called, and does a code suite return rows or report each one?",
+      "lesson": "A suite is a named set of rows that `jet test --profile` runs and compares. A stock suite is a folder of test files, written as data. A code suite is a function that checks something no folder describes, such as a binary-size budget, and reports one row per check.",
+      "explainer": "",
+      "story": "Sam adds a size budget to CI. Today it is a Node script that prints its own format. With a code suite he writes one Jet function that reports a row per program. `jet test --profile perf` then shows those rows beside the golden rows, compares them with the last run, and fails when a row that passed now fails.",
+      "inWild": "Cargo: [[test]] harness = false points at a binary that prints its own results.\nGo: a TestMain or t.Run(name, fn) reports each subtest as it runs.\nVitest: projects in config name test folders; each test reports as it finishes.\npytest: a plugin's pytest_collect_file turns any file type into reported items.",
+      "detail": "WHAT IS DECIDED ALREADY\n\nD-TEST-PROFILE1=A (2026-10-30) made profiles `test:` records in package.jet, such as `quick: TestProfile{ suites: [tests], time_limit: 60s }`. The suite `tests`, every #Test, is built in. Stock suites are `suites:` data. The ratified example names one field: `golden: TestSuite{ golden_corpus: \"tests/golden\" }`. Code suites register in test.jet's fn test with Test.suite(name, value).\n\nWHAT IS OPEN\n\n1. Field names for the other two corpora Jet runs: the ui corpus (tests/ui, a source file with its expected stdout and stderr) and the cases corpus (tests/cases, step files).\n\n2. What value is in Test.suite(name, value). Today Test has one method, t.run(), which runs the stock suite and returns its exit code (sema THandleOp.TestSuiteRun). There is no Test.suite.\n\nTODAY (dev b032d40638)\n\n- `ui_corpus:` or `cases_corpus:` in package.jet is E1206 \"unknown Package field\" (Jetpack PackageModel apply_field), as `test:` was before D-TEST-PROFILE1.\n- The testkit package's ui and cases runners exist (Tools/testkit, Jet). Moving them under `jet test` is #6035 c3, which needs these names.\n- The perf, selfhost and jetpack checks are shell and Node scripts today (Tools/perf/ci-perf-check.sh, Tools/agent/s5, the Jetpack tests), outside `jet test`.\n\nTHE OPTIONS\n\nA and B both add ui_corpus and cases_corpus beside golden_corpus, and differ only in the code-suite value. C replaces the three corpus fields with one `corpus:` field plus `kind:`. That rewrites the ratified example, and C uses B's code-suite value.\n\nA: the value is a function that receives a row sink, fn(rows: TestRows). It calls rows.pass(id), rows.fail(id, detail) or rows.skip(id, reason) as each check finishes.\n\nB: the value is a function that returns its rows, fn() -> [TestRow]. TestRow is a plain struct: id, outcome (.Pass, .Fail(detail), .Skip(reason)).\n\nC: `TestSuite{ corpus: \"tests/ui\", kind: ui }`, with kind one of golden, ui, cases; code suites as in B.\n\nEDGE CASES (the same under every option unless noted)\n\n- A suite name in both `suites:` and a Test.suite call is an error that names both places.\n\n- Test.suite names are string literals, so `jet check` and `--profile` list every suite without running code. A computed name is an error with a fix to write the name.\n\n- A profile that names an unknown suite is the D-TEST-PROFILE1 error listing the known suites, code suites included.\n\n- Two rows with one id in a suite: the second is a failing row \"duplicate row id\".\n\n- A code suite that panics: under A, rows reported before the panic stay and one failing row \"stopped: <message>\" is added. Under B and C every row of that suite is lost and the suite is one failing row.\n\n- time_limit bounds each corpus row, and each code-suite call as a whole. Under A the rows reported before the limit stay.\n\n- -u rewrites a ui row's expected streams. A code suite has no snapshots; -u accepts its new rows as the stored last result.\n\n- cases_corpus reads .case files only while they exist. When D-TESTKIT1=A's migration moves them to #Test, they join `tests` and the field retires with the corpus.\n\nBEGINNER AND EXPERT\n\nBeginner: nothing changes. `jet test` runs every #Test, with no package.jet fields and no test.jet. Expert: package.jet names the corpora and the profiles, and test.jet registers code suites. `jet test --profile full` runs them all in the c4 pool and prints one row stream.\n\nADVERSARIAL\n\n- Three corpus fields grow by one per new corpus kind; C's one field with a kind never grows the vocabulary.\n\n- C rewrites a ratified example six days after ratification, for a naming gain only.\n\n- B loses every row of a suite when one check panics, which is the failure case suites exist to show.\n\n- A adds a second handle type, TestRows, beside Test, so beginners meet two handle types instead of one.\n\n- Literal-only suite names forbid generating one suite per target in a loop.\n\n- cases_corpus names a format D-TESTKIT1=A already plans to retire.",
+      "options": [
+        {
+          "key": "A",
+          "name": "ui_corpus and cases_corpus; a code suite reports rows to a sink as it goes",
+          "detail": "package.jet gains ui_corpus and cases_corpus beside golden_corpus. Test.suite(name, run) takes a function that receives a TestRows sink and reports each row the moment its check finishes. Long suites stream, and a panic keeps the rows already reported.",
+          "technical": "PackageModel: TestSuite accepts exactly one of golden_corpus, ui_corpus, cases_corpus (a path relative to package.jet, which must exist).\n\nSema: Test.suite(String literal, fn(TestRows)) is a new THandleOp, legal only in fn test, with statically collected names. TestRows is a compiler handle like Test, with pass(id), fail(id, detail) and skip(id, reason). Each call writes one framed record, as #Test records are today, so the runner streams it and keeps it after a trap. The runner calls each code suite in its own child process, one c4 pool slot each.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ golden_corpus: \"examples\" }\n    ui: TestSuite{ ui_corpus: \"tests/ui\" }\n    cases: TestSuite{ cases_corpus: \"tests/cases\" }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows(rows: TestRows) {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] {\n        size :: built_size(name)\n        if size <= limit -> rows.pass(\"size {name}\") else -> rows.fail(\"size {name}\", \"{size} B > {limit} B\")\n    }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass                       (printed as soon as hello is measured)\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        },
+        {
+          "key": "B",
+          "name": "ui_corpus and cases_corpus; a code suite returns [TestRow]",
+          "detail": "package.jet gains ui_corpus and cases_corpus beside golden_corpus. Test.suite(name, run) takes a function that returns every row of the suite at once. TestRow is plain data, so a code suite is an ordinary function a #Test can also call.",
+          "technical": "PackageModel: TestSuite accepts exactly one of golden_corpus, ui_corpus, cases_corpus (a path relative to package.jet, which must exist). Sema: Test.suite(String literal, fn() -> [TestRow]) is a new THandleOp, legal only in fn test; the names are collected statically for check and --profile. Core: struct TestRow { id: String, outcome: TestOutcome }, enum TestOutcome { Pass, Fail(detail: String), Skip(reason: String) }. The runner calls each code suite in its own child process, one c4 pool slot each, and prints the rows when the call returns.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ golden_corpus: \"examples\" }\n    ui: TestSuite{ ui_corpus: \"tests/ui\" }\n    cases: TestSuite{ cases_corpus: \"tests/cases\" }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows() -> [TestRow] {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] -> size_row(name, limit)\n}\n\nfn size_row(name: String, limit: Int) -> TestRow {\n    size :: built_size(name)\n    outcome :: if size <= limit -> TestOutcome.Pass else -> TestOutcome.Fail(\"{size} B > {limit} B\")\n    TestRow{ id: \"size {name}\", outcome: outcome }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        },
+        {
+          "key": "C",
+          "name": "One corpus field with a kind; a code suite returns [TestRow]",
+          "detail": "A single `corpus:` field names the folder and `kind:` says how to run it: golden, ui or cases. golden_corpus from the ratified example becomes `corpus:` with `kind: golden`. Code suites return rows, as in B.",
+          "technical": "PackageModel: TestSuite{ corpus: String, kind: golden|ui|cases }, both required; golden_corpus becomes an unknown Package field (the generic E1206, with no spelling hint, per D-TEACH-RECONCILE1=A), amending D-TEST-PROFILE1=A's example. A new corpus kind adds an enum case, not a field. Sema and Core as B.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ corpus: \"examples\", kind: golden }\n    ui: TestSuite{ corpus: \"tests/ui\", kind: ui }\n    cases: TestSuite{ corpus: \"tests/cases\", kind: cases }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows() -> [TestRow] {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] -> size_row(name, limit)\n}\n\nfn size_row(name: String, limit: Int) -> TestRow {\n    size :: built_size(name)\n    outcome :: if size <= limit -> TestOutcome.Pass else -> TestOutcome.Fail(\"{size} B > {limit} B\")\n    TestRow{ id: \"size {name}\", outcome: outcome }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "t.Run reports each subtest as it finishes, the streaming shape of A.",
+          "code": "func TestSizes(t *testing.T) {\n    for _, c := range cases {\n        t.Run(c.name, func(t *testing.T) { check(t, c) })\n    }\n}"
+        },
+        {
+          "lang": "Rust (Cargo)",
+          "note": "harness = false hands a binary the whole run, and it prints rows in its own format.",
+          "code": "[[test]]\nname = \"sizes\"\nharness = false"
+        },
+        {
+          "lang": "TypeScript (Vitest)",
+          "note": "Projects name test folders in config, like the corpus fields.",
+          "code": "export default defineConfig({ test: { projects: [{ test: { include: ['tests/ui/**'] } }] } })"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the ratified golden_corpus and adds its two siblings. A code suite reports each row when its check ends, so long suites stream and a crash keeps every row already reported.",
+        "gains": [
+          "The ratified example stands; ui_corpus and cases_corpus read like golden_corpus.",
+          "Rows stream from long code suites such as selfhost, as corpus rows already do.",
+          "A panic in a code suite keeps the rows reported before it."
+        ],
+        "losses": [
+          {
+            "loss": "TestRows is a second handle type beside Test.",
+            "mitigation": "It appears only in a code suite's signature; a beginner who writes #Test never sees it."
+          },
+          {
+            "loss": "A code suite is not a plain function that returns data, so a #Test can't simply assert on its result.",
+            "mitigation": "The check itself (size_row) can stay a plain function that a #Test calls; the suite function only reports."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B shows nothing until a whole code suite ends, and a panic in one check loses every row of that suite."
+          },
+          {
+            "key": "C",
+            "reason": "C rewrites the ratified golden_corpus example, for a naming gain only."
+          }
+        ],
+        "tradeoff": "A second handle type for streaming rows that survive a crash."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. C taught the old golden_corpus spelling, now fixed, and cases_corpus names a format D-TESTKIT1=A plans to retire. Examples call built_size, a user's own measuring function, since Core has no such API."
+      },
+      "checkInstructions": "Use the dev jet with JET_TOOLCHAIN_ROOT set to the dev worktree. Today `suites: { ui: TestSuite{ ui_corpus: \"tests/ui\" } }` in package.jet is E1206, unknown Package field. `fn test(t: Test) { t.suite(\"perf\", f) }` fails, because Test has only run.",
+      "surface": {
+        "gist": "What are the ui and cases corpus fields called, and does a code suite return rows or report each one?",
+        "lesson": "A stock suite is a folder of test files written as data. A code suite is a function that reports one row per check. This vote names the two folder fields and the function's shape.",
+        "trio": {
+          "current": {
+            "note": "Today only golden_corpus is ratified, and a size budget is a script outside jet test.",
+            "code": "// package.jet\nsuites: { golden: TestSuite{ golden_corpus: \"examples\" } }\n\n// Tools/perf/ci-perf-check.sh: a shell script prints its own results\n// test.jet: fn test(t: Test) { t.run() }   // Test has only run()"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "t.Run reports each subtest as it finishes.",
+            "code": "t.Run(\"size hello\", func(t *testing.T) { check(t, \"hello\") })"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Report rows as they finish",
+            "gist": "ui_corpus and cases_corpus; a code suite reports each row to a TestRows sink.",
+            "gains": [
+              "Rows stream.",
+              "A panic keeps earlier rows."
+            ],
+            "losses": [
+              "A second handle type, TestRows."
+            ],
+            "proposed": {
+              "code": "fn test(t: Test) { t.suite(\"perf\", perf_rows) }\nfn perf_rows(rows: TestRows) {\n    rows.pass(\"size hello\")\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Return rows",
+            "gist": "ui_corpus and cases_corpus; a code suite returns [TestRow] when it ends.",
+            "gains": [
+              "Plain data, simple to test.",
+              "No new handle type."
+            ],
+            "losses": [
+              "Nothing shows until the suite ends.",
+              "A panic loses the suite's rows."
+            ],
+            "proposed": {
+              "code": "fn test(t: Test) { t.suite(\"perf\", perf_rows) }\nfn perf_rows() -> [TestRow] {\n    [TestRow{ id: \"size hello\", outcome: .Pass }]\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One corpus field",
+            "gist": "`corpus:` plus `kind:` for every stock suite; code suites return rows as in B.",
+            "gains": [
+              "New corpus kinds add no fields."
+            ],
+            "losses": [
+              "Rewrites the ratified golden_corpus.",
+              "A's lost rows on panic."
+            ],
+            "proposed": {
+              "code": "suites: { ui: TestSuite{ corpus: \"tests/ui\", kind: ui } }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps golden_corpus as ratified and adds its siblings. Rows stream and survive a crash.",
+          "gains": [
+            "The ratified example stands.",
+            "Long suites stream rows."
+          ],
+          "losses": [
+            {
+              "loss": "A second handle type.",
+              "mitigation": "Only code-suite authors see it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A panic loses a whole suite's rows."
+            },
+            {
+              "key": "C",
+              "reason": "It rewrites a ratified example."
+            }
+          ],
+          "tradeoff": "One more handle type for rows that stream and survive a crash."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-05T08:32:01.885Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-05",
+      "retiredAt": "2026-11-11T02:35:31.063Z"
+    },
+    {
+      "id": "D-TEST-INVOKE1",
+      "cardId": "c0pgowhn",
+      "group": "other",
+      "title": "Every jet test flag is also a setting: shard, list, levels, results, compiler and the rest",
+      "situation": "Some test runs need choices that change each time. A release check splits the golden tests across eight processes. A census first lists the tests, then runs one build level and saves the verdicts to a file. An A/B check runs the same tests under an older compiler. Today these scripts call a separate test-kit program with its own flags. You ruled that every command-line flag must also be a setting. We recommend that each jet test flag is also a test-profile field and an fn test call, with the same name.",
+      "gist": "Should every jet test flag also be a profile field and an fn test call, with one name?",
+      "lesson": "A choice can be written in three places: a test profile in package.jet, code in test.jet's fn test, or a flag on one command. Each place uses the same name. Later places win: the profile, then fn test, then the flag. Build settings already work this way.",
+      "explainer": "",
+      "story": "Ana's release script checks a new compiler on the golden tests. It starts eight processes, each told to take one eighth of the tests, then merges the eight verdict files. Her census lists the tests first, then runs only the jet run level. She wants plain jet test commands, and the same choices written in her package when they never change.",
+      "inWild": "cargo nextest: --partition count:2/8 runs one of eight slices, and the same choice can live in a profile in .config/nextest.toml. Source: https://nexte.st/docs/configuration/\n\npytest: every flag can also be written in the addopts setting of pytest.ini. Source: https://docs.pytest.org/en/stable/reference/customize.html",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nYou ruled that any flag must also be a setting. The last draft added flags only, and only with --profile. Now every jet test flag, old and new, is also a test-profile field and a call on t in fn test. The flags work on every jet test, not only with --profile.\n\nTODAY\n\nTest profiles live in package.jet (D-TEST-PROFILE1=A). A profile already has suites, baseline, jobs, memory, filter, shard, opt_in, optimize and time_limit fields. fn test in test.jet declares code suites with t.suite and has no settings calls (Compiler/test.jet:26-31).\n\nBuild settings already come in three layers (D-SETTING-ORDER1=A): the profile in package.jet, a call in fn build such as b.optimize(.Full), then the flag. jet test instead refuses --optimize when the profile sets optimize:, with E2104 (TestProfile.jet:96-100).\n\nMost jet test flags have no setting at all: --serial, --shuffle, --coverage, --capture, --fresh, --seed, --iterations and the browser flags, among others (Compiler/JetFoundation/Source/Registry/CLICommands.jet:901-953).\n\nScripts that need per-run choices call the separate Tools/testkit program. They are release-compiler.mjs (--shard, --results), goldens-census.mjs (--list, --tier, --shard, --results), compiler-registries.mjs (--opt-in, --results), and suite.sh A/B runs (--jet for another compiler).\n\nSHAPE UNDER A\n\n1. One rule. Every jet test flag has a profile field and a t call with the same name, dashes becoming underscores. --shuffle=7 is shuffle: 7 in a profile and t.shuffle(7) in fn test. A bare flag such as --serial is serial: true and t.serial().\n\n2. One order. The profile applies first, then fn test, then the flag, exactly as build settings do. jet test runs fn test once to collect its settings and suites before any test runs, as jet build runs fn build. The E2104 refusal for --optimize becomes an override.\n\n3. Four new choices, each in all three places. shard runs the I-th of N slices, the same tests for the same slice and tree. list prints the selected test names after filter and shard, runs nothing and exits 0.\n\nresults writes every selected test's verdict as JSON, with the same writer and row format as JET_CI_EVIDENCE_DIR. compiler builds and runs the tests with another jet, while slicing, baseline and verdicts stay with the running jet, so an A/B run differs only in the compiler.\n\n4. optimize takes a list of levels, so a census needs no --tier word. none is jet run, basic is jet build, and full is the release build.\n\n5. Settings that are not choices. --profile selects a profile, so its setting is the existing defaults: { test: ... }. --help, --show-default and --browser-scaffold are actions, not run choices, so they have no setting.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Many new names. Every name is a flag that exists today. One registry row per flag produces the flag, the profile field and the t call, so the three can never drift apart. jet help test shows all three spellings on each line.\n\n2. A setting that should be one-off, such as -u or list, written into a profile by mistake. Such a profile says so in its name, and jet test prints the settings it used and where each came from.\n\n3. Shards overwriting the baseline. A sharded run compares with the baseline but never writes it. -u with shard stays refused with E2104.\n\n4. Two verdict formats. results and JET_CI_EVIDENCE_DIR share one writer and one row format.\n\nNo loss remains.\n\nEDGE CASES\n\n- list with -u is refused with E2104, since listing runs nothing to record.\n- shard 0/8, 9/8 or a malformed value is refused with E2104, naming the valid range.\n- results to an unwritable path fails before any test runs.\n- Parallel shards share no scratch files; each run gets its own temporary directory.\n- A settings call after t.run() is refused with E2104, since the run has already started.\n\nAFTER A LANDS\n\nThe four scripts switch to jet test <tree>/Compiler --profile <p> with these flags, and the Tools/testkit command is deleted. Its engine stays as the library jet test calls.\n\nWHY NOT B OR C\n\nB keeps the test-kit command as a second front door with its own words, so every new choice lands twice. C adds the flags but no settings, which breaks your rule, so a fixed choice can only be typed again on every command.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Every flag is also a setting",
+          "detail": "Every jet test flag, old and new, is also a field of a test profile in package.jet and a call on t in fn test, with the same name. The profile applies first, then fn test, then the flag, as build settings already do.\n\nFour new choices arrive in all three places: shard, list, results and compiler. optimize takes a list of levels. The separate test-kit command is deleted once its scripts move.",
+          "technical": "One registry row per jet test flag generates the flag, the TestProfile field and the Test method. jet test runs fn test in a plan step to collect settings and suites before any row runs. Layering follows D-SETTING-ORDER1=A. --results shares the evidence writer. A sharded run never writes the baseline.",
+          "code": "// package.jet: a profile can set any choice a flag can\ntest: {\n    golden: TestProfile{ suites: [golden, run], baseline: \"known-failing.tsv\" },\n    census: TestProfile{ suites: [golden], list: true, optimize: [none] },\n}\n\n// test.jet: fn test can set the same choices in code\nfn test(t: Test) -> Int {\n    if sys.get(\"CI\") != None -> t.shard(3, 8)\n    t.results(\"shard3.json\")\n    t.run()\n}\n\n// the command line overrides both, for one run\n$ jet test Compiler --profile golden --shard=3/8 --results=shard3.json\n$ jet test Compiler --profile golden --list --optimize=none\n$ jet test Compiler --profile golden --compiler=base/jet"
+        },
+        {
+          "key": "B",
+          "name": "Keep the test-kit command too",
+          "detail": "Profiles stay as they are. Scripts that need per-run choices keep calling the separate test-kit command, which has its own flag words, over the same engine.",
+          "technical": "Tools/testkit/run.jet stays a permanent command with --shard, --list, --tier, --results, --jet and --scratch. jet test gains no flags or settings.",
+          "code": "$ testkit all --jet ./jet --tier o0 --shard 3/8 --results shard3.json"
+        },
+        {
+          "key": "C",
+          "name": "Flags only",
+          "detail": "jet test gains --shard, --list, --results and --compiler, and --optimize takes a list. They have no profile field and no fn test call, so a choice that never changes must be typed on every command.",
+          "technical": "The flags parse in the profile plan and override the run for one command. TestProfile and Test gain nothing.",
+          "code": "$ jet test Compiler --profile golden --shard=3/8 --results=shard3.json\n$ jet test Compiler --profile golden --list --optimize=none"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "cargo nextest",
+          "note": "A slice per process on the command line, or the same settings in a named profile. Source: https://nexte.st/docs/configuration/",
+          "code": "cargo nextest run --partition count:3/8\n\n# .config/nextest.toml\n[profile.ci]\nretries = 2"
+        },
+        {
+          "lang": "pytest",
+          "note": "Any flag can also be written in the config file. Source: https://docs.pytest.org/en/stable/reference/customize.html",
+          "code": "pytest --junitxml=results.xml\n\n# pytest.ini\n[pytest]\naddopts = --junitxml=results.xml"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "It follows your rule: any choice can be written once in the package or in fn test, or typed for one run, always with the same name. Scripts and people use one test command, and the test-kit command goes.",
+        "gains": [
+          "Every jet test flag can also be written in a profile or in fn test.",
+          "One name per choice in all three places, generated from one table.",
+          "Release and census scripts call plain jet test."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a second test command with its own words, so every new choice lands twice."
+          },
+          {
+            "key": "C",
+            "reason": "C breaks your rule: choices that never change must be typed on every command."
+          }
+        ],
+        "tradeoff": "A gives every choice three places with one name. B keeps two commands. C has flags only."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should every jet test flag also be a profile field and an fn test call, with one name?",
+        "lesson": "A test choice can be written in a profile, in fn test, or as a flag on one command. Each place uses the same name. Later places win: profile, then fn test, then flag. Build settings already work this way.",
+        "trio": {
+          "current": {
+            "note": "Today most flags have no setting, and scripts call a separate test-kit command.",
+            "code": "$ jet test Compiler --profile golden --serial   // no setting for serial\n$ testkit all --tier o0 --shard 3/8 --results r.json"
+          },
+          "wild": {
+            "lang": "pytest",
+            "note": "Any flag can also live in the config file. Source: docs.pytest.org",
+            "code": "pytest --junitxml=results.xml\n\n# pytest.ini\naddopts = --junitxml=results.xml"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Every flag is also a setting",
+            "gist": "Each flag is also a profile field and a t call, with one name.",
+            "gains": [
+              "Fixed choices are written once, not typed every run.",
+              "Scripts call plain jet test."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "census: TestProfile{ suites: [golden], list: true, optimize: [none] }\n\nfn test(t: Test) -> Int {\n    t.shard(3, 8)\n    t.run()\n}\n\n$ jet test Compiler --profile golden --shard=3/8 --results=r.json\n$ jet test Compiler --profile golden --compiler=base/jet"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the test-kit command",
+            "gist": "Scripts keep a separate command over the same engine.",
+            "gains": [
+              "No change to jet test."
+            ],
+            "losses": [
+              "Two test commands with different words."
+            ],
+            "proposed": {
+              "code": "$ testkit all --tier o0 --shard 3/8 --results r.json"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Flags only",
+            "gist": "New flags on jet test, with no profile field or fn test call.",
+            "gains": [
+              "Fewest changes."
+            ],
+            "losses": [
+              "Breaks your rule that every flag is also a setting."
+            ],
+            "proposed": {
+              "code": "$ jet test Compiler --profile golden --shard=3/8 --results=r.json"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Every choice can be written in the package, in fn test, or for one run, always with one name.",
+          "gains": [
+            "Every flag is also a setting.",
+            "The test-kit command goes."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two test commands, so every new choice lands twice."
+            },
+            {
+              "key": "C",
+              "reason": "Flags without settings break your rule."
+            }
+          ],
+          "tradeoff": "A: three places, one name. B: two commands. C: flags only."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-05T21:30:40.557Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-11T02:35:31.063Z"
     }
   ]
 }
