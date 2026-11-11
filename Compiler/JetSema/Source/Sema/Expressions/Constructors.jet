@@ -1311,7 +1311,11 @@ SemaExpressionCheckedTextLiteral: struct {
 }
 
 // A boundary head the program has not imported (`DateTime`, or the `Path`
-// runtime handle, which has no nominal row) is its owner module's impl.
+// runtime handle, which has no nominal row) is its owner module's impl. Once
+// the registration index is built, only the graph's CheckedText impl rows
+// (`checked_text_impl_rows`) are read, the rows the full scan would accept in
+// the same order; a typed literal or static call of any other type then costs
+// no walk of every impl.
 sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExpressionCheckedTextTarget? {
     name: if head == {
         .Named(value) -> value
@@ -1319,6 +1323,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
     }
     if program.registration_graph == .Val(graph) {
     owner := Symbol?{None}
+    owner_row := SemaRegistrationRowRef?{None}
     identity_key := ""
     string_backed := false
     if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
@@ -1326,6 +1331,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
         if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(registered_row) {
             registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
             owner = Val(registered.symbol)
+            owner_row = Val(SemaRegistrationRowRef{module_index: registered_row.module_index, row: registered_row.row})
             identity_key = registered.identity_key
             if registered.kind == SemaRegistrationNominalKind.Distinct {
                 definition: sema_registration_nominal_source_item(registered.source) ?? return None
@@ -1335,69 +1341,86 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
     }
     head_module: if owner == None -> boundary_head_owner_module(name) else -> None
     if owner == None && head_module == None -> return None
-    loop graph_module_index in 0..<graph.modules.len() {
-        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-            if !sema_type_graph_is_checked_text_impl(graph, graph.modules[graph_module_index].impls[implementation_index]) -> next
-            if owner == .Val(nominal) {
-                if graph.modules[graph_module_index].impls[implementation_index].target_identity_key != identity_key && (graph.modules[graph_module_index].impls[implementation_index].target_module_identity != Val(nominal.module_name) || graph.modules[graph_module_index].impls[implementation_index].target_type_name != nominal.name) -> next
-            } else {
-                if graph.modules[graph_module_index].impls[implementation_index].target_module_identity == None || graph.modules[graph_module_index].impls[implementation_index].target_type_name != name || head_module != Val((graph.modules[graph_module_index].module_name)) -> next
-            }
-            check := SemaRegistrationFunction?{None}
-            encode_hole := SemaRegistrationFunction?{None}
-            build := SemaRegistrationFunction?{None}
-            loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
-                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "check" -> check = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
-                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "encode_hole" -> encode_hole = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
-                if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "build" -> build = Val(graph.modules[graph_module_index].impls[implementation_index].methods[method_index])
-            }
-            if check != None && encode_hole != None && (string_backed || build != None) {
-                return Val(SemaExpressionCheckedTextTarget{
-                    owner: owner ?? graph.modules[graph_module_index].impls[implementation_index].symbol,
-                    implementation_module_identity: graph.modules[graph_module_index].module_identity,
-                    check: check ?? return None,
-                    encode_hole: encode_hole ?? return None,
-                    build: build,
-                })
+    if graph.impl_traits_indexed {
+        loop impl_row in graph.checked_text_impl_rows {
+            found: sema_expression_checked_text_impl_target(graph, impl_row.module_index, impl_row.row, owner, identity_key, name, head_module, string_backed) ?? next
+            return Val(found)
+        }
+    } else {
+        loop graph_module_index in 0..<graph.modules.len() {
+            loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
+                if !sema_type_graph_is_checked_text_impl(graph, graph.modules[graph_module_index].impls[implementation_index]) -> next
+                found: sema_expression_checked_text_impl_target(graph, graph_module_index, implementation_index, owner, identity_key, name, head_module, string_backed) ?? next
+                return Val(found)
             }
         }
     }
     // An `impl CheckedText { … }` block in the type's own body, whose
     // methods the nominal registers, unless a user trait shares the name.
-    if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
-        if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(registered_row) {
-            registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
-            if registered.source == .SourceAST(item) {
-                loop block in sema_registration_item_trait_blocks(item) {
-                    if block.trait_name != "CheckedText" || sema_type_graph_trait_symbol(graph, graph.modules[registered_row.module_index].module_identity, "CheckedText") != None -> next
-                    check := SemaRegistrationFunction?{None}
-                    encode_hole := SemaRegistrationFunction?{None}
-                    build := SemaRegistrationFunction?{None}
-                    loop method in registered.methods {
-                        written := false
-                        loop declared in block.methods {
-                            if declared.span == method.declaration.span -> written = true
-                        }
-                        if !written -> next
-                        if method.symbol.name == "check" -> check = Val(method)
-                        if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
-                        if method.symbol.name == "build" -> build = Val(method)
+    // A type with no such block is passed over without copying its blocks.
+    if owner_row == .Val(registered_row) {
+        registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
+        if registered.source == .SourceAST(item) {
+            if !sema_registration_item_has_trait_block(item, "CheckedText") -> return None
+            loop block in sema_registration_item_trait_blocks(item) {
+                if block.trait_name != "CheckedText" || sema_type_graph_trait_symbol(graph, graph.modules[registered_row.module_index].module_identity, "CheckedText") != None -> next
+                check := SemaRegistrationFunction?{None}
+                encode_hole := SemaRegistrationFunction?{None}
+                build := SemaRegistrationFunction?{None}
+                loop method in registered.methods {
+                    written := false
+                    loop declared in block.methods {
+                        if declared.span == method.declaration.span -> written = true
                     }
-                    if check != None && encode_hole != None && (string_backed || build != None) {
-                        return Val(SemaExpressionCheckedTextTarget{
-                            owner: registered.symbol,
-                            implementation_module_identity: graph.modules[registered_row.module_index].module_identity,
-                            check: check ?? return None,
-                            encode_hole: encode_hole ?? return None,
-                            build: build,
-                        })
-                    }
+                    if !written -> next
+                    if method.symbol.name == "check" -> check = Val(method)
+                    if method.symbol.name == "encode_hole" -> encode_hole = Val(method)
+                    if method.symbol.name == "build" -> build = Val(method)
+                }
+                if check != None && encode_hole != None && (string_backed || build != None) {
+                    return Val(SemaExpressionCheckedTextTarget{
+                        owner: registered.symbol,
+                        implementation_module_identity: graph.modules[registered_row.module_index].module_identity,
+                        check: check ?? return None,
+                        encode_hole: encode_hole ?? return None,
+                        build: build,
+                    })
                 }
             }
         }
     }
     }
     None
+}
+
+// The checked-text target CheckedText impl row `row` of module `module_index`
+// gives the head `name`: the impl targets the head's nominal `owner` (by
+// identity key, or by module and type name), or for a head with no nominal
+// row, the type `name` in its boundary owner module `head_module`; and it
+// writes `check` and `encode_hole`, and `build` unless the head is
+// string-backed. None when the row is not the head's.
+sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, owner: Symbol?, identity_key: String, name: String, head_module: String?, string_backed: Bool) -> SemaExpressionCheckedTextTarget? {
+    if owner == .Val(nominal) {
+        if graph.modules[module_index].impls[row].target_identity_key != identity_key && (graph.modules[module_index].impls[row].target_module_identity != Val(nominal.module_name) || graph.modules[module_index].impls[row].target_type_name != nominal.name) -> return None
+    } else {
+        if graph.modules[module_index].impls[row].target_module_identity == None || graph.modules[module_index].impls[row].target_type_name != name || head_module != Val((graph.modules[module_index].module_name)) -> return None
+    }
+    check := SemaRegistrationFunction?{None}
+    encode_hole := SemaRegistrationFunction?{None}
+    build := SemaRegistrationFunction?{None}
+    loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
+        if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "check" -> check = Val(graph.modules[module_index].impls[row].methods[method_index])
+        if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "encode_hole" -> encode_hole = Val(graph.modules[module_index].impls[row].methods[method_index])
+        if graph.modules[module_index].impls[row].methods[method_index].symbol.name == "build" -> build = Val(graph.modules[module_index].impls[row].methods[method_index])
+    }
+    if check == None || encode_hole == None || (!string_backed && build == None) -> return None
+    Val(SemaExpressionCheckedTextTarget{
+        owner: owner ?? graph.modules[module_index].impls[row].symbol,
+        implementation_module_identity: graph.modules[module_index].module_identity,
+        check: check ?? return None,
+        encode_hole: encode_hole ?? return None,
+        build: build,
+    })
 }
 
 sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

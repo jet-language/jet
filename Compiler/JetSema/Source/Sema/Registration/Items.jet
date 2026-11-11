@@ -809,6 +809,12 @@ SemaRegistrationGraph: struct {
     // they read one name's rows instead of every impl of the graph.
     impl_trait_name_slots: [String:Int]{[String:Int]{}}
     impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
+    // The impl rows that implement core.prelude's CheckedText
+    // (sema_type_graph_is_checked_text_impl), in module/row order, built with
+    // the trait index above. A typed literal or static call looks its head's
+    // checked-text impl up among these rows instead of every impl of the graph
+    // (sema_expression_checked_text_target).
+    checked_text_impl_rows: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
     // Opaque impl type name -> the Core source modules that own its impls
     // (`sema_registration_source_owns_impl`), in module order. Built once with
     // the graph, so method lookup reads only the owning modules instead of
@@ -1592,7 +1598,8 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
 
 // Buckets every impl under the trait it implements (Rust's keyed trait
 // registry), in module/row order. An inherent impl or an unresolved trait
-// name matches no bound, so it has no bucket.
+// name matches no bound, so it has no bucket. The CheckedText impls are
+// listed once more on their own (`checked_text_impl_rows`).
 sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
     graph.impl_trait_slots = [String:Int]{}
     graph.impl_trait_buckets = [[SemaRegistrationRowRef]]{}
@@ -1624,6 +1631,13 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
             }
         }
     }
+    checked_text := [SemaRegistrationRowRef]{}
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].impls.len() {
+            if sema_type_graph_is_checked_text_impl(graph, graph.modules[module_index].impls[row]) -> checked_text.push(SemaRegistrationRowRef{module_index: module_index, row: row})
+        }
+    }
+    graph.checked_text_impl_rows = checked_text.move()
     graph.impl_traits_indexed = true
 }
 
@@ -1804,6 +1818,17 @@ sema_registration_operator_owner: fn(owner: SymbolID, module_identity: String, l
     if !owned_trait_is_operator(trait_value) -> return owner.copy()
     right: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
+}
+
+// Whether the struct or enum `item` writes an `impl` block of `trait_name`
+// in its body; the blocks are read in place, not copied.
+sema_registration_item_has_trait_block: fn(item: Item, trait_name: String) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
+        .Enum(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .UserDerive(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+    false
 }
 
 // The `impl Trait { … }` blocks a struct or enum writes in its body.
