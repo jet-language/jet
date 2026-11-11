@@ -2894,9 +2894,10 @@ jet_cli_fmt_ordinary: fn(source: String, simplify: Bool, library: Bool) -> JetFo
     formatted: jet_cli_fmt_parsed(ordinary, simplify, library)
     if !formatted.ok -> return formatted
     kept: String.from_bytes(source.bytes()[0..<carrier.end]) ?? panic("the carrier ends on a character boundary")
-    if formatted.text == "" -> return JetFormatResult{ok: true, text: kept, diagnostics: [Diagnostic]{}}
-    separator: if kept.ends_with("\n") || kept.ends_with("\r") -> "" else -> "\n"
-    JetFormatResult{ok: true, text: "{kept}{separator}{formatted.text}", diagnostics: [Diagnostic]{}}
+    if formatted.text.trim() == "" -> return JetFormatResult{ok: true, text: "{kept.trim_end()}\n", diagnostics: [Diagnostic]{}}
+    // One blank line separates the carrier from what follows, as between
+    // any two top-level items.
+    JetFormatResult{ok: true, text: "{kept.trim_end()}\n\n{formatted.text}", diagnostics: [Diagnostic]{}}
 }
 
 jet_cli_fmt_parsed: fn(source: String, simplify: Bool, library: Bool) -> JetFormatResult {

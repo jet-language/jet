@@ -215,3 +215,14 @@ run: fn() {
     }
     assert(reserved, "the user source reports E0067")
 }
+
+// An empty struct or enum body stays `{}` on its header line; a body that
+// holds only a comment keeps the comment.
+#Test("empty_type_bodies_stay_on_the_header_line") {
+    source: "Meter: struct {{}}\n\nPer: struct<A, B> {{}}\n\nNothing: enum {{}}\n\nNoted: struct {{\n    // filled in later\n}}\n"
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok, "the source formats: {formatted.diagnostics:Debug}")
+    assert_eq(formatted.text, source)
+    spread: jet_format_source("Meter: struct {{\n\n}}\nNothing: enum {{\n}}\n", false)
+    assert_eq(spread.text, "Meter: struct {{}}\n\nNothing: enum {{}}\n")
+}

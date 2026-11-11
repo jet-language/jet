@@ -2233,10 +2233,6 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
     jfmt_write(f, ": struct")
     type_source: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, s.type_params, type_source)
-    jfmt_write(f, " {{")
-    jfmt_newline(f)
-    derives_decode: jfmt_has_name(s.derives, "Decode")
-    f.indent += 1
     members := [JetFmtMember]{}
     if s.state == .Val(state) -> members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     loop index in 0..<s.fields.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_FIELD, index: index, start: s.fields[index].name_span.start})
@@ -2249,10 +2245,33 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
     if s.marker_span == .Val(span) -> members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER_IMPL, index: 0, start: span.start})
     if s.effect_impl == .Val(declared) -> members.push(JetFmtMember{kind: JFMT_MEMBER_EFFECT_IMPL, index: 0, start: declared.span.start})
     jfmt_push_marker_members(members, s.type_markers)
+    if members.len() == 0 {
+        jfmt_fmt_empty_type_body(f, s.name_span.end, s.span.end)
+        return
+    }
+    jfmt_write(f, " {{")
+    jfmt_newline(f)
+    derives_decode: jfmt_has_name(s.derives, "Decode")
+    f.indent += 1
     body: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block, marker: s.marker, marker_expand_span: s.marker_expand_span, effect_impl: s.effect_impl, markers: s.type_markers}
     jfmt_fmt_type_body_members(f, jfmt_sort_members(members), body, derives_decode, false)
     f.indent -= 1
     jfmt_end_block(f)
+}
+
+// A struct or enum body with no members: `{}` on the header line, or, when
+// it holds comments, those comments one per line inside the braces.
+jfmt_fmt_empty_type_body: fn(f: &JetFmt, open: Int, end: Int) {
+    if !jfmt_span_has_comment(f, open, end) {
+        jfmt_write(f, " {{}}")
+        return
+    }
+    jfmt_write(f, " {{")
+    jfmt_newline(f)
+    f.indent += 1
+    jfmt_emit_leading(f, end)
+    f.indent -= 1
+    jfmt_write(f, "}}")
 }
 
 jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
@@ -2264,6 +2283,14 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     jfmt_write(f, ": enum")
     type_source: jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, e.type_params, type_source)
+    inside_marker := false
+    loop marker in e.type_markers {
+        if marker.inside -> inside_marker = true
+    }
+    if e.variants.len() == 0 && e.groups.len() == 0 && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && !inside_marker {
+        jfmt_fmt_empty_type_body(f, e.name_span.end, e.span.end)
+        return
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
     derives_decode: jfmt_has_name(e.derives, "Decode")

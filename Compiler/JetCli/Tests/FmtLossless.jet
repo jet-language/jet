@@ -1612,6 +1612,19 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
     assert(formatted.text == src, "{path} is not in fmt canonical form")
 }
 
+// One blank line separates an inline package carrier from the first item, as
+// between any two top-level items; a file that is only a carrier ends in one
+// newline.
+#Test("an_inline_package_carrier_is_followed_by_one_blank_line") {
+    tight: jet_cli_fmt_ordinary("package: {{\n    name: \"p\"\n}}\nrun: fn() {{ print(\"ok\") }}\n", false, false)
+    assert(tight.ok, "the source formats")
+    assert_eq(tight.text, "package: {{\n    name: \"p\"\n}}\n\nrun: fn() {{ print(\"ok\") }}\n")
+    spread: jet_cli_fmt_ordinary("package: {{\n    name: \"p\"\n}}\n\n\n\nrun: fn() {{ print(\"ok\") }}\n", false, false)
+    assert_eq(spread.text, tight.text)
+    alone: jet_cli_fmt_ordinary("package: {{\n    name: \"p\"\n}}\n\n", false, false)
+    assert_eq(alone.text, "package: {{\n    name: \"p\"\n}}\n")
+}
+
 #Test("canonical_rewrite_rules_are_explicit_and_narrow") {
     allowed: [[String]]{
         {"top-level ordering", "#Target(Web)\nuse core.ui as ui\nrun: fn() {{}}\n", "use core.ui as ui\n#Target(Web)\nrun: fn() {{}}\n"},
