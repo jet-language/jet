@@ -1,0 +1,101 @@
+// Text pieces of a root nothing changes (#6414): string views of a
+// parameter and of a loop variable, diverging split pairs chained through
+// their pieces, a piece handed on into a map that outlives the function,
+// and the negative cases where the text changes or goes away while a piece
+// lives (a var appended to after the split, a text moved or dropped early).
+
+Row: struct {
+    name: String
+    tags: String
+}
+
+views: fn(s: String) {
+    trimmed: s.trim()
+    after: s.after(":")
+    before: s.before(":")
+    part: s[1..4]
+    print("views [{trimmed}] [{after}] [{before}] [{part}]")
+}
+
+chained: fn(line: String) {
+    first: line.split_once(" ") ?? panic("bad line")
+    rest: first.after
+    second: rest.split_once(" ") ?? panic("bad line")
+    third: second.after.split_once(" ") ?? panic("bad line")
+    print("chained [{first.before}] [{second.before}] [{third.before}] [{third.after}]")
+}
+
+last_cut: fn(path: String) {
+    cut: path.cut_last("/") ?? return
+    print("cut [{cut.before}] [{cut.after}]")
+}
+
+// A piece handed on copies, so the map's keys outlive every line.
+index: fn(text: String) -> [String:Int] {
+    counts := [String:Int]{}
+    loop line in text.lines() {
+        pair: line.split_once("=") ?? next
+        key: pair.before.trim()
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    counts
+}
+
+rows_by_tag: fn(rows: [Row]) {
+    loop row in rows {
+        tags: row.tags
+        first: tags.split_once(",") ?? next
+        print("row {row.name} first tag [{first.before}] rest [{first.after}]")
+    }
+}
+
+appended: fn() {
+    buf := "alpha beta".copy()
+    pair: buf.split_once(" ") ?? panic("no space")
+    buf += " gamma"
+    view: buf.after(" ")
+    print("appended [{pair.before}] [{pair.after}] [{view}] [{buf}]")
+    buf += " delta"
+    print("appended [{pair.before}] [{pair.after}] [{buf}]")
+}
+
+moved: fn() {
+    owned: "up|down".copy()
+    cut: owned.split_once("|") ?? panic("no bar")
+    sink := [String]{}
+    sink.push(owned)
+    print("moved [{cut.before}] [{cut.after}] [{sink[0]}]")
+}
+
+kept: fn() {
+    keep := [String]{}
+    loop line in "a:1\nb:2\nc:3".lines() {
+        pair: line.split_once(":") ?? next
+        print("kept piece [{pair.before}] [{pair.after}]")
+        keep.push(line)
+    }
+    print("kept {keep.len()} [{keep[0]}] [{keep[2]}]")
+}
+
+dropped: fn() {
+    text := "left|right".copy()
+    pair: text.split_once("|") ?? panic("no bar")
+    text = "replaced"
+    print("dropped [{pair.before}] [{pair.after}] [{text}]")
+}
+
+run: fn() {
+    views("  ab:cd  ")
+    views("xyz:w")
+    chained("2026-11-11T10:00:00Z INFO net connected")
+    last_cut("a/b/c.txt")
+    last_cut("plain")
+    counts: index("x = 1\ny=2\nnoequals\n x =3\n")
+    print("index x {counts.get("x") ?? 0} y {counts.get("y") ?? 0} keys {counts.len()}")
+    rows: [Row{name: "one", tags: "red,green,blue"}, Row{name: "two", tags: "solo"}, Row{name: "three", tags: ",lead"}]
+    rows_by_tag(rows)
+    appended()
+    kept()
+    dropped()
+    moved()
+}

@@ -1,0 +1,28 @@
+# Text pieces of a root nothing changes borrow its bytes (#6414): string
+# views of a parameter, diverging split pairs chained through their pieces,
+# `cut_last`, pieces of a loop variable and of a field of one, and a piece
+# handed on into a map that outlives the function. The negative cases keep
+# copies: a var appended to after the split, a loop variable moved into a
+# List, a var reassigned and an immutable text moved while its pieces live.
+# Every tier and a built binary print the same bytes.
+fixture: text_pieces_of_unchanged_roots_read_the_same_bytes_on_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = text_pieces_of_unchanged_roots_read_the_same_bytes_on_every_tier.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = text_pieces_of_unchanged_roots_read_the_same_bytes_on_every_tier.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = text_pieces_of_unchanged_roots_read_the_same_bytes_on_every_tier.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = text_pieces_of_unchanged_roots_read_the_same_bytes_on_every_tier.out

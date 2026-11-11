@@ -12,6 +12,17 @@
 // that owns it. Every use that hands the value on still copies it (ir_own),
 // as for any read of a place another holder keeps.
 //
+// A text piece borrows the same way (#6414): a string view
+// (`x: s.after(sep)`, TLetTy.StrView over trim/after/before/slice) or a
+// split pair that diverges on a miss (`x: s.split_once(sep) ?? panic(…)`,
+// and `cut_last`) whose text is a root or a place in one. Its bytes are a
+// window into the root's, which nothing changes, moves or drops while the
+// binding lives; lowering builds the pieces without a copy (JetIR ir_stmt
+// `.Let`) and every use that hands one on copies it.
+//
+// A loop variable is a root for the Lets of its body: it holds one item
+// for a whole pass, and every Let of the body ends with the pass.
+//
 // Only statement-level Lets of a function body are marked; a Let inside an
 // expression block (whose value may leave the block) or a lambda is not.
 // Both walks are linear in the body: one census of the variables something
@@ -76,14 +87,20 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
                 if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
                 _ := table.seen.add(key.copy(), true)
             }
-            if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty) {
-                if sema_place_borrow_place(init, false, arena) && !sema_place_borrow_consumed(census, key, local.name) {
-                    root: sema_place_borrow_root(init, arena)
-                    if table.roots.get(root.key) != None && table.blocked.get(root.key) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
+            piece: sema_place_borrow_piece_root(init, let_ty, arena)
+            if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty, piece) {
+                if !sema_place_borrow_consumed(census, key, local.name) {
+                    root: if {
+                        piece.key != "" -> piece
+                        sema_place_borrow_place(init, false, arena) -> sema_place_borrow_root(init, arena)
+                        else -> SemaPlaceBorrowRoot{key: "", name: ""}
+                    }
+                    if root.key != "" && table.roots.get(root.key) != None && table.blocked.get(root.key) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
                 }
                 // An owning immutable variable is a root for later places;
                 // a window (`r: &place`) aliases storage another variable
-                // may still change.
+                // may still change. A piece's bytes stay put while its root
+                // does.
                 if !sema_place_borrow_is_window(init, arena) -> _ := table.roots.add(key, true)
             }
         }
@@ -105,14 +122,72 @@ sema_place_borrow_is_window: fn(init: TExpr, arena: BodyTree) -> Bool Never! {
     }
 }
 
-// An immutable user variable with no address, persistence, wrapper or view.
-sema_place_borrow_plain_local: fn(local: TLocal, let_ty: TLetTy) -> Bool Never! {
+// An immutable user variable with no address, persistence or wrapper, and
+// a string view only when it is a text piece (`piece` has a root).
+sema_place_borrow_plain_local: fn(local: TLocal, let_ty: TLetTy, piece: SemaPlaceBorrowRoot) -> Bool Never! {
     if local.mutable || local.generated || local.deref || local.address_lifetime != None || local.persist_key != None -> return false
     if let_ty == {
         .Inferred -> true
         .Annotated(_, wrapper) -> wrapper == TLetWrapper.Plain
-        .StrView -> false
+        .StrView -> piece.key != ""
     }
+}
+
+// The root of a text piece Let's text (see the header), or an empty key
+// for any other initializer. A string view's initializer is the view's
+// trim/after/before or slice of its text.
+sema_place_borrow_piece_root: fn(init: TExpr, let_ty: TLetTy, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
+    none: SemaPlaceBorrowRoot{key: "", name: ""}
+    if init.kind == .Flat(index) -> return sema_place_borrow_row_piece_root(arena, index, let_ty)
+    if let_ty == .StrView {
+        if init.kind == .BuiltinMethod(receiver, _, _) -> return sema_place_borrow_text_root(receiver, arena)
+        if init.kind == .Slice(base, _, _, _, _) -> return sema_place_borrow_text_root(base, arena)
+        return none
+    }
+    if init.kind == .OrFallback(value, fallback, _) {
+        if fallback == .Value(_) -> return none
+        if value.kind == .Flat(index) -> return sema_place_borrow_row_cut_root(arena, index)
+        if value.kind == .BuiltinMethod(receiver, operation, _) {
+            if operation == .StringSplitOnce || operation == .StringCutLast -> return sema_place_borrow_text_root(receiver, arena)
+        }
+    }
+    none
+}
+
+// sema_place_borrow_piece_root of node row `index` of `tree`.
+sema_place_borrow_row_piece_root: fn(tree: BodyTree, index: Int, let_ty: TLetTy) -> SemaPlaceBorrowRoot Never! {
+    none: SemaPlaceBorrowRoot{key: "", name: ""}
+    kind: tree.nodes[index - tree.node_base].kind
+    if let_ty == .StrView {
+        if kind == .BuiltinMethod(receiver, _, _) -> return sema_place_borrow_row_text_root(tree, receiver)
+        if kind == .Slice(base, _, _, _, _) -> return sema_place_borrow_row_text_root(tree, base)
+        return none
+    }
+    if kind == .OrFallback(value, fallback, _) {
+        if fallback == .Value(_) -> return none
+        return sema_place_borrow_row_cut_root(tree, value)
+    }
+    none
+}
+
+// The root of the text a `split_once`/`cut_last` row cuts, or an empty key.
+sema_place_borrow_row_cut_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
+    if tree.nodes[index - tree.node_base].kind == .BuiltinMethod(receiver, operation, _) {
+        if operation == .StringSplitOnce || operation == .StringCutLast -> return sema_place_borrow_row_text_root(tree, receiver)
+    }
+    SemaPlaceBorrowRoot{key: "", name: ""}
+}
+
+// The root of a piece's text: a keyed immutable variable itself, or a
+// place that reads one.
+sema_place_borrow_text_root: fn(text: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
+    if sema_place_borrow_place(text, true, arena) -> return sema_place_borrow_root(text, arena)
+    SemaPlaceBorrowRoot{key: "", name: ""}
+}
+
+sema_place_borrow_row_text_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
+    if sema_place_borrow_row_place(tree, index, true) -> return sema_place_borrow_row_root(tree, index)
+    SemaPlaceBorrowRoot{key: "", name: ""}
 }
 
 // Whether `place` reads an immutable keyed variable through at least one
@@ -569,7 +644,10 @@ sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, a
         .CountedLoop(_, _, _, _, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
         .Loop(_, body, _) -> sema_place_borrow_statements(body, census, arena, table)
         .While(_, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
-        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .ForIn(_, variable, _, _, _, _, _, _, _, _, body, _) -> {
+            sema_place_borrow_loop_root(variable, census, table)
+            sema_place_borrow_statements(body, census, arena, table)
+        }
         .Inline(body, _) -> sema_place_borrow_statements(body, census, arena, table)
         .DebugOnly(body, _) -> sema_place_borrow_statements(body, census, arena, table)
         .Unsafe(_, body) -> sema_place_borrow_statements(body, census, arena, table)
@@ -601,4 +679,14 @@ sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, a
         }
         .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
     }
+}
+
+// A loop variable is a root for its body's Lets (see the header) when it
+// is immutable and nothing consumes it.
+sema_place_borrow_loop_root: fn(variable: TLocal, census: SemaPlaceBorrowCensus, table: &SemaPlaceBorrowRoots) Never! {
+    key: if variable.symbol_id == .Val(id) -> id.key else -> return
+    if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
+    _ := table.seen.add(key.copy(), true)
+    if variable.mutable || variable.deref || sema_place_borrow_consumed(census, key, variable.name) -> return
+    _ := table.roots.add(key, true)
 }

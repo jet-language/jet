@@ -432,8 +432,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // (TLocal.place_borrow) is read in place: the binding aliases its
             // value like a read pin and never owns it, so every use that hands
             // the value on copies it (ir_own). Only for a value that copies as
-            // a share or a clone and never closes.
-            if local.place_borrow && !b.fresh[value] && ir_place_borrow_type(m, p, b, value, span) {
+            // a share or a clone and never closes. A text piece's mark (a
+            // string view or a diverging split pair) is not a place: its
+            // value is built as an owned copy.
+            piece: let_ty == .StrView || ir_body_node(p, b, init).kind == .OrFallback(_, _, _)
+            if local.place_borrow && !piece && !b.fresh[value] && ir_place_borrow_type(m, p, b, value, span) {
                 symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
                 b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
                 return
