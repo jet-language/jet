@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99494,
+    "rev": 99495,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85736,6 +85736,15 @@
           "verifiedBy": null,
           "evidence": "dev e2118b654e (QuickLead-1), integration batch b2r: census rc=0, ratchets rc=0, listed proofs passed",
           "at": "2026-11-08T20:13:03.622Z"
+        },
+        {
+          "n": 6,
+          "text": "A release admit never re-runs suite rows that already passed for the same source (intake rule 12). (1) Admit.jet's reuse_plan (lines 1287-1311 on 2026-11-11) keys reuse on the compiler source identity (the Land.jet census receipt's tree hash) instead of the s3 binary hash, and it accepts a train's row file. (2) Each landed train, or a background milestone run per landed train, records golden, ui and cases rows with the train compiler in admit's prior_rows format. (3) The release column's rows (the previous release's jet) carry over from the previous admit, keyed by release name. Proof: the admit after the change reuses a train's rows and runs only the rows the train didn't cover, with its suite stage wall time in the REPORT against the 30-minute full run of a0.0.44. Owner: Lander2. Gap found 2026-11-11: no admit can match today, because every release has a new candidate and trains run no full suites.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T14:57:54.612Z"
         }
       ],
       "refs": [],
@@ -85746,9 +85755,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T04:00:20.629Z",
-      "updated": "2026-11-08T20:13:27.685Z",
+      "updated": "2026-11-11T14:57:54.612Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0h8jjrp",
@@ -197506,6 +197515,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T14:57:54.612Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0h114mv",
+      "note": "#6 A release admit never re-runs suite rows that already passed"
+    },
     {
       "at": "2026-11-11T14:50:40.967Z",
       "by": "Main",
