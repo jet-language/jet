@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99314,
+    "rev": 99318,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85952,6 +85952,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-01T01:36:21.102Z"
+        },
+        {
+          "n": 4,
+          "text": "Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATCH_ROOT/lanes/G11Speed/report-bisect.md): 9afa7da76b (#6206 c22 CheckedText Hole/build) dropped the Distinct-only guard of sema_expression_checked_text_target, so every typed literal and Type.method() call walked every impl with string-cloning name lookups (77.9% of samples on seed-t22). It was amplified by 8c02016476, af8d3e09d0 and 8eaf6f17cc. Fixed by G11Speed-1, which indexes CheckedText impl rows once at registration (same rows, same order). Acceptance: the c1 cell's default-mode CPU-s on the t22 tree is at most 1.10x a0.0.43's per corpus line; comptime.precheck and sema.bodies wall are each at most 1.10x a0.0.43's; and perf shows sema_expression_checked_text_target under 1% of samples. Measured on the fix (n=1, basic): 749 to 164 CPU-s, 6.7K to 14.8K lines/s.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:37:49.118Z"
+        },
+        {
+          "n": 5,
+          "text": "Root C: 42d3bedfe8 and d17bb32500 (2026-11-08) made `jet build Compiler` build the whole toolchain (runtime pack, IDENTITY) and regenerate the Prelude copies and keyword spans, about 23 s of untraced build steps per build (wall 36 to 74 s with CPU flat). Acceptance: every untraced step of the c1 cell is traced phase by phase and takes at most 2 s of wall, or becomes part of the traced compile.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:37:50.846Z"
+        },
+        {
+          "n": 6,
+          "text": "Root B: bb770de593 (2026-11-01, the default level also versions small loops, runs the SSA round trip and the reductions) took ir.opt from 1.2 to 8.9 s wall. Acceptance: ir.opt at the default level costs at most a0_021's per-line cost (1.18 s wall over 646K lines) times 1.10 on the c1 cell, or each pass over that bound has its own named root. Architectural only (owner order 2026-11-11: no small tuning during language churn): the fix is pass scheduling or structure, not per-pass tweaks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:37:52.534Z"
+        },
+        {
+          "n": 7,
+          "text": "Root A: the a0_021 to a0_022 jump (2026-10-28 to 10-30, 54 to 89 CPU-s, compiler side +21% across trees) is attributed by the c1 cell's per-phase CPU on the a0_022 tree, both compilers, to named commits, and each named root is fixed or carded here.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T12:37:54.299Z"
         }
       ],
       "refs": [],
@@ -85962,8 +85998,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-07T04:02:54.862Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-11T12:37:54.299Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7
     },
     {
       "id": "c0h114mv",
@@ -197760,6 +197797,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T12:37:54.299Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#7 Root A: the a0_021 to a0_022 jump (2026-10-28 to 10-30, 54 t"
+    },
+    {
+      "at": "2026-11-11T12:37:52.535Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#6 Root B: bb770de593 (2026-11-01, the default level also versi"
+    },
+    {
+      "at": "2026-11-11T12:37:50.846Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#5 Root C: 42d3bedfe8 and d17bb32500 (2026-11-08) made `jet bui"
+    },
+    {
+      "at": "2026-11-11T12:37:49.118Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pjwkhn",
+      "note": "#4 Root F (proved by G11Speed's bisect, 2026-11-11, $JET_SCRATC"
+    },
     {
       "at": "2026-11-11T12:36:32.591Z",
       "by": "Main",
