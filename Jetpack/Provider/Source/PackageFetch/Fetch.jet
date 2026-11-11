@@ -91,6 +91,9 @@ pkg_fetch_semantic_records: fn(root: String, lock: LockFile, manifest: Manifest,
     scope: if options.update_dep == .Val(target) -> Val(pkg_fetch_closure(lock, target)) else -> None
     loop package in lock.packages {
         if scope == .Val(names) && !names.contains(package.name) -> next
+        // A first-party battery resolves from the toolchain tree, as a path
+        // dependency does, so it has no registry resolution to explain.
+        if package.is_registry(BATTERIES_SOURCE_NAME) -> next
         if package.source == .Registry(registry, reference, output, hash, repository, _, _, _) {
             dependency: pkg_fetch_load_store_manifest(output, package.name)
             receipt: publication_authorize_package_candidate(manifest.policy, package.name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {package.name}#{package.version}", registry, err)})

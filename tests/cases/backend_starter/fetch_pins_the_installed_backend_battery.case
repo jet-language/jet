@@ -2,7 +2,10 @@
 # version. `jet fetch` resolves that dependency to the battery the toolchain
 # ships, without a registry, and the lock pins its version and content hash
 # beside the path pin of the shared contract. A locked fetch replays those
-# pins, and the service builds against the pinned battery.
+# pins, and the service builds against the pinned battery. A toolchain whose
+# `backend` battery differs from the pinned tree is refused by a locked fetch:
+# the pin keeps the battery's identity even though, like a path dependency,
+# the battery gets no registry policy record.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 copy: {root}/Examples/Network/BackendStarter starter
@@ -19,3 +22,11 @@ exit: 0
 step build: jet build
 cwd: starter/Packages/Service
 exit: 0
+copy: {root}/Jetpack/Provider/Batteries/backend tampered/Jetpack/Provider/Batteries/backend
+append: tampered/Jetpack/Provider/Batteries/backend/package.jet "// this toolchain's battery is not the pinned tree\n"
+step tampered: jet fetch --locked
+env: JET_TOOLCHAIN_ROOT={work}/tampered
+cwd: starter/Packages/Service
+exit: nonzero
+stderr: ~ E1204 # the locked fetch refuses the mismatched battery
+stderr: ~ "this toolchain's `backend` battery is not the one `.jet/lock` pins" # the refusal names the battery

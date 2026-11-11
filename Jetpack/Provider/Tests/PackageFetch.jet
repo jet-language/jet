@@ -118,3 +118,13 @@
     assert_eq(pkg_lock_source_value(source), "{{ registry = \"batteries\", reference = \"backend#0.1.0\", output = \"\", source-hash = \"sha256-0123\", repository = \"embedded:batteries\", authority = \"toolchain\", tier = \"core\", gate-status = \"first-party\" }}")
     assert_eq(pkg_lock_parse_source(pkg_lock_source_value(source)) ?? panic("the pinned source parses back"), source)
 }
+
+#Test("fetch records no registry rationale for a battery pin, so package policy asks it for no registry license") {
+    root: files.tmpdir("jet-fetch-semantic-battery-") ?? panic("fixture")
+    manifest: Manifest.parse("package.jet", "name: \"service\"\nversion: \"0.1.0\"\n") ?? panic("manifest")
+    lock := LockFile.empty()
+    lock.packages.push(LockedPackage{name: "backend", version: "0.1.0", source: pkg_fetch_battery_source("backend", "0.1.0", "sha256-0123")})
+    semantic: pkg_fetch_semantic_records(root, lock, manifest, PackageFetchOptions{}) ?? panic("a battery pin needs no registry policy record: {err.diagnostic.what}")
+    assert_eq(trust_write_semantic_lock(semantic), trust_write_semantic_lock(pkg_fetch_semantic_records(root, LockFile.empty(), manifest, PackageFetchOptions{}) ?? panic("empty")))
+    files.remove_all(root) ?? panic("cleanup")
+}
