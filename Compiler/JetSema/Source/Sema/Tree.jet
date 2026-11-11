@@ -430,10 +430,13 @@ THostCall: enum {
     SwitchSubjectValue
     YieldSend(value: TExpr)
     NumericBounds(ty: Type, member: String)
-    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
-    // checked literal path or glob, relative to the source file being
-    // compiled. The compiler reads and records it; it never runs at runtime.
-    ComptimeInput(builtin: String, path: String)
+    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
+    // String path or glob, relative to the source file being compiled. A
+    // literal is the checked, normalized literal; a computed value is checked
+    // against the same path law when the comptime evaluation reaches it
+    // (sema_comptime_input_value_problem). The compiler reads and records the
+    // input; it never runs at runtime.
+    ComptimeInput(builtin: String, path: TExpr)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
@@ -1111,7 +1114,8 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .OptionProbe(inner, _) -> visit(inner)
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
-        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
+        .ComptimeInput(_, path) -> visit(path)
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }
 

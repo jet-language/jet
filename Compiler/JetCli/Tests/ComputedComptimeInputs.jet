@@ -1,0 +1,88 @@
+// Comptime inputs named by computed values: the path the comptime code
+// computed meets the literal's path law before any read (E0957, quoting the
+// value), `\` reads as `/`, and a `find` records its glob with the digest of
+// its sorted membership, so an empty glob is a record too and `jet dev` sees
+// a file added to or removed from it.
+use {
+    jet_cli.[JetCLIBuildInputs, jet_cli_dev_inputs_current, jet_cli_dev_inputs_stamp]
+    jet_driver.[JetDriverComptimeInputLog, JetDriverComptimeInputRecord, JetDriverComptimeInputs, jet_driver_shared_build_inputs]
+    jet_foundation.[Span, TComptimeValue]
+    cli_crypto: core.crypto
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
+}
+
+computed_inputs_test_adapter: fn(file: String, log: Shared<JetDriverComptimeInputLog>) -> JetDriverComptimeInputs {
+    JetDriverComptimeInputs{inputs: jet_driver_shared_build_inputs(JetCLIBuildInputs{}), base_dir: cli_files.dirname(file), log: Val(log), file: file, toolchain: None}
+}
+
+// The code and headline of the refusal of `builtin(path)`.
+computed_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: String, path: String) -> String {
+    if adapter.comptime_input(builtin, path, Span{start: 0, end: 1}) == {
+        .Ok(_) -> panic("`{builtin}(\"{path}\")` was admitted")
+        .Err(problem) -> "{problem.diagnostic.code} {problem.diagnostic.what}"
+    }
+}
+
+#Test("a computed comptime input path meets the path law before any read") {
+    made: "{cli_sys.temp_dir()}/jet-computed-inputs-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{made}/pkg/sub") ?? panic("test directory")
+    cli_files.write("{made}/secret.txt", "secret\n") ?? panic("outside file")
+    cli_files.write("{made}/pkg/sub/a.txt", "a\n") ?? panic("inside file")
+    root: cli_files.realpath(made) ?? panic("test root")
+    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    adapter: computed_inputs_test_adapter("{root}/pkg/main.jet", log.copy())
+    assert_eq(computed_inputs_test_refused(adapter, "embed_file", "../secret.txt"), "E0957 `embed_file` path `../secret.txt` can't use `..`")
+    assert_eq(computed_inputs_test_refused(adapter, "embed_bytes", "sub\\..\\..\\secret.txt"), "E0957 `embed_bytes` path `sub/../../secret.txt` can't use `..`")
+    assert_eq(computed_inputs_test_refused(adapter, "embed_file", "{root}/secret.txt"), "E0957 `embed_file` path `{root}/secret.txt` must be relative")
+    assert_eq(computed_inputs_test_refused(adapter, "find", "../*.txt"), "E0957 `find` glob `../*.txt` can't use `..`")
+    assert_eq(computed_inputs_test_refused(adapter, "embed_file", "toolchain:../secret.txt"), "E0957 `embed_file` path `toolchain:../secret.txt` can't use `..`")
+    assert_eq(log.guard_read().value.records.len(), 0)
+    if adapter.comptime_input("embed_file", "sub\\a.txt", Span{start: 0, end: 1}) == .Ok(value) {
+        if value == .String(text) -> assert_eq(text, "a\n") else -> panic("embed_file gives text")
+    } else {
+        panic("a computed path inside the package reads")
+    }
+    assert_eq(log.guard_read().value.records[0].path, "sub/a.txt")
+    cli_files.remove_all(made) ?? panic("test root cleanup")
+}
+
+#Test("a find records its glob, empty or not, and jet dev sees its membership move") {
+    made: "{cli_sys.temp_dir()}/jet-computed-globs-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{made}/in") ?? panic("test directory")
+    root: cli_files.realpath(made) ?? panic("test root")
+    log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}
+    adapter: computed_inputs_test_adapter("{root}/main.jet", log.copy())
+    if adapter.comptime_input("find", "in/*.txt", Span{start: 0, end: 1}) == .Ok(value) {
+        if value == .List(values) -> assert_eq(values.len(), 0) else -> panic("find gives a list")
+    } else {
+        panic("an empty find is a value")
+    }
+    read: log.guard_read().value.records.copy()
+    assert_eq(read.len(), 1)
+    assert_eq(read[0].path, "in/*.txt")
+    assert_eq(read[0].file, "{root}/in/*.txt")
+    assert_eq(read[0].glob, "in/*.txt")
+    assert_eq(read[0].sha256, cli_crypto.sha256("".bytes()).hex())
+    assert(jet_cli_dev_inputs_current(read), "the glob still matches nothing")
+    before: jet_cli_dev_inputs_stamp(read)
+    cli_files.write("{root}/in/added.txt", "added\n") ?? panic("added file")
+    assert(!jet_cli_dev_inputs_current(read), "a file added to an empty glob is a change")
+    assert(jet_cli_dev_inputs_stamp(read) != before, "a file added to a glob moves the stamp")
+    cli_files.write("{root}/in/other.md", "ignored\n") ?? panic("unmatched file")
+    log.guard_edit().value.records = [JetDriverComptimeInputRecord]{}
+    if adapter.comptime_input("find", "in/*.txt", Span{start: 0, end: 1}) == .Ok(value) {
+        if value == .List(values) -> assert_eq(values.len(), 1) else -> panic("find gives a list")
+    } else {
+        panic("a find is a value")
+    }
+    again: log.guard_read().value.records.copy()
+    assert_eq(again.len(), 2)
+    assert_eq(again[0].path, "in/added.txt")
+    assert_eq(again[1].sha256, cli_crypto.sha256("in/added.txt".bytes()).hex())
+    assert(jet_cli_dev_inputs_current(again), "a file the glob doesn't match is no change")
+    cli_files.remove_all("{root}/in/added.txt") ?? panic("removed file")
+    assert(!jet_cli_dev_inputs_current(again), "a file removed from a glob is a change")
+    cli_files.remove_all(made) ?? panic("test root cleanup")
+}

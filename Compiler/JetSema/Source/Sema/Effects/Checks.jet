@@ -4759,7 +4759,8 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
         .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, inner)
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
-        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
+        .ComptimeInput(_, path) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, path)
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }
 

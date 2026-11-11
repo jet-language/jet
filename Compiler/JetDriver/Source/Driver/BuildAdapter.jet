@@ -343,7 +343,7 @@ jet_driver_build_find_path_problem: fn(glob: String, span: Span) -> BuildSession
 // tree-file bound.
 jet_driver_build_find: fn(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
     if args.len() != 1 -> return jet_driver_build_input_fail("E3502", "build plan is invalid: `b.find` requires exactly one glob", "`build: fn` must return one deterministic typed graph whose handles all belong to that build", "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", span)
-    raw: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0957", "`find` glob must be a string literal", "a computed glob can't be audited at build time, so the compiler can't tell which file it reads", "pass the glob inline, e.g. `find(\"content/**/*.jet\")`", span)
+    raw: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0957", "`find` glob must be a String", "`find` walks the files the String it is given names", "pass a String glob, e.g. `find(\"content/**/*.jet\")`", span)
     glob: raw.replace("\\", "/")
     if jet_driver_build_find_path_problem(glob, span) == .Val(problem) -> return problem
     walk_what: "`find` can't walk `{raw}`"

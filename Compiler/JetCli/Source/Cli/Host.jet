@@ -50,6 +50,8 @@ use {
         JetDriverCompileResult,
         JetDriverComptimeInputRecord,
         jet_driver_comptime_input_unchanged,
+        jet_driver_comptime_glob_membership,
+        jet_driver_shared_build_inputs,
         JetDriverDocModule,
         JetDriverForeignLinkFacts,
         JetDriverLoweringInputs,
@@ -3763,24 +3765,37 @@ jet_cli_dev_stamp: fn(root: String, watch: [String]) -[FS]> String Never! {
 // A change stamp over the comptime inputs a build read (`read`, files outside
 // the package's .jet sources and `d.watch` paths, such as an `embed_file`
 // asset): their latest modification time and how many of them exist, as
-// jet_cli_dev_stamp.
-jet_cli_dev_inputs_stamp: fn(read: [JetDriverComptimeInputRecord]) -[FS]> String Never! {
+// jet_cli_dev_stamp, then each `find`'s membership digest now, so that a file
+// added to or removed from a glob moves it.
+jet_cli_dev_inputs_stamp: fn(read: [JetDriverComptimeInputRecord]) -[FS]> String {
+    inputs: jet_driver_shared_build_inputs(JetCLIBuildInputs{})
     latest := 0
     count := 0
+    globs := ""
     loop record in read {
+        if record.glob != "" {
+            globs = "{globs}:{jet_driver_comptime_glob_membership(inputs, record) ?? "unwalkable"}"
+            next
+        }
         info: cli_files.stat(record.file) ?? next
         count += 1
         modified: info.modified.to_unix_ns() ?? next
         if modified > latest -> latest = modified
     }
-    "{count}:{latest}"
+    "{count}:{latest}{globs}"
 }
 
 // Whether every comptime input in `read` still holds the bytes the build
-// read; an input edited while the build compiled (or since removed) is not,
+// read, and every `find` still matches the files it matched; an input edited
+// while the build compiled (or since removed, or added to a glob) is not,
 // and `jet dev` rebuilds at once.
-jet_cli_dev_inputs_current: fn(read: [JetDriverComptimeInputRecord]) -[FS]> Bool Never! {
+jet_cli_dev_inputs_current: fn(read: [JetDriverComptimeInputRecord]) -[FS]> Bool {
+    inputs: jet_driver_shared_build_inputs(JetCLIBuildInputs{})
     loop record in read {
+        if record.glob != "" {
+            if jet_driver_comptime_glob_membership(inputs, record) != Val((record.sha256)) -> return false
+            next
+        }
         bytes: cli_files.read_bytes(record.file) ?? return false
         if !jet_driver_comptime_input_unchanged(record, bytes) -> return false
     }

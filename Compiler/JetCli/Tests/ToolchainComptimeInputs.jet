@@ -65,8 +65,10 @@ toolchain_inputs_test_refused: fn(adapter: JetDriverComptimeInputs, builtin: Str
     }
     assert_eq(tree.guard_read().value.packages, Val([String]{"{root}/Compiler", "{root}/Compiler/Member", "{root}/Dep"}))
     names: loop record in log.guard_read().value.records -> record.path
-    assert_eq(names, [String]{"toolchain:Data/table.txt", "toolchain:Data/rows/a.txt", "toolchain:Data/rows/b.txt"})
+    assert_eq(names, [String]{"toolchain:Data/table.txt", "toolchain:Data/rows/a.txt", "toolchain:Data/rows/b.txt", "toolchain:Data/rows/*.txt"})
     assert_eq(log.guard_read().value.records[0].file, "{root}/Data/table.txt")
+    assert_eq(log.guard_read().value.records[3].file, "{root}/Data/rows/*.txt")
+    assert_eq(log.guard_read().value.records[3].glob, "Data/rows/*.txt")
     assert_eq(toolchain_inputs_test_refused(member, "embed_file", "toolchain:Data/escape.txt"), "E0955")
     vendored: toolchain_inputs_test_adapter("{root}/Vendored/main.jet", Val(tree.copy()), log.copy())
     assert_eq(toolchain_inputs_test_refused(vendored, "embed_file", "toolchain:Data/table.txt"), "E0945")

@@ -1807,15 +1807,16 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             }
             if call == .MemoStats(function, bound) -> return ir_memo_stats(m, p, b, expression_ty, function, bound, span)
             if call == .ComptimeInput(builtin, path) {
-                // A comptime input (embed_file, embed_bytes, find) the checked
-                // program names by its literal; the compiler answers it
-                // (ir_host_route kind 3): builtin, path.
+                // A comptime input (embed_file, embed_bytes, find): the
+                // compiler answers it (ir_host_route kind 3) from its builtin
+                // and its path's String value, the checked literal or the
+                // value the comptime code computed.
                 row: ir_value_type(m, p, expression_ty) ?? return ir_type_fail(b, span, expression_ty)
                 string_row: ir_string_row(m)
                 builtin_text: ir_temp(m, b, string_row)
                 ir_emit(b.f, IROp.ConstText, builtin_text, ir_intern_text(m, builtin), -1, -1, b.line)
-                path_text: ir_temp(m, b, string_row)
-                ir_emit(b.f, IROp.ConstText, path_text, ir_intern_text(m, path), -1, -1, b.line)
+                path_text: ir_expr(m, p, b, path)
+                if ir_failed(b) -> return -1
                 return ir_host_route(m, b, 3, row, [Int]{builtin_text, path_text})
             }
             if call == .TupleIndex(base, index) {

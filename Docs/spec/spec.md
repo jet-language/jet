@@ -554,11 +554,16 @@ binding (D-VERDICT-1308-1, D-PERSIST1).
 bytes, and `find("glob") -> [String]` returns sorted relative paths. `find` accepts the
 std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`. They are the sanctioned build-time
 I/O operations inside a compile-time binding; other comptime evaluation is pure.
-Paths and globs are string literals resolved relative to the embedding file, never
-absolute and never escaping the project with `..` (E0957). Missing or unreadable
+A path or glob is any `String` the comptime code computes: a literal, or a value such
+as a path an earlier `find` returned (D-EMBED-WALK1). It resolves relative to the
+embedding file, never absolute and never escaping the project with `..` (E0957, which
+quotes a computed value that breaks the law). Sema judges a literal; the compiler judges
+a computed value when the evaluation reaches the call, before it reads anything. Missing or unreadable
 input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched file
-records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1) and is an input of
-the build identity: editing it makes `jet build` rebuild, not reuse a stored binary, and `jet dev` rerun.
+records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1), and every `find`
+its glob with the SHA-256 of its sorted matches, an empty match included. Each is an input of
+the build identity: editing a file, or adding a file to or removing one from a glob, makes
+`jet build` and `jet run` rebuild, not reuse a stored binary, and `jet dev` rerun.
 A Core library file embeds files beside it in the toolchain's Core tree. They
 are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
 A path or glob spelled `toolchain:<path>` resolves against the toolchain tree the

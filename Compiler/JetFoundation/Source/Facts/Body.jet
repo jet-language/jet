@@ -404,11 +404,13 @@ BodyHostCall: enum {
     YieldSend(value: Int)
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
-    // checked literal path or glob, relative to the source file being
+    // node of its String path or glob, relative to the source file being
     // compiled, or after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the
-    // toolchain tree. The compiler reads and records it; it never runs at
-    // runtime.
-    ComptimeInput(builtin: String, path: String)
+    // toolchain tree. A literal is the checked, normalized literal; a
+    // computed value is checked against the same path law when the comptime
+    // evaluation reaches it. The compiler reads and records the input; it
+    // never runs at runtime.
+    ComptimeInput(builtin: String, path: Int)
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
@@ -1644,7 +1646,10 @@ body_each_host_call_child: fn(tree: BodyTree, value: BodyHostCall, visit: fn(Int
         .YieldSend(f0) -> {
             visit(f0)
         }
-        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
+        .ComptimeInput(_, f1) -> {
+            visit(f1)
+        }
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
     }
 }
 

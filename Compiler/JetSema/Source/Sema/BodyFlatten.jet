@@ -610,7 +610,7 @@ body_flat_host_call: fn(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never
         .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
-        .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
+        .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_flat_expr(f_path, flat)}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }
@@ -1482,7 +1482,7 @@ body_copy_host_call: fn(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Ne
         .SwitchSubjectValue -> BodyHostCall.SwitchSubjectValue
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_copy_expr(f_value, flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
-        .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
+        .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_copy_expr(f_path, flat)}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }

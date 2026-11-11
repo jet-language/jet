@@ -1,0 +1,8 @@
+Error [jet.InvalidEmbedPath]: `find` glob `inputs/../*.jet` can't use `..`
+  --> tests/ui/comptime_find_computed_dotdot.jet:2:19
+    |
+  2 | PATHS: comptime { find("inputs/{UP}/*.jet") }
+    |                   ^^^^
+ Why: Comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused in a computed glob too
+ Fix: Compute a glob under this file's directory, without `..`
+More: jet-lang.dev/e/E0957

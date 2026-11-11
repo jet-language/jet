@@ -2160,11 +2160,12 @@ jet_driver_comptime_run: fn(
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
-                // A comptime input that is the item's whole value (`TEXT: comptime {
-                // embed_file("x") }`) is read here, as Rust's
-                // `try_eval_build_time_io` did, with no evaluation.
-                if jet_driver_comptime_input_expression(comptime_request.expression) {
-                    if jet_driver_comptime_read_input(request, source.source_file, comptime_request.expression) == {
+                // A comptime input with a literal path that is the item's whole
+                // value (`TEXT: comptime { embed_file("x") }`) is read here, as
+                // Rust's `try_eval_build_time_io` did, with no evaluation; a
+                // computed path is evaluated.
+                if jet_driver_comptime_literal_input(comptime_request.expression) == .Val(literal_input) {
+                    if jet_driver_comptime_read_input(request, source.source_file, literal_input) == {
                         .Ok(value) -> {
                             if batch.entries.len() > 0 {
                                 no_functions := [FnBody]{}
