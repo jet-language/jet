@@ -30,9 +30,6 @@ use {
     term: core.term
 }
 
-// The whole run's wall-clock bound.
-RUN_TIMEOUT: 6800s
-
 Pool: struct {
     jetpack: String
     warn: String
@@ -87,8 +84,9 @@ suite: fn(label: String, tree: String, jetdir: String, profile: String, settings
     if memory != "" -> argv.push("--memory={memory}")
     loop setting in settings -> argv.push(setting.copy())
     out: "{sg}/{profile}-{label}.txt"
+    // 6800s bounds the whole run's wall clock.
     ran: process.cmd(argv).cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree).env("TMPDIR", "{fs}/tmp")
-        .timeout(RUN_TIMEOUT).output_limit(1073741824).run() ?? return fail("{argv[0]} could not start: {err}")
+        .timeout(6800s).output_limit(1073741824).run() ?? return fail("{argv[0]} could not start: {err}")
     text: "{ran.output}{ran.errors}"
     files.write(out, text) ?? return fail("cannot write {out}: {err}")
     code: exit_code(ran)
