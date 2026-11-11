@@ -100,10 +100,11 @@ SourceLocation: struct {
 
     impl Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
 }
-// The phase an expression is evaluated in: `#phase` is `.Preparation` in
-// preparation and compile-time code, `.Build` in a package's `fn build`, and
-// `.Runtime` in the running program. The evaluation site decides it, never
-// the optimizer: the same expression reads the same phase on every tier.
+// The phase of the compiled copy an expression runs in: `#phase` is
+// `.Preparation` in preparation and compile-time code and in a function's
+// compile-time copy, `.Build` in the copy a package's `fn build` runs, and
+// `.Runtime` in the running program. Each copy folds its own phase, never the
+// optimizer: the same copy reads the same phase on every tier.
 Phase: enum {
     Preparation
     Build

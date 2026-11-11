@@ -312,14 +312,19 @@ spelling until a ballot names their `$` root.
 #build  #package  #phase  #program
 ```
 
-`#phase` reports the evaluation-site `Phase` value (`core.prelude`), one of
-exactly `Preparation`, `Build`, and `Runtime`: `.Preparation` in a `comptime`
-block or binding, `.Build` in `build: fn`, and `.Runtime` in the running
-program. The evaluation site decides it, so `print(#phase)` in `run` prints
-`Runtime` on every tier. [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet)
-shows both sites, and [`PhaseContract`](../../../Examples/Metaprogramming/Comptime/PhaseContract/run.jet)
-adds the `build: fn` site and a prepared record that keeps `.Preparation`
-while the program reads it. Do not confuse that language phase with
+`#phase` is a `Phase` value (`core.prelude`) that Jet fills in for each
+compiled copy, one of exactly `Preparation`, `Build`, and `Runtime`. A
+`comptime` block or binding reads `.Preparation`. A function body is compiled
+once for each phase that runs it: its compile-time copy reads `.Preparation`,
+its copy in the build entry (`build: fn` and what it calls) reads `.Build`,
+and its copy in the program reads `.Runtime`. Each copy folds its own
+`if #phase == ...`, so one helper called from a `comptime` binding and from
+`run` returns `.Preparation` to the first and `.Runtime` to the second, and
+`print(#phase)` in `run` prints `Runtime` on every tier.
+[`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet) shows both
+sites, and [`PhaseContract`](../../../Examples/Metaprogramming/Comptime/PhaseContract/run.jet)
+adds the `build: fn` copy, a helper whose copies differ, and a prepared record
+that keeps `.Preparation` while the program reads it. Do not confuse that language phase with
 `CompilerStage`, which contains `Parsed`, `Resolved`, `Typed`, `Prepared`,
 and `Emitted` and describes when a checked fact becomes available.
 

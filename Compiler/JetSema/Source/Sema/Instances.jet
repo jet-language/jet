@@ -178,6 +178,7 @@ sema_fact_node: fn(tree: &BodyTree, kind: NodeKind) Never! {
         .TypeTest(subject, _) -> sema_fact_type(tree, subject)
         .TraitConst(owner, _, _) -> sema_fact_type(tree, owner)
         .NumberParam(param) -> sema_fact_type(tree, param)
+        .CopyPhase(_, _, _, _) -> {}
         .Field(_, field) -> sema_fact_type(tree, field.ty)
         .StructLit(fields) -> {
             loop field in fields -> sema_fact_type(tree, field.field.ty)

@@ -39,8 +39,8 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FoldConstants](Comptime/FoldConstants.jet) — `:` asks for build-time evaluation as an optimization; `comptime` forces it.
 - [FrozenMap](Comptime/FrozenMap.jet) — A Map constant is frozen at build time like a List constant: its entries sit in static data in key order, and every read borrows them instead of building…
 - [ModuleValues](Comptime/ModuleValues.jet) — A module-level `NAME: expr` is computed while building and stored in the program like a literal, the same value on every tier.
-- [Phase](Comptime/Phase.jet) — `#phase` reads the evaluation-site `Phase`: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
-- [PhaseContract](Comptime/PhaseContract/) — `#phase` tells preparation, the build entry and the running program apart, and a prepared record keeps the phase it was made in.
+- [Phase](Comptime/Phase.jet) — `#phase` reads the `Phase` of the compiled copy: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
+- [PhaseContract](Comptime/PhaseContract/) — `#phase` tells preparation, the build entry and the running program apart, one helper reads a different phase in each compiled copy, and a prepared record keeps the phase it was made in.
 - [PrepBlock](Comptime/PrepBlock.jet) — `comptime { … }` is the explicit shared-preparation block.
 - [PrepFn](Comptime/PrepFn.jet) — `comptime fn` marks a literal hook, a method that runs while building to turn a written number into a value.
 - [PrepLoop](Comptime/PrepLoop.jet) — `comptime loop` repeats declarations while building.

@@ -1,6 +1,7 @@
-// `#phase` is the `Phase` of where it is evaluated: `.Preparation` inside
-// `comptime` code, `.Build` in `build: fn`, and `.Runtime` in the running
-// program. The site decides it, not the tier, so every tier prints the same.
+// `#phase` is the `Phase` of the compiled copy that runs it: `.Preparation`
+// inside `comptime` code, `.Build` in the build entry's copy, and `.Runtime`
+// in the running program. Each copy folds its own phase, not the tier, so
+// every tier prints the same.
 PREPARED: comptime { #phase }
 
 describe: fn(phase: Phase) -> String {
