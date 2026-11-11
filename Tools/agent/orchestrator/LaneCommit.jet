@@ -49,41 +49,25 @@ quiet: fn(l: Lander, line: Sh) -> Bool { command(l, line).stderr(.Capture).run()
 
 short_head: fn(l: Lander) -> String { command(l, Sh{"git rev-parse --short HEAD"}).run().output.trim() }
 
-// Every path a patch touches; a rename contributes both its old and its new
-// path. `git apply --numstat -z` gives `added TAB deleted TAB path` records, a
-// rename an empty path followed by its old and new path.
+// Every path a patch touches, each once, in the order git lists them; a rename
+// contributes both its old and its new path. `git apply --numstat -z` gives
+// `added TAB deleted TAB path` records, a rename an empty path followed by its
+// old and new path, so dropping each record's counts leaves every path.
+NUMSTAT_COUNTS: Regex{"^[^\t]*\t[^\t]*\t"}
+
 files_of: fn(l: Lander, patch: String) -> [String] {
-    parts: command(l, Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run().output.split(String.from_bytes([U8]{"\x00"}) ?? "").to_list()
-    found := [String]{}
-    at := 0
-    loop at < parts.len() {
-        added: parts[at].partition("\t")
-        deleted: added.tail.partition("\t")
-        at += 1
-        if added.head == "" || deleted.sep == "" || deleted.head == "" -> next
-        if deleted.tail != "" {
-            found.push(deleted.tail)
-            next
-        }
-        found.extend(parts.slice(at, at + 2))
-        at += 2
-    }
-    loop line in files.read_or(patch, "").lines() {
-        if line.starts_with("rename from ") -> found.push(line.removeprefix("rename from "))
-    }
-    paths := [String]{}
-    loop path in found {
-        if path != "" && !paths.contains(path) -> paths.push(path)
-    }
-    paths
+    numstat: command(l, Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run().output.split(String.from_bytes([U8]{"\x00"}) ?? "").map(part -> NUMSTAT_COUNTS.replace_first(part, "")).to_list()
+    renames: files.read_or(patch, "").lines().filter(line -> line.starts_with("rename from ")).map(line -> line.removeprefix("rename from "))
+    [String]{}.union(numstat.concat(renames).filter(path -> path != ""))
 }
 
 // The path list as the job's files file holds it: one path per line.
-listed: fn(paths: [String]) -> String { (loop path in paths -> "{path}\n").join("") }
+listed: fn(paths: [String]) -> String { paths.map(path -> "{path}\n").join("") }
 
 // Ends job `job` with exit status `code` and output `text`.
 finish: fn(job: String, code: Int, text: String) {
-    files.remove("{job}/applied") ?? ()
+    done := files.best_effort()
+    done.remove("{job}/applied")
     files.write("{job}/out", "{text}\n")
     files.write("{job}/rc", "{code}\n")
     files.touch("{job}/result")
@@ -95,14 +79,15 @@ revert_job: fn(l: Lander, job: String) {
         target: "{l.worktree}/{path}"
         if path != "" && files.exists(target) && !quiet(l, Sh{"git ls-files --error-unmatch -- {path}"}) -> files.remove(target)
     }
-    files.remove("{job}/applied") ?? ()
+    done := files.best_effort()
+    done.remove("{job}/applied")
 }
 
 // The queue's job directories, sorted.
 jobs_in: fn(queue: String) -> [String] {
-    names := loop entry in files.list_dir_or(queue, []) -> entry.name
+    names := files.list_dir_or(queue, []).map(entry -> entry.name)
     names.sort()
-    loop name in names.filter(name -> !name.starts_with(".") && files.is_dir("{queue}/{name}")) -> "{queue}/{name}"
+    names.filter(name -> !name.starts_with(".")).map(name -> "{queue}/{name}").filter(job -> files.is_dir(job))
 }
 
 // A lock holder interrupted mid-batch must not leave patches applied in the
@@ -181,12 +166,7 @@ frozen: fn(l: Lander, lane: String, paths: [String]) -> Bool {
     lines: (files.read(l.freeze) ?? return false).lines()
     end: (lines.get(0) ?? "").to_int() ?? return false
     if time.unix_ns() /% 1000000000 >= end || lane == (lines.get(1) ?? "") -> return false
-    loop prefix in lines.slice(2, lines.len()) {
-        loop path in paths {
-            if prefix != "" && path.starts_with(prefix) -> return true
-        }
-    }
-    false
+    lines.slice(2, lines.len()).any(prefix -> prefix != "" && paths.any(path -> path.starts_with(prefix)))
 }
 
 // Whether the hold switch keeps `lane` from landing: it exists and does not
