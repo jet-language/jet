@@ -1,0 +1,20 @@
+# #3526 c5: a Meta effect is compiler control, not host authority. Both builds
+# hold `Meta.Generate` and `Meta.Rewrite` and rewrite `greeting` to call
+# `read_note`, which reads files (`FS.Read`). The rewritten body is checked
+# against the program's own rows like hand-written code: the `allowed` program
+# has no denial, so it builds and runs the new body; the `denied` program's
+# `run` is `-[!FS]>`, so the rewrite that reaches `FS.Read` through `greeting`
+# is refused and nothing is built.
+fixture: meta_effects_grant_no_host_authority.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build allowed/main.jet
+exit: 0
+step: {work}/allowed/.jet/build/app
+exit: 0
+stdout: = "rewritten\n"
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ E0749 # the program's own denial checks the rewritten body
+stderr: ~ "which it prohibits with `-[!FS]>`" # Meta.Rewrite widens no host effect
+file: denied/.jet/build/app absent

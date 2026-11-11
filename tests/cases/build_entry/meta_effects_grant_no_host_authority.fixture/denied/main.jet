@@ -1,0 +1,19 @@
+build: fn(b: Build) -[Meta.Generate, Meta.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(greeting, #code {
+        read_note()
+        print("rewritten")
+    })
+    b.default(app)
+}
+
+run: fn() -[!FS]> {
+    greeting()
+}
+
+greeting: fn() {
+    print("written by hand")
+}
+
+read_note: fn() -[FS.Read]> {}
