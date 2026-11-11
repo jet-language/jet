@@ -3,12 +3,27 @@
 // on the kit's Measure module.
 //
 //   node driver.mjs trace FILE | strict FILE IDENTITY | phases TRACE SAMPLES OFFSET
-//                   | cpu SAMPLES T... | counters FILE | tree | run | timeout
+//                   | cpu SAMPLES TIMES | counters FILE | tree | run | timeout
+//
+// A value that starts with `-` takes its named form (`--offset -12345.5`,
+// `--times -5,0`), as the twin's typed command line reads it; TIMES is a
+// comma-separated list.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { cpuAt, parseCounters, phaseTable, readTrace, runMeasured, sampleTree } from '../../../perf/throughput/measure.mjs';
 
-const [command, ...args] = process.argv.slice(2);
+const [command, ...words] = process.argv.slice(2);
+// The command's positional values, and its named ones (`--name VALUE`).
+const named = {};
+const args = [];
+for (let at = 0; at < words.length; at += 1) {
+  if (words[at].startsWith('--')) {
+    named[words[at].slice(2)] = words[at + 1];
+    at += 1;
+  } else {
+    args.push(words[at]);
+  }
+}
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 const fail = (error) => {
   console.log(`error: ${error instanceof SyntaxError ? 'SyntaxError' : error.message}`);
@@ -22,10 +37,10 @@ try {
     const events = readTrace(args[0], { completedProcess: read(args[1]) });
     console.log(`${events.length} events`);
   } else if (command === 'phases') {
-    console.log(JSON.stringify(phaseTable(readTrace(args[0]), read(args[1]), Number(args[2])), null, 2));
+    console.log(JSON.stringify(phaseTable(readTrace(args[0]), read(args[1]), Number(named.offset ?? args[2])), null, 2));
   } else if (command === 'cpu') {
     const samples = read(args[0]);
-    console.log(JSON.stringify(args.slice(1).map((t) => cpuAt(samples, Number(t)))));
+    console.log(JSON.stringify((named.times ?? args[1]).split(',').map((t) => cpuAt(samples, Number(t)))));
   } else if (command === 'counters') {
     console.log(JSON.stringify(parseCounters(fs.readFileSync(args[0], 'utf8')), null, 2));
   } else if (command === 'tree') {
