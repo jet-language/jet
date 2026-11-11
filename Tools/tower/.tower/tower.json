@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99543,
+    "rev": 99545,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25806,6 +25806,11 @@
         {
           "at": "2026-11-11",
           "by": "Main",
+          "text": "D-DEEP-SPELL1 posted for the owner's vote, after a cross-family adversarial review (Review3, sol-reviewer, 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/ballot-review.md: PASS after repair). The review added the strongest missing option, a .DeepDisabled condition on the existing #Off marker (now A, recommended), kept #On(.Deep), #DeepCheck, a revived #DebugOnly(.deep) and an ordinary checks.deep() call as B to E, and corrected the costs and edge cases. The validator reports ok. The spelling-independent request and diagnostics (G6Decl-44, E2119-E2121) proceed meanwhile."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
           "text": "Deep-check spelling: D-DEEP-CHECK1=A spelled the marker #DebugOnly(.deep), and D-OFF-RELEASE1=A later retired #DebugOnly, so c1 and c10 have no current marker spelling. Ballot D-DEEP-SPELL1 is drafted at $JET_SCRATCH_ROOT/lanes/G6Decl/ballot-deep/D-DEEP-SPELL1.json (options A #On(.Deep), recommended; B #DeepCheck; C #DebugOnly(.deep); D if checks.deep(), which can't see its scope unless it's folded per declaration, so it would be a hidden marker that duplicates #Off). Validate.jet passes. It waits for its cross-family adversarial review in the next free agent slot, and then goes to the owner. The scope flag spelling is --deep-checks=tree.run, since :: is retired. G6Decl is building the spelling-independent parts meanwhile."
         },
         {
@@ -26044,7 +26049,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-11-11T15:15:20.054Z",
+      "updated": "2026-11-11T17:49:55.418Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -194529,6 +194534,223 @@
       "created": "2026-11-11T09:15:22.006Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-11"
+    },
+    {
+      "id": "D-DEEP-SPELL1",
+      "cardId": "c0cshs43",
+      "group": "syntax",
+      "title": "How should an opt-in deep check be written?",
+      "situation": "A deep check walks data to find a bug, such as a wrong stored tree size. The approved design keeps it off until --deep-checks selects it. Its original marker was #DebugOnly(.deep). A later ruling replaced #DebugOnly with #Off(.Release), leaving the deep spelling unsettled. The selection and safety rules are not being voted on again. Choose a spelling that preserves them. We recommend adding .DeepDisabled to #Off: the block is off when deep checks do not select it. This keeps one presence marker. #On(.Deep) reads more directly, but adds another marker and changes the earlier one-marker direction.",
+      "gist": "How should code mark an expensive check that stays off until requested?",
+      "lesson": "A deep check inspects data for a bug. It stays off until --deep-checks selects it, even in development. Jet must still check its types while off. Today's #Off(.Release) removes ordinary code in release builds. The choice is how to name the deep-check block, not whether its safety rules apply.",
+      "explainer": "Expected command results after implementation, identical for all five choices. Run these from the tree package beside run.jet. These are requirements, not observations of proposed syntax.\n\n```text\njet run -A run.jet\nstdout: 4\\n\nstderr: empty\nexit: 0\n\njet run -A --deep-checks run.jet\njet run -A --deep-checks=tree run.jet\njet run -A --deep-checks=tree.run run.jet\nstdout: empty, for each selected command\nstderr first line: Stop [E3001]: `panic: tree size is wrong`\nexit: 70, for each selected command\n\njet run -A --deep-checks=tree.leaf run.jet\nstdout: empty\nstderr: E2121, a blocking check-free-scope report\nexit: 1\n```\n\nThe selected command results stay the same with --profile release. -A suppresses authority notices; it does not enable deep checks or override a written Panic denial. Full report source excerpts depend on the chosen header's line positions; they must be snapshotted when implemented.",
+      "story": "Ana's three-node tree wrongly records four nodes. She wants a full walk while hunting the bug, without paying for that walk on normal runs.",
+      "inWild": "# Python illustration of the same three-node tree, not a library quotation.\nimport sys\n\ndef deep_consistent(tree):\n    children, cached_size = tree\n    return all(deep_consistent(child) for child in children) and cached_size == 1 + sum(child[1] for child in children)\n\ntree = ([([], 1), ([], 1)], 4)\nif '--deep-checks' in sys.argv:\n    assert deep_consistent(tree), 'tree size is wrong'\nprint(tree[1])\n# No flag: stdout 4, exit 0. Flag: AssertionError, exit 1.\n# This is an ordinary runtime branch, not Jet's checked removal contract.",
+      "detail": "All five choices are proposals, not working deep-check syntax. Each code pane shows the same complete run.jet. Beside it, package.jet contains name: \"tree\" and version: \"0.1.0\", on separate lines. Only the check header changes. The check walks the same corrupt tree and has the same required output under every choice.\n\nThe shared contract is D-DEEP-CHECK1=A, ratified September 11. No switch means off in every profile. --deep-checks selects all authored deep checks in the program and its Jet libraries, not foreign libraries or separate build tools. --deep-checks=tree selects this package; --deep-checks=tree.run selects this declaration, not its callers or callees. Paths use dots, not the retired ::. Several scopes take their union. An empty, unknown or check-free scope blocks compilation, even beside a bare switch.\n\nEach selected block may read captured state and mutate only fresh, nonescaping locals. External effects are rejected transitively. Local helper returns and local loop control remain allowed; return, propagation, break or next cannot leave the check. No ownership transfer, initialization, permission, refinement or optimizer assumption escapes it. Assert may stop, but the block grants no Panic permission. Disabled checks contribute no reachable Panic or memory effects. Required contracts and safety checks stay on. Selection is independent of release eligibility.\n\nEvery option needs the same compiler plumbing. CLI and embedded callers share one typed request. Selection belongs to the authored declaration, including private methods and anonymous bodies under their nearest named function. Overloads and generic instances with the same authored name are selected together. Diagnostics name matched declarations. Sessions retain their creation-time selection; changing it starts another session. Compiled-out code needs recompilation; compatible units may be reused, while unverifiable prebuilt identities need admitted source or a blocking refusal, even with checks off.\n\nCurrent source: origin/dev Core/Compiler/Lang.jet:24-28 declares only BuildCondition.Release. Compiler/Prelude/Markers.jet declares Off at Statement and Block sites. Compiler/JetFoundation/Data/Syntax/CoreSurface.jet registers Off and also #here and #caller. The parser emits Stmt.Switched; sema's Off arm checks the body in isolated state and emits TStmt.DebugOnly for .Release. JetIR then omits it for release. That internal name does not make #DebugOnly legal source. Adding any condition still requires generalizing that path, not just declaring an enum case.\n\nThe earlier D-OFF-RELEASE1=A ruling explicitly chose one conditional-presence marker. New options must say when they amend that direction. SUB G6Decl-44 stages only spelling-independent selection and diagnostics E2119-E2121; it is not proof that any proposed body runs. Proposed diagnostic reuse and removal costs below are design requirements, not observed behavior. Beginner and expert paths are stated per option; the expert selection and safety rules above never change.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Off(.DeepDisabled)",
+          "detail": "Add one BuildCondition case to the existing marker. DeepDisabled means this site's deep check was not selected. Beginner: write this header and use --deep-checks. Expert: use the same header with declaration scopes; no second presence marker is introduced. The negative condition is longer and requires care when reading it.",
+          "code": "Tree: struct { children: [Tree], cached_size: Int }\ndeep_consistent: fn(tree: Tree) -> Bool {\n    count := 1\n    loop child in tree.children {\n        if !deep_consistent(child) -> return false\n        count += child.cached_size\n    }\n    tree.cached_size == count\n}\nleaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }\nrun: fn() {\n    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}\n    #Off(.DeepDisabled) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    print(tree.cached_size)\n}\n// No flag: stdout 4, exit 0.\n// --deep-checks, =tree, or =tree.run: no stdout; panic, exit 70.\n// --deep-checks=tree.leaf: blocking check-free-scope error.",
+          "technical": "The proposed BuildCondition.DeepDisabled is evaluated per authored site, not once for the whole build. It removes this block when unselected, regardless of profile. .Release and bare Off retain their current meanings. Reuse Stmt.Switched and the isolated checking/removal path, with the shared deep restrictions.\n\nCost: one condition case, registry and marker-argument updates, generalized selection/removal, plus all shared deep-check work. No measured compile-time or runtime advantage is claimed. Enabled checks pay for the walk; disabled checks must emit no branch or body at any level.\n\nEdge cases: two Off markers on one statement remain refused. DeepDisabled is valid only for a deep-check body, not a general escape from read-only rules. Nesting under Off(.Release) can suppress an otherwise selected check in release, so document both conditions rather than promising it runs there. Statement and Block sites stay; expression and item uses are refused. This extends the closed condition menu but keeps the ratified one-marker direction."
+        },
+        {
+          "key": "B",
+          "name": "#On(.Deep)",
+          "detail": "Add an affirmative marker. Beginner: the header says the check is on only when selected. Expert: target declarations with the same switches as A. It reads directly but asks the owner to amend the earlier one-marker direction. It can share A's semantic path; two spellings do not require two implementations.",
+          "code": "Tree: struct { children: [Tree], cached_size: Int }\ndeep_consistent: fn(tree: Tree) -> Bool {\n    count := 1\n    loop child in tree.children {\n        if !deep_consistent(child) -> return false\n        count += child.cached_size\n    }\n    tree.cached_size == count\n}\nleaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }\nrun: fn() {\n    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}\n    #On(.Deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    print(tree.cached_size)\n}\n// No flag: stdout 4, exit 0.\n// --deep-checks, =tree, or =tree.run: no stdout; panic, exit 70.\n// --deep-checks=tree.leaf: blocking check-free-scope error.",
+          "technical": "Propose On at Statement and Block sites and BuildCondition.Deep, with the same isolated deep checker and removal path as A. Cost: a new marker, condition case, registry/parser wiring and shared implementation work. There is no measured cost comparison with A.\n\nEdge cases: this option refuses On(.Release), Off(.Deep) and two presence markers on one statement. Those refusals are proposed, not today's E0344 behavior for On. Expression and item uses are refused. Nested Off(.Release) can still erase an enabled deep block. The new spelling amends D-OFF-RELEASE1's one-marker direction. Sharing the underlying mechanism is required by I8; a second independent selector or checker is not authorized."
+        },
+        {
+          "key": "C",
+          "name": "#DeepCheck",
+          "detail": "Name the purpose rather than the build condition. Beginner: one short word with no condition to learn. Expert: declaration targeting and all shared rules stay unchanged. This is the clearest domain name, but adds a marker beside Off and amends the earlier one-marker direction.",
+          "code": "Tree: struct { children: [Tree], cached_size: Int }\ndeep_consistent: fn(tree: Tree) -> Bool {\n    count := 1\n    loop child in tree.children {\n        if !deep_consistent(child) -> return false\n        count += child.cached_size\n    }\n    tree.cached_size == count\n}\nleaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }\nrun: fn() {\n    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}\n    #DeepCheck {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    print(tree.cached_size)\n}\n// No flag: stdout 4, exit 0.\n// --deep-checks, =tree, or =tree.run: no stdout; panic, exit 70.\n// --deep-checks=tree.leaf: blocking check-free-scope error.",
+          "technical": "Propose DeepCheck at Statement and Block sites, lowered into the shared switched-body path. It needs no BuildCondition case. Cost: one marker and registry/parser wiring, plus shared checking, selection and removal work. Its shorter source spelling is not proof of faster compilation.\n\nEdge cases: arguments are refused; item and expression uses are refused. DeepCheck plus Off on one statement is refused, while nesting keeps both conditions. No ordinary check, required contract or arbitrary effectful debug block is silently converted. This changes the one-marker surface direction but need not violate I8 if it has exactly one semantic path."
+        },
+        {
+          "key": "D",
+          "name": "Restore #DebugOnly(.deep)",
+          "detail": "Use the spelling originally approved for deep checks. Beginner: old deep-check examples remain recognizable. Expert: targeting stays identical. It revives a retired name, and DebugOnly is misleading because selected checks may run in release. Bare DebugOnly would remain refused, not become an alias.",
+          "code": "Tree: struct { children: [Tree], cached_size: Int }\ndeep_consistent: fn(tree: Tree) -> Bool {\n    count := 1\n    loop child in tree.children {\n        if !deep_consistent(child) -> return false\n        count += child.cached_size\n    }\n    tree.cached_size == count\n}\nleaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }\nrun: fn() {\n    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    print(tree.cached_size)\n}\n// No flag: stdout 4, exit 0.\n// --deep-checks, =tree, or =tree.run: no stdout; panic, exit 70.\n// --deep-checks=tree.leaf: blocking check-free-scope error.",
+          "technical": "This explicitly amends D-OFF-RELEASE1's retirement. Register only the deep form and lower it through the same switched-body path. Cost: marker and argument registration, parser changes and shared work. Lowercase .deep needs an explicit argument rule; do not claim it follows the current BuildCondition menu.\n\nEdge cases: bare DebugOnly stays refused with Off(.Release) as its repair. Other arguments are refused. Two presence markers on one statement, expression uses and item uses are refused. The argument-sensitive retirement rule is additional teaching and diagnostic work, but does not mean one accepted name has two runtime meanings. Selected checks remain legal in release unless an enclosing condition removes them."
+        },
+        {
+          "key": "E",
+          "name": "if checks.deep(at: #here)",
+          "detail": "Use an ordinary-looking call with an explicit site. Beginner: familiar if syntax, but a new checks API must be learned and imported. Expert: the site can identify the authored declaration without a hidden caller-dependent function. It still needs special branch rules to satisfy the already approved deep-check contract.",
+          "code": "use checks: core.checks\nTree: struct { children: [Tree], cached_size: Int }\ndeep_consistent: fn(tree: Tree) -> Bool {\n    count := 1\n    loop child in tree.children {\n        if !deep_consistent(child) -> return false\n        count += child.cached_size\n    }\n    tree.cached_size == count\n}\nleaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }\nrun: fn() {\n    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}\n    if checks.deep(at: #here) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    print(tree.cached_size)\n}\n// No flag: stdout 4, exit 0.\n// --deep-checks, =tree, or =tree.run: no stdout; panic, exit 70.\n// --deep-checks=tree.leaf: blocking check-free-scope error.",
+          "technical": "The checks module and deep function are proposed, not existing Core APIs. #here already supplies a SourceLocation with function and module; #caller is also an existing parameter-default mechanism. Thus an ordinary function can receive site information. A Boolean need not have one value throughout a build. The draft's impossibility argument was false.\n\nSite information alone does not mark a checked diagnostic region. Ordinary if allows outward writes and effects and does not promise branch removal at every level. To keep this a spelling-only choice, recognize only this direct condition as a deep site and lower its then branch through the same isolated checker/removal as A. Cost: a new Core API, exact-call recognition and shared work. Purely ordinary if without those rules is not equivalent and would need reopening D-DEEP-CHECK1.\n\nEdge cases: this option refuses a stored result, negation, a compound condition, an else arm, a forwarded or forged site, and indirect calls as deep-check spellings. That is extra expression policy; these are proposed refusals, not current diagnostics. A wrapper's #caller default could capture a site, but does not remove the need for branch-region recognition. Function identity alone also cannot identify each check site for artifact identities."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Off(.DeepDisabled) extends the existing presence marker instead of introducing a second one. Its longer negative name buys consistency with the ratified direction. All choices still need the same deep safety and selection work.",
+        "gains": [
+          "One presence marker",
+          "No revived retirement or call-sensitive branch rules"
+        ],
+        "losses": [
+          {
+            "loss": "The negative condition is longer and less direct.",
+            "mitigation": "Teach it as off unless selected, show the exact command beside it, and keep its condition meaning consistent with Off."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It reads well, but adds a marker and explicitly amends the earlier one-marker direction."
+          },
+          {
+            "key": "C",
+            "reason": "The purpose is clearest, but another marker is not necessary to express this build condition."
+          },
+          {
+            "key": "D",
+            "reason": "It revives a retired name whose debug-only promise is false in release."
+          },
+          {
+            "key": "E",
+            "reason": "Site passing is feasible, but ordinary-looking if needs special restrictions and guaranteed removal to preserve the approved behavior."
+          }
+        ],
+        "tradeoff": "Prefer one marker and a longer condition over the shorter affirmative or purpose-specific names. This is a readability judgment, not a measured speed claim."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI. Fresh agent: Review3. Added the missing Off condition and corrected the claim that a function cannot receive its source site; all five options now name costs and the same behavior. Replaced unsupported implementation and diagnostic promises with proposals, restored shared edge cases, and recommend one presence marker rather than the original On recommendation."
+      },
+      "checkInstructions": "First verify this payload with the ballot validator. After the vote, implement only the chosen spelling and the complete shared contract. Prove valid and corrupt trees, default off, global and dotted scopes, union, every malformed or unmatched occurrence, and an embedded caller. Prove type errors while off, read-only captures, no external effects, no escaped facts, local versus outward control flow, Panic denial and required contracts.\n\nExercise every entry point, optimization level and applicable target. Check session immutability, resolved-site artifact identities and missing-source refusals. Validate each spelling's proposed pairing and attachment diagnostics with snapshots. Do not count rejection of unsupported syntax as behavior coverage.",
+      "surface": {
+        "gist": "How should code mark an expensive check that stays off until requested?",
+        "lesson": "The check stays off until --deep-checks selects it. Its types are checked even while off. Every choice keeps the same safety rules and targeting.",
+        "trio": {
+          "current": {
+            "note": "Today this runs outside release; it is not an opt-in deep check.",
+            "code": "#Off(.Release) {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// Corrupt tree: development stops; release prints 4."
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "An ordinary if can select the same check; it does not promise Jet's checked removal rules.",
+            "code": "if '--deep-checks' in sys.argv:\n    assert deep_consistent(tree), 'tree size is wrong'\nprint(tree[1])\n# No flag: 4. Flag: AssertionError, exit 1."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "#Off(.DeepDisabled)",
+            "gist": "Off unless this check is selected.",
+            "gains": [
+              "One presence marker"
+            ],
+            "losses": [
+              "Longer negative name"
+            ],
+            "proposed": {
+              "code": "#Off(.DeepDisabled) {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// No flag: 4. --deep-checks: stops before printing."
+            }
+          },
+          {
+            "key": "B",
+            "name": "#On(.Deep)",
+            "gist": "On when this check is selected.",
+            "gains": [
+              "Direct affirmative wording"
+            ],
+            "losses": [
+              "Adds a presence marker"
+            ],
+            "proposed": {
+              "code": "#On(.Deep) {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// No flag: 4. --deep-checks: stops before printing."
+            }
+          },
+          {
+            "key": "C",
+            "name": "#DeepCheck",
+            "gist": "Name the check's purpose.",
+            "gains": [
+              "Short, clear purpose"
+            ],
+            "losses": [
+              "Adds a marker"
+            ],
+            "proposed": {
+              "code": "#DeepCheck {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// No flag: 4. --deep-checks: stops before printing."
+            }
+          },
+          {
+            "key": "D",
+            "name": "#DebugOnly(.deep)",
+            "gist": "Revive the original deep spelling.",
+            "gains": [
+              "Matches the first approved example"
+            ],
+            "losses": [
+              "Retired name",
+              "Misleading in release"
+            ],
+            "proposed": {
+              "code": "#DebugOnly(.deep) {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// No flag: 4. --deep-checks: stops before printing."
+            }
+          },
+          {
+            "key": "E",
+            "name": "if checks.deep(at: #here)",
+            "gist": "Pass the site to a new API.",
+            "gains": [
+              "Familiar if syntax"
+            ],
+            "losses": [
+              "Special branch rules still needed"
+            ],
+            "proposed": {
+              "code": "if checks.deep(at: #here) {\n    assert(deep_consistent(tree), \"tree size is wrong\")\n}\n// No flag: 4. --deep-checks: stops before printing."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep one presence marker. The longer negative name avoids another marker or special rules hidden behind an ordinary-looking call.",
+          "gains": [
+            "Same marker family",
+            "Same checked removal path"
+          ],
+          "losses": [
+            {
+              "loss": "Longer, negative wording.",
+              "mitigation": "Read it as off unless selected; show the enabling command."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Direct wording, but another presence marker."
+            },
+            {
+              "key": "C",
+              "reason": "Clear purpose, but another marker."
+            },
+            {
+              "key": "D",
+              "reason": "Revives a name that misleads in release."
+            },
+            {
+              "key": "E",
+              "reason": "Passing the site works; special branch rules are still needed."
+            }
+          ],
+          "tradeoff": "Choose consistency over the shortest wording. No speed advantage is claimed."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T17:49:41.037Z"
     }
   ],
   "questions": [
@@ -197723,6 +197945,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:49:55.418Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-11T17:49:41.038Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DEEP-SPELL1",
+      "note": "How should an opt-in deep check be written?"
+    },
     {
       "at": "2026-11-11T17:49:04.907Z",
       "by": "Main",
