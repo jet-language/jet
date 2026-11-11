@@ -761,19 +761,13 @@ rate: fn(passes: Int, cases: Int) -> Dyn {
 score: fn(row: Dyn, key: String) -> Int { integer(row, key) ?? -1 }
 
 // How many `rows` score 1 for `key`.
-ones: fn(rows: [Dyn], key: String) -> Int {
-    n := 0
-    loop row in rows {
-        if score(row, key) == 1 -> n += 1
-    }
-    n
-}
+ones: fn(rows: [Dyn], key: String) -> Int { rows.filter((row: Dyn) -> score(row, key) == 1).len() }
 
 summarize: fn(rows: [Dyn]) -> Dyn {
     out := Dyn.object()
     loop context in ["capsule", "control"] {
         wanted: context.copy()
-        selected: rows.filter((row: Dyn) -> (str(row, "context") ?? "") == wanted)
+        selected: rows.filter((row: Dyn) -> text(row, "context") == wanted)
         entry := Dyn.object()
         entry["cases"] = selected.len()
         entry["passes"] = Dyn.Int(ones(selected, "score"))
@@ -824,13 +818,8 @@ make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [Strin
     loop row in rows -> add(keys, row_key(row))
     complete: rows.len() == inputs.tasks.len() * resolved.len() * modes.len() && keys.len() == rows.len() && keys.all((key: String) -> expected.contains(key))
     status: if blocked_reasons.len() > 0 || !complete -> "blocked" else -> "recorded"
-    keys.sort()
-    sorted := [Dyn]{}
-    loop key in keys {
-        loop row in rows {
-            if row_key(row) == key -> sorted.push(row.copy())
-        }
-    }
+    sorted := rows.copy()
+    sorted.sort_by((row: Dyn) -> row_key(row))
     reasons := [String]{}
     loop reason in blocked_reasons -> add(reasons, reason)
     reasons.sort()
@@ -843,19 +832,15 @@ make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [Strin
     out["control"] = inputs.control.copy()
     out["fixtures"] = inputs.fixtures.copy()
     out["harness"] = inputs.harness.copy()
-    adapters := [Dyn]{}
-    loop r in resolved -> adapters.push(adapter_descriptor(r, env))
-    tasks := [Dyn]{}
-    loop task in inputs.tasks -> tasks.push(task_descriptor(task))
-    out["adapters"] = adapters
-    out["tasks"] = tasks
+    out["adapters"] = Dyn.Array(resolved.map((r: Resolved) -> adapter_descriptor(r, env)))
+    out["tasks"] = Dyn.Array(inputs.tasks.map((task: Task) -> task_descriptor(task)))
     out["rows"] = sorted
     out["summary"] = if status == "recorded" -> summarize(rows) else -> Dyn.Null
     out["blocked_reasons"] = reasons
     out
 }
 
-capsule_rows: fn(report: Dyn) -> [Dyn] { (items(report, "rows") ?? []).filter((row: Dyn) -> str(row, "context") == Val("capsule")) }
+capsule_rows: fn(report: Dyn) -> [Dyn] { (items(report, "rows") ?? []).filter((row: Dyn) -> text(row, "context") == "capsule") }
 
 baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
     if text(report, "status") != "recorded" || !truthy(member(report, "summary")) -> usage("cannot record a baseline from an incomplete or blocked run")
@@ -957,7 +942,7 @@ compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
         adapter: text(want, "adapter")
         task: text(want, "task")
         name: "{adapter}/{task}"
-        found: current.filter((row: Dyn) -> (str(row, "adapter") ?? "") == adapter && (str(row, "task") ?? "") == task)
+        found: current.filter((row: Dyn) -> text(row, "adapter") == adapter && text(row, "task") == task)
         if found.len() == 0 {
             failures.push("{name}:missing")
             next
