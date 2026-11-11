@@ -30,9 +30,9 @@ fail: fn(message: String, code: Int) -> Never {
 
 // The text of the files in `dir` that `matching` names, in name order.
 read_all: fn(dir: String, matching: String) -> String {
-    names := loop entry in files.list_dir_or(dir, [], matching: matching) -> entry.name
+    names := files.list_dir_or(dir, [], matching: matching).map(entry -> entry.name)
     names.sort()
-    (loop name in names -> files.read("{dir}/{name}")).join("")
+    names.map(name -> files.read("{dir}/{name}")).join("")
 }
 
 // The lines a patch adds, trimmed.
@@ -46,20 +46,9 @@ lead: fn(name: String) -> String {
     if parts.sep == "" -> name else -> parts.head
 }
 
-// Whether any of `lines` is one of `set`.
-overlaps: fn(lines: [String], set: [String]) -> Bool {
-    loop line in lines {
-        if set.contains(line) -> return true
-    }
-    false
-}
-
 // Whether a line `patch` adds holds a word `word` matches.
 adds_word: fn(patch: String, word: Regex) -> Bool {
-    loop line in added(patch) {
-        if word.is_match(line) -> return true
-    }
-    false
+    added(patch).any(line -> word.is_match(line))
 }
 
 // The SUBs of `run` that `hits` names, each with every later SUB of its
@@ -134,7 +123,7 @@ run: fn() {
         name: files.basename(sub)
         paths: files.read_or("{integ}/{name}.files", "").lines().filter(path -> path != "")
         rebased: files.read_or("{integ}/{name}.rebased", "")
-        hits.push(overlaps(paths.concat(loop path in paths -> path.removesuffix(".jet")), rows) || overlaps(added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")), errors))
+        hits.push(paths.concat(loop path in paths -> path.removesuffix(".jet")).any(line -> rows.contains(line)) || added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")).any(line -> errors.contains(line)))
     }
     split: quarantine(integ, run, hits)
     if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)

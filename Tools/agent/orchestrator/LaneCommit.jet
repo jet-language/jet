@@ -205,14 +205,6 @@ alive: fn(pid: String) -> Bool {
     true
 }
 
-// Whether a path of `paths` is already one of `taken`.
-overlaps: fn(paths: [String], taken: [String]) -> Bool {
-    loop path in paths {
-        if taken.contains(path) -> return true
-    }
-    false
-}
-
 drain: fn(l: Lander) {
     if !files.is_dir(l.worktree) -> return
     batch := [String]{}
@@ -229,7 +221,7 @@ drain: fn(l: Lander) {
         peek: files_of(l, "{job}/patch")
         files.write("{job}/files.peek", listed(peek.copy()))
         // A job that touches a path already in the batch waits for the next round.
-        if frozen(l, lane, peek.copy()) || overlaps(peek, union.copy()) -> next
+        if frozen(l, lane, peek.copy()) || union.any(path -> peek.contains(path)) -> next
         if apply_job(l, job.copy()) == .Val(paths) {
             union.extend(paths)
             batch.push(job)

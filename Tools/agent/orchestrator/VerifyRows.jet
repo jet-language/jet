@@ -7,41 +7,42 @@
 // $JET_DEV_WORKTREE as Roots.jet finds it.
 use {
     files: core.files
+    json: core.encoding.json
     process: core.process
     roots: "Roots"
 }
 
-// The number after `"KEY":` in a testkit summary line, 0 when it has none.
-count: fn(summary: String, key: String) -> Int {
-    summary.partition("\"{key}\":").tail.partition(",").head.partition("}}").head.to_int() ?? 0
+// The CPUs the runs share, as `taskset -c 0-11`.
+CPUS: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+
+// The line printed for `row` from its run `ran`, whose output it keeps in
+// `log`: the PASS and FAIL counts of the testkit summary (the last line that
+// starts `{"PASS"`, a JSON object), and the exit code, 124 on the timeout and
+// 127 when the run did not start.
+row_line: fn(row: [String], ran: Result<ProcessReceipt, IOError>, log: String) -> String {
+    head: "{row[0]}\t{row[1]}\t{row[2]}"
+    receipt: ran ?? {
+        files.write(log, "{err}\n")
+        return "{head}\tPASS=0\tFAIL=0\trc=127"
+    }
+    files.write(log, receipt.output)
+    summary: json.parse(receipt.output.lines().filter(line -> line.starts_with("{{\"PASS\"")).last() ?? "") ?? Dyn.Null
+    "{head}\tPASS={json.at<Int>(summary, "PASS") ?? 0}\tFAIL={json.at<Int>(summary, "FAIL") ?? 0}\trc={if receipt.timed_out -> 124 else -> receipt.code}"
 }
 
 run: fn() {
     args: process.args()
-    if args.len() < 2 || args.len() > 3 -> process.fail(2, "usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
+    if ![2, 3].contains(args.len()) -> process.fail(2, "usage: jet Tools/agent/orchestrator/VerifyRows.jet ROWS OUTDIR [JET]")
     out: args[1]
     given: args.get(2) ?? "jet"
     // A JET given as a relative path still names it from the worktree.
     jet: if given.contains("/") && !given.starts_with("/") -> "{files.cwd()}/{given}" else -> given
     rows: files.read(args[0]).tsv_records().filter(cells -> cells.len() >= 3)
     files.create_dir_all(out)
-    cpus: loop cpu in 0..<12 -> cpu
     worktree: roots.roots()["JET_DEV_WORKTREE"]
-    specs: loop row in rows -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(cpus)
+    specs: rows.map(row -> Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(CPUS))
     results: process.run_all(specs, 6)
-    lines := [String]{}
-    loop at in 0..<rows.len() {
-        row: rows[at]
-        log: "{out}/{row[0]}.{row[1]}.{row[2]}.out"
-        receipt: results[at] ?? {
-            files.write(log, "{err}\n")
-            lines.push("{row[0]}\t{row[1]}\t{row[2]}\tPASS=0\tFAIL=0\trc=127")
-            next
-        }
-        files.write(log, receipt.output)
-        summary: receipt.output.lines().filter(line -> line.starts_with("{{\"PASS\"")).last() ?? ""
-        lines.push("{row[0]}\t{row[1]}\t{row[2]}\tPASS={count(summary, "PASS")}\tFAIL={count(summary, "FAIL")}\trc={if receipt.timed_out -> 124 else -> receipt.code}")
-    }
+    lines := loop at in 0..<rows.len() -> row_line(rows[at], results[at], "{out}/{rows[at][0]}.{rows[at][1]}.{rows[at][2]}.out")
     lines.sort_by((a, b) -> a.compare_version(b))
     loop line in lines -> print(line)
 }
