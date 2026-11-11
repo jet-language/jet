@@ -363,8 +363,9 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
 // The response row of one selected generated module. A `meta.rewrite_body`
 // row becomes its function, the declaration's own text up to its body with
 // the new body, which replaces the declaration in the package's own file
-// (the loader blanks it there). None when the package declares no top-level
-// function of that name with a braced body.
+// (the loader blanks it there). A line `#{f.body}` of the new body is the
+// original body, at that line's indentation. None when the package declares
+// no top-level function of that name with a braced body.
 jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
     // copy: each row's texts are views of the plan, which stays whole.
     function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy()})
@@ -377,9 +378,19 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                 head: String.from_bytes(bytes[declared.span.start..<open]) ?? return None
                 lines := row.source.split("\n").to_list()
                 loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
+                paste: "#{{{function}.body}}"
                 text := "{head}{{\n"
                 loop line in lines {
-                    text = if line.trim() == "" -> "{text}\n" else -> "{text}    {line}\n"
+                    if line.trim() == "" {
+                        text = "{text}\n"
+                    } else if line.trim() == paste {
+                        margin: line.removesuffix(paste)
+                        loop original in jet_driver_function_body_lines(bytes, open, declared.span.end) {
+                            text = if original == "" -> "{text}\n" else -> "{text}    {margin}{original}\n"
+                        }
+                    } else {
+                        text = "{text}    {line}\n"
+                    }
                 }
                 text = "{text}}}\n"
                 return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: text, replaces: Val(JetDriverReplacedFunction{path: module_row.physical_path.copy(), start: declared.span.start, end: declared.span.end})})
@@ -387,6 +398,42 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
         }
     }
     None
+}
+// The lines of a function's original body, between its braces at `open` and
+// `end - 1`: without the blank lines around them, and dedented by their
+// common indentation.
+jet_driver_function_body_lines: fn(bytes: [U8], open: Int, end: Int) -> [String] Never! {
+    starts := [Int]{}
+    stops := [Int]{}
+    at := open + 1
+    loop at <= end - 1 {
+        stop := at
+        loop stop < end - 1 && bytes[stop] != 10 -> stop += 1
+        starts.push(at)
+        stops.push(stop)
+        at = stop + 1
+    }
+    indent := -1
+    first := -1
+    last := -1
+    loop index in 0..<starts.len() {
+        width := 0
+        loop starts[index] + width < stops[index] && (bytes[starts[index] + width] == 32 || bytes[starts[index] + width] == 9) -> width += 1
+        if starts[index] + width == stops[index] -> next
+        if indent < 0 || width < indent -> indent = width
+        if first < 0 -> first = index
+        last = index
+    }
+    lines := [String]{}
+    if first < 0 -> return lines
+    loop index in first..<(last + 1) {
+        if starts[index] + indent >= stops[index] {
+            lines.push("")
+            next
+        }
+        lines.push(String.from_bytes(bytes[(starts[index] + indent)..<stops[index]]) ?? "")
+    }
+    lines
 }
 // The offset of the `{` that opens a function's braced body in `bytes`: the
 // first brace after its name (`after`) outside parentheses, brackets, string

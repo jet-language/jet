@@ -377,7 +377,8 @@ row widens nothing for its importer.
 top-level function `f` with the statements of a `#code { statements }` block.
 The rewritten function, its own declaration with the new body, is the
 generated module `rewrite_body/f` of the value's target, checked with the
-program, and its original text is withdrawn from its file. It uses
+program, and its original text is withdrawn from its file. A line `#{f.body}`
+in the block pastes the original body there, so a rewrite can wrap it. It uses
 `Meta.Rewrite`, which a row denies with `-[!Meta.Rewrite]>`.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
@@ -396,7 +397,7 @@ affects and recorded in a receipt that does not promise equivalence. Some
 limits hold in both modes: no token, tree or attribute macros, no custom
 syntax, no message loop, no user macros, no mutable compiler nodes, no forged
 facts, and no host permission carried by a Meta effect. `b.compiler`, `#code`,
-`meta.add` and `meta.rewrite_body` are built; pasting a body with `#{f.body}`,
+`meta.add`, `meta.rewrite_body` and its `#{f.body}` paste are built;
 `meta.events` and the other operations on the value are ratified contract and
 not yet built.
 The source examples and the two executable registries linked above are the

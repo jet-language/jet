@@ -6,6 +6,8 @@
 # `rewrite_body/greeting.jet`. Replacing a body uses `Meta.Rewrite`, so the
 # `denied` build's `-[!Meta.Rewrite]>` row refuses the call and nothing is
 # built. The `unnamed` build passes a local value, not a top-level function.
+# The `wrapped` build pastes the original body with `#{greeting.body}` between
+# two new statements, keeping its nested indentation.
 fixture: rewrite_body_replaces_a_function_body.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -23,3 +25,8 @@ step: jet build unnamed/main.jet
 exit: 1
 stderr: ~ "`meta.rewrite_body` needs a top-level function's name" # a local value names no function
 file: unnamed/.jet/build/app absent
+step: jet build wrapped/main.jet
+exit: 0
+step: {work}/wrapped/.jet/build/app
+exit: 0
+stdout: = "before\nwritten by hand\nafter\n"

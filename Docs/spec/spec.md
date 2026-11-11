@@ -5803,7 +5803,9 @@ withdrawn from its file, whose other code keeps its place. The new body is
 checked like hand-written code, in that module, which sees the package's
 declarations. `f` is named directly; a local value is refused, and a function
 the package doesn't declare with a braced body fails the build (E3502). One
-build rewrites a function's body once. Replacing a body uses the
+build rewrites a function's body once. A line `#{f.body}` of the new body
+pastes the function's original body there, at that line's indentation, so a
+rewrite can wrap the body it replaces. Replacing a body uses the
 `Meta.Rewrite` effect, denied the same way (`-[!Meta.Rewrite]>`).
 
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.

@@ -670,9 +670,12 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         }
         if value == 35 {
             // A template paste `#{name}` is one word: the name a derive or
-            // marker template splices in for its binding `name`.
+            // marker template splices in for its binding `name`. So is
+            // `#{f.body}`, which pastes the body of the function a
+            // `meta.rewrite_body` replaces into its new body.
             if next1 == 123 && is_identifier_start(source, i + 2) {
-                paste_end: scan_identifier_end(source, i + 2)
+                paste_end := scan_identifier_end(source, i + 2)
+                if byte_at(source, paste_end) == 46 && byte_at(source, paste_end + 1) == 98 && byte_at(source, paste_end + 2) == 111 && byte_at(source, paste_end + 3) == 100 && byte_at(source, paste_end + 4) == 121 && byte_at(source, paste_end + 5) == 125 -> paste_end += 5
                 if byte_at(source, paste_end) == 125 {
                     last_code = push_code(facts, K_IDENT, start, paste_end + 1, false)
                     i = paste_end + 1

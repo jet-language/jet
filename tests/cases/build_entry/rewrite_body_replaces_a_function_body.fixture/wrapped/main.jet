@@ -1,0 +1,21 @@
+build: fn(b: Build) -[Meta.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(greeting, #code {
+        print("before")
+        #{greeting.body}
+        print("after")
+    })
+    b.default(app)
+}
+
+run: fn() {
+    greeting()
+}
+
+greeting: fn() {
+    name: "hand"
+    if name != "" {
+        print("written by {name}")
+    }
+}
