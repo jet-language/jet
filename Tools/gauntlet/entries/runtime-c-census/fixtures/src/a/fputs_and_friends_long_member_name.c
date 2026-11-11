@@ -1,0 +1,1 @@
+struct F { int fd; }; extern long __stdio_write(struct F *, const char *); int fputs(const char *s, struct F *f) { return (int)__stdio_write(f, s); } int fputc(int c, struct F *f) { return c + f->fd; }

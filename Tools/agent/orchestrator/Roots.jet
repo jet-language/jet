@@ -1,7 +1,15 @@
 // The dev tool roots for the orchestrator's Jet twins, the twin of
-// Tools/agent/roots.sh (which their originals source): a root is the
-// environment's value, else what the machine's ${XDG_CONFIG_HOME:-~/.config}/jet/env
-// sets it to, else the default derived from $HOME and the XDG directories.
+// Tools/agent/roots.sh (which their originals source) and of
+// Tools/agent/roots.mjs (gauntlet tool entries roots-sh and roots-mjs): a root
+// is what a shell that sources the machine's ${XDG_CONFIG_HOME:-~/.config}/jet/env
+// sees, else the default derived from $HOME and the XDG directories.
+//
+//   jet Tools/agent/orchestrator/Roots.jet NAME...
+//
+// prints `NAME=value` for each root named (JET_STATE_ROOT, JET_SCRATCH_ROOT,
+// JET_RUN_ROOT, JET_BASE_ROOT, JET_TARGET_ROOT, JET_SEEDS, JET_SEED,
+// JET_DEV_WORKTREE, JET_BIN), as `bash roots.sh NAME...` and
+// `node roots.mjs NAME...` do; any other name exits 64.
 use {
     files: core.files
     process: core.process
@@ -14,36 +22,28 @@ env_or: fn(name: String, fallback: String) -[Env]> String Never! {
     if value == "" -> fallback.copy() else -> value
 }
 
-// What the machine's jet/env file sets `name` to (the default of its
-// `${NAME:-default}` form), None when it sets nothing.
-env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+// `$name` once the machine's jet/env file is sourced, else `fallback`: the
+// environment's value, then each of the file's assignments of it in turn
+// (`NAME=value` or `export NAME=value`, quoted or not, `$HOME` expanded; a
+// `${NAME:-default}` value keeps a value already set).
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
+    found := env_or(name, "")
     home: env_or("HOME", "")
-    text: files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? return None
     defaulted: "${{{name}:-"
-    found := ""
-    seen := false
-    loop line in text.lines() {
+    loop line in (files.read("{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env") ?? "").lines() {
         parts: line.trim().removeprefix("export ").partition("=")
         if parts.sep == "" || parts.head != name -> next
-        value := parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
-        if value.starts_with(defaulted) && value.ends_with("}}") {
-            value = value.removeprefix(defaulted).removesuffix("}}")
+        value: parts.tail.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'").replace("$HOME", home)
+        if {
+            !value.starts_with(defaulted) || !value.ends_with("}}") -> found = value
+            found == "" -> found = value.removeprefix(defaulted).removesuffix("}}")
         }
-        found = value.replace("$HOME", home)
-        seen = true
     }
-    if seen -> Val(found) else -> None
-}
-
-// A root: the environment, else the jet/env file, else `fallback`.
-root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
-    found: env_or(name, "")
-    if found != "" -> return found
-    env_file_value(name) ?? fallback.copy()
+    if found != "" -> found else -> fallback.copy()
 }
 
 state: fn() -[Env, FS]> String Never! {
-    root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")
+    root("JET_STATE_ROOT", "{root("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")
 }
 
 scratch: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state()) }
@@ -59,7 +59,25 @@ worktree: fn() -[Env, FS]> String Never! {
     root("JET_DEV_WORKTREE", files.dirname(files.dirname(files.dirname(sys.executable()))))
 }
 
-seed: fn() -[Env, FS]> String Never! {
-    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
-    root("JET_SEED", "{seeds}/current")
+// The seed store.
+seeds: fn() -[Env, FS]> String Never! {
+    root("JET_SEEDS", "{root("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
+}
+
+seed: fn() -[Env, FS]> String Never! { root("JET_SEED", "{seeds()}/current") }
+
+run: fn() {
+    known: [String: String]{
+        "JET_STATE_ROOT": state(),
+        "JET_SCRATCH_ROOT": scratch(),
+        "JET_RUN_ROOT": run_dir(),
+        "JET_BASE_ROOT": root("JET_BASE_ROOT", "{scratch()}/discovery/base"),
+        "JET_TARGET_ROOT": root("JET_TARGET_ROOT", "{scratch()}/targets"),
+        "JET_SEEDS": seeds(),
+        "JET_SEED": seed(),
+        "JET_DEV_WORKTREE": worktree(),
+        // The jet under test, which `jet test` passes its children.
+        "JET_BIN": root("JET_BIN", "{seed()}/jet"),
+    }
+    loop name in process.args() -> print("{name}={known.get(name) ?? process.fail(64, "roots: unknown root {name}")}")
 }

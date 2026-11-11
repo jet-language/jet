@@ -1,0 +1,24 @@
+{
+  "name": "runtime-c-census",
+  "mode": "tool",
+  "description": "The runtime's C census runtime-c-census.mjs and its Jet twin RuntimeCCensus.jet (#6693, #5072 c9): read the global symbols of ELF64 relocatable objects and the ELF members of ar archives, then resolve the objects' strong undefined references the way `ld -static` does over one archive group (the first member that defines a name is pulled, repeated until nothing changes; weak references pull nothing), and print the references outside the objects, each member pulled with the reference that pulled it, and what stays unresolved. The fixtures are two objects and two archives built from fixtures/src with gcc 15.2 (`-c -O1 -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-ident`) and `ar rcs`, plus short.o, main.o's first 40 bytes: liba.a holds a member with a GNU long name and a non-ELF member, libb.a a second memcpy that loses to liba.a's unless it comes first. The cases cover --start, --root (with an empty item and a name nothing defines), --provided, archive order, --expect-none on both outcomes, and each refusal (no `--`, an unknown option, no object, an object that is not ELF64 or is cut short, an archive that is not ar), whose stdout is empty and whose exit is 1.",
+  "tool": {
+    "original": "Tools/agent/runtime-c-census.mjs",
+    "jet": "Tools/agent/RuntimeCCensus.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["main.o", "second.o", "--", "liba.a", "libb.a"], "expected": "expected/plain.out"},
+      {"args": ["--start", "main.o", "second.o", "--", "liba.a", "libb.a"], "expected": "expected/start.out"},
+      {"args": ["--root=extra_root_fn,,missing_root", "--provided=memcpy,shared_def", "main.o", "--", "liba.a", "libb.a"], "expected": "expected/roots.out"},
+      {"args": ["main.o", "--", "libb.a", "liba.a"], "expected": "expected/order.out"},
+      {"args": ["--expect-none", "main.o", "--", "liba.a"], "exit": 1, "expected": "expected/expect-none.out"},
+      {"args": ["--expect-none", "--provided=strlen", "second.o", "--", "liba.a"], "expected": "expected/none-pulled.out"},
+      {"args": ["main.o", "liba.a"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--bogus", "main.o", "--", "liba.a"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--", "liba.a"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["short.o", "--", "liba.a"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["notes.txt", "--", "liba.a"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["main.o", "--", "main.o"], "exit": 1, "expected": "expected/refused.out"}
+    ]
+  }
+}
