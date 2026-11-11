@@ -337,7 +337,10 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
     // pinned copy in the Hangar), probed there; the probe below adds the
     // registry overlay this helper needs.
     bwrap: foundation_linux_bwrap() ?? return Err(jet_cli_rust_foreign_sandbox_error(err.message()))
-    shell: cli_process.which("sh") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap is present but no immutable shell probe is available"))
+    found: cli_process.which("sh") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap is present but no immutable shell probe is available"))
+    // PATH can reach the shell through a host link the sandbox does not mount
+    // (NixOS's /run/current-system/sw/bin), so the probe runs its target.
+    shell: cli_files.canonicalize(found) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve the shell probe `{found}`: {err}"))
     probe := jet_cli_rust_foreign_bwrap(bwrap, "", "", "", false, false)
     // A registry overlay needs bubblewrap 0.11 or newer; probe the exact mount
     // the build will use so an older bubblewrap reports here, not as a Cargo
