@@ -33,6 +33,27 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
     }
     classes := if lowest < 0 -> 0 else -> 1
     rows: ir_opt_fold_rows(m)
+    // Each candidate's body is spelled once, as its shape: everything but
+    // the functions it reaches, which a round reads by their class. Bodies
+    // of one shape number the same.
+    shapes := [String:Int]{}
+    shape_of := [Int]{}
+    reached := [[Int]]{}
+    loop id in 0..<count {
+        if first[id] < 0 {
+            shape_of.push(-1)
+            reached.push([Int]{})
+            next
+        }
+        found := ir_opt_fold_shape(m, functions[id], rows)
+        known := shapes.get(found.text) ?? -1
+        if known < 0 {
+            known = shapes.len()
+            shapes[found.text] = known
+        }
+        shape_of.push(known)
+        reached.push(found.reached.move())
+    }
     loop classes > 0 {
         seen := [String:Int]{}
         split := [Int]{}
@@ -41,7 +62,7 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
                 split.push(-1)
                 next
             }
-            key: "{first[id]}|{ir_opt_fold_key(m, functions[id], rows, first)}"
+            key: ir_opt_fold_key(first, id, shape_of[id], reached[id])
             known: seen.get(key) ?? -1
             if known < 0 -> seen[key] = id
             split.push(if known < 0 -> id else -> known)
@@ -125,16 +146,19 @@ ir_opt_fold_runtime: fn(m: IRModule, symbol: String) -> String Never! {
     symbol.copy()
 }
 
-// The class of the function `symbol` names, or the runtime routine itself.
-ir_opt_fold_routine: fn(m: IRModule, symbol: String, first: [Int]) -> String Never! {
-    id: name_rows_value(m.function_rows, symbol) ?? return symbol.copy()
-    "#{ir_opt_fold_callee(first, id)}"
+// Body `f` as ir_opt_fold_identical compares it, apart from the functions
+// it reaches: `text` spells the rest, with `#` where a direct call's callee
+// or a dropped slot's routine names a function of the module, and
+// `reached` lists those functions in that order.
+IROptFoldShape: struct {
+    text: String
+    reached: [Int]
 }
 
-// Body `f` as ir_opt_fold_identical compares it.
-ir_opt_fold_key: fn(m: IRModule, f: IRFunction, rows: [Int], first: [Int]) -> String Never! {
+ir_opt_fold_shape: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape Never! {
     result: if f.result < 0 -> -1 else -> rows[f.result]
     parts := [String]{"{f.param_count} {result}"}
+    reached := [Int]{}
     loop slot in 0..<f.slot_type.len() {
         kind: if f.slot_kind[slot] == {
             .Param -> "p"
@@ -144,10 +168,32 @@ ir_opt_fold_key: fn(m: IRModule, f: IRFunction, rows: [Int], first: [Int]) -> St
         parts.push("{kind}{rows[f.slot_type[slot]]}")
     }
     loop at in 0..<f.op.len() {
-        a: if f.op[at] == .Call -> ir_opt_fold_callee(first, f.a[at]) else -> f.a[at]
+        a: f.a[at]
+        if f.op[at] == .Call {
+            parts.push("{ir_op_name(f.op[at])} {f.dst[at]} # {f.b[at]} {f.c[at]}")
+            reached.push(a)
+            next
+        }
         parts.push("{ir_op_name(f.op[at])} {f.dst[at]} {a} {f.b[at]} {f.c[at]}")
-        if f.op[at] == .Drop && a >= 0 -> parts.push(ir_opt_fold_routine(m, m.types[f.slot_type[a]].drop, first))
+        if f.op[at] == .Drop && a >= 0 {
+            routine: m.types[f.slot_type[a]].drop
+            if name_rows_value(m.function_rows, routine) == {
+                .Val(id) -> {
+                    parts.push("#")
+                    reached.push(id)
+                }
+                .None -> parts.push(routine.copy())
+            }
+        }
     }
     loop arg in f.args -> parts.push("{arg}")
+    IROptFoldShape{text: parts.join("|"), reached}
+}
+
+// Body `id` as a round of ir_opt_fold_identical compares it: its class, its
+// shape's number, and the class of each function it reaches.
+ir_opt_fold_key: fn(first: [Int], id: Int, shape: Int, reached: [Int]) -> String Never! {
+    parts := [String]{"{first[id]}", "{shape}"}
+    loop callee in reached -> parts.push("{ir_opt_fold_callee(first, callee)}")
     parts.join("|")
 }
