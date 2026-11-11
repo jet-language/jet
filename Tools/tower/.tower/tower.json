@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99209,
+    "rev": 99210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88895,7 +88895,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-11T09:32:40.945Z",
+      "updated": "2026-11-11T09:40:52.469Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -196054,6 +196054,191 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T09:15:23.360Z"
+    },
+    {
+      "id": "NEW-D-HOST-CAP1",
+      "cardId": "c0bbj6h3",
+      "group": "stdlib",
+      "title": "Place UI host requirements on checked service identities, not copied call rows",
+      "situation": "Core call rows currently carry UI requirements, and the runtime-library cutover removes those rows. Both checking calls and validating manifest names read that metadata. Moving only one reader would either miss calls or reject valid needs. This vote chooses the replacement source and its propagation rule. It also states the behavior changes for constructors and capability probes instead of silently dropping their checks.",
+      "gist": "Where should UI host requirements live after the compiler call rows are removed?",
+      "lesson": "A host requirement and an effect grant need not mean the same thing. Derive a service requirement once, carry it through wrappers, and validate its name independently of which services a target provides.",
+      "explainer": "",
+      "story": "A package declares UI.IME but calls clipboard.read_text. Every option refuses missing clipboard authority. A new wrapper around the same service must not escape the check.",
+      "inWild": "A typed declaration annotation can express a semantic promise independently of implementation. An effect row can instead make the service ordinary permission authority. Neither is merely a spelling change.",
+      "detail": "D-HOST-LEAF1=E requires ordinary runtime imports, declared effect rows and a generated interface; keep that cutover. A is the supplied option d; B/C are a/b; D is c. Propagate requirements through checked calls and fail closed on unresolved authority. An import alone does not require a service.\n\nKeep the seven UI capability names in UICapability, not the union of services present on one target. Generate each service identity-to-case association from that canonical source; audit complete, unique coverage and stable provider codes. Both the loader and E2937 consume it. Do not call a new namespace naming convention metadata-free.\n\nA removes requirements from shortcut/accessibility constructors and shortcuts.binding only. Dispatch and attach/project retain theirs through service-specific probes; capabilities() uses a neutral enumeration probe. Missing runtime providers still return ordinary errors. Prove aliases, user wrappers, direct runtime calls, shared event adapters, unknown names, native and web behavior.",
+      "options": [
+        {
+          "key": "A",
+          "sourceOption": "d",
+          "name": "Infer needs from runtime binding identity",
+          "detail": "Each checked runtime UI service module maps to one UICapability case. Requirements propagate through every checked callee, including user wrappers and direct runtime calls. Core states its need by calling that service. Match generated interface identities, never a user-controlled namespace spelling. Keep the neutral capability-enumeration probe unprivileged. Give service-specific availability probes the service requirement, preserving dispatch and accessibility checks. \n\nHost-free constructors stop requiring capabilities; their ordinary effects remain unchanged. Split the shared event interface into typed service entries over one runtime implementation, fixing each event code privately. No duplicated C body or public arbitrary event code.",
+          "code": "// [UNCHECKED: proposed runtime UI module grouping]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Core implementation imports jet.runtime.ui.clipboard and calls get().\n// That service identity implies UI.Clipboard; not the import alone.\n// read_text and clear both require UI.Clipboard through their callees."
+        },
+        {
+          "key": "B",
+          "sourceOption": "a",
+          "name": "Policy needs on declarations",
+          "detail": "Add the typed needs key to Policy on the introducing runtime declaration; Core wrappers inherit it through checked callees. Applying it only to selected Core wrappers would repeat the present coverage gap. Read the same UICapability vocabulary in the manifest loader. This supports a host-free API that deliberately promises a capability, without tying that promise to a service module. Its cost is explicit annotations whose absence cannot be detected merely from the module name. Never infer a new permission from the annotation.",
+          "code": "// [UNCHECKED: proposed Policy needs key]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Introducing service declaration:\n// #Policy(needs: [UI.Clipboard])\n// get: fn() -[IO]> String?\n// Core wrappers inherit the checked requirement."
+        },
+        {
+          "key": "C",
+          "sourceOption": "b",
+          "name": "Needs marker on declarations",
+          "detail": "Add Needs as a registered marker carrying typed UICapability values. Put it on introducing runtime declarations and propagate it exactly as B. Keep needs in the manifest and use the same enum for vocabulary checks. It is a visually distinct spelling for the same annotation semantics, not another propagation engine. It must replace, not coexist with, Policy needs. Its cost is one more public marker and its registration, formatting and documentation.",
+          "code": "// [UNCHECKED: proposed Needs marker]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Introducing service declaration:\n// #Needs(UI.Clipboard)\n// get: fn() -[IO]> String?\n// Same propagation and manifest check as B."
+        },
+        {
+          "key": "D",
+          "sourceOption": "c",
+          "name": "UI services are ordinary effects",
+          "detail": "Introduce UI with seven effect leaves on runtime services. Infer them through ordinary calls and require them in explicitly bounded caller rows. UI authority moves to allow/deny; remove the parallel UI needs check rather than enforcing the same permission twice. This is one effect mechanism, but changes both manifests and the meaning of a host requirement. If host availability is a separate promise, keep that promise separately specified instead of pretending an allow entry guarantees a provider. Replace E2937 with ordinary effect-authority diagnostics in one cutover.",
+          "code": "// [UNCHECKED: proposed UI effect family and authority cutover]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() -[IO, UI.Clipboard]> { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// No UI.Clipboard grant: ordinary authority error.\n// The introducing get declaration also names UI.Clipboard."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Use the checked service identity already required by the runtime-library cutover. Preserve needs as a host requirement, with one transitive check rather than copied wrapper rows.",
+        "gains": [
+          "New wrappers inherit requirements"
+        ],
+        "losses": [
+          {
+            "loss": "Host-free constructors no longer require a capability.",
+            "mitigation": "Make that behavior change explicit; retain service-specific checks for dispatch and accessibility operations."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "More flexible than module grouping, but adds a Policy key and explicit requirement annotations to audit."
+          },
+          {
+            "key": "C",
+            "reason": "Clear spelling, but a new marker for the declaration property B can express with Policy."
+          },
+          {
+            "key": "D",
+            "reason": "Strongest unification option, but it changes needs to permission authority rather than just relocating existing metadata."
+          }
+        ],
+        "tradeoff": "Grouping carries meaning; explicit annotations offer more freedom at a larger audit surface."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked both metadata readers and runtime-library ratification; added transitive and identity checks, target-stable vocabulary, and explicit constructor/probe behavior."
+      },
+      "checkInstructions": "Check each capability separately, including clear and is_empty after their separate defect fix. Verify manifest vocabulary after deleting call rows, direct runtime calls, user-defined lookalikes, dynamic calls, neutral probes, provider absence and all applicable tiers. Proposed APIs are UNCHECKED.",
+      "surface": {
+        "gist": "Where should UI host requirements live after the compiler call rows are removed?",
+        "lesson": "A host requirement and an effect grant need not mean the same thing. Derive a service requirement once, carry it through wrappers, and validate its name independently of which services a target provides.",
+        "trio": {
+          "current": {
+            "note": "Current call checking and manifest vocabulary both depend on compiler call rows.",
+            "code": "// Baseline probe: probes/host-cap.jet\n// needs: [UI.IME]\n// clipboard.read_text() lacks UI.Clipboard."
+          },
+          "wild": {
+            "lang": "Jet alternative",
+            "note": "A declaration annotation makes a semantic promise visible even if the body changes.",
+            "code": "// [UNCHECKED: proposed Policy key]\n// #Policy(needs: [UI.Clipboard])"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Infer needs from runtime binding identity",
+            "gist": "Derive requirements from the host service actually reached.",
+            "gains": [
+              "Requirements survive new wrappers"
+            ],
+            "losses": [
+              "Changes requirements for host-free constructors."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed runtime UI module grouping]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Core implementation imports jet.runtime.ui.clipboard and calls get().\n// That service identity implies UI.Clipboard; not the import alone.\n// read_text and clear both require UI.Clipboard through their callees."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Policy needs on declarations",
+            "gist": "Write a typed host requirement on the introducing declaration.",
+            "gains": [
+              "Explicit promises independent of file layout"
+            ],
+            "losses": [
+              "Missing annotations need a coverage check."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed Policy needs key]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Introducing service declaration:\n// #Policy(needs: [UI.Clipboard])\n// get: fn() -[IO]> String?\n// Core wrappers inherit the checked requirement."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Needs marker on declarations",
+            "gist": "Use a distinct marker for the same requirement annotation.",
+            "gains": [
+              "The requirement is visually separate"
+            ],
+            "losses": [
+              "Adds a public marker."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed Needs marker]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] needs: [UI.IME] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// Introducing service declaration:\n// #Needs(UI.Clipboard)\n// get: fn() -[IO]> String?\n// Same propagation and manifest check as B."
+            }
+          },
+          {
+            "key": "D",
+            "name": "UI services are ordinary effects",
+            "gist": "Move UI requirements into the existing effect-authority mechanism.",
+            "gains": [
+              "Reuses ordinary effect inference"
+            ],
+            "losses": [
+              "Changes manifest and callable contracts."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed UI effect family and authority cutover]\npackage: { name: \"paste\" version: \"0.1.0\" authority: { allow: [IO, Mem.Alloc] } }\nuse clipboard: core.ui.host.clipboard\npaste: fn() -[IO, UI.Clipboard]> { _read: clipboard.read_text() }\nrun: fn() { print(\"ready\") }\n// No UI.Clipboard grant: ordinary authority error.\n// The introducing get declaration also names UI.Clipboard."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the checked service identity already required by the runtime-library cutover. Preserve needs as a host requirement, with one transitive check rather than copied wrapper rows.",
+          "gains": [
+            "New wrappers inherit requirements"
+          ],
+          "losses": [
+            {
+              "loss": "Host-free constructors no longer require a capability.",
+              "mitigation": "Make that behavior change explicit; retain service-specific checks for dispatch and accessibility operations."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "More flexible than module grouping, but adds a Policy key and explicit requirement annotations to audit."
+            },
+            {
+              "key": "C",
+              "reason": "Clear spelling, but a new marker for the declaration property B can express with Policy."
+            },
+            {
+              "key": "D",
+              "reason": "Strongest unification option, but it changes needs to permission authority rather than just relocating existing metadata."
+            }
+          ],
+          "tradeoff": "Grouping carries meaning; explicit annotations offer more freedom at a larger audit surface."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T09:40:52.469Z"
     }
   ],
   "questions": [
@@ -199204,6 +199389,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T09:40:52.469Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "NEW-D-HOST-CAP1",
+      "note": "Place UI host requirements on checked service identities, not copied call rows"
+    },
     {
       "at": "2026-11-11T09:32:40.945Z",
       "by": "Main",
