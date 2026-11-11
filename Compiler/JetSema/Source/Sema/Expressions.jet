@@ -5996,6 +5996,7 @@ sema_expr_pipe_binding: fn(name: String, init: Expr, span: Span) -> Stmt Never! 
 }
 
 sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if call.name == "#code" -> return sema_build_code_value(call, expected, environment, program, diagnostics)
     if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
         payload: sema_expression_result_call_payload(call, state, scopes)
         span: Span{start: call.name_span.start, end: expr_span(payload).end}

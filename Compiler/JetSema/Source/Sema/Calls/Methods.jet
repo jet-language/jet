@@ -241,6 +241,8 @@ sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     if hook.handled -> return hook
     build: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if build.handled -> return build
+    compiler: sema_call_try_compiler_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if compiler.handled -> return compiler
     step: sema_call_try_build_step_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if step.handled -> return step
     dev: sema_call_try_dev_context_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

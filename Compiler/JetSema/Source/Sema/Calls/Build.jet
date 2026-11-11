@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, CtValue, DeriveBodyItem, Diagnostic, Expr, Item, NamedCtValue, ParamZone, Span, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, type_name]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, BuildOptionKind, BuildOptionRow, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, Expr, Item, NamedCtValue, ParamZone, Span, TComptimeField, TComptimeValue, Type, ast_empty_call_arg_flags, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -208,6 +208,82 @@ sema_build_compiler_site: fn(environment: SemaScopeEnvironment, span: Span, diag
     row: diagnostic_registry_row("E0776") ?? panic("E0776 must have a registry row")
     diagnostics.push(sema_error("E0776", span, row.what, row.why, row.fix))
     false
+}
+
+// `#code { items }`: a `Code` value holding its items formatted as source,
+// expanded by the same path as a `b.generate` template. The items are
+// checked where the value lands, with the program (`meta.add`).
+sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    body := [DeriveBodyItem]?{None}
+    if call.args.len() == 1 -> body = call.args[0].flags.template_items
+    items_written: body ?? {
+        diagnostics.push(sema_error("E3502", call.name_span, "`#code` needs one item block", "a `Code` value is the items written in its block", "write `#code {{ ... }}`"))
+        return None
+    }
+    items: sema_derive_expand_template_body(items_written, [NamedCtValue]{}, diagnostics) ?? return None
+    source: TComptimeField{name: "source", value: TComptimeValue.String{value: sema_build_generate_format(items)}}
+    value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source}}
+    node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, Span{start: call.name_span.start, end: call.args[0].span.end})
+    sema_expr_expected(node, expected, environment, program, diagnostics)
+}
+
+// A call on the root's `Compiler` value. `meta.add(code, scope: name)` adds
+// a `Code` value's items as the generated module `name` of the value's
+// target, checked with the program like hand-written code (JetBuildSession
+// `compiler.add`).
+sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    shape: "meta.add(#code {{ ... }}, scope: \"name\")"
+    if method != "add" {
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`"))
+        return failed
+    }
+    code := CallArg?{None}
+    scope := CallArg?{None}
+    loop argument in args {
+        label: if argument.label == .Val(written) -> written.name.copy() else -> ""
+        takes: if label == {
+            "" -> code == None
+            "scope" -> scope == None
+            else -> false
+        }
+        if argument.spread || argument.flags.template_items != None || !takes {
+            diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add` doesn't take this argument", "`meta.add` takes one `Code` value and the `scope:` module it joins", "write `{shape}`"))
+            return failed
+        }
+        unlabelled := argument.copy()
+        unlabelled.label = None
+        if label == "scope" -> scope = Val(unlabelled) else -> code = Val(unlabelled)
+    }
+    code_arg: code ?? {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects a `Code` value", "`meta.add` adds the items of one `Code` value", "write `{shape}`"))
+        return failed
+    }
+    scope_arg: scope ?? {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects `scope:`", "the added items join the generated module `scope:` names", "write `{shape}`"))
+        return failed
+    }
+    // The session reads the `Code` value, then the scope's String.
+    ordinary := [CallArg]{code_arg, scope_arg}
+    required_types: [Type]{Type.Named{name: "Code"}, Type.String}
+    values := [TExpr]{}
+    params := [SemaCallParam]{}
+    loop (index, argument) in ordinary {
+        required: required_types[index]
+        value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return failed
+        if !compatible {
+            diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
+            return failed
+        }
+        values.push(value.copy())
+        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+    }
+    ownership: sema_ownership_check_method_call(state, "Compiler.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 // A `b.generate` template's formatted items and the build locals it splices.

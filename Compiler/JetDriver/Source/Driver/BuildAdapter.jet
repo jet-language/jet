@@ -63,6 +63,7 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         return Val(JetEvalBuildReply.Value{value: jet_eval_build_graph_value(graph)})
     }
     if member.starts_with("BuildAction.") || member.starts_with("BuildFile.") -> return Val(jet_driver_build_step_call(session, inputs, base_dir, member, args, span))
+    if member.starts_with("Compiler.") -> return Val(jet_driver_compiler_call(session, member, args, span))
     if !member.starts_with("Build.") -> return None
     if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
     owner: jet_eval_build_context_id(args[0]) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
@@ -155,6 +156,32 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
         .HostRequest(service_method, _) -> jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable")
     }
+}
+
+// A call on the root's `Compiler` value, the value first. `meta.add` sends
+// its `Code` value's formatted items as the generated source and the scope
+// it joins (JetBuildSession `compiler.add`).
+jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
+    if member != "Compiler.add" || args.len() != 3 -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
+    compiler: jet_eval_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+    source: jet_driver_code_source(args[1]) ?? return jet_driver_build_host_failure(session, span, "`meta.add` received code without its items")
+    scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`meta.add`'s scope must be a string")
+    reply: build_session_call(session, "compiler.add", [BuildSessionValue]{compiler, scope}, Val(source), false, span.start, span.end)
+    if reply == {
+        .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}
+        .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        .HostRequest(service_method, _) -> jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable")
+    }
+}
+
+// The formatted items a `Code` value (`#code { … }`) holds.
+jet_driver_code_source: fn(value: TComptimeValue) -> String? Never! {
+    if value == .Struct(type_name, fields) && type_name == "Code" {
+        loop field in fields {
+            if field.name == "source" && field.value == .String(text) -> return Val(text.copy())
+        }
+    }
+    None
 }
 
 // Whether `text`, read as a path under the build file's directory, names a

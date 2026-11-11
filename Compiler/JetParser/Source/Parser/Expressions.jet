@@ -960,6 +960,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
             span: span,
         }
     }
+    if parser_code_value_ahead(state) -> return parser_parse_code_value(state)
     // `#package`, `#here` and `#caller`: the site values, one name written
     // against the `#`. A marker path `#here.Name` stays a marker.
     if kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) {

@@ -1,0 +1,24 @@
+# #3526 c14 (D-META-LADDER1): `#code { … }` is a `Code` value, and
+# `meta.add(code, scope:)` on the root's `Compiler` value adds its items as
+# the generated module `scope` of the value's target. The `good` build's
+# program calls the added function. The `bad` build's added items call a name
+# nothing declares, and they are checked with the program like hand-written
+# code, so the build fails. `jet fmt` writes `#code { … }` back as `#code`
+# and its item block, stable on a second pass, and the formatted file builds.
+fixture: meta_add_inserts_code_into_its_target.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet fmt good/main.jet
+exit: 0
+file: good/main.jet ~ "#code {"
+step: jet fmt --check good/main.jet
+exit: 0
+step: jet build good/main.jet --write-generated=on
+exit: 0
+file: good/.jet/generated/main/greeting.jet ~ "added by meta.add" # the added items are the generated module
+step: {work}/good/.jet/build/app
+exit: 0
+stdout: = "added by meta.add\n"
+step: jet build bad/main.jet
+exit: 1
+stderr: ~ missing_helper # the added items are checked

@@ -5756,7 +5756,9 @@ refuses the words with E2104 instead of dropping them.
 build's targets. Only the root package's own build source can make it: a
 `b.compiler` call written in any other package is E0776, even inside a
 function the root hands its `Build` to. The value expires with the build that
-made it.
+made it. `#code { items }` is a `Code` value holding the items written in its
+block, and `meta.add(code, scope: "name")` adds them to the value's target as
+the generated module `name`, which the program checks like hand-written code.
 
 `b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`

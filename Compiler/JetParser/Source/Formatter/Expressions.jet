@@ -2369,6 +2369,11 @@ jfmt_str_match_has_computed_hole: fn(f: JetFmt, span: Span) -> Bool Never! {
 
 jfmt_fmt_call: fn(f: &JetFmt, call: Call) {
     jfmt_write(f, call.name)
+    // `#code { items }` is its item block alone (parser_parse_code_value).
+    if call.name == "#code" && call.args.len() == 1 {
+        jfmt_fmt_template_block(f, call.args[0])
+        return
+    }
     jfmt_fmt_call_type_args(f, call.type_args, call.name_span.end)
     jfmt_fmt_call_args_with_template(f, call.args, Val(call.name_span.end))
 }
@@ -2531,16 +2536,19 @@ jfmt_fmt_call_args_with_template: fn(f: &JetFmt, args: [CallArg], source_start: 
         jfmt_fmt_call_args_multiline(f, call_args, source)
     }
     jfmt_write(f, ")")
-    if template == .Val(template_arg) {
-        jfmt_write(f, " {{")
-        jfmt_newline(f)
-        f.indent += 1
-        if template_arg.flags.template_items == .Val(items) -> jfmt_fmt_derive_body_items(f, items)
-        f.indent -= 1
-        jfmt_emit_leading(f, template_arg.span.end)
-        if !f.at_line_start -> jfmt_newline(f)
-        jfmt_write(f, "}}")
-    }
+    if template == .Val(template_arg) -> jfmt_fmt_template_block(f, template_arg)
+}
+
+// A typed template's ` { items }` block.
+jfmt_fmt_template_block: fn(f: &JetFmt, template_arg: CallArg) {
+    jfmt_write(f, " {{")
+    jfmt_newline(f)
+    f.indent += 1
+    if template_arg.flags.template_items == .Val(items) -> jfmt_fmt_derive_body_items(f, items)
+    f.indent -= 1
+    jfmt_emit_leading(f, template_arg.span.end)
+    if !f.at_line_start -> jfmt_newline(f)
+    jfmt_write(f, "}}")
 }
 
 // Whether `arg` is a `fn` lambda that can hug its call's parentheses: no
