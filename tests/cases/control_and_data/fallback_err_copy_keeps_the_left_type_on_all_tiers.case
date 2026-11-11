@@ -17,19 +17,19 @@ stdout: == default
 step method_o0: jet run method_error.jet
 exit: 1
 stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
-stderr: ~ "This `List` value has no instance method named `zz`"
-stderr: ~ "1 problem found"
+stderr: ~ "This `List` value has no instance method named `zz`" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
 stderr: !~ "[jet.UnknownName]" # `fact` is bound
 step method_o1: jet run --optimize=basic method_error.jet
 exit: 1
-stderr: ~ "`zz` isn't a method on this value"
-stderr: ~ "1 problem found"
-stderr: !~ "[jet.UnknownName]"
+stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
+stderr: !~ "[jet.UnknownName]" # `fact` is bound
 step method_o2: jet run --optimize=full method_error.jet
 exit: 1
-stderr: ~ "`zz` isn't a method on this value"
-stderr: ~ "1 problem found"
-stderr: !~ "[jet.UnknownName]"
+stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
+stderr: !~ "[jet.UnknownName]" # `fact` is bound
 step bind_o0: jet run pattern_bind.jet
 exit: 1
 stderr: = fallback_err_copy_keeps_the_left_type_on_all_tiers.pattern_bind.stderr
