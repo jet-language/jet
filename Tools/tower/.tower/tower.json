@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99563,
+    "rev": 99564,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75157,11 +75157,11 @@
         {
           "n": 183,
           "text": "A ?? fallback that returns a value built from err.copy() keeps the left side's type. Found by G6Meta on 2026-11-11 (seed-t22, probe ZFactsScratch in lane w5024): in a user module, rows: compiler.query(...) ?? return Answer{failure: Val(err.copy()), ...} leaves rows untyped. rows.zz() reports no method error, and if row == .Program(fact) binds nothing, so fact fails later with E0107. Val(err) or \"{err}\" in the same fallback keep [Fact]. Fix it in sema at the root (an untyped binding must never reach later checks silently), with a case covering the err.copy() form, the method-error form and the pattern-bind form at O0, O1 and O2, and a sweep for other expression forms that lose the left type in a ?? fallback.",
-          "status": "met",
-          "metBy": "Main",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "19bfa53eb4 (G8Scope-21): its named proof lines pass on batch compiler seed-t25a.",
-          "at": "2026-11-11T18:55:29.348Z"
+          "evidence": "",
+          "at": "2026-11-11T19:12:11.568Z"
         }
       ],
       "refs": [],
@@ -75172,7 +75172,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-11T18:55:29.348Z",
+      "updated": "2026-11-11T19:12:11.568Z",
       "updatedBy": "Main",
       "criteriaLastN": 183
     },
@@ -197954,6 +197954,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T19:12:11.568Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0oev2ib",
+      "note": "#183: Batch compiler b2 refused the G8Scope-21 case fallback_err_copy (line 20 stream assertion); the fix is routed to G8Scope-3, and c183 is met again when its fix lands and passes on a batch compiler."
+    },
     {
       "at": "2026-11-11T19:04:00.709Z",
       "by": "Main",
