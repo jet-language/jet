@@ -410,13 +410,22 @@ sema_taint_edit_distance: fn(left: String, right: String) -> Int Never! {
     previous[b.len()]
 }
 
+// Whether two names are the same kind of word: both start with an ASCII upper
+// case letter (a tag, effect or type), or neither does (a function or keyword).
+sema_taint_same_word_kind: fn(left: String, right: String) -> Bool Never! {
+    sema_checked_module_uppercase(left) == sema_checked_module_uppercase(right)
+}
+
+// The one candidate within three edits of `name` that is the same kind of word
+// (both start upper case or both lower case) and keeps at least one of its
+// letters; none when two candidates tie. `#run` is not a near miss of `PII`.
 sema_taint_closest: fn(name: String, candidates: [String]) -> String? {
     best := ""
     best_distance := 4
     ambiguous := false
     loop candidate in candidates {
         distance := sema_taint_edit_distance(name, candidate)
-        if distance == 0 || distance > 3 -> next
+        if distance == 0 || distance > 3 || distance >= name.count_bytes() || !sema_taint_same_word_kind(name, candidate) -> next
         if {
             distance < best_distance -> {
                 best = candidate

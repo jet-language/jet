@@ -3204,8 +3204,8 @@ is not built yet: it attaches to the D-MEMREF1 link build.
 *(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
 no-`defer` ruling)*: automatic scope-end cleanup remains
 the safety net on success, error, panic, and cancellation; a small block still
-ends ownership early. `close(^resource)` is the one consuming close operation
-for files, locks, connections, and other resources. `defer close(^resource)`
+ends ownership early. `close(resource)` is the one consuming close operation
+for files, locks, connections, and other resources. `defer close(resource)`
 schedules it beside acquisition and runs deferred closes in reverse order on
 every scope exit. An immediate close consumes at the call; a deferred close
 consumes when its scheduled action runs. `.drop("reason")` remains deliberate
@@ -3214,8 +3214,11 @@ success such as `finish`, `commit`, `flush`, and `shutdown` remains an ordinary
 fallible method rather than pretending automatic cleanup succeeded.
 There is no general deferred statement or block: `defer action()` and
 `defer { ... }` are E0003. The resource expression is one directly moved local;
-ordinary close-call resolution proves that `close(^resource)` is valid, and the
+ordinary close-call resolution proves that `close(resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
+(Corrected 2026-11-10: this entry first spelled the operand `^resource`; a
+`^` in value position is E0003, and `close` consumes its argument through its
+`Close` contract, so the operand is the plain local.)
 Checked instantiated owned fields and List/Option payloads retain their
 ordinary `Close` cleanup (#4792). A partial field move leaves cleanup only
 for the remaining initialized fields; moving the payload transfers its duty.
@@ -3991,7 +3994,7 @@ and scope-inferred by default (the region is the arena binding's lexical
 scope); explicit `#Region(r) { … }` for the expert tier (respelled by D-BLOCKPLANE1, 2026-07-12). `arena:
 mem.Arena.new(capacity: 4096)`; `arena.alloc(value)` returns a scope-bound
 view — escape E0631, use-after-reset E0632. D-SHAPE-RESOURCE2 later supersedes
-terminal `free()` with universal `close(^allocator)`. Arenas live flat in
+terminal `free()` with universal `close(allocator)`. Arenas live flat in
 `core.mem` (D-REF2); arena values are not `#Unsafe`.
 
 **D-FIXED-BACKING1=A — Fixed allocator backing**: `fixed:
@@ -4001,7 +4004,7 @@ mutable fixed-size byte array instead. Both constructors must directly
 initialize a lexical binding. Payload plus alignment grows from the buffer
 start, reverse-drop metadata reserves from its end, and allocation fails
 atomically before the cursors collide; there is no heap fallback. The backing
-borrow is exclusive until consuming `close(^fixed)` or scope exit. Fixed
+borrow is exclusive until consuming `close(fixed)` or scope exit. Fixed
 handles and allocation views cannot escape, be stored/captured, or cross a
 task/join boundary, and `reset()` is rejected while any allocation view lives.
 

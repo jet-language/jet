@@ -3246,16 +3246,21 @@ sema_expr_check_unit_conversion_source: fn(argument: Expr, method: String, round
 // Checks `value` for its own type only, on the live scope table, context and
 // ownership state: all three are rolled back afterwards (the ownership state
 // through a fork, which the probe runs in as on a whole-state copy), so the
-// probe leaves nothing behind except what it reports to `diagnostics`. This
-// replaces whole-table and whole-state snapshots, which copied every module
-// binding and every row the function had accumulated, per probe.
+// probe leaves nothing behind except what it reports to `diagnostics` and the
+// share sites it found. A probed use after an unmarked move (an argument
+// probed for inference after `[a, b]` moved `b`) makes that move a share on
+// the next pass, as the real check of the use would; dropping the site would
+// fail the probe on every pass. This replaces whole-table and whole-state
+// snapshots, which copied every module binding and every row the function had
+// accumulated, per probe.
 sema_probe_expression: fn(value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     scope_mark: sema_scope_mark(scopes)
     context_mark: sema_check_context_mark(context)
     fork: sema_ownership_fork(state)
     checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    sema_ownership_fork_rollback(state, fork)
-    sema_ownership_fork_close(state, fork)
+    // copy: the rollback below restores `state.share_found`; the sites the probe found are kept from this copy.
+    found_sites: state.share_found.copy()
+    sema_ownership_fork_drop(state, fork, found_sites, [SemaOwnershipShareSite]{})
     sema_check_context_rollback(context, context_mark)
     sema_scope_rollback(scopes, scope_mark)
     checked

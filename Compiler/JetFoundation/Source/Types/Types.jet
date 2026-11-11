@@ -282,6 +282,25 @@ escape_dimension_axis: fn(axis: String) -> String Never! {
     axis.replace("%", "%25").replace(";", "%3B").replace(":", "%3A")
 }
 
+// The dimension `identity` names (dimension_identity's inverse): `;`
+// separates the axes and the last `:` of each splits its escaped name from
+// its whole exponent. Every `%` an escaped name holds starts one of the three
+// escapes, so undoing them in the reverse order restores the name byte for
+// byte, a non-ASCII axis name included. None when a part is not `name:exponent`
+// or its exponent is not a whole number in i32.
+dimension_from_identity: fn(identity: String) -> Dimension? {
+    axes := [DimensionAxis]{}
+    if identity == "" -> return Val(Dimension{axes: axes})
+    loop part in identity.split(";") {
+        cut: part.cut_last(":") ?? return None
+        exponent: Int.parse(cut.after) ?? return None
+        if exponent == 0 || exponent < -2147483648 || exponent > 2147483647 -> return None
+        name: cut.before.replace("%3A", ":").replace("%3B", ";").replace("%25", "%")
+        axes.push(DimensionAxis{name: name, exponent: Measure.SignedLiteral{kind: "dimension", value: exponent}})
+    }
+    Val(Dimension{axes: axes})
+}
+
 Exactness: enum {
     Exact
     Approximate(precision: Int)
