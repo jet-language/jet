@@ -1,0 +1,24 @@
+# The lambda form (#6251 c1): `fn(n) { n > 2 }`
+# passed where the call fixes the types, a multi-line body whose last value
+# is the result, a `return` that leaves the lambda, and stored lambdas that
+# write their parameter and result types or an effect row. It checks and
+# prints the same on every tier.
+fixture: fn_lambda_form_runs_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "[3, 4]\n[10, 20, 30, 40]\n[9, 16]\n16\n> done\n42\n2\n[2, 3]\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "[3, 4]\n[10, 20, 30, 40]\n[9, 16]\n16\n> done\n42\n2\n[2, 3]\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "[3, 4]\n[10, 20, 30, 40]\n[9, 16]\n16\n> done\n42\n2\n[2, 3]\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "[3, 4]\n[10, 20, 30, 40]\n[9, 16]\n16\n> done\n42\n2\n[2, 3]\n"

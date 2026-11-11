@@ -1,0 +1,29 @@
+// A lambda is a function binding's value without its
+// name. A passed lambda leaves out what the call fixes; a stored one writes
+// its types as a named function does.
+apply: fn(f: fn(Int, Int) -> Int, a: Int, b: Int) -> Int {
+    f(a, b)
+}
+
+run: fn() {
+    nums: [1, 2, 3, 4]
+    big: nums.filter(fn(n) { n > 2 })
+    tens: nums.map(fn(n) {
+        doubled: n * 2
+        doubled * 5
+    })
+    print(big)
+    print(tens)
+    square: fn(n: Int) -> Int { n * n }
+    shout: fn(line: String) -[IO]> { print("> {line}") }
+    print(big.map(square))
+    print(square(4))
+    shout("done")
+    print(apply(fn(a, b) { a * 10 + b }, 4, 2))
+    print(apply(fn(a: Int, b: Int) -> Int { a - b }, 4, 2))
+    middle: nums.filter(fn(n) {
+        if n == 1 -> return false
+        n < 4
+    })
+    print(middle)
+}

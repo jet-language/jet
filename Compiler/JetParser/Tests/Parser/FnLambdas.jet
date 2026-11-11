@@ -1,0 +1,94 @@
+// #6251 c1: a lambda is a function binding's value
+// without its name, `fn(params) <contract> { body }`.
+use jet_foundation.[Lambda]
+
+fn_lambda_test_stored: fn(source: String) -> Lambda {
+    initializer: parser_test_binding(parser_test_function(parser_test_program(source), "run")).init
+    initializer == .Lambda(lambda, _) ?? panic("expected a stored lambda")
+    lambda
+}
+
+fn_lambda_test_param_names: fn(lambda: Lambda) -> String {
+    names := [String]{}
+    loop param in lambda.params -> names.push(if param.ty == None -> param.name else -> "{param.name}: _")
+    names.join(", ")
+}
+
+#Test("a stored fn lambda keeps its typed parameters, result and braced body") {
+    lambda: fn_lambda_test_stored(`run: fn() {
+    square: fn(n: Int) -> Int { n * n }
+}
+`)
+    assert_eq(fn_lambda_test_param_names(lambda), "n: _")
+    assert(lambda.result != None, "the written result")
+    assert(lambda.effects == None, "no effect row")
+    assert(if lambda.body == .Block(statements) -> statements.len() == 1 else -> false, "a braced body")
+}
+
+#Test("a fn lambda's effect row and unit failure contract read as a function's") {
+    shout: fn_lambda_test_stored(`run: fn() {
+    shout: fn(line: String) -[IO]> { print(line) }
+}
+`)
+    effects: shout.effects ?? panic("lambda effect row")
+    assert_eq(effects.len(), 1)
+    assert_eq(effects[0].name, "IO")
+    assert(shout.result == None, "no written result")
+    save: fn_lambda_test_stored(`run: fn() {
+    save: fn(path: String) IOError! { write(path) }
+}
+`)
+    assert(save.result != None, "the unit failure contract is the result")
+}
+
+#Test("a passed fn lambda leaves out what the call fixes") {
+    lambda: fn_lambda_test_stored(`run: fn() {
+    add: fn(a, b) {
+        total: a + b
+        total
+    }
+}
+`)
+    assert_eq(fn_lambda_test_param_names(lambda), "a, b")
+    assert(lambda.result == None, "no written result")
+    assert(if lambda.body == .Block(statements) -> statements.len() == 2 else -> false, "a two-line body")
+    _: parser_test_program(`run: fn() {
+    big: nums.filter(fn(n) { n > 2 })
+    tens: nums.map(fn(n) {
+        if n == 1 -> return 0
+        n * 10
+    })
+}
+`)
+}
+
+#Test("the formatter keeps the fn lambda form, its one-line bodies and its contract order") {
+    source: `run: fn() {
+    big: nums.filter(fn(n) { n > 2 })
+    tens: nums.map(fn(n) {
+        doubled: n * 2
+        doubled * 5
+    })
+    pairs: nums.zip(others).map(fn(a, b) { a + b })
+    square: fn(n: Int) -> Int { n * n }
+    shout: fn(line: String) -[IO]> Int { print(line) }
+    save: fn(path: String) IOError! -[IO]> { write(path) }
+}
+`
+    assert_eq(parser_test_stable(source), source)
+    spread: parser_test_stable(`run: fn() {
+    tens: nums.map(fn(n) { n *
+        10 })
+}
+`)
+    assert_eq(spread, `run: fn() {
+    tens: nums.map(fn(n) {
+        n * 10
+    })
+}
+`)
+}
+
+#Test("a fn lambda refuses a body without braces") {
+    _: parser_test_errors(`run: fn() { f: fn(n: Int) -> Int n * n }`)
+}

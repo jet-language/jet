@@ -1,0 +1,38 @@
+// #6251 c1: a `fn(…) { … }` lambda checks as a function
+// value. The call fixes what a passed lambda leaves out, and a written result
+// is the type its body must produce.
+fn_lambda_errors: fn(source: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> codes.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    codes
+}
+
+#Test("fn_lambda_fixtures") {
+    accepted: `apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+run: fn() {
+    a: apply(fn(n) { n * 2 }, 3)
+    square: fn(n: Int) -> Int { n * n }
+    b: apply(square, a)
+    c: apply(fn(n: Int) -> Int {
+        doubled: n * 2
+        if doubled > 100 -> return 0
+        doubled + 1
+    }, b)
+    d: apply(fn(n) { n - c }, c)
+}
+`
+    assert_eq(fn_lambda_errors(accepted).join("; "), "")
+    stored_mismatch: `run: fn() {
+    bad: fn(n: Int) -> Int { "text" }
+}
+`
+    assert(fn_lambda_errors(stored_mismatch).len() > 0, "a stored lambda's body must produce its written result")
+    passed_mismatch: `apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
+run: fn() {
+    a: apply(fn(n) -> String { "x" }, 1)
+}
+`
+    assert(fn_lambda_errors(passed_mismatch).len() > 0, "a written result must match the expected callable type")
+}
