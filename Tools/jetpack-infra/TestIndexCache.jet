@@ -1,0 +1,407 @@
+#!/usr/bin/env jet
+// Hostile local proof for bounded, no-follow index/cache staging and atomic
+// publication: stage then publish, republish the same generation, refresh
+// to a second one, refuse a rollback, and refuse traversal channels, linked,
+// special and oversize inputs, linked roots and a missing signature. An
+// ancestor swapped while the stager runs must never publish attacker bytes.
+// Usage (from anywhere inside the checkout):
+//   JET=<admitted native jet> jet Tools/jetpack-infra/TestIndexCache.jet
+// The scratch directory is JET_TEST_SCRATCH, else <checkout>/.tmp/jet-test-scratch.
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+}
+
+TOOL: "/Tools/jetpack-infra/TestIndexCache.jet"
+STAGER: "/Tools/jetpack-infra/StageIndexCache.jet"
+CHANNEL: "nixpkgs-unstable"
+REVISION: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SYSTEM: "x86_64-linux"
+SIGNATURE: "{{\"schema\":1,\"key_id\":\"jet-test-index-v1\",\"algorithm\":\"ed25519\",\"signature\":\"AA==\"}}"
+CACHE_NAR: "nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cache.nar"
+// One byte over the stager's 32 MiB compressed-target bound.
+OVERSIZE_BYTES: 33554433
+// The stand-in for `jetpack hangar cache stage`: it fills the `--to` directory.
+FAKE_JETPACK: [
+    "#!/bin/sh",
+    "set -eu",
+    "destination=",
+    "while [ \"$#\" -gt 0 ]; do",
+    "    if [ \"$1\" = \"--to\" ]; then destination=$2; shift 2; else shift; fi",
+    "done",
+    "[ -n \"$destination\" ]",
+    "mkdir -p \"$destination/nar\" \"$destination/trust\"",
+    "printf 'cache object\\n' >\"$destination/nar/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cache.nar\"",
+    "printf 'StorePath: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cache\\n' >\"$destination/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cache.narinfo\"",
+    "printf 'jet-cache-receipt-v1\\n' >\"$destination/trust/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cache.receipt\"",
+    "",
+]
+
+#Error
+ProofError: struct {
+    message: String
+}
+
+// What a child left: its exit status (128 + N for signal N) and its output.
+Ran: struct {
+    code: Int
+    output: String
+    errors: String
+}
+
+// The fixed inputs of one proof run.
+Proof: struct {
+    jet: String
+    stager: String
+    work: String
+    index: String
+    root: String
+    fake: String
+}
+
+run: fn() {
+    jet: sys.get("JET") ?? ""
+    if jet == "" {
+        term.eprint("JET must name the admitted native jet compiler")
+        process.exit(1)
+    }
+    if !files.is_file(jet) || !files.can_execute(jet) {
+        term.eprint("missing {jet}; build jet first")
+        process.exit(1)
+    }
+    repo: repo_root()
+    if repo == "" {
+        term.eprint("TestIndexCache: no checkout holds {TOOL}")
+        process.exit(1)
+    }
+    scratch: sys.get("JET_TEST_SCRATCH") ?? "{repo}/.tmp/jet-test-scratch"
+    if scratch == "/tmp" || scratch.starts_with("/tmp/") {
+        term.eprint("index/cache staging proof must not use /tmp")
+        process.exit(1)
+    }
+    work: "{scratch}/index-cache-stage-{sys.getpid()}"
+    proof: Proof{
+        jet: jet,
+        stager: "{repo}{STAGER}",
+        work: work,
+        index: "{work}/producer",
+        root: "{work}/jetpack-root",
+        fake: "{work}/fake-jetpack",
+    }
+    if prove(proof) == {
+        .Ok(_) -> {
+            clean(work)
+            print("index/cache staging, hostile-input, race, refresh, and rollback proofs passed")
+        }
+        .Err(error) -> {
+            clean(work)
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+clean: fn(work: String) -[FS]> Never! {
+    files.remove_all(work).drop("the scratch tree is removed best-effort, as the shell trap did")
+}
+
+failed: fn(message: String) -> ProofError Never! {
+    ProofError{message: message}
+}
+
+// The checkout holding this script, or else the one around the working directory.
+repo_root: fn() -[Env, FS]> String Never! {
+    script: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? return ""
+    loop {
+        if files.exists("{dir}{TOOL}") -> return dir
+        if dir == "/" || dir == "" -> return ""
+        dir = files.dirname(dir)
+    }
+}
+
+prove: fn(proof: Proof) -[Env, Exec, FS, Time.Wait]> ProofError! {
+    files.create_dir_all(proof.root) ?? return Err(failed("cannot create {proof.root}: {err}"))
+    digest: write_fixture(proof.index, 1, "compressed index fixture") ?? return Err(err)
+    write(proof.fake, FAKE_JETPACK.join("\n").bytes()) ?? return Err(err)
+    files.set_mode(proof.fake, 0o755) ?? return Err(failed("cannot mark {proof.fake} executable: {err}"))
+
+    stage_1: "{proof.work}/stage-1"
+    index_host: "{proof.work}/index-host"
+    cache_host: "{proof.work}/cache-host"
+    staged: stage(proof, proof.index, stage_1, CHANNEL, ["--role", "public"]) ?? return Err(err)
+    expect_success(staged, "stage") ?? return Err(err)
+    target_name: "{digest}.json.zst"
+    target_path: "{stage_1}/index/index-v1/{REVISION}/{SYSTEM}/{target_name}"
+    require_file("{stage_1}/index/v1/{CHANNEL}/manifest.json", "staged manifest") ?? return Err(err)
+    require_file("{stage_1}/index/v1/{CHANNEL}/manifest.json.sig.json", "staged manifest signature") ?? return Err(err)
+    require_file(target_path, "staged index target") ?? return Err(err)
+    require_file("{target_path}.sig.json", "staged index target signature") ?? return Err(err)
+    require_file("{stage_1}/cache/{CACHE_NAR}", "staged cache object") ?? return Err(err)
+    require_absent("{stage_1}/index/v1/{CHANNEL}/manifest.json.sig.request", "staged signing request") ?? return Err(err)
+
+    published: publish(proof, stage_1, index_host, cache_host) ?? return Err(err)
+    expect_success(published, "publish") ?? return Err(err)
+    generation_1: "g1-{file_digest("{proof.index}/manifest.json") ?? return Err(err)}"
+    if !files.is_symlink("{index_host}/current") -> return Err(failed("index current pointer is not a symlink"))
+    pointer: files.read_link("{index_host}/current") ?? return Err(failed("cannot read the index current pointer: {err}"))
+    expected_1: "generations/{generation_1}"
+    if pointer != expected_1 -> return Err(failed("index current pointer names {pointer}, not {expected_1}"))
+    require_file("{index_host}/current/v1/{CHANNEL}/manifest.json", "published manifest") ?? return Err(err)
+    require_file("{index_host}/current/index-v1/{REVISION}/{SYSTEM}/{target_name}", "published index target") ?? return Err(err)
+    require_file("{cache_host}/current/{CACHE_NAR}", "published cache object") ?? return Err(err)
+    require_directory("{index_host}/generations/{generation_1}", "index generation 1") ?? return Err(err)
+    require_directory("{cache_host}/generations/{generation_1}", "cache generation 1") ?? return Err(err)
+    require_absent("{index_host}/current/v1/{CHANNEL}/manifest.json.sig.request", "published signing request") ?? return Err(err)
+
+    real_host: "{proof.work}/real-index-host"
+    files.create_dir_all(real_host) ?? return Err(failed("cannot create {real_host}: {err}"))
+    linked_host: "{proof.work}/symlink-index-host"
+    link(real_host, linked_host) ?? return Err(err)
+    through_host: publish(proof, stage_1, linked_host, "{proof.work}/cache-host-symlink-check") ?? return Err(err)
+    expect_refusal(through_host, "", "symlinked publication root was accepted") ?? return Err(err)
+
+    // Same generation is idempotent. Existing immutable bytes cannot be replaced.
+    again: publish(proof, stage_1, index_host, cache_host) ?? return Err(err)
+    expect_success(again, "idempotent publish") ?? return Err(err)
+
+    stage_2: "{proof.work}/stage-2"
+    index_2: "{proof.work}/producer-2"
+    write_fixture(index_2, 2, "refreshed compressed index fixture") ?? return Err(err)
+    staged_2: stage(proof, index_2, stage_2, CHANNEL, [String]{}) ?? return Err(err)
+    expect_success(staged_2, "second stage") ?? return Err(err)
+    generation_2: "g2-{file_digest("{index_2}/manifest.json") ?? return Err(err)}"
+    published_2: publish(proof, stage_2, index_host, cache_host) ?? return Err(err)
+    expect_success(published_2, "second publish") ?? return Err(err)
+    pointer_2: files.read_link("{index_host}/current") ?? return Err(failed("cannot read the index current pointer: {err}"))
+    expected_2: "generations/{generation_2}"
+    if pointer_2 != expected_2 -> return Err(failed("index current pointer names {pointer_2}, not {expected_2}"))
+    require_directory("{index_host}/generations/{generation_1}", "retained index generation 1") ?? return Err(err)
+    require_directory("{index_host}/generations/{generation_2}", "index generation 2") ?? return Err(err)
+    require_file("{index_host}/generations/{generation_1}/v1/{CHANNEL}/manifest.json", "retained index generation 1 manifest") ?? return Err(err)
+    require_file("{cache_host}/generations/{generation_1}/{CACHE_NAR}", "retained cache generation 1 object") ?? return Err(err)
+
+    rollback: publish(proof, stage_1, index_host, cache_host) ?? return Err(err)
+    expect_refusal(rollback, "generation rollback", "publisher accepted a generation rollback") ?? return Err(err)
+
+    // Canonical channel validation blocks traversal, separators, uppercase, and overlong names.
+    traversal: stage(proof, proof.index, "{proof.work}/bad-channel", "../escape", [String]{}) ?? return Err(err)
+    expect_refusal(traversal, "", "traversal channel was accepted") ?? return Err(err)
+    uppercase: stage(proof, proof.index, "{proof.work}/bad-channel-case", "NIXPKGS-UNSTABLE", [String]{}) ?? return Err(err)
+    expect_refusal(uppercase, "", "noncanonical channel was accepted") ?? return Err(err)
+
+    hostile_inputs(proof, digest) ?? return Err(err)
+
+    real_output: "{proof.work}/real-output"
+    files.create_dir_all(real_output) ?? return Err(failed("cannot create {real_output}: {err}"))
+    linked_output: "{proof.work}/symlink-output"
+    link(real_output, linked_output) ?? return Err(err)
+    through_output: stage(proof, proof.index, linked_output, CHANNEL, [String]{}) ?? return Err(err)
+    expect_refusal(through_output, "", "symlinked output root was accepted") ?? return Err(err)
+
+    ancestor_race(proof, digest) ?? return Err(err)
+
+    remove("{fixture_target(proof.index, digest)}.sig.json") ?? return Err(err)
+    expect_stage_failure(proof, "missing-signature")
+}
+
+// Each hostile replacement of the producer's target or its signature is
+// refused, and the original is restored before the next.
+hostile_inputs: fn(proof: Proof, digest: String) -[Env, Exec, FS, Time.Wait]> ProofError! {
+    outside: "{proof.work}/outside"
+    write(outside, "outside\n".bytes()) ?? return Err(err)
+    target: fixture_target(proof.index, digest)
+    original: "{proof.index}/target.bytes"
+
+    remove(target) ?? return Err(err)
+    link(outside, target) ?? return Err(err)
+    expect_stage_failure(proof, "target-symlink") ?? return Err(err)
+    restore(original, target) ?? return Err(err)
+
+    signature: "{target}.sig.json"
+    remove(signature) ?? return Err(err)
+    link(outside, signature) ?? return Err(err)
+    expect_stage_failure(proof, "signature-symlink") ?? return Err(err)
+    remove(signature) ?? return Err(err)
+    write(signature, SIGNATURE.bytes()) ?? return Err(err)
+
+    remove(target) ?? return Err(err)
+    files.hard_link(original, target) ?? return Err(failed("cannot hard-link {target}: {err}"))
+    expect_stage_failure(proof, "target-hardlink") ?? return Err(err)
+    restore(original, target) ?? return Err(err)
+
+    remove(target) ?? return Err(err)
+    fifo: invoke(["mkfifo", target]) ?? return Err(err)
+    if fifo.code != 0 -> return Err(failed("cannot make a FIFO at {target}: {fifo.errors.trim()}"))
+    expect_stage_failure(proof, "target-special") ?? return Err(err)
+    restore(original, target) ?? return Err(err)
+
+    // A sparse file: one byte written at the bound leaves a hole before it.
+    remove(target) ?? return Err(err)
+    write(target, [U8]{}) ?? return Err(err)
+    files.write_at(target, OVERSIZE_BYTES - 1, [U8]{U8{0}}) ?? return Err(failed("cannot extend {target}: {err}"))
+    expect_stage_failure(proof, "target-oversize") ?? return Err(err)
+    restore(original, target)
+}
+
+// Ancestor race: while the stager runs, its index root is swapped with a
+// trap tree naming attacker bytes. Success may target only held real
+// directories, so it must publish the real target; rejection is also safe.
+ancestor_race: fn(proof: Proof, digest: String) -[Env, Exec, FS, Time.Wait]> ProofError! {
+    parent: "{proof.work}/race-parent"
+    race_root: "{parent}/input"
+    trap: "{parent}/trap"
+    saved: "{parent}/saved"
+    files.copy_dir(proof.index, race_root) ?? return Err(failed("cannot copy the race input: {err}"))
+    files.copy_dir(proof.index, trap) ?? return Err(failed("cannot copy the race trap: {err}"))
+    remove(fixture_target(trap, digest)) ?? return Err(err)
+    attacker: "attacker bytes\n".bytes()
+    attacker_digest: crypto.sha256(attacker).hex()
+    attacker_target: fixture_target(trap, attacker_digest)
+    write(attacker_target, attacker) ?? return Err(err)
+    write("{attacker_target}.sig.json", SIGNATURE.bytes()) ?? return Err(err)
+    write("{trap}/manifest.json", manifest_text(1, attacker_digest, attacker.len()).bytes()) ?? return Err(err)
+
+    output: "{proof.work}/race-output"
+    argv: [proof.jet.copy(), proof.stager.copy(), "--index-root", race_root, "--hangar-root", proof.root.copy(), "--output", output, "--channel", CHANNEL, "--jetpack", proof.fake.copy()]
+    child: process.cmd(argv).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(failed("cannot start the race stager: {err}"))
+    loop !(child.exited() ?? true) {
+        swap(race_root, trap, saved)
+        swap(race_root, trap, saved)
+    }
+    receipt: child.wait() ?? return Err(failed("cannot wait for the race stager: {err}"))
+    if receipt.code != 0 -> return Ok()
+    staged: "{output}/index/index-v1/{REVISION}/{SYSTEM}"
+    entries: files.list_dir(staged) ?? return Err(failed("cannot list {staged}: {err}"))
+    loop entry in entries {
+        if !entry.name.ends_with(".json.zst") -> next
+        if (file_digest(entry.path) ?? return Err(err)) == digest -> return Ok()
+    }
+    Err(failed("ancestor race published attacker bytes"))
+}
+
+// Move the trap tree into the input's place and the input into the trap's,
+// as the shell racer's three `mv`s did; a lost step is undone or skipped.
+swap: fn(race_root: String, trap: String, saved: String) -[FS]> Never! {
+    if !files.is_dir(race_root) || files.is_symlink(race_root) -> return
+    if files.rename(race_root, saved) == .Err(_) -> return
+    if files.rename(trap, race_root) == .Err(_) {
+        files.rename(saved, race_root).drop("the racer restores the input best-effort")
+        return
+    }
+    files.rename(saved, trap).drop("the racer restores the trap best-effort")
+}
+
+// The producer tree for `generation`: one target holding `text`, its
+// signature, and a canonical manifest without a trailing newline. The
+// target's digest.
+write_fixture: fn(root: String, generation: Int, text: String) -[FS]> String ProofError! {
+    directory: "{root}/index-v1/{REVISION}/{SYSTEM}"
+    files.create_dir_all(directory) ?? return Err(failed("cannot create {directory}: {err}"))
+    bytes: "{text}\n".bytes()
+    write("{root}/target.bytes", bytes) ?? return Err(err)
+    digest: crypto.sha256(bytes).hex()
+    target: fixture_target(root, digest)
+    write(target, bytes) ?? return Err(err)
+    write("{target}.sig.json", SIGNATURE.bytes()) ?? return Err(err)
+    write("{root}/manifest.json", manifest_text(generation, digest, bytes.len()).bytes()) ?? return Err(err)
+    write("{root}/manifest.json.sig.json", SIGNATURE.bytes()) ?? return Err(err)
+    Ok(digest)
+}
+
+fixture_target: fn(root: String, digest: String) -> String Never! {
+    "{root}/index-v1/{REVISION}/{SYSTEM}/{digest}.json.zst"
+}
+
+manifest_text: fn(generation: Int, digest: String, length: Int) -> String Never! {
+    url: "https://index.jet-lang.dev/index-v1/{REVISION}/{SYSTEM}/{digest}.json.zst"
+    signature_digest: crypto.sha256(SIGNATURE.bytes()).hex()
+    target: "{{\"revision\":\"{REVISION}\",\"system\":\"{SYSTEM}\",\"url\":\"{url}\",\"signature_url\":\"{url}.sig.json\",\"sha256\":\"{digest}\",\"compressed_length\":{length},\"decoded_length\":1,\"record_count\":0,\"index_signature_sha256\":\"{signature_digest}\",\"discoverable\":true}}"
+    "{{\"schema\":1,\"channel\":\"{CHANNEL}\",\"generation\":{generation},\"issued_unix\":1,\"expires_unix\":2147483647,\"targets\":[{target}]}}"
+}
+
+file_digest: fn(path: String) -[FS]> String ProofError! {
+    bytes: files.read_bytes(path) ?? return Err(failed("cannot read {path}: {err}"))
+    Ok(crypto.sha256(bytes).hex())
+}
+
+write: fn(path: String, bytes: [U8]) -[FS]> ProofError! {
+    files.write_bytes(path, bytes) ?? return Err(failed("cannot write {path}: {err}"))
+    Ok()
+}
+
+remove: fn(path: String) -[FS]> ProofError! {
+    files.remove(path) ?? return Err(failed("cannot remove {path}: {err}"))
+    Ok()
+}
+
+link: fn(original: String, path: String) -[FS]> ProofError! {
+    files.symlink(original, path) ?? return Err(failed("cannot link {path}: {err}"))
+    Ok()
+}
+
+// Put the fixture's real target back at `target`.
+restore: fn(original: String, target: String) -[FS]> ProofError! {
+    remove(target) ?? return Err(err)
+    files.copy(original, target) ?? return Err(failed("cannot restore {target}: {err}"))
+    Ok()
+}
+
+require_file: fn(path: String, what: String) -[FS]> ProofError! {
+    if !files.is_file(path) -> return Err(failed("{what} is missing: {path}"))
+    Ok()
+}
+
+require_directory: fn(path: String, what: String) -[FS]> ProofError! {
+    if !files.is_dir(path) -> return Err(failed("{what} is missing: {path}"))
+    Ok()
+}
+
+require_absent: fn(path: String, what: String) -[FS]> ProofError! {
+    if files.exists(path) -> return Err(failed("{what} was kept: {path}"))
+    Ok()
+}
+
+invoke: fn(argv: [String]) -[Exec, Time.Wait]> Ran ProofError! {
+    receipt: process.cmd(argv.copy()).run() ?? return Err(failed("cannot run {argv[0]}: {err}"))
+    code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+    Ok(Ran{code: code, output: receipt.output, errors: receipt.errors})
+}
+
+stage: fn(proof: Proof, index: String, output: String, channel: String, extra: [String]) -[Exec, Time.Wait]> Ran ProofError! {
+    invoke([
+        proof.jet.copy(), proof.stager.copy(),
+        "--index-root", index, "--hangar-root", proof.root.copy(), "--output", output,
+        "--channel", channel, "--jetpack", proof.fake.copy(),
+    ].concat(extra))
+}
+
+publish: fn(proof: Proof, staging: String, index_host: String, cache_host: String) -[Exec, Time.Wait]> Ran ProofError! {
+    invoke([
+        proof.jet.copy(), proof.stager.copy(), "publish",
+        "--staging", staging, "--channel", CHANNEL,
+        "--index-destination", index_host, "--cache-destination", cache_host,
+    ])
+}
+
+// Staging the producer tree as it now stands is refused.
+expect_stage_failure: fn(proof: Proof, label: String) -[Exec, Time.Wait]> ProofError! {
+    ran: stage(proof, proof.index, "{proof.work}/reject-{label}", CHANNEL, [String]{}) ?? return Err(err)
+    expect_refusal(ran, "", "{label} input was accepted")
+}
+
+expect_success: fn(ran: Ran, step: String) ProofError! {
+    if ran.code != 0 -> return Err(failed("{step} failed (exit {ran.code}): {ran.output.trim()}{ran.errors.trim()}"))
+    Ok()
+}
+
+// The run failed, and its errors name `needle` when one is given.
+expect_refusal: fn(ran: Ran, needle: String, complaint: String) ProofError! {
+    if ran.code == 0 -> return Err(failed(complaint))
+    if !ran.errors.contains(needle) -> return Err(failed("{complaint}: the refusal does not name {needle}: {ran.errors.trim()}"))
+    Ok()
+}
