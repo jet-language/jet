@@ -1,0 +1,11 @@
+# Claim: `jet fmt` formats a package.jet `build:` function as a function (its body in the form any top-level function takes), not as a record, so the manifest still parses; the two manifests are the build_entry fixtures the format corpus caught (#6005 c23)
+fixture: package_manifest_formats_a_build_function_as_a_function.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt entry/package.jet workspace/package.jet
+exit: 0
+file: entry/package.jet = package_manifest_formats_a_build_function_as_a_function/entry.out
+file: workspace/package.jet = package_manifest_formats_a_build_function_as_a_function/workspace.out
+step: jet fmt --check entry/package.jet workspace/package.jet
+exit: 0

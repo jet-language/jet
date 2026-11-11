@@ -1,4 +1,7 @@
 // The canonical Package/Config formatter (Package/mod.rs).
+use {
+    jet_parser.[jet_format_source]
+}
 
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
@@ -62,7 +65,27 @@ pkg_format_package_entry: fn(input: String, indent: Int) -> String Never! {
     entry: pkg_trim_entry_terminators(input)
     binding: pkg_split_package_binding(entry) ?? return pkg_format_package_value(entry, indent)
     left: pkg_binder_words(binding.left).join(" ")
+    if pkg_is_function_value(binding.right) -> return pkg_format_function_entry(left, binding.right, indent)
     "{left}: {pkg_format_package_value(binding.right, indent)}"
+}
+
+// A field whose value is a function (`build: fn(b: Build) { … }`), not a
+// record: its braces hold statements, which the record layout would break.
+pkg_is_function_value: fn(value: String) -> Bool Never! {
+    head: value.trim()
+    if !head.starts_with("fn") -> return false
+    rest: head.slice(2..<head.len()).trim_start()
+    rest.starts_with("(") || rest.starts_with("<")
+}
+
+// A function field in the form `jet fmt` gives any top-level function. A
+// nested one, or one the Jet formatter can't read, stays as written.
+pkg_format_function_entry: fn(left: String, value: String, indent: Int) -> String Never! {
+    written: "{left}: {value.trim()}"
+    if indent > 0 -> return written
+    formatted: jet_format_source("{written}\n", false)
+    if !formatted.ok -> return written
+    formatted.text.trim_end()
 }
 
 pkg_format_package_value: fn(input: String, indent: Int) -> String Never! {

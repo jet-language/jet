@@ -1,0 +1,11 @@
+
+name: "package-entry"
+version: "0.1.0"
+build: fn(b: Build) {
+    b.generate("package_message") {
+        package_message: fn() -> String { "package" }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])
+    b.default(app)
+}
+

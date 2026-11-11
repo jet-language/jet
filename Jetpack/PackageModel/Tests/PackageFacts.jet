@@ -53,6 +53,16 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     assert(reparsed.outputs["mod"] == output)
 }
 
+// A `build:` function is code, not a record: its body takes the form `jet fmt`
+// gives any top-level function, and the manifest still parses.
+#Test("a build function field formats as a function") {
+    source: "\nname: \"a\"\nversion: \"0.1.0\"\n    build: fn(b: Build) {{\n    b.generate(\"a_generated\") {{\n        a_generated: fn() -> String {{ \"a\" }}\n        }}\n    target: b.add_library(\"a\", [\"run.jet\"], [])\n    b.default(target)\n}}\n"
+    formatted: pkg_format_source(source, "package.jet") ?? panic("formats")
+    assert_eq(formatted, "name: \"a\"\nversion: \"0.1.0\"\nbuild: fn(b: Build) {{\n    b.generate(\"a_generated\") {{\n        a_generated: fn() -> String {{ \"a\" }}\n    }}\n    target: b.add_library(\"a\", [\"run.jet\"], [])\n    b.default(target)\n}}\n")
+    assert_eq(pkg_format_source(formatted, "package.jet") ?? panic("formats again"), formatted)
+    _: PackageFacts.parse(formatted, "package.jet") ?? panic("reparses")
+}
+
 #Test("loadable library requires a boolean") {
     if PackageFacts.parse("name: \"skyhawk\"\noutputs: {{ mod: .Library{{ loadable: \"yes\" }} }}", "package.jet") == {
         .Err(error) -> assert(error.message().contains("outputs.mod.loadable"))
