@@ -6,7 +6,8 @@
 // - the toolchain: this compiler, its runtime pack and the toolchain tree, and
 //   the build options (`checked_alloc` among them), and each Core file the
 //   compile read, by file identity (Core built into jet is part of this
-//   compiler);
+//   compiler), and each Core source jet supplies as text beside a toolchain
+//   tree (the jet.runtime interface units), by the SHA-256 of that text;
 // - a hash of the schema snapshots its checks read, of every file of its
 //   authorized source snapshot and of the source tree's shape (the
 //   directories its walk enters and its source names; other files a
@@ -39,6 +40,7 @@ use {
         JetDriverComptimeInputRecord,
         JetDriverCoreSource,
         JetDriverVerbOutput,
+        jet_driver_runtime_interface_sources,
         schema_cache_dir,
     ]
     jet_foundation.[BuildOptions, build_options_key, build_options_value]
@@ -119,20 +121,43 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
 // The Core files `keep`'s compile read, one row each: its path and file
 // identity. Each identity is taken before the file is read again and found to
 // hold the text the compile read, so a file that changed during the compile
-// keeps nothing (None). Core built into jet has no rows: the executable's row
-// names it.
+// keeps nothing (None). A source jet supplied as text (no file) is named by
+// its text's hash instead (jet_cli_script_text_identity). Core built into jet
+// has no rows: the executable's row names it.
 jet_cli_script_core_rows: fn(keep: JetCLIScriptKeep) -> [String]? {
     rows := [String]{}
     if keep.core_root == "" -> return Val(rows)
     loop row in keep.core {
         permit: row.text.guard_read()
         compiled: permit.value.text ?? next
+        if permit.value.file == "" {
+            rows.push("{row.path} {jet_cli_script_text_identity(compiled)}")
+            next
+        }
         file: jet_cli_authority_path(keep.core_root, row.path)
         stat: cli_files.stat(file) ?? return None
         if (cli_files.read(file) ?? return None) != compiled -> return None
         rows.push("{row.path} {jet_cli_script_file_identity(stat)}")
     }
     Val(rows)
+}
+
+// The record identity of a Core source jet supplies as text: the SHA-256 of
+// that text. A file identity starts with its size, so the two never collide.
+JET_CLI_SCRIPT_TEXT_IDENTITY: "sha256 "
+
+jet_cli_script_text_identity: fn(text: String) -> String {
+    "{JET_CLI_SCRIPT_TEXT_IDENTITY}{script_crypto.sha256(text.bytes()).hex()}"
+}
+
+// The identity of the Core source jet supplies as text at `path` today, or
+// None when it supplies none there. The supplied sources are the ones
+// Request.jet jet_cli_core_sources adds beside the toolchain tree's files.
+jet_cli_script_supplied_identity: fn(path: String) -> String? {
+    loop source in jet_driver_runtime_interface_sources() {
+        if source.path == path -> return Val(jet_cli_script_text_identity(source.source()))
+    }
+    None
 }
 
 // A file's identity in a toolchain row: size, modification time in
@@ -399,12 +424,18 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
 }
 
 // Whether the complete slot record `rows` names exactly `keep`'s sources and
-// toolchain, and each Core file it names still has the identity it records.
+// toolchain, each Core file it names still has the identity it records, and
+// each Core source jet supplies as text still hashes as recorded.
 jet_cli_script_record_matches: fn(rows: [String], keep: JetCLIScriptKeep) -> Bool {
     end: JET_CLI_SCRIPT_RECORD_HEAD + JET_CLI_SCRIPT_TOOLCHAIN_ROWS
     if rows[2] != keep.sources || rows.len() < end || rows[JET_CLI_SCRIPT_RECORD_HEAD..<end].join("\n") != keep.toolchain -> return false
     loop row in rows[end..<rows.len()] {
         named: row.partition(" ")
+        if named.tail.starts_with(JET_CLI_SCRIPT_TEXT_IDENTITY) {
+            supplied: jet_cli_script_supplied_identity(named.head) ?? return false
+            if supplied != named.tail -> return false
+            next
+        }
         stat: cli_files.stat(jet_cli_authority_path(keep.core_root, named.head)) ?? return false
         if jet_cli_script_file_identity(stat) != named.tail -> return false
     }

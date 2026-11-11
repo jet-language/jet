@@ -737,7 +737,9 @@ applies to scripts and to any other file. There is one program per entry file
 and profile. Its record names the toolchain it was built with (the compiler
 and its runtime pack by file identity, and the toolchain tree), the file identity
 of each Core source file the compile read (Core built into `jet` is part of
-the compiler), and a hash of its source snapshot: the source files and the
+the compiler), the SHA-256 of each Core source `jet` supplies as text beside
+a toolchain tree (the `jet.runtime` interface modules), and a hash of its
+source snapshot: the source files and the
 directories the source walk enters. Other
 files in the tree, such as one the program writes beside its source, and
 directories the walk skips, such as the `.jet` directory a stopping program
