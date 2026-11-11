@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99085,
+    "rev": 99086,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88911,6 +88911,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:30:28.030Z"
+        },
+        {
+          "n": 2,
+          "text": "Found 2026-11-10 by Lander2 on the t18a train: `jet test` leaks its per-run files. Host.jet names them `.test_<stem>.<pid>` (binary) and `.test_<stem>.<pid>.records.*` under the native test records dir, and nothing removes them when the run is killed (timeout, OOM, signal). 796 stale files filled the 6.2G XDG runtime tmpfs to 97%, and later runs failed with ENOSPC (\"native test record I/O failed\", rc 101), which looked like a test failure. Fix it at the root: the run removes its own files on every exit path, including a killed child, and each run sweeps files whose PID is no longer alive before it writes, without touching a live run. A case kills a run mid-test and shows that the next run leaves 0 stale files. An ENOSPC in record I/O reports its cause and path instead of a bare ICE.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T02:33:24.083Z"
         }
       ],
       "refs": [],
@@ -88921,9 +88930,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T22:11:13.646Z",
-      "updated": "2026-11-07T03:30:28.030Z",
+      "updated": "2026-11-11T02:33:24.083Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c0iqh0og",
@@ -200121,6 +200130,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T02:33:24.083Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0zyuv5p",
+      "note": "#2 Found 2026-11-10 by Lander2 on the t18a train: `jet test` le"
+    },
     {
       "at": "2026-11-11T02:32:01.957Z",
       "by": "Main",
