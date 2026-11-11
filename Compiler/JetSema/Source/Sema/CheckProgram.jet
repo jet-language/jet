@@ -2035,6 +2035,12 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     }
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
+    // #6281 c176: the union solve reads this body's default `Err` route as
+    // sema_failure_union_infer does: a top-level candidate other than the
+    // entry `run`, which keeps the `Unit Err!` exit contract.
+    if function_kind == .TopLevel && sema_failure_inference_candidate(func) {
+        if program.registration_graph == .Val(graph) -> context.failure_union_inferable = func.name != "run" || graph.entry_module_identity != module_identity
+    }
     context.arithmetic_policy = sema_function_arithmetic_policy(func.markers)
     context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
     context.return_view_declared = func.declared_return_view_provenance != None

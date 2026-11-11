@@ -677,6 +677,11 @@ SemaCheckContext: struct {
     failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
     failure_union_edges: [String]{[String]{}}
     failure_union_general: Bool{false}
+    // #6281 c176: a top-level body whose default `Err` route the union solve
+    // infers (sema_failure_inference_candidate, not the entry `run`). A typed
+    // failure it records projects it onto a typed contract and checks it
+    // again, so this pass's reports are replaced (sema_failure_recheck_modules).
+    failure_union_inferable: Bool{false}
     // (Rust `task_body_propagates`): a failure in this lambda
     // body leaves through the enclosing callable's carrier. Every lambda body
     // starts it false (a checking snapshot does not copy it) and harvests it.
@@ -1222,6 +1227,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         failure_union_cases: source.failure_union_cases.copy(),
         failure_union_edges: source.failure_union_edges.copy(),
         failure_union_general: source.failure_union_general,
+        failure_union_inferable: source.failure_union_inferable,
         source_nesting: source.source_nesting,
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,

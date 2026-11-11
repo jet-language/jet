@@ -1013,6 +1013,14 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if normalized_target == (Type.Named{name: "Err"}) {
                 diagnostics.push(sema_failure_no_default_conversion(error, span, implicit))
+                // #6281 c176: the union solve projects an inferable body that
+                // records this typed failure onto a typed contract and checks
+                // it again, which replaces this report. The success value stays
+                // typed so the statements that read it still record their own
+                // failures and Core calls; otherwise the projected contract
+                // misses them (E2404 on the recheck, or an unchecked Core body
+                // at ir.build).
+                if context.failure_union_inferable -> return Val(TTryConvert.NoConversion)
                 return None
             }
             // D9: a `_` hole domain already has its one E0119 at the

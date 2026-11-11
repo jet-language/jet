@@ -1,0 +1,98 @@
+// #6281 c176: a function written without a failure contract has the union
+// of what it can fail with inferred, and that union includes the failures of
+// its unit-returning statements (`files.write`, a stream `write`, a call of a
+// function with a written contract) whose arguments read a value a typed
+// failure guards. `save_length`, `copy_length`, `store_length` and `announce`
+// each fail with `Parity` or an I/O error; their callers match both.
+
+use {
+    files: core.files
+    io: core.term
+}
+
+#Error
+Parity: enum {
+    Odd
+}
+
+even_length: fn(text: String) -> Int Parity! {
+    if text.len() % 2 == 1 -> return Err(Parity.Odd)
+    Ok(text.len())
+}
+
+// The written text reads a local bound from the typed call.
+save_length: fn(path: String) {
+    n: even_length(path)
+    files.write(path, "{n}\n")
+}
+
+// The typed call sits inside the written text; an independent read follows.
+copy_length: fn(path: String, source: String) {
+    files.write(path, "{even_length(source)}\n")
+    text: files.read(source)
+    print("copied {text.trim()}")
+}
+
+store: fn(path: String, n: Int) IOError! {
+    files.write(path, "{n}\n")
+}
+
+// A function with a written contract takes the guarded value.
+store_length: fn(path: String) {
+    n: even_length(path)
+    store(path, n)
+}
+
+// A stream write reads the guarded value.
+announce: fn(word: String) {
+    n: even_length(word)
+    out := io.stdout()
+    out.write("{word} has {n}\n")
+    out.flush()
+}
+
+saved: fn(path: String) -> String {
+    if save_length(path) == {
+        .Ok(_) -> "saved {path}"
+        .Err(.Odd) -> "odd {path}"
+        .Err(_) -> "io {path}"
+    }
+}
+
+copied: fn(path: String, source: String) -> String {
+    if copy_length(path, source) == {
+        .Ok(_) -> "copy {path}"
+        .Err(.Odd) -> "odd {source}"
+        .Err(_) -> "io {source}"
+    }
+}
+
+stored: fn(path: String) -> String {
+    if store_length(path) == {
+        .Ok(_) -> "stored {path}"
+        .Err(.Odd) -> "odd {path}"
+        .Err(_) -> "io {path}"
+    }
+}
+
+announced: fn(word: String) -> String {
+    if announce(word) == {
+        .Ok(_) -> "announced"
+        .Err(.Odd) -> "odd {word}"
+        .Err(_) -> "io {word}"
+    }
+}
+
+run: fn() {
+    print(saved("ab.txt"))
+    print(saved("abc.txt"))
+    print(saved("no/such/xy.txt"))
+    print(copied("cd.txt", "ab.txt"))
+    print(copied("cd.txt", "abc.txt"))
+    print(copied("cd.txt", "absent.txt"))
+    print(stored("ef.txt"))
+    print(stored("efg.txt"))
+    print(stored("no/such/xy.txt"))
+    print(announced("jet!"))
+    print(announced("odd"))
+}
