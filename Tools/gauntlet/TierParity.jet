@@ -7,14 +7,13 @@
 //
 // Run it from the repository root. Each entry's jet/ package is copied to
 // DIR/ENTRY, with its input written there by the entry's fixtures/gen.py (an
-// input that already exists is kept). Each level runs twice, with the
-// programs kept in DIR/cache: the first run compiles the program and runs it,
-// the second runs the kept program and is timed as runtime_wall_seconds. A
-// batch entry's stdout must equal its expected.out; the service entry is
-// started on a free port and must answer its readiness probe and each probe
-// of entry.json exactly, then exit cleanly (its runtime_wall_seconds is the
-// whole session, start to exit). One row per entry and level is printed and
-// written to DIR/tiers.tsv; the exit is 1 on any difference or failed run.
+// input that already exists is kept). Each level runs once: `jet run`
+// compiles the program and runs it, and the whole run is timed as
+// run_seconds. A batch entry's stdout must equal its expected.out; the
+// service entry is started on a free port and must answer its readiness probe
+// and each probe of entry.json exactly, then exit cleanly. One row per entry
+// and level is printed and written to DIR/tiers.tsv; the exit is 1 on any
+// difference or failed run.
 //
 // `--plant ENTRY` changes one byte of that entry's expected output and runs
 // only that entry: the check must report a difference on every level while
@@ -37,8 +36,9 @@ use {
 ENTRIES: [String]{"sieve", "wordfreq", "datasummary", "csvtransform", "concurrency-service"}
 LEVELS: 3
 RUN_TIMEOUT_MS: 300000
-// The service entry listens on PORT_BASE + 2 * level + run, a port of its own
-// for every run.
+
+// The service entry listens on PORT_BASE + level, a port of its own for every
+// level.
 PORT_BASE: 18180
 
 Probe: struct {
@@ -210,8 +210,8 @@ run_service: fn(opts: Options, e: Entry, work: String, level: Int, port: Int) ->
     Ran{output: answers, ns: ns, error: ""}
 }
 
-run_once: fn(opts: Options, e: Entry, work: String, level: Int, attempt: Int) -> Ran {
-    if e.service -> return run_service(opts, e, work, level, PORT_BASE + 2 * level + attempt)
+run_once: fn(opts: Options, e: Entry, work: String, level: Int) -> Ran {
+    if e.service -> return run_service(opts, e, work, level, PORT_BASE + level)
     run_batch(opts, e, work, level)
 }
 
@@ -247,12 +247,10 @@ first_difference: fn(want: String, got: String) -> String {
     "the same lines"
 }
 
-// Why a level fails, "" when both runs ran cleanly and printed `expected`.
-verdict: fn(expected: String, first: Ran, warm: Ran) -> String {
-    if first.error != "" -> return "first run: {first.error}"
-    if warm.error != "" -> return "kept run: {warm.error}"
-    if first.output != expected -> return "first run, {first_difference(expected, first.output)}"
-    if warm.output != expected -> return "kept run, {first_difference(expected, warm.output)}"
+// Why a level fails, "" when the run ran cleanly and printed `expected`.
+verdict: fn(expected: String, ran: Ran) -> String {
+    if ran.error != "" -> return ran.error.copy()
+    if ran.output != expected -> return first_difference(expected, ran.output)
     ""
 }
 
@@ -281,7 +279,7 @@ run: fn() {
     fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}: {err}")
     fs.remove_all("{opts.out}/cache").drop("a cache left by an earlier run may be absent")
     names: if opts.plant != "" -> [String]{opts.plant.copy()} else -> ENTRIES.copy()
-    rows := ["entry\tlevel\tstatus\tfirst_run_seconds\truntime_wall_seconds"]
+    rows := ["entry\tlevel\tstatus\trun_seconds"]
     failures := 0
     caught := 0
     loop name in names {
@@ -289,19 +287,18 @@ run: fn() {
         work: prepare(opts, e)
         expected: if opts.plant != "" -> planted(e.expected) else -> e.expected.copy()
         loop level in 0..<LEVELS {
-            first: run_once(opts, e, work, level, 0)
-            warm: run_once(opts, e, work, level, 1)
-            why: verdict(expected, first, warm)
+            ran: run_once(opts, e, work, level)
+            why: verdict(expected, ran)
             status: if {
                 why == "" -> "ok"
-                first.error != "" || warm.error != "" -> "error"
+                ran.error != "" -> "error"
                 else -> "differs"
             }
             if status != "ok" -> failures += 1
-            if status == "differs" && first.output == e.expected && warm.output == e.expected -> caught += 1
-            rows.push("{name}\tO{level}\t{status}\t{seconds(first.ns)}\t{seconds(warm.ns)}")
+            if status == "differs" && ran.output == e.expected -> caught += 1
+            rows.push("{name}\tO{level}\t{status}\t{seconds(ran.ns)}")
             shown: if why == "" -> "" else -> " ({why})"
-            print("{name.pad_end(20, " ")} O{level} {status.pad_end(7, " ")} first run {seconds(first.ns).pad_start(8, " ")} s  runtime_wall_seconds {seconds(warm.ns).pad_start(8, " ")}{shown}")
+            print("{name.pad_end(20, " ")} O{level} {status.pad_end(7, " ")} run {seconds(ran.ns).pad_start(8, " ")} s{shown}")
         }
     }
     fs.write("{opts.out}/tiers.tsv", "{rows.join("\n")}\n") ?? fail("can't write {opts.out}/tiers.tsv: {err}")
@@ -324,4 +321,10 @@ run: fn() {
     assert_eq(first_difference("a\n", "a\nb\n"), "line 2: expected ``, printed `b`")
     assert_eq(seconds(1234567890), "1.235")
     assert_eq(seconds(5000000), "0.005")
+}
+
+#Test("a level fails on a run error first, then on the first line its output leaves the expected") {
+    assert_eq(verdict("a\n", Ran{output: "a\n", ns: 1, error: ""}), "")
+    assert_eq(verdict("a\n", Ran{output: "a\n", ns: 1, error: "exit 1: boom"}), "exit 1: boom")
+    assert_eq(verdict("a\n", Ran{output: "b\n", ns: 1, error: ""}), "line 1: expected `a`, printed `b`")
 }

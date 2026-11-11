@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1427,
+  "total": 1426,
   "counts": {
-    "Compiler": 749,
+    "Compiler": 748,
     "Core": 177,
     "Docs": 8,
     "Examples": 41,
@@ -1138,13 +1138,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 1728,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet",
-      "line": 131,
-      "column": 5,
-      "reason": "the test owns the slot record it ages"
     },
     {
       "package": "Compiler",
@@ -10219,14 +10212,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 749 |
+| Compiler | 748 |
 | Core | 177 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 8 |
 | tests | 435 |
-| **total** | **1427** |
+| **total** | **1426** |
 
 ### Regions
 
@@ -10363,7 +10356,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
 | Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1728:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
-| Compiler | Compiler/JetCli/Tests/RunKeep.fixture/RunKeep.jet | 131:5 | "the test owns the slot record it ages" |
 | Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 71:1 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
 | Compiler | Compiler/JetFoundation/Source/Policy/EffectScope.jet | 82:5 | "the runtime reads the two NUL-terminated rights the call packs and keeps neither" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |

@@ -1,0 +1,38 @@
+# No step is reused: every build runs every step again. `mirror` declares only
+# Exec and FS and `stamp` also declares Time; an unchanged rebuild runs both,
+# and a changed input runs both with it. `sneak` reads a file it never
+# declares: the sandbox hides it, so the step fails on every build.
+fixture: fixtures/run_steps_reuse_follows_their_effects
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet build main.jet --allow=Exec,FS,Time
+env: JET_STORE_DIR={work}/store
+exit: 0
+file: mirror.txt = "one"
+file: stamp.txt = "one"
+file: .jet/build/receipt.json count "\"cache_hit\":false" = 2 # the first build ran both steps
+step: jet build main.jet --allow=Exec,FS,Time
+env: JET_STORE_DIR={work}/store
+exit: 0
+file: mirror.txt = "one"
+file: .jet/build/receipt.json count "\"cache_hit\":false" = 2 # the unchanged rebuild ran both steps again
+file: .jet/build/receipt.json !~ "\"cache_hit\":true" # nothing came from the store
+file: .jet/build/receipt.json ~ "\"cache_hits\":[]"
+write: in.txt = "two\n"
+step: jet build main.jet --allow=Exec,FS,Time
+env: JET_STORE_DIR={work}/store
+exit: 0
+file: mirror.txt = "two" # the changed input reaches mirror
+file: stamp.txt = "two"
+file: .jet/build/receipt.json count "\"cache_hit\":false" = 2
+file: .jet/build/receipt.json ~ "\"cache_hits\":[]"
+step: jet build sneak.jet --allow=Exec,FS
+env: JET_STORE_DIR={work}/store
+exit: nonzero
+stderr: ~ "Build action `sneak` exited with status" # the undeclared read fails the step
+step: jet build sneak.jet --allow=Exec,FS
+env: JET_STORE_DIR={work}/store
+exit: nonzero
+stderr: ~ "Build action `sneak` exited with status" # and fails it again

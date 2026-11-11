@@ -1,8 +1,8 @@
 # Every `jet build` records the graph it ran in `.jet/build/receipt.json` and
 # how long each step and target took in `.jet/build/times.json`, which
-# `jet inspect build --times` shows. A second build reuses the step's stored
-# output and says so; the step's `.jet` output, now on disk, stays `show`'s
-# own program instead of joining the build entry's namespace.
+# `jet inspect build --times` shows. A second build runs the step again and
+# says so; the step's `.jet` output, now on disk, stays `show`'s own program
+# instead of joining the build entry's namespace.
 fixture: fixtures/run_steps_run_a_host_tool
 artifact: show
 requires: tool:bwrap
@@ -30,11 +30,12 @@ stdout: !~ "\treused\n" # nothing was reused
 step: jet build main.jet --allow=Exec,FS
 env: JET_STORE_DIR={work}/store
 exit: 0
-file: .jet/build/receipt.json ~ "\"cache_hit\":true" # the second run of the step came from the store
+file: .jet/build/receipt.json ~ "\"cache_hit\":false" # the second build ran the step again
+file: .jet/build/receipt.json !~ "\"cache_hit\":true" # nothing came from the store
 step: jet inspect build main.jet --times --json
 exit: 0
 stdout: ~ "\"times\":{\"rows\":[" # the record itself under --json
 stdout: ~ "\"kind\":\"step\"" # the step's row
-stdout: ~ "\"reused\":true" # the step's outputs were reused
+stdout: !~ "\"reused\":true" # nothing was reused
 step: built
 stdout: = "42\n"

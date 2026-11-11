@@ -19,12 +19,10 @@ A full run does the following:
 2. Each `wNN-*/run.jet` is built at O0 (`--optimize=none`), O1 (`--optimize=basic`) and O2
    (`jet build --release`). Every build, each `jet run` phase, and every peer must print exactly
    `wNN-*/expected.out`.
-3. Timing uses hyperfine `-N`, with the jet-bin tier (the release binary), the three jet-run
-   phases and every peer. Each phase keeps its programs in its own user cache,
-   `OUT/cache/wNN-PHASE`:
-   - `jet-run-first` is the first run with nothing kept: the cache is emptied before every
-     timed run.
-   - `jet-run-warm` is the warm run of the kept program.
+3. Timing uses hyperfine `-N`, with the jet-bin tier (the release binary), the two jet-run
+   phases and every peer. `jet run` keeps no program, so every jet-run run compiles. Each
+   phase runs under its own user cache, `OUT/cache/wNN-PHASE`:
+   - `jet-run-first` empties its cache before every timed run.
    - `jet-run-edit` is the run after a one-line edit. It runs `OUT/edit/wNN/run.jet`, a copy of
      `run.jet` whose last line, `bench_edit: fn() -> Int { N }`, counts up before every timed
      run (`Bench.jet --edit FILE`).

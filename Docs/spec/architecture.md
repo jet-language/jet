@@ -1533,8 +1533,8 @@ The native C path consumes the same checked direct/transitive library closure
 and object/archive link units. A local `c@path` source directory is realized
 with the installed C toolchain into a content-addressed static archive; source
 and header bytes, preprocessed translation units (including system headers),
-exact compiler flags, target and tool identities determine its key. Cache hits
-check the archive digest. System V scalar calls preserve
+exact compiler flags, target and tool identities determine its key. Every
+build compiles the archive again; no stored archive is reused. System V scalar calls preserve
 their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 

@@ -1,0 +1,111 @@
+// `jet file.jet` and `jet run file.jet` compile every run: keeping a program
+// is off (Compiler/JetCli/Source/Cli/ScriptCache.jet). Two runs of one
+// unchanged program print the same and leave nothing under the scripts
+// directory (`$XDG_CACHE_HOME/jet/scripts`). Then the Core file the program
+// reads is made unreadable, which leaves its sources and every file's size,
+// time and inode as they were: each form of the run compiles again and stops
+// on that file, where a kept program would have run. Runs against a
+// toolchain root holding a copy of Core, and its own XDG cache.
+// Usage: jet run Compiler/JetCli/Tests/RunLive.fixture/RunLive.jet -- <jet> <scratch>
+// Run from the repository root: Core is copied from the working directory.
+// It prints one line, the CompilerRegistries row's exact verdict.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+fail: fn(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// The fixed layout of one proof: the compiler under test, the toolchain
+// root, the work directory and the XDG cache.
+Live: struct {
+    jet: String
+    root: String
+    work: String
+    cache: String
+}
+
+// One finished run.
+Ran: struct {
+    code: Int
+    signal: Int
+    output: String
+    errors: String
+}
+
+// `jet <words>` in the work directory, against the copied Core and the test's
+// own XDG cache.
+run_words: fn(live: Live, words: [String]) -> Ran {
+    argv := [String]{live.jet.copy()}
+    loop word in words -> argv.push(word.copy())
+    receipt: process.cmd(argv).cwd(live.work.copy()).env("JET_TOOLCHAIN_ROOT", live.root.copy()).env("XDG_CACHE_HOME", live.cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {words.join(" ")} failed to start: {err}")
+    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+// A run that must succeed and print `expected`.
+run_prints: fn(live: Live, step: String, words: [String], expected: String) {
+    ran: run_words(live, words)
+    if ran.code != 0 || ran.signal != 0 {
+        fail("{step}: code={ran.code} signal={ran.signal}\n{ran.output}{ran.errors}")
+    }
+    if ran.output != expected {
+        fail("{step}: output {ran.output.debug()}, expected {expected.debug()}")
+    }
+}
+
+// A run that must compile and stop on the unreadable Core file `read`.
+run_compiles: fn(live: Live, step: String, words: [String], read: String) {
+    ran: run_words(live, words)
+    if ran.code == 0 && ran.signal == 0 {
+        fail("{step}: the run printed {ran.output.debug()} without compiling; a kept program ran")
+    }
+    if !ran.errors.contains(read) {
+        fail("{step}: the compile stopped without naming {read}\n{ran.errors}")
+    }
+}
+
+// Nothing may exist under the scripts directory.
+no_scripts: fn(live: Live, step: String) {
+    scripts: "{live.cache}/jet/scripts"
+    if files.exists(scripts.copy()) -> fail("{step}: the run wrote {scripts}")
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 2 {
+        fail("usage: jet run Compiler/JetCli/Tests/RunLive.fixture/RunLive.jet -- <jet> <scratch>")
+    }
+    jet: files.canonicalize(args[0].copy()) ?? fail("cannot resolve {args[0]}: {err}")
+    scratch: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
+    repo: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
+    if files.exists(scratch.copy()) {
+        files.remove_all(scratch.copy()) ?? fail("cannot clear {scratch}: {err}")
+    }
+    live: Live{jet: jet, root: "{scratch}/root", work: "{scratch}/work", cache: "{scratch}/cache"}
+    loop directory in ([String]{live.root, live.work, live.cache}) {
+        files.create_dir_all(directory.copy()) ?? fail("cannot create {directory}: {err}")
+    }
+    files.copy_dir("{repo}/Core", "{live.root}/Core") ?? fail("cannot copy Core: {err}")
+    // The program reads core.time, so its compile reads Core/Time/Time.jet.
+    files.write("{live.work}/greet.jet", "use {{\n    time: core.time\n}}\n\nrun: fn() {{\n    if time.duration_ms(1).ns < 0 -> print(\"never\")\n    print(\"hello\")\n}}\n") ?? fail("cannot write greet.jet: {err}")
+
+    run_prints(live, "first run", [String]{"run", "greet.jet"}, "hello\n")
+    no_scripts(live, "first run")
+    run_prints(live, "rerun", [String]{"greet.jet"}, "hello\n")
+    no_scripts(live, "rerun")
+
+    time_file: "{live.root}/Core/Time/Time.jet"
+    files.set_mode(time_file.copy(), 0) ?? fail("cannot change the mode of {time_file}: {err}")
+    if files.read(time_file.copy()) == .Ok(_) {
+        fail("{time_file} is still readable at mode 0; run the test as a user file modes bind")
+    }
+    run_compiles(live, "jet run of unchanged sources", [String]{"run", "greet.jet"}, "Time.jet")
+    run_compiles(live, "jet file.jet of unchanged sources", [String]{"greet.jet"}, "Time.jet")
+    no_scripts(live, "compiling reruns")
+    files.set_mode(time_file.copy(), 420) ?? fail("cannot restore the mode of {time_file}: {err}")
+    term.print("run-live: two runs print the same and keep nothing under the scripts directory, and each rerun of unchanged sources compiles again: ok")
+}

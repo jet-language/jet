@@ -210,7 +210,7 @@ jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or projec
 jet build [<file.jet|dir>]           Create a native executable
 jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
-jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u] Run tests
+jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
 jet explain <CODE|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
 jet self <command>                   Manage the Jet installation and editor tools
@@ -572,7 +572,7 @@ exactly the flags the command takes.
   `build`, `run` and `test` links the checked memory allocator, which stops at
   a bad free or a write after free.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
-- `--watch`, `--fresh`, `--docs`, `--coverage`, `--where`, and `--capture`
+- `--watch`, `--docs`, `--coverage`, `--where`, and `--capture`
   control test or development execution; `--browser` selects browser engines.
 - `--explain-partition` is the web-target build option that shows JavaScript or
   WebAssembly assignment.
@@ -701,9 +701,9 @@ expression, its value is shown, as `node -p` shows it: `jet -e '1 + 2'` prints
 nothing more. A value that has no display is refused with E0112, as `print`
 refuses it. CODE is checked as a file is, so a
 misspelled name is refused before anything runs. The file that holds it is
-kept under the kept programs' directory (`eval/`, named by the content hash),
-and the rest runs as `jet <that file> [args...]`, so the same code reruns its
-kept program. Flags that come before `-e` are the run's. `jet run -e CODE`
+written under the scripts directory (`eval/`, named by the content hash),
+and the rest runs as `jet <that file> [args...]`, so the same code reruns the
+same file. Flags that come before `-e` are the run's. `jet run -e CODE`
 runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
 refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
 may declare: a line of it (between `;`s) that is a declaration alone, such as
@@ -720,7 +720,7 @@ standard input (`jet -e 'input.map((l) -> l.words()[1])' log.txt`);
 input` lists every such name with an example, and `jet help run` points to it.
 
 `jet run - [args...]` runs the program read from standard input
-(`jet run - < hello.jet`, or a pipe). Its source is kept the same way, under
+(`jet run - < hello.jet`, or a pipe). Its source is written the same way, under
 `stdin/` named by its content hash, and runs as `jet run <that file> [args...]`.
 It gets the authority decision the same program gets as a file. An E1803
 refusal names it as the command did: its Fix runs `jet run --allow=… -` and
@@ -730,35 +730,19 @@ for `jet fix` to edit.
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.
 
-`jet run` keeps the program it built in the user cache directory
-(`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
-[`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
-applies to scripts and to any other file. There is one program per entry file
-and profile. Its record names the toolchain it was built with (the compiler
-and its runtime pack by file identity, and the toolchain tree), the file identity
-of each Core source file the compile read (Core built into `jet` is part of
-the compiler), the SHA-256 of each Core source `jet` supplies as text beside
-a toolchain tree (the `jet.runtime` interface modules), and a hash of its
-source snapshot: the source files and the
-directories the source walk enters. Other
-files in the tree, such as one the program writes beside its source, and
-directories the walk skips, such as the `.jet` directory a stopping program
-writes its fault report into, are not compile inputs and don't change the
-hash. A rerun with the same toolchain and sources
-runs the kept program without compiling. Any change, including a different
-compiler, compiles again and replaces the kept program. The cache holds at
-most 64 programs; keeping another removes the least recently run one. A rerun
-marks its program as just run unless it was marked in the last ten minutes,
-so recency counts to within ten minutes. A compile that read a comptime input
-file keeps nothing, and a `--verbose` or traced run always compiles.
+`jet run` and `jet <file.jet>` compile the program on every run, for scripts
+and for any other file, and keep no program: a rerun of unchanged sources
+compiles again and writes nothing under the scripts directory
+(`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`; only the `eval/`
+and `stdin/` source files above are written there). Keeping a built program
+([`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)) is
+off, and no flag, variable or setting turns it on.
 
 A plain `jet run` compiles at the stock `optimize: none`, so a run starts
-quickly; `jet run --optimize=full` (or `-O2`) runs an O2 program. The level is
-one of the build options that name a kept program's slot, so each level keeps
-its own program, a rerun reuses the one built at its level, and no run builds
-at a level it was not asked for. The reused program runs as a freshly
-compiled one does, in place of `jet run` with its process id, so a signal
-sent to that process reaches the program.
+quickly; `jet run --optimize=full` (or `-O2`) runs an O2 program, and no run
+builds at a level it was not asked for. The compiled program runs in place of
+`jet run` with its process id, so a signal sent to that process reaches the
+program.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
@@ -904,7 +888,7 @@ spellings from one row: the flag `--shard=3/8`, the TestProfile field
 flags, each replacing the earlier; `jet test` runs `test: fn` once in a plan
 step (the harness runs no test while `JET_TEST_PLAN` names the plan file)
 before any test runs, and prints the settings it used and the layer each came
-from whenever a profile or `test: fn` wrote one. The settings are `fresh`,
+from whenever a profile or `test: fn` wrote one. The settings are
 `docs`, `filter`, `capture`, `update_snapshots` (`-u`), `shuffle=<seed>`,
 `serial`, `measure`, `trace_tiers`, `optimize=<levels>` (one run per level
 when it lists more than one), `time_limit=<duration>`, `opt_in`,
@@ -1004,17 +988,10 @@ the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
 `iterations`, `time`, `seed`, `corpus`, `watch`, `record`, the `browser_*`
 rows) are refused in all three spellings. The evidence report and the package claims
 floor are not ported yet: the outcome is the harness exit (the outcome for a
-package without a claims floor). The test-result cache lives in
-`.jet/test-results/`, keyed by the harness executable's bytes, the run's
-selection and every `JET_*` variable. A passing run stores its outcomes with
-the reads the harness runtime recorded (`JET_TEST_READS_PATH` names the log:
-opened files and directories, stat'ed paths, environment variables; reads
-under `/proc`, `/sys` and `/dev` key nothing). The next run with that key
-reuses the outcomes while every read's fingerprint (a file's content hash, a
-directory's listing, a stat's kind, size, mode and modification time, a
-variable's value) is unchanged, and runs the tests again otherwise. Snapshot
-updates, `--measure`, code-suite rows and `jet prove` captures always run;
-`--fresh` skips the lookup.
+package without a claims floor). `jet test` keeps no results between runs:
+every run runs its tests, and nothing is read from or written to
+`.jet/test-results/`. Reusing a stored result is off, and no flag, variable
+or setting turns it on.
 
 `jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes a
 project: `package.jet`

@@ -1,7 +1,7 @@
 # A find_folder probe chooses the first folder holding the file it names,
 # looking in each LIBRARY_PATH entry, then the usual library folders.
 # `b.found(probe)` is that folder, which a step reads whole at
-# `.jet/found/<probe>`, and the step's key covers every file in it.
+# `.jet/found/<probe>`; every build runs the step again.
 fixture: fixtures/run_steps_read_a_found_folder
 requires: tool:sh
 requires: tool:bwrap
@@ -13,7 +13,7 @@ exit: 0
 file: app/marker.txt = "found\n" # copied out of libs/, past the missing none/
 step: jet build app/main.jet --allow=Exec,FS
 exit: 0
-file: app/.jet/build/receipt.json ~ "\"cache_hit\":true" # nothing changed, so the store gave the step back
+file: app/.jet/build/receipt.json ~ "\"cache_hit\":false" # nothing changed, and the build ran the step again
 write: libs/jet-case-marker.txt = "changed\n"
 step: jet build app/main.jet --allow=Exec,FS
 exit: 0

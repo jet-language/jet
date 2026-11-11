@@ -2,8 +2,8 @@
 # by the path it runs at in the step's sandbox, which shows it as it shows a
 # step's tool. Here `jet-case-cc` on PATH links the machine's gcc, which must
 # be in the Nix store: the store is the host layout a step's sandbox shows, so
-# a compiler there finds its cc1, as, ld and libraries. The step's key covers
-# the program's bytes, so linking g++ in its place runs the step again.
+# a compiler there finds its cc1, as, ld and libraries. Every build runs the
+# step again, so linking g++ in its place shows in its output.
 fixture: fixtures/run_steps_pass_a_found_program
 requires: tool:sh
 requires: tool:bwrap
@@ -20,7 +20,7 @@ file: app/version.txt ^= "gcc " # the step ran the found gcc
 file: app/answer.o exists # and compiled answer.c with it
 step: jet build app/main.jet --allow=Exec,FS
 exit: 0
-file: app/.jet/build/receipt.json ~ "\"cache_hit\":true" # nothing changed, so the store gave the step back
+file: app/.jet/build/receipt.json ~ "\"cache_hit\":false" # nothing changed, and the build ran the step again
 step: sh -c 'ln -sf "$(readlink -f "$(command -v g++)")" bin/jet-case-cc'
 exit: 0
 step: jet build app/main.jet --allow=Exec,FS

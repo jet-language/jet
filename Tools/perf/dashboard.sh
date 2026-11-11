@@ -1233,16 +1233,11 @@ check_cache_state() {
     else
         cache_hits=$TRIAL_CACHE_HITS
     fi
+    # No build reuses saved work, so every kind, no-change too, compiles.
     case "$cache_kind" in
-        clean|edit)
+        clean|edit|no-change)
             [ "$cache_hits" -eq 0 ] && [ "$TRIAL_CACHE_MISSES" -gt 0 ] || {
-                echo "cache invalidation hidden for $cache_program/$cache_state: expected miss, hits=$cache_hits misses=$TRIAL_CACHE_MISSES" >&2
-                exit 1
-            }
-            ;;
-        no-change)
-            [ "$cache_hits" -gt 0 ] && [ "$TRIAL_CACHE_MISSES" -eq 0 ] || {
-                echo "no-change cache reuse missing for $cache_program/$cache_state: hits=$cache_hits misses=$TRIAL_CACHE_MISSES" >&2
+                echo "saved work reused for $cache_program/$cache_state: expected a compile, hits=$cache_hits misses=$TRIAL_CACHE_MISSES" >&2
                 exit 1
             }
             ;;

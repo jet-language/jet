@@ -1,8 +1,8 @@
 # Port of tests/receipt_store.rs::participating_verbs_are_explicit_and_bounded (9-28). The Rust
 # PARTICIPATING_VERBS table is gone: the Jet CLI claims receipts only at its explicit call sites
-# (CheckReceipt.jet `check`, ComparisonHistory.jet `test-compare`, ImportUpdate.jet `import`). The
-# jet-visible half of the bound: with receipts enabled, `run` and `build` publish nothing to the
-# receipt store, while `check` publishes its receipt there.
+# (CheckReceipt.jet `check`, ComparisonHistory.jet `test-compare`, ImportUpdate.jet `import`).
+# The jet-visible half of the bound: `run` and `build` publish nothing to the receipt store, and
+# neither does `check`, whose receipts are off, so every check runs.
 write: main.jet = "run: fn() {}\n"
 step run: jet run main.jet
 unset: JET_RECEIPT_BYPASS
@@ -18,4 +18,4 @@ step check: jet check main.jet
 unset: JET_RECEIPT_BYPASS
 env: JET_STORE_DIR={work}/store
 exit: 0
-file: .jet/receipts/objects is-dir
+file: .jet/receipts absent

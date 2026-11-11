@@ -1,0 +1,21 @@
+# `jet test` keeps no results between runs: a rerun with every source and every file its
+# tests read unchanged runs the test again and stores nothing under `.jet/test-results`.
+# The test appends to `runs.log` each time it runs.
+fixture: test_runs_again_on_an_unchanged_rerun.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+
+step first: jet test
+cwd: app
+exit: 0
+file: app/runs.log = "ran\n"
+file: app/.jet/test-results absent # nothing is stored
+
+step again: jet test
+cwd: app
+exit: 0
+stderr: !~ "reused" # no stored result stands in for the run
+file: app/runs.log = "ran\nran\n" # the unchanged rerun ran the test again
+file: app/.jet/test-results absent

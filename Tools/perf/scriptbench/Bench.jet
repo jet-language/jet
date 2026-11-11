@@ -7,16 +7,16 @@
 // the pinned peer runtimes, the method, the comparator and the workloads. Each
 // run writes the inputs (Gen.jet), builds every run.jet at O0, O1 and O2 (`jet
 // build --release`), checks that every Jet build, each `jet run` phase and every
-// peer prints the workload's expected.out, then times the jet-bin tier, the three
+// peer prints the workload's expected.out, then times the jet-bin tier, the two
 // jet-run phases and every peer with hyperfine. It prints one cell per workload,
 // tier, peer and metric, writes the cells to OUT/cells.tsv, and exits 1 on any
 // LOSS or any wrong output.
 //
-// The jet-run phases each keep their programs in their own user cache,
-// OUT/cache/ID-PHASE: jet-run-first empties it before every timed run, so nothing
-// is kept; jet-run-warm reruns the kept program; jet-run-edit runs a copy of
-// run.jet, OUT/edit/ID/run.jet, whose last line `Bench.jet --edit FILE` changes
-// before every timed run.
+// `jet run` keeps no program, so every jet-run run compiles. The phases each
+// run under their own user cache, OUT/cache/ID-PHASE: jet-run-first empties it
+// before every timed run; jet-run-edit runs a copy of run.jet,
+// OUT/edit/ID/run.jet, whose last line `Bench.jet --edit FILE` changes before
+// every timed run.
 package: {
     name: "scriptbench"
     authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Net, Time, Time.Wait] }
@@ -78,8 +78,8 @@ Command: struct {
     name: String
     argv: [String]
     slow: Bool
-    // The user cache (XDG_CACHE_HOME) a jet-run phase keeps its programs in;
-    // "" inherits the caller's.
+    // The user cache (XDG_CACHE_HOME) a jet-run phase runs under; "" inherits
+    // the caller's.
     cache: String
     // What hyperfine runs before each timed run ("" for nothing).
     prepare: String
@@ -457,16 +457,12 @@ run: fn() {
         fs.create_dir_all(edit_dir) ?? fail("mkdir {edit_dir}")
         source: fs.read("{bench}/{w.dir}/run.jet") ?? fail("can't read {w.dir}/run.jet")
         fs.write("{edit_dir}/run.jet", "{source}\n{EDIT_HEAD}0 }}\n") ?? fail("can't write {edit_dir}/run.jet")
-        phases: ["first", "warm", "edit"]
+        phases: ["first", "edit"]
         loop phase in phases {
             cache: "{opts.out}/cache/{w.id}-{phase}"
             fs.remove_all(cache).drop("a cache left by an earlier ScriptBench run may be absent")
             entry: if phase == "edit" -> "{edit_dir}/run.jet" else -> "{bench}/{w.dir}/run.jet"
-            prepare: if phase == {
-                "first" -> "rm -rf {cache}"
-                "edit" -> "{opts.jet} {bench}/Bench.jet --edit {entry}"
-                else -> ""
-            }
+            prepare: if phase == "edit" -> "{opts.jet} {bench}/Bench.jet --edit {entry}" else -> "rm -rf {cache}"
             run_argv := [opts.jet.copy(), "run", entry]
             if w.args.len() > 0 -> run_argv.push("--")
             loop a in w.args -> run_argv.push(a.copy())
@@ -497,7 +493,7 @@ run: fn() {
         if measured == .Val(stats) {
             loop s in stats -> print("  {s.name.pad_end(13, " ")} wall {ms_text(s.wall).pad_start(11, " ")}  cpu {ms_text(s.cpu).pad_start(11, " ")}  rss {mb_text(s.rss).pad_start(9, " ")}")
             loop t in timed_out -> print("  {t.pad_end(13, " ")} TIMEOUT (over {m.method.timeout_s} s)")
-            tiers: ["jet-bin", "jet-run-first", "jet-run-warm", "jet-run-edit"]
+            tiers: ["jet-bin", "jet-run-first", "jet-run-edit"]
             loop tier in tiers {
                 ji: stat_index(stats, tier)
                 if ji < 0 -> next

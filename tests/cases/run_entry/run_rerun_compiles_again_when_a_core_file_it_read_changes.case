@@ -1,7 +1,6 @@
-# Docs/spec/reference/cli.md: a kept `jet run` program's record names the file identity of
-# each Core source file its compile read, so a rerun after one of them changes compiles
-# again. Here the edit breaks `Core/Text/Text.jet`, which the program imports, so the rerun
-# that compiles again fails on it instead of running the kept program.
+# Docs/spec/reference/cli.md: `jet run` compiles every run and keeps nothing under the
+# scripts directory, so a rerun reads each Core source file again. Here the edit breaks
+# `Core/Text/Text.jet`, which the program imports, so the rerun fails on it.
 env: NO_COLOR=1
 env: XDG_CACHE_HOME={work}/cache
 env: JET_STORE_DIR={work}/store
@@ -13,11 +12,12 @@ step first: jet run tree/app/words.jet
 unset: JET_TOOLCHAIN_ROOT
 exit: 0
 stdout: = "3\n"
-entries: cache/jet/scripts name $= ".run" = 1 # the compile kept its program
-step kept: jet run tree/app/words.jet
+file: cache/jet/scripts absent # the run kept nothing
+step rerun: jet run tree/app/words.jet
 unset: JET_TOOLCHAIN_ROOT
 exit: 0
 stdout: = "3\n"
+file: cache/jet/scripts absent
 concat: tree/Core/Text/Text.jet tree/Core/Text/Text.jet broken.txt
 step changed: jet run tree/app/words.jet
 unset: JET_TOOLCHAIN_ROOT

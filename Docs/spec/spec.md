@@ -4454,13 +4454,8 @@ file-local and run once per member. A directory without a package manifest is
 walked recursively for `*.jet` files. A package-level `test: fn` override owns
 the command unless `--show-default` requests the stock harness.
 The default child-output policy is `--capture=failed`; choose `all` or `none`
-explicitly. `--fresh` bypasses only the persisted test-result cache; the build
-cache remains reusable. The test-result cache keeps a passing run's outcomes
-with the reads its tests made: each file or directory opened, each path
-stat'ed, each environment variable read. A rerun of the same test executable
-and selection reuses the outcomes while every recorded read is unchanged (a
-file's content, a directory's listing, a variable's value) and runs the tests
-again when one changed. `--docs` selects checked documentation examples.
+explicitly. Every `jet test` runs its tests: no result is stored, and no
+stored result stands in for a run. `--docs` selects checked documentation examples.
 `--watch`, `--where=<expr>`, `--filter=<substring>`, `--shuffle[=<seed>]`,
 `--serial`, `--coverage`, `--update-snapshots` (or `-u`), `--release`, and
 `--profile=<name>` select the corresponding test-run behavior. Browser claims
@@ -5778,29 +5773,26 @@ refused (E3502) before anything runs. A step's key covers its declared input
 content, argv, authority, toolchain, probes, signing identity, and
 generated-source hashes.
 
-A step's effects decide whether it is reused; nothing else does. An effect is
-ambient when its result is not fixed by the step's declared inputs. `FS`,
-`Exec` and `Env` are not: the sandbox lets the step read only its declared
+No step is reused: every `jet build` runs every step, whatever its effects, so
+a step's outputs are always the ones this build made. Reusing a step's stored
+record is off, and no flag, variable or setting turns it on. `FS`, `Exec` and
+`Env` are not ambient effects: the sandbox lets the step read only its declared
 inputs, write only its tree, run only its tool and what is mounted (each
 identified by content in the key), and see only its declared variables (their
 values in the key). `Net`, `Time`, `Rand`, `IO`, `DB`, `Log` and `GPU` are. A
-step with no ambient effect is reused on an unchanged rebuild: its stored
-record restores only its declared outputs from the local CAS, and a changed
-input changes its key, so it runs again. Such a step must write an output. A
-step with an ambient effect always runs. The sandbox is what makes the
-readings hold, and no step runs outside it: a read of an undeclared file fails
-the step instead of reusing a stale result. Example:
-[`tests/cases/build_entry/run_steps_reuse_follows_their_effects.case`](../../tests/cases/build_entry/run_steps_reuse_follows_their_effects.case).
+step must write an output. No step runs outside the sandbox: a read of an
+undeclared file fails the step on every build. Example:
+[`tests/cases/build_entry/run_steps_run_again_on_every_build.case`](../../tests/cases/build_entry/run_steps_run_again_on_every_build.case).
 
 When `jet build` runs the graph of a `build: fn`, it leaves two records under
 `.jet/build/` beside the build entry, whether or not the build succeeded. `receipt.json` is
 the `core.build` `BuildGraph` it ran: its targets, steps with their keys, files
-and the compiler's own nodes, with each step that ran marked a cache hit or
-miss in `cache_hit` and listed in `cache_hits` when its outputs came from the
-store. `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
+and the compiler's own nodes, with each step that ran marked a cache miss in
+`cache_hit` (`cache_hits` lists none, since no step's outputs come from the
+store). `times.json` is its `BuildTimes`: one `BuildTime` row (`name`, `kind`
 `step`, `host`, `image` or `library`, `wall_ms`, `reused`) per step and target,
 in the order each finished. A step's `wall_ms` is the time of the steps that ran
-with it, and a target is `reused` when its image came from the store. Both are
+with it, and `reused` is false, since every image is built. Both are
 JSON objects whose fields are the value's own, in declaration order; after
 them `receipt.json` has `kept`, one `path` and `digest` (`sha256:<hex>`) per
 kept output, of the bytes the build left there.
