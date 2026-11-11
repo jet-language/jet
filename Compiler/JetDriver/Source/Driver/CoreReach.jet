@@ -9,16 +9,19 @@
 // same rule, so a program that only measures UTF-8 never loads the case
 // tables. Every other declaration (types, impls, traits, marked or
 // compiler-routed `__` functions, and the whole of a module the compiler
-// demands) is reached with its module.
+// demands) is reached with its module; core.math, demanded by a receiver's
+// `abs` or `pow`, reaches only the functions those lower to.
 //
 // Spellings are read from the source bytes outside comments, strings
 // included, so reach is a superset of what the code names. When the load is
-// done, the imports never followed leave their modules, and so does every
-// unreached declaration that spells one of their
+// done, the imports never followed and the unreached constants leave their
+// modules, and so does every unreached declaration that spells one of those
 // aliases as a path head or spells a declaration that left; what stays names
-// only what stays, so every tier checks the same closed program.
+// only what stays, so every tier checks the same closed program, and
+// comptime evaluates only constants the program can name.
 use {
     jet_foundation.[ImportDecl, Item, NameTable, Span, name_intern, name_intern_bytes, name_table]
+    jet_ir.[ir_precise_source_helper]
     jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, Token]
     jet_sema.[sema_source_word_byte]
 }
@@ -291,6 +294,24 @@ jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
     jet_driver_reach_drain(reach)
 }
 
+// A receiver's `abs` or `pow` lowers to the core.math function
+// ir_precise_source_helper names, which the source need not spell
+// (`x.abs()` on a Float runs `fabs`): each is reached, now and when
+// core.math loads. The rest of core.math loads by use.
+jet_driver_reach_math_receiver: fn(reach: &JetDriverReach) {
+    if !reach.enabled -> return
+    owners: [String]{"Int", "Float", "F32", "I64"}
+    operations: [String]{"abs", "pow"}
+    loop owner in owners {
+        loop operation in operations {
+            name: ir_precise_source_helper(owner, operation) ?? next
+            id: Int.from_u32(name_intern(reach.names, name).id)
+            jet_driver_reach_global(reach, id)
+        }
+    }
+    jet_driver_reach_drain(reach)
+}
+
 // Defers `scoped`, an import of the module at `unit`.
 jet_driver_reach_defer: fn(reach: &JetDriverReach, unit: Int, scoped: JetDriverScopedImport) {
     alias: Int.from_u32(name_intern(reach.names, scoped.declaration.alias).id)
@@ -348,10 +369,12 @@ jet_driver_reach_drain: fn(reach: &JetDriverReach) {
     }
 }
 
-// The load is done: drop each never-followed import from its module, then
-// every unreached declaration that spells its alias as a path head, or spells
-// a dropped declaration (bare in the same module, after a `.` anywhere),
-// until no remaining declaration names a dropped one.
+// The load is done: drop each never-followed import from its module and each
+// unreached constant (so comptime evaluates only constants the program can
+// name), then every unreached declaration that spells a dropped import's
+// alias as a path head, or spells a dropped declaration (bare in the same
+// module, after a `.` anywhere), until no remaining declaration names a
+// dropped one.
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModule]) {
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
@@ -367,12 +390,20 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         dead[edge.unit][edge.alias] = true
         dead_imports[edge.unit].push(edge.scoped.declaration.span)
     }
-    if !any -> return
     gone := [Bool]{}
     loop _ in reach.items -> gone.push(false)
     global_gone := [Bool]{}
     local_gone := [[Bool]]{}
     loop _ in reach.units -> local_gone.push([Bool]{})
+    loop index in 0..<reach.items.len() {
+        if reach.items[index].live -> next
+        unit: reach.items[index].unit
+        if modules[reach.units[unit].loaded].program.items[reach.items[index].item] == .Const(_) {
+            any = true
+            jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
+        }
+    }
+    if !any -> return
     grew := true
     loop grew {
         grew = false
@@ -389,13 +420,8 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
                 if hit -> break
             }
             if !hit -> next
-            gone[index] = true
             grew = true
-            name: reach.items[index].name
-            loop global_gone.len() <= name -> global_gone.push(false)
-            global_gone[name] = true
-            loop local_gone[unit].len() <= name -> local_gone[unit].push(false)
-            local_gone[unit][name] = true
+            jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
         }
     }
     drop := [[Bool]]{}
@@ -422,4 +448,16 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         }
         modules[loaded].program.items = items.move()
     }
+}
+
+// Marks reach item `index` dropped, and its name dropped in its module (bare
+// spellings) and everywhere (spellings after a `.`).
+jet_driver_reach_gone: fn(reach: JetDriverReach, index: Int, gone: &[Bool], global_gone: &[Bool], local_gone: &[[Bool]]) Never! {
+    gone[index] = true
+    unit: reach.items[index].unit
+    name: reach.items[index].name
+    loop global_gone.len() <= name -> global_gone.push(false)
+    global_gone[name] = true
+    loop local_gone[unit].len() <= name -> local_gone[unit].push(false)
+    local_gone[unit][name] = true
 }

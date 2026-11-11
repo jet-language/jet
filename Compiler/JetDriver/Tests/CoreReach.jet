@@ -118,3 +118,25 @@ reach_test_load_runtime: fn(source: String) -> JetDriverLoadResult {
     assert(reach_test_has_module(lookup, "core.devtools.runtime.table"))
     assert_eq(reach_test_functions(lookup, "core.devtools.runtime.kernel"), [String]{"plain", "lookup"})
 }
+
+reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
+    names := [String]{}
+    loop module_row in load.modules {
+        if module_row.module_name != module_name -> next
+        loop item in module_row.program.items {
+            if item == .Const(value) -> names.push(value.name)
+        }
+    }
+    names
+}
+
+#Test("an unreached Core constant leaves its module with the declarations that name it") {
+    owner: "plain: fn() -> Int Never! {{ 1 }}\n\nLIMIT: 3\n\nlimited: fn() -> Int Never! {{ LIMIT }}\n"
+    plain: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n", owner)
+    assert(plain.complete && !jet_driver_has_errors(plain.diagnostics))
+    assert_eq(reach_test_constants(plain, "core.devtools"), [String]{})
+    assert_eq(reach_test_functions(plain, "core.devtools"), [String]{"plain"})
+    limited: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.limited()) }}\n", owner)
+    assert_eq(reach_test_constants(limited, "core.devtools"), [String]{"LIMIT"})
+    assert_eq(reach_test_functions(limited, "core.devtools"), [String]{"plain", "limited"})
+}
