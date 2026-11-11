@@ -1,0 +1,49 @@
+# Card #3173 c22: the backend starter's service and client both depend on the
+# workspace's contract library. One edit to that library, and nothing else,
+# reaches both programs at their next build: the rebuilt client and the
+# rebuilt service each report the new contract revision.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Examples/Network/BackendStarter starter
+step: jet build starter/Packages/Service
+exit: 0
+step: jet build starter/Packages/Client
+exit: 0
+spawn before: {work}/starter/Packages/Service/.jet/build/run
+env: BACKEND_ADDR=127.0.0.1:{free-port:before}
+env: BACKEND_STATE_DIR={work}/before
+env: BACKEND_OPERATOR_PASSWORD=case-credential-0123456789
+stdout: null
+stderr: null
+poll ready_before: {work}/starter/Packages/Client/.jet/build/run health until exit: 0 && stdout: ~ " is ok" timeout 60s every 50ms # the service is ready
+env: BACKEND_URL=http://127.0.0.1:{free-port:before}
+step client_before: {work}/starter/Packages/Client/.jet/build/run
+env: BACKEND_URL=http://127.0.0.1:{free-port:before}
+env: BACKEND_PASSWORD=case-credential-0123456789
+exit: 0
+stdout: = "client orders/v1: service orders/v1 is ok\norder 1: 2 x book under orders/v1 (201)\n"
+signal before: INT
+wait: before timeout 30s
+exit: 0
+
+write: starter/Packages/Contract/version.jet one_contract_change_reaches_the_built_service_and_client.fixture/version.jet
+step: jet build starter/Packages/Service
+exit: 0
+step: jet build starter/Packages/Client
+exit: 0
+spawn after: {work}/starter/Packages/Service/.jet/build/run
+env: BACKEND_ADDR=127.0.0.1:{free-port:after}
+env: BACKEND_STATE_DIR={work}/after
+env: BACKEND_OPERATOR_PASSWORD=case-credential-0123456789
+stdout: null
+stderr: null
+poll ready_after: {work}/starter/Packages/Client/.jet/build/run health until exit: 0 && stdout: ~ " is ok" timeout 60s every 50ms # the service is ready
+env: BACKEND_URL=http://127.0.0.1:{free-port:after}
+step client_after: {work}/starter/Packages/Client/.jet/build/run
+env: BACKEND_URL=http://127.0.0.1:{free-port:after}
+env: BACKEND_PASSWORD=case-credential-0123456789
+exit: 0
+stdout: = "client orders/v2: service orders/v2 is ok\norder 1: 2 x book under orders/v2 (201)\n"
+signal after: INT
+wait: after timeout 30s
+exit: 0

@@ -197,8 +197,19 @@ role_allowed: fn(req: HTTPRequest, session_id: String, expected_role: String, no
     return true
 }
 
-issue_session: fn(user: String, password: String, now: Int, ttl_ms: Int) -[DB, Rand, Time]> String {
-    session: auth.password_login(user, password, now, ttl_ms) ?? return ""
+// Hash `password` with Argon2id and register `user` under that hash. The
+// caller keeps the returned hash, never the password, to verify later logins.
+register_account: fn(user: String, password: crypto.Secret) -[DB, Rand]> crypto.PasswordHash Err! {
+    stored: crypto.password_hash(password) ?? return Err("password hashing failed")
+    auth.register_user(user, stored.text) ?? return Err(err)
+    return Ok(stored)
+}
+
+// A session for `user` when `password` verifies against the Argon2id hash
+// `stored`, or "" when it does not.
+issue_session: fn(user: String, password: crypto.Secret, stored: crypto.PasswordHash, now: Int, ttl_ms: Int) -[DB, Rand, Time]> String {
+    if !(crypto.password_verify(password, stored) ?? false) -> return ""
+    session: auth.password_login(user, stored.text, now, ttl_ms) ?? return ""
     return auth.session_id(session)
 }
 

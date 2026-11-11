@@ -1,0 +1,106 @@
+// The deployable order service. Its deployment supplies every setting:
+//
+//   BACKEND_ADDR               where it listens (default 127.0.0.1:8080)
+//   BACKEND_STATE_DIR          the directory that keeps its SQLite database
+//   BACKEND_OPERATOR           the operator's user name (default `operator`)
+//   BACKEND_OPERATOR_PASSWORD  the operator's credential, from the
+//                              deployment's secret store
+//
+// The starter ships no credential: without one the service refuses to
+// start. The password lives in memory only as its Argon2id hash, sessions are
+// opaque random tokens, and the schema changes only through named, additive
+// migrations. `ready` is printed once the listener is bound; an interrupt
+// stops accepting, lets the request in progress finish and ends with a drain
+// report.
+use {
+    backend
+    contract
+    auth: core.auth
+    crypto: core.crypto
+    db: core.db
+    files: core.files
+    http_server: core.http.server
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+SESSION_TTL_MS: 600000
+// The exit status for missing configuration (sysexits EX_CONFIG).
+CONFIG_ERROR: 78
+
+Config: struct {
+    address: String
+    state_dir: String
+    operator: String
+    password: String
+}
+
+config_from_env: fn() -> Config {
+    state_dir: process.env_get("BACKEND_STATE_DIR") ?? process.fail(CONFIG_ERROR, "BACKEND_STATE_DIR must name the directory that keeps the service's database")
+    password: process.env_get("BACKEND_OPERATOR_PASSWORD") ?? process.fail(CONFIG_ERROR, "BACKEND_OPERATOR_PASSWORD must carry the operator credential from the deployment's secret store; the starter ships none")
+    if password.len() < 16 -> process.fail(CONFIG_ERROR, "BACKEND_OPERATOR_PASSWORD must be at least 16 characters")
+    Config{
+        address: process.env_get("BACKEND_ADDR") ?? "127.0.0.1:8080",
+        state_dir: state_dir,
+        operator: process.env_get("BACKEND_OPERATOR") ?? "operator",
+        password: password,
+    }
+}
+
+// The schema, one named step at a time. A step only ever adds; a migration
+// that has run is never edited, and a later change is a new named step.
+migrate: fn(orders: db.DBScope) {
+    applied: db.migrate(orders, "orders-v1", [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL, quantity INTEGER NOT NULL, owner TEXT NOT NULL)"}]) ?? process.fail(CONFIG_ERROR, "migration orders-v1: {err}")
+    print("migrations: orders-v1 applied={applied}")
+}
+
+login: fn(req: HTTPRequest, operator: String, stored: crypto.PasswordHash) -> HTTPResponse HTTPError! {
+    body: req.json<contract.LoginRequest>() ?? return backend.error_response(req, 400, "malformed-json", "request body is not LoginRequest")
+    session: if body.user == operator -> backend.issue_session(body.user, crypto.Secret.from_text(body.password), stored, time.now().to_unix_ms(), SESSION_TTL_MS) else -> ""
+    if session == "" -> return backend.error_response(req, 401, "unauthorized", "invalid user name or password")
+    Ok(http_server.json(200, contract.LoginResponse{session: session}) ?? return Err(err))
+}
+
+create_order: fn(req: HTTPRequest, orders: db.DBScope) -> HTTPResponse HTTPError! {
+    session: auth.session_validate(req.header("x-session") ?? "", time.now().to_unix_ms()) ?? return backend.error_response(req, 401, "unauthorized", "a valid session is required")
+    body: req.json<contract.OrderRequest>() ?? return backend.error_response(req, 400, "malformed-json", "request body is not OrderRequest")
+    if body.item == "" || body.quantity <= 0 -> return backend.error_response(req, 422, "invalid-order", "item and positive quantity are required")
+    owner: auth.session_user(session)
+    _inserted: orders.execute(SQL{"INSERT INTO orders (item, quantity, owner) VALUES ({body.item}, {body.quantity}, {owner})"}) ?? return backend.error_response(req, 503, "store-unavailable", "the order was not stored")
+    row: orders.query_one(SQL{"SELECT max(id) AS id FROM orders"}) ?? return backend.error_response(req, 503, "store-unavailable", "the order was not stored")
+    order_id: db.row_int(row, "id") ?? 0
+    Ok(http_server.json(201, contract.OrderResponse{order_id: order_id, item: body.item, quantity: body.quantity, api: contract.API_VERSION}) ?? return Err(err))
+}
+
+run: fn() {
+    config: config_from_env()
+    files.create_dir_all(config.state_dir) ?? process.fail(CONFIG_ERROR, "state directory {config.state_dir}: {err}")
+    conn: db.open(Path.from(config.state_dir).join("orders.sqlite").to_string())
+    orders: conn.with_policy(db.policy("orders", "true") ?? process.fail(CONFIG_ERROR, "orders policy: {err}"), "service")
+    migrate(orders)
+
+    stored: backend.register_account(config.operator, crypto.Secret.from_text(config.password)) ?? process.fail(CONFIG_ERROR, "operator account: {err}")
+    operator: config.operator
+
+    mux: http_server.mux()
+    http_server.request_id(mux)
+    // Liveness and readiness: the service answers only once it is migrated
+    // and listening.
+    mux.get("/health", (req: HTTPRequest) -> http_server.json(200, contract.Health{status: "ok", api: contract.API_VERSION}))
+    mux.post("/login", (req: HTTPRequest) -> login(req, operator.copy(), stored.copy()))
+    mux.post("/orders", (req: HTTPRequest) -> create_order(req, orders.copy()))
+
+    bound: http_server.bind(config.address, mux, deadline: 5s) ?? process.fail(CONFIG_ERROR, "listen on {config.address}: {err}")
+    address: bound.local_addr() ?? process.fail(CONFIG_ERROR, "listener address: {err}")
+    // An interrupt stops new connections; `serve` returns once the request in
+    // progress has been answered.
+    stopper: bound.copy()
+    sys.on_interrupt(() -> {
+        _report: stopper.shutdown(5s) ?? return
+    })
+    print("ready {contract.API_VERSION} http://{address}")
+    report: bound.serve() ?? process.fail(1, "serve: {err}")
+    if !conn.close() -> process.fail(1, "database close failed")
+    print("drained: accepted={report.accepted} completed={report.completed} unanswered={report.accepted - report.completed}")
+}

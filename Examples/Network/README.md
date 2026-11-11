@@ -18,6 +18,10 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [URLSourceLiteral](URLSourceLiteral.jet) — No import: the typed URL head loads its source-owned carrier and constructor.
 - [WSEcho](WSEcho.jet) — core.net.ws client/server echo over cleartext WebSocket.
 
+## Backend starter
+
+- [BackendStarter](BackendStarter/workspace.jet) — A production-minded starter workspace: a deployable order service on the first-party `backend` battery and its client, both built from one shared contract library. The service takes its address, state directory and operator credential from the environment (it ships none), applies only additive migrations, answers a readiness probe (`client health`) and drains on interrupt. Build each program with `jet build Examples/Network/BackendStarter/Packages/Service` (and `.../Client`); `tests/cases/backend_starter/` deploys the built artifacts.
+
 ## Browser
 
 - [BrowserAgent](Browser/BrowserAgent.jet) — Agent-facing browser automation cookbook.

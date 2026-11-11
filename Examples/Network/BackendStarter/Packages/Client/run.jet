@@ -1,0 +1,37 @@
+// A client of the order service. It builds from the same contract package as
+// the service, and reads where the service lives and its credential from
+// the environment:
+//
+//   BACKEND_URL       the service's base URL (default http://127.0.0.1:8080)
+//   BACKEND_USER      the user to sign in as (default `operator`)
+//   BACKEND_PASSWORD  that user's credential
+//
+// `client health` only asks the service whether it is ready, and exits 0
+// when it is: a deployment's readiness probe.
+use {
+    contract
+    http_client: core.http.client
+    process: core.process
+}
+
+run: fn() {
+    base: process.env_get("BACKEND_URL") ?? "http://127.0.0.1:8080"
+    health_response: http_client.request("GET", "{base}/health").send() ?? process.fail(1, "health: {err}")
+    if health_response.status() != 200 -> process.fail(1, "health: status {health_response.status()}")
+    health: health_response.json<contract.Health>() ?? process.fail(1, "health body: {err}")
+    print("client {contract.API_VERSION}: service {health.api} is {health.status}")
+    if (process.args().get(0) ?? "") == "health" -> return
+
+    user: process.env_get("BACKEND_USER") ?? "operator"
+    password: process.env_get("BACKEND_PASSWORD") ?? process.fail(78, "BACKEND_PASSWORD must carry the credential to sign in with")
+    login_response: http_client.request("POST", "{base}/login").json(contract.LoginRequest{user: user, password: password}).send() ?? process.fail(1, "login: {err}")
+    if login_response.status() != 200 -> process.fail(1, "login refused: {login_response.status()}")
+    login: login_response.json<contract.LoginResponse>() ?? process.fail(1, "login body: {err}")
+
+    order_response: http_client.request("POST", "{base}/orders")
+        .header("x-session", login.session)
+        .json(contract.OrderRequest{item: "book", quantity: 2})
+        .send() ?? process.fail(1, "order: {err}")
+    order: order_response.json<contract.OrderResponse>() ?? process.fail(1, "order body: {err}")
+    print("order {order.order_id}: {order.quantity} x {order.item} under {order.api} ({order_response.status()})")
+}

@@ -1,0 +1,107 @@
+// The production-minded backend starter, and the first-party backend battery it
+// consumes, present no sample secret, plaintext password or destructive schema
+// change as their default. A credential comes from the deployment, a password
+// lives only as its Argon2id hash, and a schema changes only through an
+// explicit, additive migration.
+use {
+    backend_starter_files: core.files
+}
+
+// The battery source the starters run on, and the maintained starter package.
+BACKEND_STARTER_SOURCES: [String]{
+    "Jetpack/Provider/Batteries/backend/backend.jet",
+    "tests/run/Net/BackendBattery/run.jet",
+}
+
+// The starter workspace; every Jet source under it is scanned.
+BACKEND_STARTER_WORKSPACE: "Examples/Network/BackendStarter"
+
+// Environment names whose value is a credential, so it may have no default.
+BACKEND_STARTER_SECRET_NAMES: [String]{"PASSWORD\") ?? \"", "SECRET\") ?? \"", "TOKEN\") ?? \"", "KEY\") ?? \""}
+
+// Every Jet source under `directory`, in directory order.
+backend_starter_sources_under: fn(directory: String) -> [String] {
+    found := [String]{}
+    entries: backend_starter_files.list_dir(directory) ?? panic("read {directory}: {err}")
+    loop entry in entries {
+        if entry.name.starts_with(".") -> next
+        if entry.is_dir {
+            loop path in backend_starter_sources_under(entry.path) -> found.push(path)
+        } else if entry.name.ends_with(".jet") {
+            found.push(entry.path)
+        }
+    }
+    found
+}
+
+// Calls whose credential argument must never be a source literal.
+BACKEND_STARTER_CREDENTIAL_CALLS: [String]{"register_user(", "register_account(", "issue_session(", "password_login("}
+
+// Schema text that destroys data or derives the schema from the code.
+BACKEND_STARTER_DESTRUCTIVE: [String]{"DROP TABLE", "DROP SCHEMA", "DROP DATABASE", "TRUNCATE", "synchronize", "sync_schema", "auto_migrate"}
+
+// Every finding in `source` (read from `path`), as `path:line: problem`.
+backend_starter_findings: fn(path: String, source: String) -> [String] {
+    found := [String]{}
+    line_number := 0
+    loop line in source.lines() {
+        line_number += 1
+        code: line.trim()
+        if code.starts_with("//") -> next
+        if code.contains("Secret.from_text(\"") || code.contains("Secret.from_bytes(\"") {
+            found.push("{path}:{line_number}: a secret built from a source literal")
+        }
+        loop name in BACKEND_STARTER_SECRET_NAMES {
+            if code.contains(name) -> found.push("{path}:{line_number}: a credential with a default value")
+        }
+        loop call in BACKEND_STARTER_CREDENTIAL_CALLS {
+            if code.split_once(call) == .Val(parts) {
+                // The first argument names the account; any later literal is a credential.
+                if parts.after.split_once("\", \"") != None {
+                    found.push("{path}:{line_number}: `{call}` takes a literal credential")
+                }
+            }
+        }
+        upper: code.to_upper()
+        loop word in BACKEND_STARTER_DESTRUCTIVE {
+            if upper.contains(word.to_upper()) -> found.push("{path}:{line_number}: destructive schema change `{word}`")
+        }
+        if upper.contains("CREATE TABLE ") && !upper.contains("CREATE TABLE IF NOT EXISTS ") {
+            found.push("{path}:{line_number}: a schema creation that is not an additive migration")
+        }
+    }
+    found
+}
+
+#Test("the backend starter presents no sample secret, plaintext password or destructive schema change as its default") {
+    guards_enter_root()
+    found := [String]{}
+    sources := BACKEND_STARTER_SOURCES.copy()
+    loop path in backend_starter_sources_under(BACKEND_STARTER_WORKSPACE) -> sources.push(path)
+    assert(sources.len() > BACKEND_STARTER_SOURCES.len() + 3, "the starter workspace lost its sources: {sources}")
+    loop path in sources {
+        source: backend_starter_files.read(path) ?? panic("read {path}: {err}")
+        loop finding in backend_starter_findings(path, source) -> found.push(finding)
+    }
+    assert(found.len() == 0, found.join("\n"))
+}
+
+#Test("the backend starter scan reports a literal password, a sample secret, a default credential and a destructive sync") {
+    sample: [String]{
+        `auth.register_user("ada", "argon2id:demo")`,
+        `key: crypto.Secret.from_text("change-me")`,
+        `db.execute(SQL{"DROP TABLE orders"})`,
+        `db.migrate(conn, "v1", [SQL{"CREATE TABLE orders (id INTEGER)"}])`,
+        `// auth.register_user("commented", "out")`,
+        `stored: backend.register_account("ada", crypto.Secret.from_text(credential))`,
+        `password: process.env_get("BACKEND_OPERATOR_PASSWORD") ?? "change-me-later"`,
+    }.join("\n")
+    found: backend_starter_findings("sample.jet", sample)
+    assert_eq(found, [String]{
+        "sample.jet:1: `register_user(` takes a literal credential",
+        "sample.jet:2: a secret built from a source literal",
+        "sample.jet:3: destructive schema change `DROP TABLE`",
+        "sample.jet:4: a schema creation that is not an additive migration",
+        "sample.jet:7: a credential with a default value",
+    })
+}

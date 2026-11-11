@@ -1,12 +1,13 @@
 use {
     backend
-    auth: core.auth
+    crypto: core.crypto
     files: core.files
     http_client: core.http.client
     http: core.http
     http_server: core.http.server
     json: core.encoding.json
     log: core.log
+    random: core.crypto.random
     testing: core.testing
     process: core.process
     time: core.time
@@ -64,8 +65,11 @@ run: fn() {
     queue_path: Path.from(temp).join("queue.log").to_string()
     queue_report: backend.durable_queue(queue_path, "order:bootstrap", "order-1")
 
-    auth.register_user("ada", "argon2id:demo") ?? panic("auth register")
-    session_id: backend.issue_session("ada", "argon2id:demo", time.now().to_unix_ms(), 600000)
+    // The operator credential is drawn fresh for each run, and the service
+    // keeps only its Argon2id hash: there is no sample password to ship.
+    credential: random.token_urlsafe(32) ?? panic("credential")
+    stored: backend.register_account("ada", crypto.Secret.from_text(credential)) ?? panic("auth register")
+    session_id: backend.issue_session("ada", crypto.Secret.from_text(credential), stored, time.now().to_unix_ms(), 600000)
     policy: backend.session_policy()
     print("session-policy:{policy.session_header}/{policy.role_header}/{policy.cookie_name}")
     if session_id == "" -> panic("auth login")
