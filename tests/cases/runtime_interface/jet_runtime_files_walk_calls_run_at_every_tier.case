@@ -27,11 +27,11 @@ step: .jet/build/main
 timeout: 60s
 exit: 0
 stdout: = jet_runtime_files_walk_calls_run_at_every_tier.out
-step: jet run out_of_range.jet
+step: jet run out_of_range/main.jet
 timeout: 60s
-exit: != 0
-stderr: ~ "live walk slot"
-step: jet run released.jet
+exit: != 0 # a stale walk slot stops the program
+stderr: ~ "live walk slot" # the slot check names its rule
+step: jet run released/main.jet
 timeout: 60s
-exit: != 0
-stderr: ~ "live walk slot"
+exit: != 0 # a stale walk slot stops the program
+stderr: ~ "live walk slot" # the slot check names its rule
