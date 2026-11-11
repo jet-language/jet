@@ -9,6 +9,7 @@
 // data), never stored, returned, or passed. Approved Core authority boundary
 // arguments are delegations, not escapes.
 use jet_foundation.[
+    BodyEffectScopeRegion,
     CallArg,
     Diagnostic,
     Expr,
@@ -18,6 +19,7 @@ use jet_foundation.[
     NamedSpan,
     Span,
     Stmt,
+    effect_scope_descriptor,
     expr_span,
 ]
 
@@ -556,6 +558,19 @@ sema_authority_fx_regions: fn(statements: [Stmt]) -> [SemaEffectFxRegion] {
     regions := [SemaEffectFxRegion]{}
     sema_authority_collect_fx_regions(statements, regions)
     regions
+}
+
+// The run-time frames of the `#FX(…)` regions of one body whose caps scope
+// FS or Net (FnBody.effect_scope_regions), each keyed by its region's span
+// and named after `function_name`; a region whose caps scope neither has
+// none, and its caps are checked only at compile time.
+sema_authority_scope_regions: fn(statements: [Stmt], function_name: String) -> [BodyEffectScopeRegion] {
+    frames := [BodyEffectScopeRegion]{}
+    loop region in sema_authority_fx_regions(statements) {
+        descriptor: effect_scope_descriptor("#FX block in {function_name}", "", false, Val(region.caps))
+        if descriptor != "" -> frames.push(BodyEffectScopeRegion{span: region.span, descriptor: descriptor})
+    }
+    frames
 }
 
 sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: &[SemaEffectFxRegion]) {

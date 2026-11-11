@@ -38,6 +38,7 @@ use jet_foundation.[
     EffectRowEntry,
     effect_scope_argument_valid,
     effect_scope_covers,
+    effect_scope_descriptor,
     effect_scope_is_scoped,
     effect_scope_name,
     effect_scope_of_argument,
@@ -1359,6 +1360,30 @@ sema_effect_cap_ceiling: fn(cap: ModuleCap) -> [String]? Never! {
     }
     if !bounded -> return None
     Val(ceiling)
+}
+
+// The run-time frames of the caps over one function whose entries scope FS
+// or Net (FnBody.effect_scope): each is named after its module, type or
+// trait and spelled as a written row's frame (effect_scope_descriptor), and
+// frames are separated by a blank line. "" when no cap scopes either, so an
+// unscoped cap costs nothing at run time.
+sema_effect_cap_frames: fn(caps: [SemaEffectModuleCap]) -> String Never! {
+    frames := [String]{}
+    loop cap in caps {
+        entries := [String]{}
+        loop entry in cap.cap.entries -> entries.push(entry.name.copy())
+        frame: effect_scope_descriptor("{cap.cap.scope} {cap.cap.owner}", "", false, Val(entries))
+        if frame != "" -> frames.push(frame)
+    }
+    frames.join("\n\n")
+}
+
+// A function's effect-scope descriptor `own` under its caps' `frames`: the
+// caps' frames are outermost, so a Core publisher's marker stays innermost.
+sema_effect_capped_scope: fn(frames: String, own: String) -> String Never! {
+    // copy: the frames stay in the per-node table.
+    if own == "" -> return frames.copy()
+    "{frames}\n\n{own}"
 }
 
 sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Never! {
@@ -3782,7 +3807,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // A module's `#FX(…)` caps bind every function inside it: a file
     // module's from the module graph, an inline module's from the function.
     // A type's cap binds each of its methods, and a trait's cap every
-    // implementation of its methods, in any package.
+    // implementation of its methods, in any package. A cap whose entries
+    // scope FS or Net also binds at run time: its frame is entered with the
+    // function's own (FnBody.effect_scope).
+    cap_frames := [String]{}
     loop node_index in 0..<nodes.len() {
         graph_module: inputs[nodes[node_index].module_index].module_index
         caps := [SemaEffectModuleCap]{}
@@ -3797,6 +3825,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
                 caps.push(SemaEffectModuleCap{cap: found.cap.cap, site: site})
             }
         }
+        cap_frames.push(sema_effect_cap_frames(caps))
         if caps.len() == 0 -> next
         cap_diagnostics := [Diagnostic]{}
         notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
@@ -3815,6 +3844,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         loop function_index in 0..<modules[target].functions.len() {
             node_index: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
             modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
+            if cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index]) {
+                modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
+            }
         }
     }
     // e3401 names the first impure call and its chain; the reached row is the

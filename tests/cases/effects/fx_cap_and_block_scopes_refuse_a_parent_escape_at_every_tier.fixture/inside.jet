@@ -1,0 +1,18 @@
+use files: core.files
+#FX(FS.Read("data/"))
+Reader: struct {
+    read: fn(self, name: String) -> String {
+        files.read("data/{name}") ?? "refused"
+    }
+}
+read_scoped: fn(name: String) -> String {
+    result := "refused"
+    #FX(FS.Read("data/")) {
+        result = files.read("data/{name}") ?? "refused"
+    }
+    result
+}
+run: fn() {
+    print(Reader{}.read("inside.txt"))
+    print(read_scoped("inside.txt"))
+}

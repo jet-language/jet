@@ -1,0 +1,9 @@
+use files: core.files
+read_scoped: fn(name: String) -> String {
+    result := "refused"
+    #FX(FS.Read("data/")) {
+        result = files.read("data/{name}") ?? "refused"
+    }
+    result
+}
+run: fn() { print(read_scoped("../secret.txt")) }

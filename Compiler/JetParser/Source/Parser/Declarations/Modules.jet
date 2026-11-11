@@ -409,12 +409,7 @@ parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) 
                 path = operand
             }
         }
-        written: parser_authority_effect_path(path) ?? {
-            parser_marker_shape_error(state, marker)
-            return None
-        }
-        name := written
-        if name.starts_with("Effect.") -> name = name.slice(7, name.len())
+        name: parser_authority_effect_entry(state, marker, path, prefix) ?? return None
         entries.push(EffectRowEntry{name: "{prefix}{name}", span: expr_span(expr)})
     }
     Val(ModuleCap{owner: owner, entries: entries, span: marker.span})

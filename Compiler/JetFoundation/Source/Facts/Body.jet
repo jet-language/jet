@@ -802,11 +802,25 @@ FnBody: struct {
     // row's FS and Net entries, one per line (a denial keeps its `!`), for a
     // function whose row scopes one of them; `@` and the published effect
     // for a Core scope publisher (effect_scope_published_effect); else "".
-    // The IR builder enters it as a frame on entry and leaves it on every
-    // exit (JetIR ir_effect_scope_frame).
+    // The scoped `#FX(…)` caps over it (its module's, type's or trait's)
+    // come first, one frame each, frames separated by a blank line (JetSema
+    // sema_effect_cap_frames). The IR builder enters every frame, outermost
+    // first, on entry and leaves them on every exit (JetIR
+    // ir_effect_scope_frame).
     effect_scope: String{""}
+    // The frames of the body's `#FX(…)` blocks whose caps scope FS or Net,
+    // each keyed by its block's span (the lowered region's): the IR builder
+    // enters one around its block (JetIR ir_effect_scope_region).
+    effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}}
     // The function's nodes, statements and expression-type column.
     tree: BodyTree
+}
+
+// One `#FX(…)` block's effect-scope frame (FnBody.effect_scope_regions): the
+// block's span and its descriptor, spelled as a function's is.
+BodyEffectScopeRegion: struct {
+    span: Span
+    descriptor: String
 }
 
 // Whether a body of `functions` holds a `timing: .Fixed` value

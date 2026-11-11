@@ -660,7 +660,8 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if b.mask >= 0 -> return ir_fail(b, span, "a masked branch continues")
             ir_loop_jump_stmt(m, p, b, label, false, span)
         }
-        .Inline(body, _) | .Region(body, _) -> ir_stmts(m, p, b, body)
+        .Inline(body, _) -> ir_stmts(m, p, b, body)
+        .Region(body, span) -> ir_effect_scope_region(m, p, b, body, span)
         .Contract(contract) -> ir_contract(m, p, b, contract)
         .ContractScope(pre, body, post, result, span) -> ir_contract_scope(m, p, b, pre, body, post, result, span)
         .RefutableBind(pattern, init, fallback, span) -> ir_refutable_bind(m, p, b, pattern, init, fallback, span)

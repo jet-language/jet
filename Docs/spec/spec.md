@@ -2445,8 +2445,8 @@ run: fn() {
 
 The region permits only the listed effects, including effects reached through a
 call, or reports E0712. It is a ceiling, not a grant: the operations still
-happen and contribute to the enclosing function's inferred row. `#FX` is a
-lexical block and disappears in generated code.
+happen and contribute to the enclosing function's inferred row. A block whose
+list has no scoped `FS` or `Net` entry disappears in generated code.
 
 Written above a module, a struct or an enum, `#FX(...)` caps every function
 inside it with the same list, including what each function reaches through a
@@ -2481,6 +2481,25 @@ a second `#FX` marker on it, above it or in its body, is E0999. A type without
 `#FX` keeps its inferred rows unchanged. A public type's, trait's or module's
 cap is part of its package's published API: widening or removing it under a
 non-major release is E1218, and narrowing or adding one is compatible.
+
+An entry of a cap or a block is spelled as a row entry: a dotted effect, one
+with a plain string scope (`FS.Read("data/")`, `Net("api.example.com")`), or
+the denial `!Mem.Alloc(above: N)`. Any other argument is E0119, as is
+`Mem.Alloc(above: N)` without `!`. A scoped `FS` or `Net` entry is mediated at
+run time as a written row's is (see "Effect scopes"): while a capped function
+runs, its cap is in force before its own row, and while a block runs, its
+list is in force, for every callee and every task it spawns. So
+
+```jet
+#FX(FS.Read("data/"))
+Reader: struct {
+    read: fn(self, name: String) -> String { files.read("data/{name}") ?? "refused" }
+}
+```
+
+refuses `name` set to `../secret.txt` with E0740 at every optimization level.
+A block inside a lambda, and a lambda that escapes its capped function, are
+checked at build time only.
 
 A type's inferred row is everything a value of it can reach: its methods'
 solved rows, the rows written on its function-typed fields, and the inferred

@@ -1,0 +1,42 @@
+# A `#FX(FS.Read("data/"))` cap on a type and the same list on a block are
+# mediated at run time as a written row is: `data/../secret.txt` is refused
+# at O0, O1 and O2 and the read's fallback prints, never the secret, while a
+# file inside `data/` still reads.
+fixture: fx_cap_and_block_scopes_refuse_a_parent_escape_at_every_tier.fixture
+env: NO_COLOR=1
+step: jet run type.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=basic type.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=full type.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run block.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=basic block.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run --optimize=full block.jet
+timeout: 60s
+exit: 0
+stdout: = "refused\n"
+step: jet run inside.jet
+timeout: 60s
+exit: 0
+stdout: = "inside\n\ninside\n\n"
+step: jet run --optimize=basic inside.jet
+timeout: 60s
+exit: 0
+stdout: = "inside\n\ninside\n\n"
+step: jet run --optimize=full inside.jet
+timeout: 60s
+exit: 0
+stdout: = "inside\n\ninside\n\n"

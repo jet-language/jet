@@ -405,16 +405,46 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
 }
 
 // On entry to a function with an effect-scope descriptor: the runtime
-// frame its scoped row (or a Core scope publisher's marker) puts in force,
-// left by every return and stop edge (IRTxFrame.effect_scope). The
-// runtime checks each file and host reached against the frames in force
-// (JetRuntime Authority.jet "Effect-scope frames").
+// frames its scoped `#FX(…)` caps and its scoped row (or a Core scope
+// publisher's marker) put in force, outermost first, each left by every
+// return and stop edge (IRTxFrame.effect_scope). The runtime checks each
+// file and host reached against the frames in force (JetRuntime
+// Authority.jet "Effect-scope frames").
 ir_effect_scope_frame: fn(m: &IRModule, b: &IRBuilder, descriptor: String) Never! {
     if descriptor == "" -> return
+    loop frame in descriptor.split("\n\n") -> _ := ir_effect_scope_enter(m, b, frame, 0)
+}
+
+// A `#FX(…)` block whose caps scope FS or Net (FnBody.effect_scope_regions)
+// runs inside its frame, entered before the body and left after it, or by
+// an early exit (ir_tx_unwind) or a stop edge; any other region is its body.
+ir_effect_scope_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], span: Span) Never! {
+    found := -1
+    if b.row >= 0 {
+        regions: p.functions[b.row].effect_scope_regions
+        loop index in 0..<regions.len() {
+            if regions[index].span.start == span.start && regions[index].span.end == span.end -> found = index
+        }
+    }
+    if found < 0 {
+        ir_stmts(m, p, b, body)
+        return
+    }
+    previous: ir_effect_scope_enter(m, b, p.functions[b.row].effect_scope_regions[found].descriptor, b.loops.len())
+    ir_stmts(m, p, b, body)
+    if ir_failed(b) -> return
+    _: b.transactions.pop()
+    _: ir_runtime(m, b, "jet_rt_effect_scope_leave", [Int]{previous}, -1)
+}
+
+// Enters the frame of `descriptor` under the one in force, as a transaction
+// frame opened inside `loops` loops, and returns the frame it replaces.
+ir_effect_scope_enter: fn(m: &IRModule, b: &IRBuilder, descriptor: String, loops: Int) -> Int Never! {
     text: ir_static_text(m, b, descriptor)
     word_row: ir_word_row(m)
     previous: ir_runtime(m, b, "jet_rt_effect_scope_enter", [Int]{text[0], text[1]}, word_row)
-    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, effect_scope: previous})
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: loops, shield: false, deadline: -1, effect_scope: previous})
+    previous
 }
 
 // Whether a frame opened at or above `base` holds state a caught stop
