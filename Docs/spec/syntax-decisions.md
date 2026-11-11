@@ -52,6 +52,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
+| `fn(…) { … }` | lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) { n > 2 })`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int { n * n }`); the body is always braced and its last value is the result |
 | `-[…]` | effect row on a callable |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
