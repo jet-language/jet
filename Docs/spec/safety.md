@@ -2164,42 +2164,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 208,
+      "line": 210,
       "column": 9,
       "reason": "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 283,
+      "line": 285,
       "column": 9,
       "reason": "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 406,
+      "line": 408,
       "column": 13,
       "reason": "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 455,
+      "line": 457,
       "column": 9,
       "reason": "a fresh private anonymous stack mapping, unreserved until touched"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 467,
+      "line": 469,
       "column": 5,
       "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 615,
+      "line": 617,
       "column": 9,
       "reason": "sched_yield retains no memory; the firing carrier clears the word right after its wake"
     },
@@ -4635,147 +4635,147 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 82,
+      "line": 93,
       "column": 5,
       "reason": "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 92,
+      "line": 103,
       "column": 5,
       "reason": "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 99,
+      "line": 110,
       "column": 5,
       "reason": "gettid identifies this thread without reading its inherited GS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 145,
+      "line": 160,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 211,
+      "line": 226,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 305,
+      "line": 320,
       "column": 9,
       "reason": "the registry owns this live closure header whose code accepts header and one I64 value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 401,
+      "line": 416,
       "column": 5,
       "reason": "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 409,
+      "line": 424,
       "column": 5,
       "reason": "the caller transferred a System V I64->I64 code address and one argument to this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 424,
+      "line": 439,
       "column": 5,
       "reason": "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 498,
+      "line": 513,
       "column": 5,
       "reason": "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 550,
+      "line": 565,
       "column": 5,
       "reason": "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 588,
+      "line": 603,
       "column": 5,
       "reason": "the startup hands these over once, before the init arrays and any other thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 598,
+      "line": 613,
       "column": 5,
       "reason": "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 630,
+      "line": 645,
       "column": 5,
       "reason": "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 666,
+      "line": 681,
       "column": 9,
       "reason": "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 827,
+      "line": 842,
       "column": 5,
       "reason": "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 861,
+      "line": 876,
       "column": 9,
       "reason": "kill(getpid(), SIGKILL) retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 879,
+      "line": 894,
       "column": 5,
       "reason": "getpid retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 902,
+      "line": 917,
       "column": 13,
       "reason": "tgkill names a live registered thread of this process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 940,
+      "line": 955,
       "column": 9,
       "reason": "a credential system call takes word arguments and retains no memory"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 952,
+      "line": 967,
       "column": 13,
       "reason": "written under the registry mutex, before any handler can run"
     },
@@ -10495,12 +10495,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 107:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 133:5 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 188:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 208:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 283:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 406:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 455:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 467:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 615:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 210:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 285:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 408:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 457:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 469:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 617:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 36:5 | "runtime-init runs before any other thread exists" |
@@ -10848,27 +10848,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 151:5 | "item0 lends the C-ABI tuple's one writable Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 82:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 92:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 99:5 | "gettid identifies this thread without reading its inherited GS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 145:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 211:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 305:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 401:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 409:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 424:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 498:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 550:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 588:5 | "the startup hands these over once, before the init arrays and any other thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 598:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 630:5 | "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 666:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 827:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 861:9 | "kill(getpid(), SIGKILL) retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 879:5 | "getpid retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 902:13 | "tgkill names a live registered thread of this process" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 940:9 | "a credential system call takes word arguments and retains no memory" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 952:13 | "written under the registry mutex, before any handler can run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 93:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 103:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 110:5 | "gettid identifies this thread without reading its inherited GS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 160:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 226:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 320:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 416:5 | "rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 424:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 439:5 | "getrlimit writes its two-word record into the owned 16-byte scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 513:5 | "a fresh private anonymous mapping, owned by the new thread's handle; its first page becomes the guard" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 565:5 | "the child inherits a fully blocked mask and starts on its own guarded stack seeded with jet_rt_thread_entry and the start record; the handle's tid word lives until join or reap" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 603:5 | "the startup hands these over once, before the init arrays and any other thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 613:5 | "the link's thread functions take words: the handle's live thread id word, jet_rt_thread_entry, its start record and a stack size, or a thread id" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 645:5 | "rt_sigprocmask reads and writes the owned masks record; create writes the thread id into the live handle and hands jet_rt_thread_entry the start record, which the thread frees" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 681:9 | "the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 842:5 | "a credential system call takes word arguments; setgroups' list is the synccall caller's, live until every thread has run" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 876:9 | "kill(getpid(), SIGKILL) retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 894:5 | "getpid retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 917:13 | "tgkill names a live registered thread of this process" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 955:9 | "a credential system call takes word arguments and retains no memory" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 967:13 | "written under the registry mutex, before any handler can run" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 3:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 6:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |

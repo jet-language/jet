@@ -277,6 +277,34 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
     _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{save}, -1)
 }
 
+// `context.<field>` (BodyHostCall.ContextRead): a read of the current task
+// context (Runtime Context.jet), whose runtime reads cannot stop.
+// `thread` is the running thread's index (jet_ctx_thread); `deadline` is
+// the installed absolute wall-millisecond deadline, None when no
+// `#Context(deadline:)` or `task.timeout` installed one.
+ir_context_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, field: String, span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    int_row: ir_type_row(m, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
+    word_row: ir_word_row(m)
+    if field == "thread" {
+        index: ir_runtime(m, b, "jet_ctx_thread", [Int]{}, word_row)
+        return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{index}, row)
+    }
+    if field != "deadline" -> return ir_fail_slot(b, span, "context field {field}")
+    result: ir_fresh_temp(m, b, row)
+    ir_option_none(m, b, result)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    present: ir_runtime(m, b, "jet_ctx_deadline_present", [Int]{}, bool_row)
+    ir_open_if(b.f, present, b.line)
+    ms: ir_runtime(m, b, "jet_ctx_deadline_ms", [Int]{}, word_row)
+    exact: ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{ms}, int_row)
+    int_size: ir_type_size(m, p, Type.Int)
+    made: ir_option_make(m, p, b, row, exact, int_size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    result
+}
+
 // Saves the entry value of `snapshot.local` in a generated variable: its
 // Rollback `snapshot` result, else an owned copy.
 ir_tx_snapshot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransactionSnapshot, span: Span) -> IRTxSnapshot? Never! {

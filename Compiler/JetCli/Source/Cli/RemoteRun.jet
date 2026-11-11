@@ -14,7 +14,7 @@
 // refuses any fetch or re-resolution.
 use {
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
-    jet_foundation.[AUTHORITY_AMBIENT_BASIC_EFFECTS, Diagnostic, Span, authority_grantable_roots, authority_is_deny_only, diagnostic_from_registry]
+    jet_foundation.[AUTHORITY_AMBIENT_BASIC_EFFECTS, Diagnostic, Span, authority_grantable_roots, authority_needs_no_grant, diagnostic_from_registry]
     jet_pkg_model.[
         InlineDep, InlineDepResolved, PKG_INLINE_DEPS_FIXTURES_ENV, pkg_inline_deps_list_versions,
         pkg_inline_deps_numeric_version, pkg_inline_deps_resolve, pkg_resolve_roots,
@@ -407,8 +407,8 @@ jet_cli_remote_run_accepted: fn(origin: JetCLIRemoteRunOrigin, rights: [String])
     true
 }
 
-// The rights a remote run asks about: every required right that is not
-// deny-only, not denied, and not granted by the floor or this invocation's
+// The rights a remote run asks about: every required right some policy has
+// to grant, not denied, and not granted by the floor or this invocation's
 // `--allow`/`-A` rows. The fetched code's own `allow` row grants nothing
 // here, so remote code can't wave its own effects through.
 jet_cli_remote_run_unacknowledged: fn(authority: JetCLIAuthority, rows: JetCLIInvocationAuthority) -> [String] Never! {
@@ -421,7 +421,7 @@ jet_cli_remote_run_unacknowledged: fn(authority: JetCLIAuthority, rows: JetCLIIn
     if jet_cli_read_scope(Val(rows.copy())).len() > 0 -> granted.push("FS.Read")
     missing := [String]{}
     loop right in authority.required {
-        if authority_is_deny_only(right) || jet_cli_covers_any(authority.denied, right) || jet_cli_covers_any(granted, right) -> next
+        if authority_needs_no_grant(right) || jet_cli_covers_any(authority.denied, right) || jet_cli_covers_any(granted, right) -> next
         missing.push(right.copy())
     }
     jet_cli_named_once(missing)

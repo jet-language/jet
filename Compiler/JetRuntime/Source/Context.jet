@@ -8,7 +8,10 @@
 // worker's pointer afterwards. #Context writes fields of the current record in
 // place and restores them from a caller save area on exit, so a swap never
 // allocates. Codegen may later pass the record pointer as a hidden argument
-// without changing meaning.
+// without changing meaning. `context.<field>` reads (IR BuildTransact.jet
+// ir_context_read) call jet_ctx_deadline_present and jet_ctx_deadline_ms
+// (Deadline.jet) and jet_ctx_thread (Thread.jet): the thread index is the
+// running thread's, kept in its TCB at THREAD_TCB_INDEX, not in the record.
 // Record, append-only (allocator, logger and scratch take the next words):
 // deadline present@0, deadline ms@8 (Deadline.jet), effect scope@16 (the
 // innermost effect-scope frame node, 0 for none: Authority.jet).

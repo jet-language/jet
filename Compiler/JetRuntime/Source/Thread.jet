@@ -15,7 +15,8 @@
 // @104 World current lease; @112 World flags; @120 World park slot;
 // @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
 // @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
-// @176 Sentry fence depth; @184 Sentry frames List*; @192 reserved;
+// @176 Sentry fence depth; @184 Sentry frames List*; @192 Context thread index
+// (thread_new_tcb; `context.thread`);
 // @200 Comptime request-scope flag; @208 Thread dynamic TLS [I64]*
 // (also owns T1 capture/scope services); @216/@224 Sync absolute futex
 // timespec; @232/@240 Sync/HostIO clock_gettime timespec scratch;
@@ -28,7 +29,8 @@
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
-// Task's matches concern its separate 200-byte child, not the TCB.
+// Task's matches concern its separate 200-byte child, not the TCB. @192 is
+// now the thread index (THREAD_TCB_INDEX).
 // RtL8a6 confirms no T1/Thread claim on either reserved slot. Attach before
 // the first GS read, never lazily from TLS: GS of an unattached thread
 // points at the allocator's zero word (thread_detached_base), so
@@ -39,9 +41,10 @@
 // List header@16, scope native List header@40 (0 thread, 1 attempt),
 // live-TCB native [I64] header@64 containing [tid,tcb,...] word pairs
 // (a fiber's pair is [tcb,tcb], Fiber.jet), the atomic count@88 of threads
-// thread_spawn started that have not registered yet, the fork gate@96, and
-// the reap list head@104 (thread_reap).
-// All headers use [len@0,cap@8,data@16]. Root is 112 bytes; closures transfer
+// thread_spawn started that have not registered yet, the fork gate@96,
+// the reap list head@104 (thread_reap), and the atomic next thread
+// index@112 (THREAD_NEXT_INDEX).
+// All headers use [len@0,cap@8,data@16]. Root is 120 bytes; closures transfer
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
 
@@ -61,8 +64,16 @@ THREAD_FORK_GATE_HELD: I64{1073741824}
 // The root word heading the detached handles whose thread has finished.
 THREAD_REAP: I64{104}
 
+// The root word handing out thread indices: the first TCB (the process's
+// main thread) takes 0, each later thread the next.
+THREAD_NEXT_INDEX: I64{112}
+
+// The TCB word holding the thread index `context.thread` reads. A fiber's
+// TCB takes its carrier thread's each time it runs (Fiber.jet fiber_run).
+THREAD_TCB_INDEX: I64{192}
+
 // The registry root's size.
-THREAD_ROOT_BYTES: I64{112}
+THREAD_ROOT_BYTES: I64{120}
 // Zero `bytes` bytes at a word-aligned address. A byte list's capacity need
 // not be a word multiple, so whole words go first and the tail goes bytewise:
 // no store passes `bytes`.
@@ -107,8 +118,12 @@ thread_new_tcb: fn(tid: I64) -> I64 {
     context_tcb_install_root(tcb)
     sync_store(tcb, tcb)
     sync_store(wrapping(tcb + I64{8}), tid)
+    if (thread_tls_registry != I64{0}) -> sync_store(wrapping(tcb + THREAD_TCB_INDEX), sync_add(wrapping(thread_tls_registry + THREAD_NEXT_INDEX), I64{1}))
     tcb
 }
+
+// `context.thread`: this thread's index (THREAD_TCB_INDEX).
+#Export(c) jet_ctx_thread: fn() -> I64 { sync_load(wrapping(thread_base() + THREAD_TCB_INDEX)) }
 
 // Registry mutex is held. These are native [I64] words, two per thread;
 // the TCB's @88 holds its row's first word index, so unregistering is O(1).

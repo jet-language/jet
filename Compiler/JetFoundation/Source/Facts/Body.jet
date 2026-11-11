@@ -395,30 +395,6 @@ BodyOrFallback: enum {
     ContinueLabel(label: String)
 }
 
-BodyHostCall: enum {
-    Method(receiver: Int, method: String, args: [Int])
-    CellGuardProject(receiver: Int, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
-    OptionProbe(inner: Int, kind: TOptionProbe)
-    TupleIndex(base: Int, index: Int)
-    SwitchSubjectValue
-    YieldSend(value: Int)
-    NumericBounds(ty: Type, member: String)
-    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
-    // node of its String path or glob, relative to the source file being
-    // compiled, or after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the
-    // toolchain tree. A literal is the checked, normalized literal; a
-    // computed value is checked against the same path law when the comptime
-    // evaluation reaches it. The compiler reads and records the input; it
-    // never runs at runtime. `net.fetch(url, sha256: "…")` in comptime code
-    // is the `fetch` input: `path` is the node of its String URL and `pin`
-    // the written SHA-256 its content must hash to (E3413); the compiler
-    // fetches and checks it. Every other input has no pin.
-    ComptimeInput(builtin: String, path: Int, pin: String?)
-    // `name.cache()` on a memoized function: its result store's `MemoStats`
-    // record, with the written bound ("128", "none").
-    MemoStats(function: DeclID, bound: String)
-}
-
 // The prefix of a comptime input named in the toolchain tree the compile takes
 // Core from (`embed_file("toolchain:Compiler/Prelude/Effects.jet")`), not
 // beside the file doing the embedding.
@@ -1677,7 +1653,7 @@ body_each_host_call_child: fn(tree: BodyTree, value: BodyHostCall, visit: fn(Int
         .ComptimeInput(_, f1, _) -> {
             visit(f1)
         }
-        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }
 

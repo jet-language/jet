@@ -204,6 +204,8 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         sync_store(wrapping(fiber + I64{16}), record)
         if (fiber_clock_on != I64{0}) -> sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
         fiber_cache_move(tcb, fiber_tcb)
+        // The fiber runs on this carrier: `context.thread` reads its index.
+        sync_store(wrapping(fiber_tcb + THREAD_TCB_INDEX), sync_load(wrapping(tcb + THREAD_TCB_INDEX)))
         fiber_gs_write(root, fiber_tcb)
         #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
             os_fiber_switch_i64(wrapping(record + I64{16}), sync_load(wrapping(fiber + I64{8})))

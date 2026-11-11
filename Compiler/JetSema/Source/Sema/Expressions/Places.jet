@@ -613,6 +613,11 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
         return None
     }
+    // `context.field` with no `context` declared in scope reads the task
+    // context.
+    if base == .Ident(root, _, _) && root == "context" && sema_scope_resolve_index(scopes, root) == None && sema_expression_type_symbol(scopes, environment, program, root) == None {
+        return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
+    }
     // `#package.*` / `#build.*` fold from the build snapshot.
     build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)
     if build_fact.handled -> return build_fact.value
@@ -742,6 +747,25 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // Lambda capture moves ask whether the captured field is a copy type.
     sema_ownership_note_place_type(state, span, value.ty)
     Val(value)
+}
+
+// `context.<field>`: a read of the current task context, which records the
+// `Context` effect at the read. `deadline` is the installed absolute
+// wall-millisecond deadline (`Int?`, None outside a `#Context(deadline:)`
+// block or `task.timeout`), and `thread` the running thread's index (`Int`,
+// 0 on the main thread). IR BuildTransact.jet ir_context_read lowers it.
+sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    ty: if member == {
+        "deadline" -> Type.Option{inner: Type.Int}
+        "thread" -> Type.Int
+        else -> {
+            diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds) and `thread` (`Int`, the running thread's index)", "write `context.deadline` or `context.thread`"))
+            return None
+        }
+    }
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.{member}", span, [EffectRowEntry]{EffectRowEntry{name: "Context", span: span}}, diagnostics) -> return None
+    read: sema_tree_node(ty, TExprKind.HostCall{call: THostCall.ContextRead{field: member}}, span)
+    sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 
 // Column field view: `table.field` on a Core `Rows<T>` (`ty`) is the

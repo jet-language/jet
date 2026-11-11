@@ -2357,9 +2357,10 @@ owns, an unannotated foreign call) lists `FFI`, whose words say the program
 "calls native code, which can do anything". `Exec` reads "starts other
 programs, which this list does not limit". The floor, `IO`, `Mem.Alloc` and
 `Exec.Args`, is never listed, and neither are the deny-only rights (`Panic`,
-`Mem`, `Time.Wait`). The floor covers output, ordinary allocation and
-argument reads, and carries no power the shell has not already given the
-process. It never covers the `Exec` root, which also starts processes.
+`Mem`, `Time.Wait`) or `Context`, the task context every program reads
+without a grant. The floor covers output, ordinary allocation and argument
+reads, and carries no power the shell has not already given the process. It
+never covers the `Exec` root, which also starts processes.
 
 The notice repeats whenever the effect set changes, and only then. Jet
 records the last effect set it named for each entry under
@@ -3433,6 +3434,18 @@ and exits with the runtime error code (D-DEADLINE1).
 For a relative wall-clock budget, derive that absolute millisecond value from
 `time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
 `DateTime`, not the deadline's integer epoch.
+
+Code reads the task context as `context.<field>` (D-CONTEXT1).
+`context.deadline` is the installed absolute wall-millisecond deadline as an
+`Int?`, `None` outside every `#Context(deadline:)` block and `task.timeout`;
+a task reads the deadline it was spawned under. `context.thread` is the
+running thread's index as an `Int`: 0 on the main thread, and a fiber reads
+its carrier thread's index. Each read adds the `Context` effect to the
+function's row, so a `-[]>` function or a written row that leaves `Context`
+out cannot read the context. Every program holds `Context`: no policy has to
+grant it, and `authority: { deny: [Context] }` refuses it. Any other field is
+**E0302**. The name `context` reads the
+task context only where nothing in scope is named `context`.
 
 ### Parallel collection adapters
 

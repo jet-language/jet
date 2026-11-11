@@ -263,12 +263,13 @@ ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 
 // The root-free routes that read the calling thread's block (JetRuntime
 // Thread.jet) even when nothing allocated: the journey's and the fault
-// schedule's Jet TLS, and the task control word process.exit and the
+// schedule's Jet TLS, the task control word process.exit and the
 // session status read (Scheduler.jet scheduler_control_current: 0 on an
-// attached thread with no root). The runtime attaches a thread exactly
-// when the program links the allocator's cached front doors or Jet TLS
-// (jet_rt_thread_init's guards), and these routes need neither, so a main
-// that calls one attaches its thread itself.
+// attached thread with no root), and the `context.<field>` reads of the
+// context record and the thread index (Context.jet). The runtime attaches a
+// thread exactly when the program links the allocator's cached front doors
+// or Jet TLS (jet_rt_thread_init's guards), and these routes need neither,
+// so a main that calls one attaches its thread itself.
 // Every other root-free route reads a thread block only behind the
 // allocator or the report probe (Scheduler.jet scheduler_report_base),
 // both of which take an unattached thread. The cleanup scopes don't stay:
@@ -277,6 +278,9 @@ ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 // jet_rt_cleanup_enter/leave), so an owned main drops their calls and links
 // none of the deadline delivery behind the shield's leave.
 IR_OWNED_ATTACH_ROUTES: comptime { [String]{
+    "jet_ctx_deadline_ms",
+    "jet_ctx_deadline_present",
+    "jet_ctx_thread",
     "jet_fault_should_fail",
     "jet_journey_origin",
     "jet_journey_reset",

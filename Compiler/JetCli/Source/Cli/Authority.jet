@@ -17,7 +17,7 @@ use {
         authority_effect_action,
         authority_root,
         authority_grantable_roots,
-        authority_is_deny_only,
+        authority_needs_no_grant,
         authority_own_process_leaf,
         authority_parse_right,
         diagnostic_from_registry,
@@ -200,14 +200,15 @@ jet_cli_read_scope: fn(invocation: JetCLIInvocationAuthority?) -> [String] Never
     paths
 }
 
-// The required rights nobody acknowledged: not deny-only (the Panic and Mem
-// roots and the Time.Wait leaf; jet-foundation `is_deny_only`), not denied,
-// and not granted by the floor, the entry package's `allow` row, `--allow` or
-// `-A`. A run names these in its notice.
+// The required rights nobody acknowledged: not one no policy grants (the
+// deny-only Panic and Mem roots and Time.Wait leaf, and the task context;
+// jet-foundation `authority_needs_no_grant`), not denied, and not granted by
+// the floor, the entry package's `allow` row, `--allow` or `-A`. A run names
+// these in its notice.
 jet_cli_unacknowledged: fn(authority: JetCLIAuthority) -> [String] Never! {
     missing := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> missing.push(right.copy())
+        if !authority_needs_no_grant(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> missing.push(right.copy())
     }
     jet_cli_named_once(missing)
 }

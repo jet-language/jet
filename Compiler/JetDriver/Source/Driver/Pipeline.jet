@@ -102,6 +102,7 @@ use {
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
+        AUTHORITY_CONTEXT_ROOT,
         AUTHORITY_PANIC_ROOT,
         body_fixed_timing,
         BuildSettingOverride,
@@ -4729,8 +4730,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
 // run never names an effect the row leaves out (spec.md "Application
 // authority"). A `deny` over the root's own code is sema's E0749, checked at
 // every function of the package. The written `allow` row adds to the
-// beginner floor every program holds (spec.md:1764-1769). No budget, no
-// diagnostic.
+// beginner floor every program holds (spec.md:1764-1769) and to the task
+// context, which no policy has to grant. No budget, no diagnostic.
 jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDriverPackageEffectRows) -> [Diagnostic] {
     root: load.packages[jet_driver_effect_budget_root(load) ?? return [Diagnostic]{}]
     manifest := PackageFacts.default()
@@ -4738,6 +4739,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
     if root.authority_allow == .Val(allow) {
         row := [String]{}
         loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> row.push(name)
+        row.push(AUTHORITY_CONTEXT_ROOT)
         loop name in allow -> row.push(name.copy())
         manifest.authority.allow = Val(row.move())
     }

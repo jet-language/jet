@@ -1,0 +1,58 @@
+package: {
+    name: "context_reads"
+    authority: { allow: [IO, Time, Time.Wait] }
+}
+
+// `context.<field>` reads the task context, and each read adds the
+// `Context` effect. `context.deadline` is the installed absolute
+// wall-millisecond deadline (`Int?`), None outside every
+// `#Context(deadline:)` block; a task reads the deadline it was spawned
+// under. `context.thread` is the running thread's index (`Int`), 0 on the
+// main thread.
+
+FAR: 4102444800000
+
+deadline_or_none: fn() -> Int {
+    context.deadline ?? -1
+}
+
+on_a_thread: fn() -> Bool {
+    context.thread >= 0
+}
+
+spawn_under: fn(deadline: Int) -> Task<Int> {
+    #Context(deadline: deadline) {
+        return task deadline_or_none()
+    }
+    task deadline_or_none()
+}
+
+report: fn(name: String, &&handle: Task<Int>) {
+    if handle.join() == {
+        .Ok(value) -> { print("{name}: {value}") }
+        .Err(_) -> { print("{name}: failed") }
+    }
+}
+
+run: fn() {
+    print("main thread {context.thread}")
+    print("outside {deadline_or_none()}")
+    #Context(deadline: FAR) {
+        print("block {deadline_or_none()}")
+        #Context(deadline: FAR - 1) {
+            nested: context.deadline ?? -1
+            print("nested {nested}")
+        }
+        print("restored {deadline_or_none()}")
+    }
+    print("after {deadline_or_none()}")
+    inside: spawn_under(FAR)
+    plain: task deadline_or_none()
+    report("task inside", inside)
+    report("task outside", plain)
+    worker: task on_a_thread()
+    if worker.join() == {
+        .Ok(value) -> { print("task thread: {value}") }
+        .Err(_) -> { print("task thread: failed") }
+    }
+}

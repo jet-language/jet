@@ -5,8 +5,10 @@ deadline_ms_to_ns: fn(ms: I64) -> I64 {
     if (ms > I64{9223372036854}) -> I64{9223372036854775807} else -> ms * I64{1000000}
 }
 
-jet_ctx_deadline_present: fn() -> Bool { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_PRESENT)) != I64{0} }
-jet_ctx_deadline_ms: fn() -> I64 { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_MS)) }
+// `context.deadline` reads these two words (THostCall.ContextRead, Sema
+// Expressions/Places.jet sema_expression_context_read).
+#Export(c) jet_ctx_deadline_present: fn() -> Bool { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_PRESENT)) != I64{0} }
+#Export(c) jet_ctx_deadline_ms: fn() -> I64 { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_MS)) }
 
 #Export(c) jet_ctx_push_deadline: fn(deadline_ms: I64, save: I64) {
     record: context_current()

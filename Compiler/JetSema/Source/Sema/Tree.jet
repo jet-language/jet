@@ -432,7 +432,8 @@ THostCall: enum {
     YieldSend(value: TExpr)
     NumericBounds(ty: Type, member: String)
     // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
-    // String path or glob, relative to the source file being compiled. A
+    // String path or glob, relative to the source file being compiled, or
+    // after JET_COMPTIME_TOOLCHAIN_PREFIX relative to the toolchain tree. A
     // literal is the checked, normalized literal; a computed value is checked
     // against the same path law when the comptime evaluation reaches it
     // (sema_comptime_input_value_problem). The compiler reads and records the
@@ -444,6 +445,9 @@ THostCall: enum {
     // `name.cache()` on a memoized function: its result store's `MemoStats`
     // record, with the written bound ("128", "none").
     MemoStats(function: DeclID, bound: String)
+    // A `context.<field>` read of the current task context
+    // (Expressions/Places.jet sema_expression_context_read).
+    ContextRead(field: String)
 }
 
 TCoreClosureKind: enum {
@@ -1125,7 +1129,7 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
         .ComptimeInput(_, path, _) -> visit(path)
-        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) -> {}
+        .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }
 

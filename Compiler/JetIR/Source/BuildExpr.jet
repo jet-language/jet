@@ -1821,6 +1821,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
                 return subject
             }
             if call == .MemoStats(function, bound) -> return ir_memo_stats(m, p, b, expression_ty, function, bound, span)
+            if call == .ContextRead(field) -> return ir_context_read(m, p, b, expression_ty, field, span)
             if call == .ComptimeInput(builtin, path, pin) {
                 // A comptime input (embed_file, embed_bytes, find, fetch): the
                 // compiler answers it (ir_host_route kind 3) from its builtin

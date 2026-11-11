@@ -108,6 +108,7 @@ run: fn() {
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
+    body_host_call_rows(repo)
     script_pairing(repo)
     if args.len() > 0 && args[0] == "--runtime-generators" {
         if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --runtime-generators")
@@ -161,6 +162,14 @@ vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     rows: process.cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
     if rows.code == 0 && rows.signal == None -> return
     check_refused(process.combined_output(rows).trim_end(), "a generated Source/Vocabulary.jet differs from its Vocabulary.tsv (see above; regenerate with jet Tools/agent/VocabularyRows.jet --write)")
+}
+
+// The BodyHostCall rows check with $JET, else the `jet` on PATH; it never writes.
+body_host_call_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    rows: process.cmd([String]{jet, "Tools/agent/BodyHostCallRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyHostCallRows.jet: {err}")
+    if rows.code == 0 && rows.signal == None -> return
+    check_refused(process.combined_output(rows).trim_end(), "Compiler/JetFoundation/Source/Facts/BodyHostCall.jet differs from THostCall (see above; regenerate with jet Tools/agent/BodyHostCallRows.jet --write)")
 }
 
 // The script-pairing guard with $JET, else the `jet` on PATH; it never writes.
