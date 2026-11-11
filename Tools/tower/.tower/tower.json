@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99234,
+    "rev": 99235,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57172,12 +57172,12 @@
         },
         {
           "n": 53,
-          "text": "A typed read of a Dyn leaf that fails reports the JSON path of the leaf (for example `receipts[3].metrics.p50`), the expected and actual types, and the source file when the Dyn came from files.read plus a decode. On seed-t21 the error carries neither path nor file (found by G1Lead4, 2026-11-11). A #Test pins the message.",
+          "text": "A typed Dyn read that fails reports the path it read (for example receipts/3/metrics/p50) and the expected and actual types. This is delivered by c59's path getters, which know the path at the call site, not by recording paths inside Dyn values (that would be an ABI change and a cost on every access). A #Test pins the message. It lands with c59, after the Core API ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T10:38:17.562Z"
+          "at": "2026-11-11T10:52:25.272Z"
         },
         {
           "n": 54,
@@ -57244,7 +57244,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T10:50:16.829Z",
+      "updated": "2026-11-11T10:52:25.272Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -199592,6 +199592,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T10:52:25.272Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#53: G1Lead4: a leaf read sees only the leaf, so its path can't reach the error without a Dyn ABI change. Decided: no ABI change; the path comes from c59's path getters.; was: A typed read of a Dyn leaf that fails reports the JSON path of the leaf (for example `receipts[3].metrics.p50`), the expected and actual types, and the source file when the Dyn came from files.read pl"
+    },
     {
       "at": "2026-11-11T10:51:44.260Z",
       "by": "Main",
