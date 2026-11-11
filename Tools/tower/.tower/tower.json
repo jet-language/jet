@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99522,
+    "rev": 99525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71196,6 +71196,33 @@
           "verifiedBy": null,
           "evidence": "Landed on dev 0a995af312 (train t18a, c2cecce162..0a995af312), SUB G8Fix-13. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18a/REPORT.md). c61 is built and its listed proofs pass.",
           "at": "2026-11-11T03:23:20.854Z"
+        },
+        {
+          "n": 62,
+          "text": "An explicitly written empty type cap is pure: a type marked #FX whose method performs IO is refused at check time. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R1, high; the closure of c6, c31 and c40 and #6614 c5 did not cover it): Checks.jet:1098-1124 returns early when the positive ceiling is empty, so it can't tell a pure cap from a deny-only cap, and Modules.jet:383-406 records a present bare marker with zero entries. Fix the representation and the check, not a fixture. Proof: probes/pure-type.jet is refused with a registered code and a UI snapshot; a deny-only cap still allows its other effects; a tier case at O0/O1/O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:47:37.837Z"
+        },
+        {
+          "n": 63,
+          "text": "A repeated #FX marker on one type never drops a limit: either both caps apply (their intersection) or the repeat is refused with a registered diagnostic. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R2, high; also #6614 c6): parser_type_fx_cap (Modules.jet:413-420) returns the first marker and ignores the second, so a second denial is silently discarded. Pick the rule that matches the one-list contract, record it on this card, and prove it with probes/duplicate-cap.jet plus a UI snapshot or tier case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:47:39.008Z"
+        },
+        {
+          "n": 64,
+          "text": "A function with an empty effect row cannot write module state through a parameter, an alias, a separately checked lambda or a trait dispatch: the write is refused or charged to the caller. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R3, high; c48 was closed on the direct-name path only): Scopes.jet:2225-2230 records a module write only when the syntactic root is a Constant, and c962b0554e disclosed the parameter, alias, lambda and trait limits. Proof: probes/alias.jet (fn(c: Shared<Count>) -[]> Int { c.value += 1; ... } called with module HITS) is refused or accounted, plus one case per path at O0/O1/O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-11T17:47:40.236Z"
         }
       ],
       "refs": [],
@@ -71206,9 +71233,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-11T14:10:29.093Z",
+      "updated": "2026-11-11T17:47:40.236Z",
       "updatedBy": "Main",
-      "criteriaLastN": 61,
+      "criteriaLastN": 64,
       "completedAt": "2026-11-11T14:10:29.093Z"
     },
     {
@@ -197628,6 +197655,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T17:47:40.236Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#64 A function with an empty effect row cannot write module stat"
+    },
+    {
+      "at": "2026-11-11T17:47:39.008Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#63 A repeated #FX marker on one type never drops a limit: eithe"
+    },
+    {
+      "at": "2026-11-11T17:47:37.837Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#62 An explicitly written empty type cap is pure: a type marked "
+    },
     {
       "at": "2026-11-11T17:36:48.585Z",
       "by": "Main",
