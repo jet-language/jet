@@ -189,8 +189,11 @@ jfmt_fmt_if_expr: fn(f: &JetFmt, expr: Expr, inline: Bool) {
     } else {
         jfmt_fmt_value_block(f, parts.then_body, parts.then_value, inline)
     }
+    // An `else` value that is a table of its own (`else -> if s == { … }`)
+    // is not the next link of this chain: as `else if s == .A -> …` it
+    // would read as a chain of tests.
     if {
-        parts.else_body.len() == 0 && jfmt_is_if(parts.else_value) -> {
+        parts.else_body.len() == 0 && jfmt_is_if(parts.else_value) && !jfmt_is_guard_expr(f, parts.else_value) -> {
             jfmt_write(f, " else ")
             jfmt_fmt_if_expr(f, parts.else_value, inline)
         }
@@ -268,9 +271,17 @@ jfmt_write_field_member: fn(f: &JetFmt, member: String, span: Span) Never! {
 }
 
 // True when the author wrote this value inside its own `{ … }`: the source
-// token before the value's left edge is the only surviving evidence.
+// token before the value's left edge is the only surviving evidence. An
+// interpolation hole has no tokens of its own (the whole string is one), so
+// there the byte before the value decides.
 jfmt_value_was_braced: fn(f: JetFmt, value: Expr) -> Bool Never! {
     start: jfmt_expr_start(value)
+    if f.interp_depth > 0 {
+        if start <= 0 || start > f.src_bytes.len() -> return false
+        before := start - 1
+        loop before > 0 && (f.src_bytes[before] == 32 || f.src_bytes[before] == 9 || f.src_bytes[before] == 10 || f.src_bytes[before] == 13) -> before -= 1
+        return f.src_bytes[before] == 123
+    }
     index := f.source_toks.len() - 1
     loop index >= 0 {
         token: f.source_toks[index]
@@ -290,10 +301,26 @@ jfmt_is_guard_expr: fn(f: JetFmt, expr: Expr) -> Bool Never! {
     jfmt_dispatch_value_head(f, expr) != None
 }
 
+// A guarded table arm (`.Rect(w, h) && w == h -> …`) is an `&&` whose
+// leftmost operand holds the arm's test of the subject.
+jfmt_guard_arm_test: fn(cond: Expr) -> Expr Never! {
+    test := cond.copy()
+    loop {
+        if test == .Binary(op, left, _, _, _) {
+            if jfmt_bin_op_spell(op) == "&&" {
+                test = left.copy()
+                next
+            }
+        }
+        break
+    }
+    test
+}
+
 // Recover `(subject, table_op)` from a nested value-dispatch `Expr::If` chain.
 jfmt_dispatch_value_head: fn(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never! {
     head: jfmt_if_parts(expr) ?? return None
-    cond: head.cond
+    cond: jfmt_guard_arm_test(head.cond)
     span: head.span
     if !jfmt_src_valid(f, span.start, span.end) || !jfmt_bytes_starts_at(f.src_bytes, span.start, "if") -> return None
     rest: jfmt_trim_start_bytes(f.src_bytes, span.start + 2)
@@ -611,7 +638,7 @@ jfmt_same_dispatch_subject: fn(f: JetFmt, candidate: Expr, subject: Expr) -> Boo
 jfmt_if_expr_chain_inlineable: fn(f: JetFmt, expr: Expr) -> Bool {
     parts: jfmt_if_parts(expr) ?? return false
     if !jfmt_value_block_inlineable(f, parts.then_body, parts.then_value) -> return false
-    if parts.else_body.len() == 0 && jfmt_is_if(parts.else_value) -> return jfmt_if_expr_chain_inlineable(f, parts.else_value)
+    if parts.else_body.len() == 0 && jfmt_is_if(parts.else_value) && !jfmt_is_guard_expr(f, parts.else_value) -> return jfmt_if_expr_chain_inlineable(f, parts.else_value)
     jfmt_value_block_inlineable(f, parts.else_body, parts.else_value)
 }
 
@@ -682,10 +709,21 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
             jfmt_fmt_type(f, inner)
             jfmt_write(f, ">")
         }
-        // The optional mark follows the type it marks.
+        // The optional mark follows the type it marks. A type marks once
+        // (`Int??` does not parse), so an optional optional keeps the
+        // `Option<Int?>` spelling.
         .Option(inner) -> {
-            jfmt_fmt_marked_type(f, inner)
-            jfmt_write(f, "?")
+            if {
+                inner == .Option(_) -> {
+                    jfmt_write(f, "Option<")
+                    jfmt_fmt_type(f, inner)
+                    jfmt_write(f, ">")
+                }
+                else -> {
+                    jfmt_fmt_marked_type(f, inner)
+                    jfmt_write(f, "?")
+                }
+            }
         }
         .Result(ok, err) -> {
             if jfmt_is_unit_type(ok) {
@@ -1134,10 +1172,11 @@ jfmt_fmt_typed_lit: fn(f: &JetFmt, head: Type?, body: TypedLitBody, span: Span) 
         }
         .Value(value) -> {
             if multiline -> jfmt_emit_leading(f, expr_span(value).start)
-            if value == .Str(parts, string_span, _) {
-                jfmt_fmt_typed_head_str(f, parts, string_span)
-            } else {
-                jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+            // Only a headed body (`Regex{"\d+"}`) keeps its backslashes as
+            // written; a bare `{"\\d+"}` is an ordinary string.
+            if {
+                head != None && value == .Str(parts, string_span, _) -> jfmt_fmt_typed_head_str(f, parts, string_span)
+                else -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
             }
             if multiline -> jfmt_emit_trailing(f, expr_span(value).end)
         }
@@ -1175,15 +1214,22 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
         jfmt_write(f, ")")
         return
     }
-    // Named payloads use braces; positional payloads
-    // keep the paren call form.
+    // Named payloads use braces; positional payloads keep the paren call
+    // form. In an `if` condition a `{` would open the body, so a named
+    // payload there keeps `(label: value)`.
     named: if args[0] == {
         .Named(_, _) -> true
         .Positional(_) -> false
     }
-    delimiter: if named -> JFMT_DELIM_BRACE else -> JFMT_DELIM_PAREN
-    jfmt_write(f, if named -> "{{" else -> "(")
+    braces: named && !f.in_condition
+    jfmt_write(f, if braces -> "{{" else -> "(")
     source_start: if variant_span == .Val(source) -> source.end else -> span.start
+    // The author's own payload group gives the layout: a named payload
+    // written `.Text(value: x)` has no brace group of its own, and the next
+    // one in the file would decide its line breaks.
+    first: jfmt_first_token_at(f, source_start)
+    written_paren: variant_span != None && first < f.source_toks.len() && f.source_toks[first].kind == TOKEN_LPAREN
+    delimiter: if braces && !written_paren -> JFMT_DELIM_BRACE else -> JFMT_DELIM_PAREN
     source: jfmt_source_list_span_after(f, source_start, delimiter)
     item_spans: jfmt_list_item_spans(f, source)
     multiline: jfmt_comma_begin(f, args.len(), source)
@@ -1201,7 +1247,7 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
         jfmt_comma_after(f, multiline, item_span.end)
     }
     jfmt_comma_end(f, multiline, source)
-    jfmt_write(f, if named -> "}}" else -> ")")
+    jfmt_write(f, if braces -> "}}" else -> ")")
 }
 
 jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg]) {

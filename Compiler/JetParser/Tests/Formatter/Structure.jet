@@ -96,6 +96,77 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(formatted.text.contains("    if c -> print(\"x\") else -> print(\"y\")\n"))
 }
 
+#Test("a guarded value table arm keeps the table") {
+    formatted: jet_format_source("pick: fn(op: Op, form: Form) -> Int {{\n    if op == {{\n        .Init(_) && form == .Counted -> 1\n        .Init(_) | .Other -> 0\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    if op == {{\n        .Init(_) && form == .Counted -> 1\n"))
+}
+
+#Test("a statement table guard prints its own test in full") {
+    formatted: jet_format_source("pick: fn(ops: [Op], form: Form) -> Int {{\n    loop op in ops {{\n        if op == {{\n            .Init(_) && form == .Counted -> return 1\n            .Init(_) | .Other -> {{}}\n        }}\n    }}\n    0\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains(".Init(_) && form == .Counted -> return 1\n"))
+}
+
+#Test("a value table in an else arm stays a table") {
+    formatted: jet_format_source("pick: fn(c: Bool, r: Int?) -> Int {{\n    if c -> 0 else -> if r == {{\n        .Val(n) -> n\n        .None -> 1\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("else -> if r == {{"))
+}
+
+#Test("a named payload in an if condition keeps its parentheses") {
+    formatted: jet_format_source("check: fn(r: Reply) -> Bool {{\n    if r != .Value(value: .Unit) -> return false\n    true\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    if r != .Value(value: .Unit) -> return false\n"))
+}
+
+#Test("a table arm block that ends in a statement has no empty value line") {
+    formatted: jet_format_source("run: fn(r: Reply) -> Bool {{\n    a: if r == {{\n        .Value(v) -> v\n        .Failure(_) -> {{ return false }}\n    }}\n    a\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(!formatted.text.contains("return false\n\n"))
+}
+
+#Test("an arrow if in an interpolation hole stays unbraced") {
+    formatted: jet_format_source("label: fn(a: Int?) -> String {{\n    \"{{key(if a == None -> \"n\" else -> \"v\", 1)}}\"\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("{{key(if a == None -> \"n\" else -> \"v\", 1)}}\""))
+}
+
+#Test("a bare regex body keeps its escaped backslash, a headed one its raw one") {
+    formatted: jet_format_source("run: fn() {{\n    print(find({{\"\\\\d+\"}}, \"a1\"))\n    digits: Regex{{\"\\d+\"}}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("find({{\"\\\\d+\"}}, \"a1\")"))
+    assert(formatted.text.contains("digits: Regex{{\"\\d+\"}}\n"))
+}
+
+#Test("an optional optional keeps its Option spelling") {
+    formatted: jet_format_source("nested: fn(x: Int) -> Option<Int?> {{\n    None\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("nested: fn(x: Int) -> Option<Int?> "))
+}
+
+#Test("a named payload written with parentheses keeps its own line layout") {
+    formatted: jet_format_source("run: fn(found: V) {{\n    v: [V]{{.Text(value: \"a\"), found}}\n    if v.len() > 0 {{\n        print(v)\n    }}\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("    v: [V]{{.Text{{value: \"a\"}}, found}}\n"))
+}
+
+#Test("a long arrow loop body that opens with a parenthesis keeps the arrow") {
+    formatted: jet_format_source("run: fn(values: [Text], count: Int) {{\n    loop values.len() > count -> (values.pop()).drop(\"discard the canonical duplicate value from this list\")\n}}\n", false)
+    assert(formatted.ok)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.text.contains("loop values.len() > count -> (values.pop()).drop("))
+}
+
 #Test("grouping parentheses are not structure, quoted text is") {
     written: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    (a) * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program
     bare: parse_source("pick: fn(a: Int, b: Int) -> Int {{\n    a * (b + 1)\n}}\nlabel: fn() -> String {{ \"(a)\" }}\n".bytes()).program

@@ -1,0 +1,81 @@
+CaptureConsentScope: struct {
+    authorities: [String]
+    hosts: [String]
+    streams: [String]
+    disclosures: [String]
+    destination: String
+    byte_limit: U64
+    mode: CaptureMode
+    source_kinds: [CaptureSource]
+
+    default: fn() -> CaptureConsentScope Never! {
+        CaptureConsentScope{authorities: [String]{}, hosts: [String]{}, streams: [String]{}, disclosures: [String]{}, destination: "", byte_limit: DEFAULT_CAPTURE_BUDGET_BYTES, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
+    }
+
+    new: fn(authorities: &&[String], hosts: &&[String], streams: &&[String], disclosures: &&[String], destination: &&String, byte_limit: U64) -> CaptureConsentScope Never! {
+        scope := CaptureConsentScope{authorities: authorities.move(), hosts: hosts.move(), streams: streams.move(), disclosures: disclosures.move(), destination: destination.move(), byte_limit: byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
+        scope.canonicalize()
+        scope
+    }
+
+    for_budget: fn(budget: CaptureBudget) -> CaptureConsentScope Never! {
+        scope := CaptureConsentScope.default()
+        scope.byte_limit = budget.max_bytes
+        scope
+    }
+
+    // Same-package C3 calls this after applying policy mode and budget.
+    canonicalize: fn(&self) Never! {
+        capture_consent_sort_unique(self.authorities)
+        capture_consent_sort_unique(self.hosts)
+        capture_consent_sort_unique(self.streams)
+        capture_consent_sort_unique(self.disclosures)
+        // Rust's derived enum order, not lexical order of Time/Rand/Input/Net.
+        loop index in 1..<self.source_kinds.len() {
+            value: self.source_kinds[index].copy()
+            cursor := index
+            loop cursor > 0 && capture_consent_source_rank(self.source_kinds[cursor - 1]) > capture_consent_source_rank(value) {
+                self.source_kinds[cursor] = self.source_kinds[cursor - 1]
+                cursor -= 1
+            }
+            self.source_kinds[cursor] = value
+        }
+        count := 0
+        loop index in 0..<self.source_kinds.len() {
+            if count == 0 || self.source_kinds[count - 1] != self.source_kinds[index] {
+                self.source_kinds[count] = self.source_kinds[index]
+                count += 1
+            }
+        }
+        loop self.source_kinds.len() > count -> (self.source_kinds.pop()).drop("discard canonical duplicate")
+    }
+
+    digest: fn(self) -> String Never! {
+        bytes := "capture-consent-scope-v1".bytes()
+        bytes.push(U8{0})
+        capture_consent_frame_vec(bytes, "authorities", self.authorities)
+        capture_consent_frame_vec(bytes, "hosts", self.hosts)
+        capture_consent_frame_vec(bytes, "streams", self.streams)
+        capture_consent_frame_vec(bytes, "disclosures", self.disclosures)
+        capture_consent_frame(bytes, "destination", self.destination)
+        capture_consent_frame(bytes, "byte_limit", "{self.byte_limit}")
+        capture_consent_frame(bytes, "mode", self.mode.as_str())
+        capture_consent_frame(bytes, "source_kinds.count", "{self.source_kinds.len()}")
+        loop (index, source) in self.source_kinds {
+            capture_consent_frame(bytes, "source_kinds.{index}", source.as_str())
+        }
+        sha256_hex_bytes(sha256_bytes(bytes))
+    }
+}
+
+capture_consent_sort_unique: fn(values: &[String]) Never! {
+    values.sort()
+    count := 0
+    loop index in 0..<values.len() {
+        if count == 0 || values[count - 1] != values[index] {
+            if count != index -> values[count] = values[index]
+            count += 1
+        }
+    }
+    loop values.len() > count -> (values.pop()).drop("discard canonical duplicate")
+}
