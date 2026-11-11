@@ -36,16 +36,27 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/c_import_needs_ffi_c_in_allow_row.stderr</code>.</p>
-<pre class="diag">Error [jet.ProhibitedEffectReached]: `c_import_needs_ffi_c_in_allow_row::run` reaches the `FFI.C` effect, which the package&#39;s `authority: { allow: […] }` row doesn&#39;t list
-  --&gt; tests/ui/c_import_needs_ffi_c_in_allow_row.jet:12:1
+<p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/build_io_net_denied.stderr</code>.</p>
+<pre class="diag">Error [jet.ProhibitedEffectReached]: `offline_banner` reaches the `Net` effect, which it prohibits with `-[!Net]&gt;`
+  --&gt; tests/ui/build_io_net_denied.jet:6:25
     |
- 12 | run: fn() {
-    | ^^^
- Why: A written `allow` row is a ceiling: the package&#39;s code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)
- Fix: Add `FFI.C` to `authority.allow`, or remove the call that reaches it
+  6 | offline_banner: fn() -[!Net]&gt; String {
+    |                         ^^^
+ Why: A `-[!Net]&gt;` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]&gt;` prohibition
  Denial: invocation
- Call chain: c_import_needs_ffi_c_in_allow_row::run
+ Call chain: offline_banner
+More: jet-lang.dev/e/E0749
+
+Error [jet.ProhibitedEffectReached]: `build` reaches the `Net` effect, which it prohibits with `-[!Net]&gt;`
+  --&gt; tests/ui/build_io_net_denied.jet:10:24
+    |
+ 10 | build: fn(b: Build) -[!Net]&gt; {
+    |                        ^^^
+ Why: A `-[!Net]&gt;` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]&gt;` prohibition
+ Denial: invocation
+ Call chain: build
 More: jet-lang.dev/e/E0749
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
