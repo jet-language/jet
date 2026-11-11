@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99204,
+    "rev": 99207,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57140,7 +57140,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-11T07:50:07.915Z",
+      "updated": "2026-11-11T09:15:23.360Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -67231,7 +67231,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-11T05:11:41.832Z",
+      "updated": "2026-11-11T09:15:21.060Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -84741,7 +84741,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-07T03:29:37.298Z",
+      "updated": "2026-11-11T09:15:22.006Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -195548,6 +195548,503 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-11T09:14:58.581Z"
+    },
+    {
+      "id": "NEW-D-MARKER-WRAP1",
+      "cardId": "c03pi177",
+      "group": "tooling",
+      "title": "Complete marker wrapping and nesting contracts",
+      "situation": "The ratified marker-type decision names wrap without its argument or return type. It also requires library combine for Merge and Tighten. The supplied facts report that an older contract refuses those library settings. Neither gap may be solved by silently ignoring a hook. This vote specifies wrapping and either makes library combination reachable or explicitly changes rule 11. Ordinary marker syntax stays unchanged.",
+      "gist": "What does wrap receive, and may library markers combine nested values?",
+      "lesson": "Wrapping must preserve a function’s arguments, result, failures and effects. A type name alone does not define these rules.",
+      "explainer": "",
+      "story": "A tracing marker prints enter and leave around work returning 7. Both wrapping designs do that same job; nesting is voted independently.",
+      "inWild": "An ordinary callable is the strongest small wrapping alternative.",
+      "detail": "D-DECL-TYPES1 rules 6 and 11 are the authority. The supplied V42 path is absent. Seed-t21 accepts library nesting settings without combine; combination behavior remains unproved. A/C use compile-time Call and Code, not runtime reflection; B/D use a specialized callable. All proposed APIs are UNCHECKED. \n\nCombination folds outer to inner; repeatable markers retain source order. Tighten must be associative and idempotent under a declared partial order and never loosen the outer value. Verify these laws for finite domains, otherwise require proof or refuse Tighten. Merge need not be commutative; document its order. Prove failure cleanup, recursion, generic/method/indirect calls, moved parameters, nested markers and all tiers before shipping.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Call value; library combine",
+          "code": "// [UNCHECKED: proposed Call and Code APIs, not available on seed]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn(self, call: Call) -> Code {\n            call.around(before: #code { print(\"enter\") }, after: #code { print(\"leave\") })\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }",
+          "gist": "Define wrapping and honor library nesting.",
+          "detail": "wrap runs once while compiling per marked function or method, for its checked body. Call is a compiler-issued immutable handle; wrap returns Code. call.around inserts before and deferred after code around exactly one original body. The default returns call.body. Every direct, indirect and recursive invocation enters the transformed body once; generated wrappers do not wrap themselves. Recheck effects, failure contracts, ownership and source spans. Permit library inherits/resolution/scopes; require combine for Merge/Tighten, outer to inner."
+        },
+        {
+          "key": "B",
+          "name": "Closure; library combine",
+          "code": "// [UNCHECKED: proposed generic wrapping hook; not a seed capability]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn<T>(self, call: fn() -> T) -> T {\n            print(\"enter\")\n            defer { print(\"leave\") }\n            call()\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }",
+          "gist": "Define wrapping and honor library nesting.",
+          "detail": "wrap receives a zero-argument callable for the original body and returns its exact success type. Its signature specializes to the original error and effect rows, never Err erasure. It cannot escape or outlive arguments. Ordinary callable rules govern invocation count; this sample invokes once. Fallible and move-only cases need proof, not a pure fn() -> T claim. Permit library inherits/resolution/scopes; require combine for Merge/Tighten, outer to inner."
+        },
+        {
+          "key": "C",
+          "name": "Call value; site-bound libraries",
+          "code": "// [UNCHECKED: proposed Call and Code APIs, not available on seed]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn(self, call: Call) -> Code {\n            call.around(before: #code { print(\"enter\") }, after: #code { print(\"leave\") })\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }",
+          "gist": "Define wrapping but remove library nesting.",
+          "detail": "wrap runs once while compiling per marked function or method, for its checked body. Call is a compiler-issued immutable handle; wrap returns Code. call.around inserts before and deferred after code around exactly one original body. The default returns call.body. Every direct, indirect and recursive invocation enters the transformed body once; generated wrappers do not wrap themselves. Recheck effects, failure contracts, ownership and source spans. Explicitly supersede rule 11: library markers remain SiteBound; no combine hook."
+        },
+        {
+          "key": "D",
+          "name": "Closure; site-bound libraries",
+          "code": "// [UNCHECKED: proposed generic wrapping hook; not a seed capability]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn<T>(self, call: fn() -> T) -> T {\n            print(\"enter\")\n            defer { print(\"leave\") }\n            call()\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }",
+          "gist": "Define wrapping but remove library nesting.",
+          "detail": "wrap receives a zero-argument callable for the original body and returns its exact success type. Its signature specializes to the original error and effect rows, never Err erasure. It cannot escape or outlive arguments. Ordinary callable rules govern invocation count; this sample invokes once. Fallible and move-only cases need proof, not a pure fn() -> T claim. Explicitly supersede rule 11: library markers remain SiteBound; no combine hook."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Use the existing checked code-transformation direction and make the ratified combine hook reachable, rather than inventing an erased runtime call carrier.",
+        "gains": [
+          "Uses checked compile-time code transformation"
+        ],
+        "losses": [
+          {
+            "loss": "Checked transformation APIs need implementation.",
+            "mitigation": "Require full body rechecking and executable ownership, error and effect cases."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A runtime continuation is familiar, but must preserve callable ownership, errors and effects without erasure."
+          },
+          {
+            "key": "C",
+            "reason": "Removing combine is coherent only as explicit supersession of rule 11, not an implementation shortcut."
+          },
+          {
+            "key": "D",
+            "reason": "Removing combine is coherent only as explicit supersession of rule 11, not an implementation shortcut."
+          }
+        ],
+        "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked the cited decisions and exercised baseline syntax; separated proposals from observed behavior and repaired unfair alternatives."
+      },
+      "checkInstructions": "Proposal examples marked UNCHECKED are not implementation proof. Run the acceptance cases described in detail after implementation, on every applicable execution tier.",
+      "surface": {
+        "gist": "What does wrap receive, and may library markers combine nested values?",
+        "lesson": "Wrapping must preserve a function’s arguments, result, failures and effects. A type name alone does not define these rules.",
+        "trio": {
+          "current": {
+            "note": "Ratified rule 6 leaves call untyped; rule 11 requires combine.",
+            "code": "// Decision text, not executable code:\n// wrap(self, call)\n// combine(self, inner: Self) -> Self"
+          },
+          "wild": {
+            "lang": "Jet alternative",
+            "note": "An ordinary callable is the strongest small wrapping alternative.",
+            "code": "// [UNCHECKED: proposed generic hook]\nwrap: fn<T>(self, call: fn() -> T) -> T { call() }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Call value; library combine",
+            "gist": "Define wrapping and honor library nesting.",
+            "gains": [
+              "Uses checked compile-time code transformation"
+            ],
+            "losses": [
+              "Library tightening must be lawful."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed Call and Code APIs, not available on seed]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn(self, call: Call) -> Code {\n            call.around(before: #code { print(\"enter\") }, after: #code { print(\"leave\") })\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Closure; library combine",
+            "gist": "Define wrapping and honor library nesting.",
+            "gains": [
+              "Ordinary callable body is familiar"
+            ],
+            "losses": [
+              "Library tightening must be lawful."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed generic wrapping hook; not a seed capability]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn<T>(self, call: fn() -> T) -> T {\n            print(\"enter\")\n            defer { print(\"leave\") }\n            call()\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Call value; site-bound libraries",
+            "gist": "Define wrapping but remove library nesting.",
+            "gains": [
+              "Uses checked compile-time code transformation"
+            ],
+            "losses": [
+              "Removes ratified library merge and tighten behavior."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed Call and Code APIs, not available on seed]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn(self, call: Call) -> Code {\n            call.around(before: #code { print(\"enter\") }, after: #code { print(\"leave\") })\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Closure; site-bound libraries",
+            "gist": "Define wrapping but remove library nesting.",
+            "gains": [
+              "Ordinary callable body is familiar"
+            ],
+            "losses": [
+              "Removes ratified library merge and tighten behavior."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed generic wrapping hook; not a seed capability]\nTrace: struct {\n    impl Marker {\n        sites: [.Function, .Method]\n        wrap: fn<T>(self, call: fn() -> T) -> T {\n            print(\"enter\")\n            defer { print(\"leave\") }\n            call()\n        }\n    }\n}\n#Trace\nwork: fn() -> Int { 7 }\nrun: fn() { print(work()) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the existing checked code-transformation direction and make the ratified combine hook reachable, rather than inventing an erased runtime call carrier.",
+          "gains": [
+            "Uses checked compile-time code transformation"
+          ],
+          "losses": [
+            {
+              "loss": "Checked transformation APIs need implementation.",
+              "mitigation": "Require full body rechecking and executable ownership, error and effect cases."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A runtime continuation is familiar, but must preserve callable ownership, errors and effects without erasure."
+            },
+            {
+              "key": "C",
+              "reason": "Removing combine is coherent only as explicit supersession of rule 11, not an implementation shortcut."
+            },
+            {
+              "key": "D",
+              "reason": "Removing combine is coherent only as explicit supersession of rule 11, not an implementation shortcut."
+            }
+          ],
+          "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T09:15:21.060Z"
+    },
+    {
+      "id": "NEW-D-LINT-DECL1",
+      "cardId": "c0fymc7l",
+      "group": "tooling",
+      "title": "Declare package lint findings and structured fixes without a second diagnostic mechanism",
+      "situation": "The research sketch uses a declaration spelling that Jet does not have. It also assigns a built-in numeric code to a package lint and gives no activation or safe-edit contract. A package needs a declared finding and an optional checked fix. We recommend keeping Diagnostic as the finding value and using checked compiler events for discovery. A dedicated registration trait remains a fair alternative, not another diagnostic carrier.",
+      "gist": "How should packages declare lint findings and structured fixes?",
+      "lesson": "Finding text and an edit are different values. Keep human help in fix; validate structured edits separately. Importing a package must not silently enable its policy.",
+      "explainer": "",
+      "story": "A library opts into NoPrintInLib. Every option finds the same resolved print call and offers the same deliberate logging edit.",
+      "inWild": "A dedicated registration trait can offer a compact authoring surface.",
+      "detail": "D-DECL-TYPES1 supplies Diagnostic with literal what/why/fix. D-API-COMPOSE1 favors one general operation and typed options, not sibling rewrite APIs. D-NO-WARNINGS1 distinguishes style rewrites, tidy errors and optional reports: do not invent warning severity or make style a new failing lint tier. Tidy findings fail check/build, not run/dev/test; reports use lint. \n\nFixes are opt-in and may change behavior only with explicit authorization. Printing to logging is not inherently behavior-preserving. Detect symbol aliases and shadowing, refuse unsafe argument duplication and incompatible logger calls, and reject stale or overlapping edits atomically. Recheck before writing. Proposed APIs are UNCHECKED; no package lint execution is claimed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Diagnostic values; checked rewrites",
+          "gist": "Use one diagnostic carrier and checked compiler events.",
+          "detail": "Keep Diagnostic as the only finding carrier. Add tier and structured_fix; fix remains literal help text. A root build subscriber traverses checked calls and emits NoPrintInLib only for the resolved print symbol in the opted-in library. syntax.rewrite takes resolved callable identities and preserves argument subtrees. It requires compatible argument and return types. Dependents do not activate a lint merely by importing its package. Beginners enable the package lint group once; experts register a checked event subscriber.",
+          "code": "// [UNCHECKED: proposed checked-node and structured-fix APIs]\nNoPrintInLib: struct {\n    impl Diagnostic {\n        code: \"mypkg.NoPrintInLib\"\n        tier: .Tidy\n        what: fn(self) -> String { \"Library writes stdout\" }\n        why: fn(self) -> String { \"The caller owns stdout\" }\n        fix: fn(self) -> String { \"Use the package logger\" }\n        structured_fix: syntax.rewrite(callee: print, replacement: log.info)\n    }\n}\n// A checked-call subscriber emits this value for resolved print calls.\n// Input: print(value); fixed: log.info(value)."
+        },
+        {
+          "key": "B",
+          "name": "Lint trait; same diagnostic carrier",
+          "gist": "A dedicated Lint trait registers traversal, not another error type.",
+          "detail": "Lint is a registration trait whose find method consumes a checked call and returns an optional Diagnostic value. It does not replace Diagnostic, change command failure policy, or invent warning severity. Activate it explicitly for the same library as A. Use A’s checked rewrite value and the same finding texts. Its convenience is a one-place declaration; its cost is a second way to register checked-code traversal.",
+          "code": "// [UNCHECKED: proposed Lint registration trait]\nNoPrintRule: struct {\n    impl Lint {\n        find: fn(call: CheckedCall) -> NoPrintInLib? {\n            if call.callee == print && call.package.kind == .Library -> Val(NoPrintInLib{}) else -> None\n        }\n    }\n}\n// Uses A’s Diagnostic and structured rewrite, same explicit activation."
+        },
+        {
+          "key": "C",
+          "name": "Diagnostic values; string patterns",
+          "gist": "Use one carrier with parse-checked pattern and template strings.",
+          "detail": "Use A’s Diagnostic carrier and explicit subscriber activation, but structured_fix is syntax.rewrite(\"print($x)\", \"log.info($x)\"). These strings are a proposed pattern language, not Jet source. Parse both at declaration time; require every replacement hole to bind once in the pattern. Resolve names by symbol identity, preserve trivia and source spans, and reject rewrites that change evaluation order or cannot recheck. This is not automatic safe conversion from stdout to logging.",
+          "code": "// [UNCHECKED: proposed pattern DSL and APIs]\n// Same Diagnostic declaration and activation as A.\n// Only structured_fix differs:\n// structured_fix: syntax.rewrite(\"print($x)\", \"log.info($x)\")\n// Input: print(value); fixed: log.info(value)."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Keep one Diagnostic value and reuse compiler-event registration. Make the structured fix a separately checked value, not a replacement for literal help text.",
+        "gains": [
+          "One reporting mechanism"
+        ],
+        "losses": [
+          {
+            "loss": "The checked-edit API is new.",
+            "mitigation": "Refuse stale, overlapping or untypeable edits before changing source."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A separate discovery trait is coherent, but duplicates compiler-event registration for this use."
+          },
+          {
+            "key": "C",
+            "reason": "Concise, but string holes duplicate checked-node matching and require a new binding and hygiene contract."
+          }
+        ],
+        "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked the cited decisions and exercised baseline syntax; separated proposals from observed behavior and repaired unfair alternatives."
+      },
+      "checkInstructions": "Proposal examples marked UNCHECKED are not implementation proof. Run the acceptance cases described in detail after implementation, on every applicable execution tier.",
+      "surface": {
+        "gist": "How should packages declare lint findings and structured fixes?",
+        "lesson": "Finding text and an edit are different values. Keep human help in fix; validate structured edits separately. Importing a package must not silently enable its policy.",
+        "trio": {
+          "current": {
+            "note": "The research sketch is not compiled and uses a nonexistent declaration spelling.",
+            "code": "// Research sketch is not executable evidence.\n// Rewrite declarations with name: value."
+          },
+          "wild": {
+            "lang": "Jet alternative",
+            "note": "A dedicated registration trait can offer a compact authoring surface.",
+            "code": "// [UNCHECKED: proposed Lint API]\n// find(call: CheckedCall) -> Diagnostic?"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Diagnostic values; checked rewrites",
+            "gist": "Use one diagnostic carrier and checked compiler events.",
+            "gains": [
+              "One reporting mechanism"
+            ],
+            "losses": [
+              "Needs checked-call reflection and edit APIs."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed checked-node and structured-fix APIs]\nNoPrintInLib: struct {\n    impl Diagnostic {\n        code: \"mypkg.NoPrintInLib\"\n        tier: .Tidy\n        what: fn(self) -> String { \"Library writes stdout\" }\n        why: fn(self) -> String { \"The caller owns stdout\" }\n        fix: fn(self) -> String { \"Use the package logger\" }\n        structured_fix: syntax.rewrite(callee: print, replacement: log.info)\n    }\n}\n// A checked-call subscriber emits this value for resolved print calls.\n// Input: print(value); fixed: log.info(value)."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Lint trait; same diagnostic carrier",
+            "gist": "A dedicated Lint trait registers traversal, not another error type.",
+            "gains": [
+              "One declaration contains discovery and reporting"
+            ],
+            "losses": [
+              "Adds a public registration trait."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed Lint registration trait]\nNoPrintRule: struct {\n    impl Lint {\n        find: fn(call: CheckedCall) -> NoPrintInLib? {\n            if call.callee == print && call.package.kind == .Library -> Val(NoPrintInLib{}) else -> None\n        }\n    }\n}\n// Uses A’s Diagnostic and structured rewrite, same explicit activation."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Diagnostic values; string patterns",
+            "gist": "Use one carrier with parse-checked pattern and template strings.",
+            "gains": [
+              "Concise patterns for package authors"
+            ],
+            "losses": [
+              "Adds a second pattern language and hygiene rules."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed pattern DSL and APIs]\n// Same Diagnostic declaration and activation as A.\n// Only structured_fix differs:\n// structured_fix: syntax.rewrite(\"print($x)\", \"log.info($x)\")\n// Input: print(value); fixed: log.info(value)."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep one Diagnostic value and reuse compiler-event registration. Make the structured fix a separately checked value, not a replacement for literal help text.",
+          "gains": [
+            "One reporting mechanism"
+          ],
+          "losses": [
+            {
+              "loss": "The checked-edit API is new.",
+              "mitigation": "Refuse stale, overlapping or untypeable edits before changing source."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A separate discovery trait is coherent, but duplicates compiler-event registration for this use."
+            },
+            {
+              "key": "C",
+              "reason": "Concise, but string holes duplicate checked-node matching and require a new binding and hygiene contract."
+            }
+          ],
+          "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T09:15:22.006Z"
+    },
+    {
+      "id": "NEW-D-EDITOR-JS1",
+      "cardId": "c0qe89cl",
+      "group": "tooling",
+      "title": "Treat editor-host inputs explicitly in the pairing rule",
+      "situation": "The extension package names extension.js as its main and imports the VS Code host API. The tree-sitter file declares a grammar using that tool’s JavaScript vocabulary. These are not ordinary command-line scripts, but that does not make them impossible to test. Choose narrow host-input exceptions, a Jet-source migration with retained glue, or host-compatible Jet web output. None authorizes a blanket editor-tool exemption or a fake twin.",
+      "gist": "Should two editor-host JavaScript inputs be exempt, Jet-generated, or implemented through Jet web output?",
+      "lesson": "A host entry file and a portable tool are different jobs. An exception must name exact files; generated output still needs a source and reproducible checks.",
+      "explainer": "",
+      "story": "The same installed extension serves LSP, debugging and reasoning views, and the same grammar highlights Jet in each option.",
+      "inWild": "Generating a host artifact is a viable alternative to rewriting its host.",
+      "detail": "Inspected vscode/package.json:16-18, extension.js:9-13 and tree-sitter/grammar.js:16-29. The grammar already contains generated keyword tables, not a generated whole grammar. Keep every behavior under all options. Host-driven tests can exercise both artifacts; a custom fixture/check is not ruled out by the port harness. \n\nThe supplied claim that no gauntlet entry can run them is unsupported. No web build, host binding or tree-sitter CLI execution was performed, and proposed migration outputs are UNCHECKED. A changes the pairing-policy exception explicitly; B/C need generated-artifact provenance and host parity before removal of handwritten originals.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exact host-artifact exceptions",
+          "gist": "Exempt the two named host files, not all editor scripts.",
+          "detail": "Add exact exceptions for Tools/editors/vscode/extension.js and Tools/editors/tree-sitter/grammar.js. They remain host inputs, not general tool exemptions. Existing browser JS exceptions stay separate. Pair independent scripts and generators normally. Keep grammar drift checks and add extension-host activation, trust, rename and webview tests. No claim that testing these hosts is impossible. Beginners install the same extension; experts can improve native protocol services without a replacement host ABI.",
+          "code": "// No Jet source change.\n// vscode package.json keeps main: ./extension.js\n// tree-sitter consumes grammar.js as its grammar definition."
+        },
+        {
+          "key": "B",
+          "name": "Jet source with minimal host glue",
+          "gist": "Generate the grammar and move portable extension logic to Jet.",
+          "detail": "Make a paired Jet generator produce the complete grammar artifact, not only keyword tables. Keep the JS entry required by the host. Separate portable extension logic behind Jet services and retain only host API adaptation in JavaScript. Test the exact same trust, LSP, debugging, rename and webview behavior. This does not mean the extension becomes a native main. Generated JS is output, not an unpaired handwritten program.",
+          "code": "// [UNCHECKED: proposed generator and service boundary]\n// Jet generator -> grammar.js\n// extension.js -> host APIs plus Jet protocol services"
+        },
+        {
+          "key": "C",
+          "name": "Jet web output for extension logic",
+          "gist": "Compile extension logic for its JavaScript host.",
+          "detail": "Implement a supported host-module binding and extension-host loadable Jet output, with any minimal JavaScript bootstrap explicit. Generate the grammar from Jet as in B. Do not require a JS/Wasm optimizer split merely to call host imports; that is a separate implementation choice. Native process services remain an alternative. Test installed activation, asynchronous lifecycle, cancellation, trust and packaging before switching. No seed support is claimed.",
+          "code": "// [UNCHECKED: proposed extension-host target integration]\n// Jet extension source -> JS bootstrap plus Wasm\n// Host imports bind vscode and vscode-languageclient."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Adopt exact exceptions now rather than claiming an unbuilt port or a broader tooling exemption. Preserve tests and normal pairing for independent generators.",
+        "gains": [
+          "Preserves current editor integration"
+        ],
+        "losses": [
+          {
+            "loss": "Host glue stays handwritten JavaScript.",
+            "mitigation": "Keep exceptions exact and test installed host behavior."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A strong incremental direction, but it needs specified boundaries and real parity evidence before a cutover."
+          },
+          {
+            "key": "C",
+            "reason": "Web output alone is not a VS Code API binding or proof of extension-host compatibility."
+          }
+        ],
+        "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: Review2. Checked the cited decisions and exercised baseline syntax; separated proposals from observed behavior and repaired unfair alternatives."
+      },
+      "checkInstructions": "Proposal examples marked UNCHECKED are not implementation proof. Run the acceptance cases described in detail after implementation, on every applicable execution tier.",
+      "surface": {
+        "gist": "Should two editor-host JavaScript inputs be exempt, Jet-generated, or implemented through Jet web output?",
+        "lesson": "A host entry file and a portable tool are different jobs. An exception must name exact files; generated output still needs a source and reproducible checks.",
+        "trio": {
+          "current": {
+            "note": "The manifest points to JavaScript; the source imports host APIs.",
+            "code": "// package.json: main = ./extension.js\n// extension.js: require(\"vscode\")"
+          },
+          "wild": {
+            "lang": "Host boundary",
+            "note": "Generating a host artifact is a viable alternative to rewriting its host.",
+            "code": "// Jet generator -> grammar.js -> tree-sitter generate"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Exact host-artifact exceptions",
+            "gist": "Exempt the two named host files, not all editor scripts.",
+            "gains": [
+              "Preserves current editor integration"
+            ],
+            "losses": [
+              "Their host glue remains JavaScript."
+            ],
+            "proposed": {
+              "code": "// No Jet source change.\n// vscode package.json keeps main: ./extension.js\n// tree-sitter consumes grammar.js as its grammar definition."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Jet source with minimal host glue",
+            "gist": "Generate the grammar and move portable extension logic to Jet.",
+            "gains": [
+              "Jet owns portable logic and grammar source"
+            ],
+            "losses": [
+              "Host glue and cross-process boundaries remain."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed generator and service boundary]\n// Jet generator -> grammar.js\n// extension.js -> host APIs plus Jet protocol services"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Jet web output for extension logic",
+            "gist": "Compile extension logic for its JavaScript host.",
+            "gains": [
+              "Potentially one source language for extension logic"
+            ],
+            "losses": [
+              "Requires host bindings and loadable output."
+            ],
+            "proposed": {
+              "code": "// [UNCHECKED: proposed extension-host target integration]\n// Jet extension source -> JS bootstrap plus Wasm\n// Host imports bind vscode and vscode-languageclient."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Adopt exact exceptions now rather than claiming an unbuilt port or a broader tooling exemption. Preserve tests and normal pairing for independent generators.",
+          "gains": [
+            "Preserves current editor integration"
+          ],
+          "losses": [
+            {
+              "loss": "Host glue stays handwritten JavaScript.",
+              "mitigation": "Keep exceptions exact and test installed host behavior."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A strong incremental direction, but it needs specified boundaries and real parity evidence before a cutover."
+            },
+            {
+              "key": "C",
+              "reason": "Web output alone is not a VS Code API binding or proof of extension-host compatibility."
+            }
+          ],
+          "tradeoff": "Choose the stated contract, not an unmeasured implementation advantage."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-11T09:15:23.360Z"
     }
   ],
   "questions": [
@@ -198698,6 +199195,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-11T09:15:23.360Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "NEW-D-EDITOR-JS1",
+      "note": "Treat editor-host inputs explicitly in the pairing rule"
+    },
+    {
+      "at": "2026-11-11T09:15:22.006Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "NEW-D-LINT-DECL1",
+      "note": "Declare package lint findings and structured fixes without a second diagnostic mechanism"
+    },
+    {
+      "at": "2026-11-11T09:15:21.060Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "NEW-D-MARKER-WRAP1",
+      "note": "Complete marker wrapping and nesting contracts"
+    },
     {
       "at": "2026-11-11T09:14:58.581Z",
       "by": "Main",
@@ -202183,713 +202701,6 @@
       "action": "decision.update",
       "ref": "D-RESULT-BRANCH1",
       "note": ""
-    },
-    {
-      "at": "2026-11-10T12:52:33.495Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-REGION-ALLOC1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:52:16.195Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PRIM-USIZE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:52:07.331Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PRIM-TYPEKEY2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:51:56.698Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PRIM-ANY1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:39:19.558Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0699zei",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T12:37:41.994Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-10T12:36:31.472Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T12:30:54.545Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iuv3zr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T12:30:52.635Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tsbf3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T12:28:54.729Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PIPE-FIRST1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:52.041Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PERSIST-ONLY1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:49.957Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-NO-WARNINGS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:47.971Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-LIT-ADAPT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:45.799Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-LANG-MIGRATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:43.562Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-INSPECT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:41.413Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-FILE-STATEMENTS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:39.348Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CORE-LOWER1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:37.151Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-COMPREHEND1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:35.069Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-API-SURFACE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:32.965Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MODULE-VAR1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:31.206Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MODULE-BUILD1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:29.259Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ALLOC-FAIL1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:28:27.198Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-FFI-EFFECTS1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T12:27:42.364Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bnp1zw",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-10T12:18:43.082Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-10T12:18:41.371Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-10T12:18:39.723Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0scf8mn",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-10T12:18:38.069Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-10T12:18:36.302Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-10T12:18:34.607Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-10T12:18:32.943Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-10T12:18:31.293Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-10T12:18:29.573Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-10T12:18:27.594Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-10T12:18:25.721Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-10T12:18:23.326Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-10T12:18:21.372Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-10T12:18:19.358Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-10T12:18:17.413Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-10T12:18:15.342Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-10T12:18:13.225Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-10T12:18:11.049Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#106"
-    },
-    {
-      "at": "2026-11-10T12:18:08.938Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#98"
-    },
-    {
-      "at": "2026-11-10T12:18:06.759Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#97"
-    },
-    {
-      "at": "2026-11-10T12:18:04.654Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#135"
-    },
-    {
-      "at": "2026-11-10T12:18:02.578Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#131"
-    },
-    {
-      "at": "2026-11-10T12:14:21.645Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qe89cl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T12:14:20.213Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bnp1zw",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-10T12:14:18.562Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bnp1zw",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-10T12:14:16.889Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bnp1zw",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-10T12:14:15.457Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-10T12:14:13.777Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#146"
-    },
-    {
-      "at": "2026-11-10T12:14:12.087Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-10T12:07:38.871Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0iuv3zr",
-      "note": "#109: Main 2026-11-10: the earlier rewording conflicted with the standing owner order that non-Jet spellings get no teaching diagnostic, rule or jet fix rewrite (Vec/dict teaching is E0028, status Retired, in Compiler/Prelude/Diagnostics.jet). Map<K, V> is not a Jet spelling, so it is an ordinary unknown type.; was: (Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reworded by Main 2026-11-10 under the ratified D-LISTMAP-CANON1=A, where `[K: V]` is the only map spelling) `Map<String, Int>{}` is refu"
-    },
-    {
-      "at": "2026-11-10T12:05:14.956Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0a0gmpl",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-10T11:56:21.315Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0oev2ib",
-      "note": "#157: G6LeadD: the run-time fallback is the ratified D-QUANTITY-CONVERT1 behavior (spec.md and syntax-decisions.md: a rounded rational that is not exactly representable by the destination is a conversion error). Changing it is an owner gate, so the criterion becomes the missing run-time proof of the ratified behavior.; was: (Found 2026-11-10 by G6LeadD while writing the P14 contract cases (G6LeadD-2) on dev 76955986d0) The explicit rounded conversions return their rounded value instead of taking the fallback at run time:"
-    },
-    {
-      "at": "2026-11-10T11:55:23.530Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r2eell",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T11:53:15.458Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0bnp1zw",
-      "note": "#18: TlsLead3 found the real root: LaneCheck ran the Jetpack assembly under the seed (no JET_BIN), not a missing source row; was: (Found 2026-11-10 by G6Lead2 on dev 76955986d0) The port's new Core/Crypto modules are known to the Jetpack bootstrap: `CompilerPackages.jet sources` resolves __core_crypto_md (Core/Crypto/Crypto.jet:"
-    },
-    {
-      "at": "2026-11-10T11:50:20.976Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iuv3zr",
-      "note": "#111 (Found 2026-11-10 by BallotFix, probe lc/l06 on dev 76955986"
-    },
-    {
-      "at": "2026-11-10T11:49:53.484Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-SCRIPT-LOCAL-CLOCK1",
-      "note": "Give Core the host's time zone, and let format selectors take a computed number"
-    },
-    {
-      "at": "2026-11-10T11:46:27.063Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#18 (Found 2026-11-10 by G6Lead2 on dev 76955986d0) The port's n"
-    },
-    {
-      "at": "2026-11-10T11:45:38.700Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#157 (Found 2026-11-10 by G6LeadD while writing the P14 contract "
-    },
-    {
-      "at": "2026-11-10T11:45:37.403Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#156 (Found 2026-11-10 by G6LeadD while writing the P14 contract "
-    },
-    {
-      "at": "2026-11-10T11:45:36.014Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#155 (Found 2026-11-10 by G6LeadD while writing the P14 contract "
-    },
-    {
-      "at": "2026-11-10T11:45:34.822Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#154 (Found 2026-11-10 by G6LeadD while writing the P14 contract "
-    },
-    {
-      "at": "2026-11-10T11:37:50.376Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MARKER-CALL1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:37:48.945Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-META-HASH2",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:37:46.285Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-META-STAGING1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:37:43.166Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-JAI-GENERIC1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:37:39.656Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMPL-COND1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:26:55.163Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-10T11:26:38.201Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-NET-READINTO1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:26:36.774Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-WS-ROUTE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:26:06.281Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0iuv3zr",
-      "note": "#109: Map<K,V> is dead under ratified D-LISTMAP-CANON1=A (syntax-decisions.md:1516-1517); making it build would contradict the decision, so the defect is the unhelpful diagnostic; was: (Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) `Map<String, Int>{}` builds an empty map; today it is E0119. A case covers it on O0, O1 and O2."
-    },
-    {
-      "at": "2026-11-10T11:24:06.897Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0699zei",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-10T11:23:41.525Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0699zei",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-10T11:23:19.466Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-TCP-WRITE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:23:18.144Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-EMBED-TOOLCHAIN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:22:38.987Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0iuv3zr",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-10T11:16:17.785Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-TARGET-DECL1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:16:16.758Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-THREAD-STACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:16:15.738Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-MATH-NARROW1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:16:14.720Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-SECRET-CT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-10T11:15:11.145Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-10T11:07:30.469Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02m1p02",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-10T11:07:29.127Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-10T11:07:28.196Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03pi177",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-10T11:07:27.273Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-10T11:07:26.229Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-10T11:06:37.270Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-10T11:06:36.187Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0699zei",
-      "note": "#56"
-    },
-    {
-      "at": "2026-11-10T11:05:46.435Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T11:05:30.310Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#17 F-ZERO-2 (Low, from the 2026-11-10 re-review in Docs/audits/"
-    },
-    {
-      "at": "2026-11-10T11:05:19.531Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bnp1zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-10T11:03:21.693Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08tik7v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-10T11:01:18.169Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0oev2ib",
-      "note": "#146: a0_043 cut 5 (2026-11-10, dev 76955986d0) lost 19 golden and case rows to one root, G1Lead-3-6281f2 (430861ac10): a C call with no descriptor now gets E0749 (\"reaches every effect\") even with an allow row, which breaks Bridges, NativeC, OpaqueHandles, CBind, the cffi cases and three more. The c146 check has to accept a correct allow row for an undescribed C binding (the binding is held to its declared allow list), not refuse it."
-    },
-    {
-      "at": "2026-11-10T10:54:12.700Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-10T10:54:10.126Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w1wcfc",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-10T10:49:51.064Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qe89cl",
-      "note": "#22: The tie rule is already an owner ruling (#4588, 2026-10-05), so no ballot is needed for it.; was: Found 2026-11-09 by the same port: the Jet twin needed 3693 source tokens against 915. The twin reads the trace through the existing typed `json.decode<T>` (no new Dyn API: 1108 tokens on 2026-11-10),"
-    },
-    {
-      "at": "2026-11-10T10:49:49.102Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qe89cl",
-      "note": "#24: PerfLead2 2026-11-10: the owner ruling of 2026-10-05 in the #4588 log (decimal(0.125,2)=\"0.13\", half away from zero, no negative zero) is later than #4407 c1 and outranks it. Ties go away from zero, and the defect left is the exact binary value.; was: core.text.fmt.decimal and the :Fixed(N) selector again round the exact binary value ties-to-even, as the archived #4407 c1 requires: 2.675 -> \"2.67\", 1.45 -> \"1.4\", 62.5 -> \"62\", 0.125 -> \"0.12\", -2.5"
-    },
-    {
-      "at": "2026-11-10T10:48:49.640Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qe89cl",
-      "note": "#22: PerfLead2 2026-11-10: the short typed read over Dyn already exists as json.decode<T>. The typed twin (SummarizeTyped) prints node-identical output at 1108 tokens against 3693. The remaining gaps are named and balloted, not presumed.; was: Found 2026-11-09 by the same port: the Jet twin needs 3693 source tokens against 915 because Core has no JS-compatible Float text (shortest round-trip and fixed-decimal) and no short typed read over D"
     }
   ],
   "nextNum": 368,
