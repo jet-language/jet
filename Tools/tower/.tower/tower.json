@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 99979,
+    "rev": 99980,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98839,12 +98839,12 @@
         },
         {
           "n": 6,
-          "text": "Peak memory is measured per program, not per harness. The gauntlet's peak_rss readings no longer inherit the timer's own high-water mark across exec, using the asm-parity launch pattern for every peer and Jet. Proof: /bin/true and the Jet hello binary read under 1 MB through the gauntlet timer, matching GNU time within 5%, and the hello cell's rss is re-judged under the fixed timer. (Found 2026-11-12: timer.py's ru_maxrss gave every reading a floor of about 15.3 MB.)",
+          "text": "Peak memory is measured per program, not per harness. The gauntlet's peak_rss readings no longer inherit the timer's own high-water mark across exec: each reading is the measured process's own exact VmHWM, read at its exit, for every peer and Jet alike. Proof: the Jet hello binary reads under 1 MB through both the gauntlet timer and GNU time; coreutils true reads within 5% of its exact /proc VmHWM at exit; the timer's own overhead on wall time is reported for one cell; and the hello cell's rss is re-judged under the fixed timer. (Found 2026-11-12: timer.py's ru_maxrss gave every reading a floor of about 15.3 MB.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T10:27:12.810Z"
+          "at": "2026-11-12T10:48:39.270Z"
         }
       ],
       "refs": [],
@@ -98855,7 +98855,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T02:32:29.173Z",
-      "updated": "2026-11-12T10:27:12.810Z",
+      "updated": "2026-11-12T10:48:39.270Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -200429,6 +200429,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:48:39.270Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ef6eb1",
+      "note": "#6: G11Speed-4 measured that the old proof can't hold truthfully. The host has no /bin/true, and GNU time undercounts small processes (coreutils true: exact VmHWM 2.4 MB, GNU time 1.9-2.2 MB) or floors them at its fork copy (Jet hello: exact 140-168 kB, GNU time 256 kB). So the reference is the process's own exact VmHWM at exit.; was: Peak memory is measured per program, not per harness. The gauntlet's peak_rss readings no longer inherit the timer's own high-water mark across exec, using the asm-parity launch pattern for every peer"
+    },
     {
       "at": "2026-11-12T10:47:03.620Z",
       "by": "Main",
