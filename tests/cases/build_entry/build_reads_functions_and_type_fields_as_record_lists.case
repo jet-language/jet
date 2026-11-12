@@ -1,0 +1,13 @@
+# #6771: a build fn loops over reflected record lists, the checked program's
+# functions and the fields of its types, lays them out, and hands their names
+# to a generated module the program prints at O0. The lists hold the
+# program's own declarations, never the Core declarations the records' layout
+# loads.
+fixture: fixtures/build_reads_functions_and_type_fields_as_record_lists
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build -O0 main.jet
+exit: 0
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "scale\nrun\nPoint.x\nPoint.y\n6\n"

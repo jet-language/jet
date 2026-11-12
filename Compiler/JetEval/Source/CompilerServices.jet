@@ -138,6 +138,7 @@ use {
         parse_lexed,
     ]
     jet_sema.[
+        JET_CANONICAL_EFFECT_PACKAGE_IDENTITY,
         SemaCheckedForeignFunction,
         SemaCheckedForeignOwner,
         SemaCheckedForeignProvider,
@@ -164,6 +165,7 @@ use {
         sema_comptime_reflection_source,
         sema_comptime_reflection_written_comments,
         sema_comptime_reflection_written_markers,
+        sema_module_is_core_source,
         sema_source_location_at,
     ]
 }
@@ -704,12 +706,23 @@ jet_eval_compiler_services_function_key: fn(function: Func, registration_module:
     None
 }
 
+// A module the compiler supplies, which no compiler-API view lists: a
+// Core-source module (one a reflected record's layout loads beside the
+// program) or a module of the canonical Prelude's error and effect
+// declarations.
+jet_eval_compiler_services_module_is_supplied: fn(module_row: SemaRegistrationModule) -> Bool Never! {
+    sema_module_is_core_source(module_row.module_identity) || module_row.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
+}
+
+// The checked source's own functions and their effects; a module the
+// compiler supplies adds none.
 jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -> JetCompilerServicesCheckedFacts {
     diagnostics := input.diagnostics
     functions := [TComptimeValue]{}
     effects := [TComptimeValue]{}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     loop (module_index, registration_module) in input.registration.modules {
+        if jet_eval_compiler_services_module_is_supplied(registration_module) -> next
         module_text: sema_comptime_reflection_doc_source(registration_module.source, registration_module.source_file)
         checked_module := SemaGraphModuleResult?{None}
         loop candidate in input.graph.modules {
@@ -773,7 +786,8 @@ JetCompilerServicesProgramInfo: enum {
 // each listing every comment of its file; the built package's also lists
 // its effective settings with their origins.
 // `foreign` holds the ForeignInfo of every checked foreign declaration, in
-// module order (jet_eval_compiler_services_foreign_info).
+// module order (jet_eval_compiler_services_foreign_info). The view is the
+// program's own: a module the compiler supplies adds no row.
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
@@ -786,6 +800,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     foreign := [TComptimeValue]{}
     build_keys := [String]{}
     loop (module_index, module_row) in registration.modules {
+        if jet_eval_compiler_services_module_is_supplied(module_row) -> next
         // Lexed whole: the ModuleInfo lists every comment, and each
         // FunctionInfo its documentation.
         module_text: sema_comptime_reflection_source(module_row.source, module_row.source_file)

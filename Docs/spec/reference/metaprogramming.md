@@ -217,7 +217,10 @@ probe; and `b.generate(name) { ... }` registers an additive generated module.
 each operation's rules, including the generated-module diagnostics.
 
 The checked example [`Reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet)
-reads the program's reflection view from a build entry:
+reads the program's reflection view from a build entry. The view holds the
+program's own declarations and its dependencies'. Declarations the compiler
+supplies, Core's and the Prelude's error and effect declarations, never
+appear in it, even when a reflected record's layout loads their module:
 
 ```jet
 build: fn(b: Build) {

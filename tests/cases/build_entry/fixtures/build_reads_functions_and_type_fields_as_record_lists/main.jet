@@ -1,0 +1,27 @@
+// A build that reads two lists of reflected records, the checked program's
+// functions and the fields of each of its types, and hands their names to a
+// generated module that the program prints.
+Point: struct { x: Int, y: Int }
+
+scale: fn(p: Point, by: Int) -> Point { Point{x: p.x * by, y: p.y * by} }
+
+build: fn(b: Build) {
+    functions := [String]{}
+    loop function in b.program.functions() -> functions.push(function.name)
+    fields := [String]{}
+    loop info in b.program.types() {
+        loop field in info.fields -> fields.push("{info.name}.{field.name}")
+    }
+    b.generate("rows") {
+        reflected_functions: fn() -> [String] { #{functions} }
+        reflected_fields: fn() -> [String] { #{fields} }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/rows.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    loop name in reflected_functions() -> print(name)
+    loop name in reflected_fields() -> print(name)
+    print(scale(Point{x: 1, y: 2}, 3).y)
+}
