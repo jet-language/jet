@@ -1,0 +1,22 @@
+{
+  "name": "greeter",
+  "mode": "tool",
+  "tool": {
+    "original": "tools/greet.jet",
+    "jet": "tools/greet.jet",
+    "fixtures": "files",
+    "cases": [
+      {"args": ["ada"], "expected": "expected/ada.out"},
+      {"args": ["ada"], "env": {"GREETING": "hi"}, "expected": "expected/hi.out"},
+      {"args": ["ada"], "env": {"GREETING": 7}, "expected": "expected/seven.out"},
+      {"args": [1, null], "expected": "expected/args.out"},
+      {"args": ["fail"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["fail"], "expected": "expected/empty.out"},
+      {"args": ["bob"], "expected": "expected/ada.out"},
+      {"args": ["ada"], "expected": "expected/none.out"},
+      {"args": ["cat", "note.txt"], "expected": "expected/note.out"},
+      {"args": ["ada"], "check": "checks/count.jet", "expected": "expected/count.out"},
+      {"args": ["ada"], "check": "checks/refuse.jet", "expected": "expected/count.out"}
+    ]
+  }
+}

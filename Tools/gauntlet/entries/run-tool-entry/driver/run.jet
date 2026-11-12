@@ -1,0 +1,64 @@
+// The gauntlet driver of the kit's tool-entry run (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-tool-entry.mjs: the tool-entry export
+// of Tools/gauntlet/harness/run.mjs, runToolEntry.
+//
+//   jet driver run DIR
+//
+// `run` loads the corpus entries of DIR and runs the parity cases of each
+// tool entry with the `jet` on PATH, its tool paths under this directory and
+// its runs under work/<entry>, and shows the entry's directory name and its
+// parity run as JSON, or the error that stopped it. This directory reads
+// `<cwd>`, and the `note:` line a Jet program (Tools/agent/JetEnv.jet among
+// them) prints on stderr is left out of a reason, so where the checkout
+// lives changes no output. The runs go through Tools/agent/JetEnv.jet of the
+// checkout that holds this driver, as run.mjs runs them through that of its
+// own.
+package: {
+    name: "run_tool_entry_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    jet_gauntlet_kit.[load_entries, run_tool_entry]
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver run DIR"
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/gauntlet/entries/run-tool-entry/driver/run.jet"
+
+print_runs: fn(dir: String) {
+    repo: sys.executable().remove_suffix(DRIVER)
+    cwd: files.cwd()
+    catalog: load_entries(files.resolve(dir) ?? dir.copy(), None)
+    loop tool in catalog.tools {
+        result: run_tool_entry(repo, tool.dir, tool.entry, "jet", files.join(cwd, "work/{tool.directory_name}"), cwd) ?? {
+            print("{tool.directory_name}\terror: {err.message.replace(cwd, "<cwd>")}")
+            next
+        }
+        print("{tool.directory_name}\t{without_notes(json.stringify(result).replace(cwd, "<cwd>"))}")
+    }
+}
+
+// `text` without the `note:` lines of the reasons it shows as JSON.
+without_notes: fn(text: String) -> String {
+    parts: text.split("note: ").to_list()
+    out := parts[0].copy()
+    loop part in parts[1..<parts.len()] {
+        end: part.find("\\n")
+        out = if end < 0 -> "{out}note: {part}" else -> "{out}{part.slice(end + 2, part.len())}"
+    }
+    out
+}
+
+run: fn() {
+    args: process.args()
+    if args.get(0) == Val("run") && args.len() >= 2 -> print_runs(args[1]) else -> process.fail(64, USAGE)
+}

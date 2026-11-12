@@ -1,0 +1,274 @@
+// The parity cases of a tool entry: each case runs the entry's original and
+// its Jet twin in a fresh copy of the entry's fixtures and holds both to the
+// case's exit and expected output, and the provenance of the entry's
+// directory. The twin of runToolEntry in Tools/gauntlet/harness/run.mjs.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+// The sides of a case, in the order they run.
+TOOL_SIDES: ["original", "jet"]
+// How long a run may take, in milliseconds, when $JET_GAUNTLET_TIMEOUT_MS
+// names no positive whole number.
+TOOL_TIMEOUT_MS: 300000
+// How much of a failed run's stderr its reason keeps.
+TOOL_REASON_LIMIT: 300
+// How many bytes of each side a mismatch shows.
+TOOL_MISMATCH_SHOWN: 80
+
+// One variable a run adds to the environment it inherits.
+EnvSetting: struct {
+    name: String
+    value: String
+}
+
+// One parity case as a run reads it.
+ToolCase: struct {
+    args: [String]
+    env: [EnvSetting]
+    exit: Int
+    check: String
+    expected: [U8]
+}
+
+// The parity run of the tool entry `entry` in the directory `dir`: whether
+// each case's original (`tool.original`) and Jet twin (`tool.jet`), both
+// paths under `root`, exit with the case's `exit` (0 when it names none) and
+// do the job, and the SHA-256 of the entry's entry.json and of its
+// directory. An entry without both paths or without cases is broken. A case
+// with a `check`, a Jet program in the entry, proves the job: after each
+// program, `jet_bin CHECK STDOUT` runs in the case directory, STDOUT a file
+// holding the program's output, and must exit 0 and print the case's
+// `expected` file byte for byte; a case without one compares the program's
+// own output with `expected`. A `jet_bin` given as a path also goes first on
+// PATH and is $JET for both programs (a case's `env` may still set either).
+// Every run starts in its own fresh copy, under `work_dir`, of the entry's
+// `tool.fixtures` directory (an empty directory when it has none; links are
+// copied as they are), and runs through Tools/agent/JetEnv.jet of the
+// repository `repo_dir` with the case's `env` added.
+run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, work_dir: String, root: String) -[Env, Exec, FS, Time.Wait]> Dyn Err! {
+    tool: if dyn_at(entry, "tool") == .Object(_) -> dyn_at(entry, "tool") else -> Dyn.object()
+    issues := [String]{}
+    loop field in ["original", "jet"] {
+        path: text_or_empty(tool, field)
+        if {
+            path == "" -> issues.push("tool.{field} is not a path")
+            !files.exists(path_joined(root, path)) -> issues.push("tool.{field} `{path}` does not exist")
+            else -> {}
+        }
+    }
+    listed: items_at(tool, "cases")
+    if listed.len() == 0 -> issues.push("tool.cases is empty")
+    entry_bytes: files.read_bytes(files.join(dir, "entry.json")) ?? return Err("{err}")
+    provenance := Dyn.object()
+    provenance["entry_json_sha256"] = Dyn.Text(crypto.sha256(entry_bytes).hex())
+    provenance["corpus_tree_sha256"] = Dyn.Text(tree_sha256(dir) ?? return Err("{err}"))
+    out := Dyn.object()
+    put_present(out, "name", value_at(entry, "name"))
+    out["original"] = dyn_at(tool, "original")
+    out["jet"] = dyn_at(tool, "jet")
+    if issues.len() > 0 {
+        out["status"] = Dyn.Text("broken")
+        out["reason"] = Dyn.Text(issues.join("; "))
+        out["cases"] = Dyn.Array([])
+        out["provenance"] = provenance
+        return Ok(out)
+    }
+    env_runner: files.join(repo_dir, "Tools/agent/JetEnv.jet")
+    fixtures: if dyn_at(tool, "fixtures") == .Text(path) -> path_joined(dir, path) else -> ""
+    inner := [EnvSetting]{}
+    if jet_bin.contains("/") {
+        named: files.resolve(jet_bin) ?? jet_bin.copy()
+        inner.push(EnvSetting{name: "PATH", value: "{files.dirname(named)}:{sys.get("PATH") ?? ""}"})
+        inner.push(EnvSetting{name: "JET", value: named})
+    }
+    // `--` ends jet's own options, so a case's args reach the twin verbatim,
+    // a leading `--` included.
+    programs: [tool_command(path_joined(root, text_or_empty(tool, "original"))), [jet_bin.copy(), path_joined(root, text_or_empty(tool, "jet")), "--"]]
+    timeout_ms: tool_timeout_ms()
+    cases := [Dyn]{}
+    passed := true
+    loop index in 0..<listed.len() {
+        item: listed[index]
+        settings: if dyn_at(item, "env") == .Object(rows) -> rows.map(row -> EnvSetting{name: row.key.copy(), value: js_text(row.value)}) else -> [EnvSetting]{}
+        expected_value: dyn_at(item, "expected")
+        expected_name: if expected_value == .Null -> "" else -> js_text(expected_value)
+        expected_path: path_joined(dir, expected_name)
+        expected: if files.exists(expected_path) -> Val(files.read_bytes(expected_path) ?? return Err("{err}")) else -> None
+        case: ToolCase{
+            args: if dyn_at(item, "args") == .Array(list) -> list.map(arg -> js_text(arg)) else -> [String]{},
+            env: inner.concat(settings),
+            exit: int_at(item, "exit") ?? 0,
+            check: text_or_empty(item, "check"),
+            expected: expected ?? [U8]{},
+        }
+        shown_env := Dyn.object()
+        loop setting in settings -> shown_env[setting.name] = Dyn.Text(setting.value.copy())
+        row := Dyn.object()
+        row["case"] = Dyn.Int(index + 1)
+        row["args"] = Dyn.Array(case.args.map(arg -> Dyn.Text(arg.copy())))
+        row["env"] = shown_env
+        row["exit"] = Dyn.Int(case.exit)
+        row["expected"] = expected_value
+        row_passed := true
+        loop side in 0..<2 {
+            label: TOOL_SIDES[side]
+            cwd: files.join(work_dir, "case-{index + 1}-{label}")
+            reason: if expected == None -> "expected output `{expected_name}` does not exist" else -> run_side(env_runner, case, programs[side], dir, cwd, fixtures, jet_bin, timeout_ms)
+            verdict := Dyn.object()
+            verdict["status"] = Dyn.Text(if reason == "" -> "pass" else -> "fail")
+            if reason != "" {
+                verdict["reason"] = Dyn.Text(reason)
+                row_passed = false
+            }
+            row[label] = verdict
+        }
+        row["status"] = Dyn.Text(if row_passed -> "pass" else -> "fail")
+        if !row_passed -> passed = false
+        cases.push(row)
+    }
+    out["status"] = Dyn.Text(if passed -> "pass" else -> "fail")
+    out["cases"] = Dyn.Array(cases)
+    out["provenance"] = provenance
+    Ok(out)
+}
+
+// Why one side of `case`, the program `command`, fails the case in `cwd`,
+// or "" when it passes.
+run_side: fn(env_runner: String, case: ToolCase, command: [String], dir: String, cwd: String, fixtures: String, jet_bin: String, timeout_ms: Int) -> String Err! {
+    files.remove_all(cwd).drop("a case directory that is absent is already clean")
+    files.create_dir_all(cwd) ?? return Err("{err}")
+    if fixtures != "" {
+        copied: process.cmd(["cp", "-a", "{fixtures}/.", cwd.copy()]).run() ?? return Err("{err}")
+        if copied.code != 0 -> return Err("the fixtures cannot be copied: {copied.errors.trim()}")
+    }
+    run: run_tool_command(env_runner, cwd, command.concat(case.args), case.env, timeout_ms)
+    if run.code != case.exit -> return Ok("exit {run.code}, not {case.exit}: {limited(run.stderr.trim(), TOOL_REASON_LIMIT)}")
+    if case.check == "" -> return Ok(byte_mismatch(case.expected, run.stdout.bytes()))
+    printed: "{cwd}.stdout"
+    files.write(printed, run.stdout) ?? return Err("{err}")
+    checked: run_tool_command(env_runner, cwd, [jet_bin.copy(), path_joined(dir, case.check), printed.copy()], case.env, timeout_ms)
+    files.remove(printed).drop("the printed output is scratch")
+    if checked.code != 0 -> return Ok("its check `{case.check}` fails (exit {checked.code}): {limited(checked.stderr.trim(), TOOL_REASON_LIMIT)}")
+    Ok(byte_mismatch(case.expected, checked.stdout.bytes()))
+}
+
+// `command` run in `cwd` through `env_runner` with `env` added, as run.mjs
+// runs a process: 124 with a timeout note once `timeout_ms` pass, 128 when
+// a signal stopped it and 127 when it could not start.
+run_tool_command: fn(env_runner: String, cwd: String, command: [String], env: [EnvSetting], timeout_ms: Int) -> ToolRun {
+    spec := process.cmd([env_runner].concat(command)).cwd(cwd).timeout(time.duration_ms(timeout_ms))
+    loop setting in env -> spec = spec.env(setting.name, setting.value)
+    receipt: spec.run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
+    if receipt.timed_out -> return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after {seconds_text(timeout_ms)}s"}
+    ToolRun{code: if receipt.signal == None -> receipt.code else -> 128, stdout: receipt.output, stderr: receipt.errors}
+}
+
+// How long a run may take, in milliseconds: $JET_GAUNTLET_TIMEOUT_MS when it
+// is a positive whole number, else 300 seconds.
+tool_timeout_ms: fn() -> Int {
+    value: Int.parse(sys.get("JET_GAUNTLET_TIMEOUT_MS") ?? "") ?? return TOOL_TIMEOUT_MS
+    if value > 0 -> value else -> TOOL_TIMEOUT_MS
+}
+
+// `ms` milliseconds as a number of seconds, as JavaScript writes it.
+seconds_text: fn(ms: Int) -> String {
+    if ms %% 1000 == 0 -> "{ms /% 1000}" else -> "{Float.from_int(ms) / 1000.0}"
+}
+
+// The command that runs a tool's original: the interpreter its extension
+// names, else the file itself through its `#!` line.
+tool_command: fn(script: String) -> [String] {
+    interpreter: if files.suffix(script) == {
+        ".mjs" | ".js" | ".cjs" | ".ts" -> ["node"]
+        ".py" -> ["python3"]
+        ".sh" | ".bash" -> ["bash"]
+        else -> [String]{}
+    }
+    interpreter.concat([script.copy()])
+}
+
+// `path` under `base`, as node's `path.join` writes it.
+path_joined: fn(base: String, path: String) -> String {
+    files.normalize(if path == "" -> base.copy() else -> "{base}/{path}")
+}
+
+// Where `actual` first differs from `expected`, or "" when they are equal.
+byte_mismatch: fn(expected: [U8], actual: [U8]) -> String {
+    limit: if expected.len() < actual.len() -> expected.len() else -> actual.len()
+    at := 0
+    loop at < limit && expected[at] == actual[at] -> at += 1
+    if at == expected.len() && at == actual.len() -> return ""
+    "byte {at}: expected {shown_bytes(expected, at)}, got {shown_bytes(actual, at)} (length {expected.len()}/{actual.len()})"
+}
+
+// At most 80 bytes of `bytes` from `at`, as a JSON string.
+shown_bytes: fn(bytes: [U8], at: Int) -> String {
+    end: if at + TOOL_MISMATCH_SHOWN < bytes.len() -> at + TOOL_MISMATCH_SHOWN else -> bytes.len()
+    json.stringify(Dyn.Text(String.from_bytes_lossy(bytes[at..<end])))
+}
+
+// The SHA-256 of the regular files under `root`, each its path below `root`,
+// a zero byte, its bytes and a zero byte, in name order at each level; links
+// are left out and not followed.
+tree_sha256: fn(root: String) -[FS]> String IOError! {
+    hasher := crypto.Hasher.new()
+    hash_tree(hasher, root, "")
+    Ok(hasher.digest())
+}
+
+hash_tree: fn(hasher: &crypto.Hasher, dir: String, relative: String) IOError! {
+    names := files.list_dir(dir).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        full: files.join(dir, name)
+        below: if relative == "" -> name.copy() else -> "{relative}/{name}"
+        if {
+            files.is_symlink(full) -> {}
+            files.is_dir(full) -> hash_tree(hasher, full, below)
+            files.is_file(full) -> {
+                hasher.update(below.bytes())
+                hasher.update([U8{0}])
+                hasher.update(files.read_bytes(full))
+                hasher.update([U8{0}])
+            }
+            else -> {}
+        }
+    }
+}
+
+#Test("a tool's original runs through the interpreter its extension names") {
+    assert_eq(tool_command("a/b.mjs"), ["node", "a/b.mjs"])
+    assert_eq(tool_command("a/b.py"), ["python3", "a/b.py"])
+    assert_eq(tool_command("a/.sh"), ["a/.sh"])
+    assert_eq(tool_command("a/b.jet"), ["a/b.jet"])
+    assert_eq(path_joined("a/b", "../c/./d"), "a/c/d")
+    assert_eq(path_joined("a/b", ""), "a/b")
+    assert_eq(seconds_text(300000), "300")
+    assert_eq(seconds_text(1500), "1.5")
+}
+
+#Test("a mismatch names its first differing byte and both sides from there") {
+    assert_eq(byte_mismatch("same".bytes(), "same".bytes()), "")
+    assert_eq(byte_mismatch("hello ada\n".bytes(), "hello bob\n".bytes()), "byte 6: expected \"ada\\n\", got \"bob\\n\" (length 10/10)")
+    assert_eq(byte_mismatch("ab".bytes(), "a".bytes()), "byte 1: expected \"b\", got \"\" (length 2/1)")
+}
+
+#Test("a tree digest covers each file path and its bytes, in name order") {
+    dir: files.mkdtemp("tool-cases-") ?? panic("{err}")
+    files.create_dir_all(files.join(dir, "b")) ?? panic("{err}")
+    files.write(files.join(dir, "b/x"), "x") ?? panic("{err}")
+    files.write(files.join(dir, "a"), "a") ?? panic("{err}")
+    want := crypto.Hasher.new()
+    loop part in ["a", "a", "b/x", "x"] {
+        want.update(part.bytes())
+        want.update([U8{0}])
+    }
+    assert_eq(tree_sha256(dir) ?? panic("{err}"), want.digest())
+    files.remove_all(dir)
+}

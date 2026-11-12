@@ -1,0 +1,27 @@
+#!/usr/bin/env jet
+// A fixture tool of the run-tool-entry entry: greets its arguments with
+// $GREETING (hello when it is unset), prints the file `cat NAME` names, and
+// fails with exit 2 when its first argument is `fail`.
+package: {
+    name: "greet"
+    version: "0.0.1"
+    authority: {
+        allow: [Env, Exec, FS]
+    }
+}
+
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+run: fn() {
+    args: process.args()
+    if args.get(0) == Val("fail") -> process.fail(2, "asked to fail")
+    if args.get(0) == Val("cat") && args.len() == 2 {
+        print(files.read(args[1]) ?? process.fail(1, "no {args[1]}"))
+        return
+    }
+    print("{sys.get("GREETING") ?? "hello"} {args.join(" ")}")
+}

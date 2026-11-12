@@ -1,0 +1,21 @@
+// A fixture check of the run-tool-entry entry: prints how many lines the
+// program output in the file it is given has.
+package: {
+    name: "count"
+    version: "0.0.1"
+    authority: {
+        allow: [Exec, FS]
+    }
+}
+
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 1 -> process.fail(64, "usage: count FILE")
+    text: files.read(args[0]) ?? process.fail(1, "no {args[0]}")
+    print("{text.lines().len()} lines")
+}
