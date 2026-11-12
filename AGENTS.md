@@ -106,12 +106,13 @@ the original until the Jet twin passes the port bars (#5072 c14, c34).
 Performance ranks first: the same job, lower wall time and lower peak memory
 decide, with the reasoning bar beside them (no harder to reason about,
 scored on a fixed checklist in the entry's `review.json`). Source tokens are
-measured and reported; a twin above the original's count blocks a switch
-only while its entry's `tool.token_gaps` names no Core API criterion or
-syntax ballot that closes the gap. Then the repository switches to the Jet
-twin and keeps the original only as the entry's reference in the entry's
-directory. `Tools/gauntlet/PortBars.jet` judges every tool entry on all four
-bars. `Tools/agent/ScriptPairing.jet --check`, which every lane check runs,
+measured, reported and minimized, but a twin above the original's count still
+passes: a longer twin points to a missing Core API or syntax, which its entry
+names in `tool.token_gaps`, and clarity of reasoning outranks terseness. Then
+the repository switches to the Jet twin and keeps the original only as the
+entry's reference in the entry's directory. `Tools/gauntlet/PortBars.jet`
+judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
+--check`, which every lane check runs,
 refuses a change that adds a script in another language without its pair,
 or that switches an entry before it passes every bar; browser-executed
 JavaScript, Nix files, and test and example subjects are exempt. `--census`
@@ -177,13 +178,20 @@ A violation stops the affected work until it is fixed at the root.
 
 ## Performance gate
 
-Jet's performance target has two stages, and each required cell and metric
-must pass both. The first stage is the peer floor: Jet/peer must be below
-`1.00` for every matched peer. Rust is judged like every other peer, with no
-parity band. The second and final stage is the machine ceiling: hand-written,
-maximally optimized machine code for the same workload. Jet must match or beat
-it in both cycles and bytes (Jet/ceiling at most `1.00`). Beating the peers is
-the floor, not the goal.
+Jet's performance target has two stages. The first stage is the peer floor,
+and it is a hard, structural requirement: a Jet program must be faster and use
+less peak memory than the same program in every other language. Jet/peer must
+be below `1.00` for every matched peer, for each required cell and for both
+wall time and peak memory. Rust is judged like every other peer, with no
+parity band. A loss to any peer on either metric is a codegen, runtime or Core
+failure. It is fixed generally and structurally, so that any Jet program beats
+the other languages, never only the measured one. The second and final stage
+is the machine ceiling: hand-written, maximally optimized machine code for the
+same workload, which Jet must match or beat in both cycles and bytes
+(Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can.
+Closing the remaining ceiling gap is the hill-climbing stage: until the owner
+opens it, a cell passes the gate on the peer floor, and its ceiling ratio is
+measured and reported but does not fail the gate.
 
 Measure live. Jet's goal is raw compile and run speed, not incremental or
 cached compilation: the compile-speed target is 30 million lines per second
@@ -196,8 +204,8 @@ Every required cell needs a ceiling reference: an asm-parity cell
 (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
 best known technique for the workload (SIMD, algorithmic, or syscall-level),
 not a naive transliteration. A cell without a reference is uncovered and fails
-the gate, and a peer win never closes a cell whose ceiling is unmet. A better
-technique replaces the reference and raises the target.
+the gate once hill climbing opens the ceiling stage. A better technique
+replaces the reference and raises the target.
 
 The ceiling delivers the same features as the Jet program. Where a Jet feature
 (diagnostics, safety checks, fault reports) physically costs bytes or cycles,
@@ -350,8 +358,8 @@ Use the most specific agent available for each role. Workers do not spawn
 workers.
 
 This is a standing owner order. Every agent does its work on Claude Opus, and
-only the owner chooses another model for any role. The one standing exception
-is the adversarial ballot review, which a different model family performs.
+only the owner chooses another model for any role. No review needs a reviewer
+from a different model family.
 
 Workers are never idle or stalled. Each worker runs one continuous loop: write
 the code to the card's spec, run only the touched files' source checks,
