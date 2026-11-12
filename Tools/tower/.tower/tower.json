@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6762,
-    "rev": 99825,
+    "rev": 99828,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98697,20 +98697,20 @@
         {
           "n": 4,
           "text": "Moved from #6129 c69. A call of a local lambda from inside another lambda's body publishes the callee's effect row, as a direct call does since c68: a nested call is no longer treated as maximal. Cases on O0/O1/O2, and the spec's stated limit is removed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T01:52:23.519Z"
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: landed in 8616f97118. jet test Compiler --profile cases tests/cases/effects/nested_local_lambda_call_uses_its_row.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0; the case runs O0, O1 and O2 plus a narrow refusal. Docs/spec no longer has the sentence that the nested call makes the lambda row maximal (git grep finds nothing); spec.md now says the nested call adds the callee effects.",
+          "at": "2026-11-12T06:24:49.057Z"
         },
         {
           "n": 5,
           "text": "Moved from #6129 c70. Compile-time input calls publish their effects: net.fetch(url, sha256:) carries Net, and embed_file/find carry FS.Read, so a function declared -[!Net]> or without FS.Read is refused (tests/ui/build_io_net_denied and an FS.Read denial snapshot), and jet explain effects lists them. Found by G6Meta-2 on dev b181be688c, 2026-11-11: dev's net.fetch and embed_file record no effect.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T01:52:24.386Z"
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: jet test Compiler --profile ui --filter build_io_net_denied, --filter comptime_input_fs_read_denied, and --profile cases tests/cases/effects/explain_effects_reaches_comptime_inputs.case: each PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The UI pair refuses net.fetch under -[!Net]> and denies embed_file without FS.Read; the case shows explain effects listing Net and FS.Read.",
+          "at": "2026-11-12T06:24:50.025Z"
         },
         {
           "n": 6,
@@ -98724,11 +98724,11 @@
         {
           "n": 7,
           "text": "Moved from #6551 c4. jet explain effects shows an instantiated generic module's cap in its ladder and in --caps, and never prints a compiler-generated name such as __jet_counter_dbump. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R4, medium; c2 and c3): ExplainEffects.jet:366 descends through GenericModule without adding nested.cap, and the report prints the lowered function.name. Repair the shared source and fact projection, not a label for one example. Proof: probes/generic.jet shows the #FX(IO,!FS) cap at the generic module's rung and in --caps, under its source name, with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T01:52:26.280Z"
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: jet test Compiler --profile cases tests/cases/effects/explain_effects_module_caps.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. Byte-exact stdout pins the generic module cap in the ladder (module #FX(IO, !FS) generic.jet:1) and in --caps (generic.jet:1  #FX(IO, !FS)  module tally), and the output contains no __jet_ name.",
+          "at": "2026-11-12T06:24:50.973Z"
         },
         {
           "n": 8,
@@ -98748,7 +98748,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:52:19.959Z",
-      "updated": "2026-11-12T06:24:47.790Z",
+      "updated": "2026-11-12T06:24:50.973Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -199549,6 +199549,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T06:24:50.973Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mf9ybj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-12T06:24:50.025Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mf9ybj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-12T06:24:49.057Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mf9ybj",
+      "note": "#4"
+    },
     {
       "at": "2026-11-12T06:24:47.790Z",
       "by": "Main",
