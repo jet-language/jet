@@ -134,32 +134,11 @@ sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int
 }
 
 // Rust `build_function_type_info`: a function rule sees the target's stable
-// source shape; program-wide effect facts stay a separate reflection input,
-// so `effects` lists the declared row. `markers` are the function's written
+// source shape (sema_comptime_reflection_function_info), named by its own
+// name, with no module or package name. `markers` are the function's written
 // MarkerInfo rows (sema_comptime_reflection_written_markers).
-sema_user_template_function_info: fn(function: Func, markers: [TComptimeValue]) -> CtValue? {
-    effects := [TComptimeValue]{}
-    if function.declared_effects == .Val(rows) {
-        loop row in rows -> effects.push(TComptimeValue.String{value: row.name})
-    }
-    params := [TComptimeValue]{}
-    loop param_index in 0..<function.params.len() -> params.push(TComptimeValue.String{value: function.params[param_index].name})
-    info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
-        SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: ""}},
-        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: function.name}},
-        SemaComptimeReflectionField{name: "package", value: TComptimeValue.String{value: ""}},
-        SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
-        SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
-        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: TComptimeValue.List{values: effects}}})},
-        SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
-        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function)}},
-        SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
-        SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
-    })
-    sema_user_template_ct_value(info)
+sema_user_template_function_info: fn(function: Func, registered_module: SemaRegistrationModule, markers: [TComptimeValue]) -> CtValue? {
+    sema_user_template_ct_value(sema_comptime_reflection_function_info(function, "", function.name, "", registered_module, markers))
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +521,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 if marker.negated -> next
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 markers: sema_comptime_reflection_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, sema_user_template_catalog(), function.markers, registry) ?? next
-                info: sema_user_template_function_info(function, markers) ?? next
+                info: sema_user_template_function_info(function, graph.modules[module_index], markers) ?? next
                 expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics) ?? next
                 if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
                 loop expanded_item in expanded -> generated.push(expanded_item)
@@ -655,7 +634,7 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
                 .Enum(definition) -> types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? sema_user_template_handle("TypeInfo", definition.name))
                 .Func(function) -> {
                     function_markers: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), function.markers, registry) ?? return None
-                    if sema_user_template_function_info(function, function_markers) == .Val(info) -> functions.push(info)
+                    if sema_user_template_function_info(function, module_row, function_markers) == .Val(info) -> functions.push(info)
                 }
                 .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }

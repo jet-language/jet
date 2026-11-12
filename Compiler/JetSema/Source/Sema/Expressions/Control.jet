@@ -106,13 +106,19 @@ sema_site_location_expr: fn(type_name: String, environment: SemaScopeEnvironment
 // then the inline modules around `function` (`shop.cache.store`). A Core
 // source names its Core module, and a file outside a package its own name.
 sema_site_module: fn(environment: SemaScopeEnvironment, function: String) -> String Never! {
-    parts: environment.package_identity.split(":").to_list()
-    core: environment.source_file.starts_with("<corelib>/")
-    root: if !core && parts.len() >= 3 && parts[0] == "package" -> parts[2].copy() else -> environment.module_name.copy()
-    path := if environment.declared_module == "" -> root else -> "{root}.{environment.declared_module}"
+    path := sema_site_file_module(environment.package_identity, environment.source_file, environment.module_name, environment.declared_module)
     inline: sema_inline_member_module(function)
     if inline != "" -> path = "{path}.{inline}"
     path
+}
+
+// The dotted module of a whole file: the package's name (a Core source's or
+// a lone file's own module name), then its `name: module` path.
+sema_site_file_module: fn(package_identity: String, source_file: String, module_name: String, declared_module: String) -> String Never! {
+    parts: package_identity.split(":").to_list()
+    core: source_file.starts_with("<corelib>/")
+    root: if !core && parts.len() >= 3 && parts[0] == "package" -> parts[2].copy() else -> module_name.copy()
+    if declared_module == "" -> root else -> "{root}.{declared_module}"
 }
 
 // A parameter default that names the call site.

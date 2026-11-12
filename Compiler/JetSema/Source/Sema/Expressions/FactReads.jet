@@ -270,6 +270,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
             else -> None
         }
     }
@@ -427,6 +428,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "name" || field == "module" || field == "identity" || field == "package" -> Val(string)
             field == "params" -> Val(Type.List{element: string})
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
             field == "effects" -> Val(sema_fact_named("EffectInfo"))
             field == "reaches_panic" -> Val(Type.Bool)
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
@@ -462,6 +464,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
             field == "is_pub" -> Val(Type.Bool)
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
             else -> None
         }
     }
@@ -477,6 +480,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "default" -> Val(Type.Option{inner: sema_fact_named("DefaultInfo")})
             field == "offset" -> Val(Type.Option{inner: Type.Int})
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
             else -> None
         }
     }
@@ -965,6 +969,22 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, environment: SemaScopeEnv
         }
         row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
         return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog)
+    }
+    None
+}
+
+// `FunctionInfo` for a declared function (`f.reflect()`): its source shape,
+// its written markers and where it is written, named by its module and
+// package.
+sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph) -> TComptimeValue? {
+    index: sema_registration_module_index(graph, symbol.module_name) ?? return None
+    registered_module: graph.modules[index]
+    catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    registry := SemaScopeMembersMarkerRegistry?{None}
+    loop registered in registered_module.functions {
+        if registered.symbol.id.key != symbol.id.key -> next
+        markers: sema_comptime_reflection_written_markers(graph, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
+        return Val(sema_comptime_reflection_function_info(registered.declaration, registered_module.module_name, "{registered_module.module_name}::{registered.declaration.name}", registered_module.package_identity, registered_module, markers))
     }
     None
 }

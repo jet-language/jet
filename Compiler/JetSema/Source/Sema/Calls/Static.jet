@@ -1034,8 +1034,26 @@ sema_call_static_reflect_builtin: fn(name: String, span: Span, expected: Type?, 
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)})
 }
 
+// `f.reflect()` on a declared function: its FunctionInfo record, computed
+// while compiling, as `T.reflect()` is for a type. None when `name` binds no
+// function (a local of that name shadows it).
+sema_call_static_reflect_function: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    graph: program.registration_graph ?? return None
+    local: sema_scope_resolve_index(scopes, name)
+    resolved: if local == .Val(index) -> sema_scope_binding_symbol(environment, scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None)
+    if resolved.kind != SymbolKind.Function -> return None
+    info: sema_fact_function_info(resolved, graph) ?? return None
+    folded: sema_tree_node(sema_fact_named("FunctionInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
+    Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)})
+}
+
 sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor, _) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if receiver == .Ident(name, _, _) {
+        if method == "reflect" && args.len() == 0 && owner_type_args.len() == 0 && type_args.len() == 0 {
+            if sema_call_static_reflect_function(name, span, expected, environment, program, scopes, diagnostics) == .Val(reflected) -> return reflected
+        }
+    }
     static_owner: sema_call_static_source_owner(receiver, method, owner_type_args, environment, program, scopes) ?? {
         if receiver == .Field(base, owner_leaf, _, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if receiver == .Ident(name, _, _) {

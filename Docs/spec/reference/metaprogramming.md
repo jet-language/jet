@@ -283,6 +283,29 @@ field without a written default, else a `DefaultInfo` whose `source` is the
 `SourceSpan` of the default expression. Reading `default` never runs the
 expression.
 
+Every declaration record names where its declaration is written: the
+`location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
+`MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
+and `column` place the declaration's name, and whose `module` is the module
+that declares it; `function` is empty. A function reflects as a type does:
+`helper.reflect()` is its `FunctionInfo`. A generic type named with its
+arguments reads its definition's location. A declaration the compiler
+synthesized, such as a builtin number or a generated module's item, reads
+`None`.
+
+```jet
+Point: struct { x: Int }
+
+helper: fn() -> Int { 1 }
+
+run: fn() {
+    point_site: Point.reflect().location ?? panic("no declaration")
+    helper_site: helper.reflect().location ?? panic("no declaration")
+    print("Point {point_site.line}")   // Point 1
+    print("helper {helper_site.line}") // helper 3
+}
+```
+
 A `TypeInfo` lists what the type implements and binds, and the form of a number:
 
 - `traits` has one `TraitInfo` per trait the type implements, with its `name`,

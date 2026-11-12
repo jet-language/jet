@@ -147,6 +147,8 @@ use {
         sema_compiler_semantic_index_from_checked,
         sema_comptime_reflection_arithmetic_facts,
         sema_comptime_reflection_declared_function_facts,
+        sema_comptime_reflection_location,
+        sema_comptime_reflection_module_of,
         sema_comptime_reflection_written_markers,
     ]
 }
@@ -587,6 +589,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
         TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
         TComptimeField{name: "markers", value: TComptimeValue.List{values: markers}},
+        TComptimeField{name: "location", value: sema_comptime_reflection_location(registration_module.source_segments, sema_comptime_reflection_module_of(registration_module), Val(function.name_span))},
     }}
 }
 
