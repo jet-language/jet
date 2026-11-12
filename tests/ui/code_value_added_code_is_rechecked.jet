@@ -1,0 +1,14 @@
+// @programmable_build
+// @cli_build
+// The items `meta.add` lands are checked with the program like hand-written
+// code: a call to a name nothing declares fails the build.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["code_value_added_code_is_rechecked.jet"], [])
+    meta: b.compiler(app)
+    meta.add(#code {
+        greeting: fn() -> String { missing_helper() }
+    }, scope: "greeting")
+    b.default(app)
+}
+
+run: fn() { print(greeting()) }
