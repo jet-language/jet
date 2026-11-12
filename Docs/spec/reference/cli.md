@@ -993,7 +993,8 @@ It also honors
 `--show-default`, `--release`, `--profile`, `--verbose`, `--quiet`,
 `--color`, `--threads` and `--json`.
 Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
-the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
+the same harness, named `doctest <n> of <item> in <file>` (the `n`th doctest of
+the documented item), and `--docs` runs them alone; a wrong `// =>` value
 fails with E2901, and `-u` rewrites it instead (D-TEST4). `--measure` runs only
 the claims with a `.measure` member, serially and under the release profile
 unless `--profile` names one. It prints one record per claim, as a `measure

@@ -4632,10 +4632,14 @@ and may raise it; a member whose `claims.min` is below the root's is E1215 in
 a floor.
 
 A fenced ```` ```jet ```` block in a `///` doc comment is a doctest: a claim
-named `doctest at <file>:<fence line>` in the same harness, compiled after the
-file's own items so it can call them. Its lines run in order; each
-`EXPR // => VALUE` line compares the Display rendering of `EXPR` with `VALUE`
-exactly, and a mismatch fails the doctest with E2901 at that line. With
+named `doctest <n> of <item> in <file>` in the same harness, where `<item>` is
+the item the comment documents (`Outer.name` for a member) and `<n>` counts
+that item's doctests from 1; a comment that documents no named item gives
+`doctest <n> of <file>`. An edit elsewhere in the file keeps the name. The
+claim is compiled after the file's own items so it can call them. Its lines
+run in order; each `EXPR // => VALUE` line compares the Display rendering of
+`EXPR` with `VALUE` exactly, and a mismatch fails the doctest with E2901 at
+that line. With
 `--update-snapshots` a mismatched one-line rendering rewrites the claimed
 `VALUE` in the file instead. (D-TEST4)
 

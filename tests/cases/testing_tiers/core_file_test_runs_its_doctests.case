@@ -1,17 +1,18 @@
-# #5982 c53: `jet test` of a Core file runs that file's ```jet doctests as claims, as it does a user file's (Doctests.jet). They are named by their fence lines, appended to the Core unit's text, so they reach the module's own names, and run beside its #Tests. Before, the Core test path passed no doctests, and only the coverage census saw them.
+# #5982 c53: `jet test` of a Core file runs that file's ```jet doctests as claims, as it does a user file's (Doctests.jet). They are named by the item each documents and its ordinal there, appended to the Core unit's text, so they reach the module's own names, and run beside its #Tests. Before, the Core test path passed no doctests, and only the coverage census saw them.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 
 step all: jet test {root}/Core/Regex/Regex.jet
 timeout: 900s
 exit: 0
-stdout: count "doctest at Core/Regex/Regex.jet:" = 8 # each doctest, named by its row path and fence line
+stdout: count " in Core/Regex/Regex.jet: pass" = 8 # each doctest, named by its item and row path
+stdout: ~ "doctest 1 of PatternParser.parse_look in Core/Regex/Regex.jet: pass" # a member's doctest names its type
 stdout: ~ "a lookaround pass is linear: doubling an adversarial text at most doubles its steps: pass" # the #Tests run beside them
 stdout: ~ "12 passed, 0 failed" # 4 #Tests and 8 doctests share the summary
 
 step docs: jet test --docs {root}/Core/Regex/Regex.jet
 timeout: 900s
 exit: 0
-stdout: count "doctest at Core/Regex/Regex.jet:" = 8 # --docs runs the doctest claims
+stdout: count " in Core/Regex/Regex.jet: pass" = 8 # --docs runs the doctest claims
 stdout: !~ "has_line matches each line on its own" # and no #Test
 stdout: ~ "8 passed, 0 failed" # the summary counts the doctests alone

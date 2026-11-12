@@ -1,14 +1,16 @@
 // Doctests under `jet test`. Each ```` ```jet ```` fence in a `///`
 // run of a tested file (Docs.jet discovery) becomes the claim
-// `doctest at <file>:<fence line>`, appended after that file's last line in
-// the compile's snapshot (nothing is written), so every original span stays put
-// and the fence sees the file's items. The tested files are the package's
-// sources when the target is in a package, else the target file alone. The
-// claim runs the fence's setup lines, then prints the rendering of each
-// `EXPR // => VALUE` expression in a frame. The parent compares each frame
-// with its claimed value: a mismatch is E2901 at the claim's line and fails the
-// doctest (or, under `--update-snapshots`, rewrites the claimed value); the
-// claim's own output stays without the frames.
+// `doctest <n> of <item> in <file>` (`doctest <n> of <file>` when the run
+// documents no named item): the `n`th fence documenting that item, so an edit
+// elsewhere in the file keeps every name. The claims are appended after the
+// file's last line in the compile's snapshot (nothing is written), so every
+// original span stays put and the fence sees the file's items. The tested
+// files are the package's sources when the target is in a package, else the
+// target file alone. The claim runs the fence's setup lines, then prints the
+// rendering of each `EXPR // => VALUE` expression in a frame. The parent
+// compares each frame with its claimed value: a mismatch is E2901 at the
+// claim's line and fails the doctest (or, under `--update-snapshots`, rewrites
+// the claimed value); the claim's own output stays without the frames.
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot]
     jet_foundation.[
@@ -25,17 +27,64 @@ JET_CLI_DOCTEST_OPEN: "\tjet-doctest\t"
 JET_CLI_DOCTEST_CLOSE: "\tjet-doctest-end\t\n"
 
 // One tested file with doctests: its path, its path as claims and
-// diagnostics show it (relative to the source root), its original source and
-// the doctests discovered in it.
+// diagnostics show it (relative to the source root), its original source, the
+// doctests discovered in it and each one's claim name.
 JetCLIDoctestFile: struct {
     path: String
     shown: String
     source: String
     tests: [JetCLIDocTest]
+    names: [String]
 }
 
 jet_cli_doctest_file: fn(path: String, shown: String, source: String) -> JetCLIDoctestFile Never! {
-    JetCLIDoctestFile{path: path, shown: shown, source: source, tests: jet_cli_doc_discover_doctests(JetCLIDocUnit{path: shown, source: source})}
+    tests: jet_cli_doc_discover_doctests(JetCLIDocUnit{path: shown, source: source})
+    lines: source.split("\n").to_list()
+    items := [String]{}
+    loop test in tests -> items.push(jet_cli_doctest_item(lines, test.line))
+    names := [String]{}
+    loop index in 0..<items.len() {
+        ordinal := 1
+        loop before in 0..<index {
+            if items[before] == items[index] -> ordinal += 1
+        }
+        names.push(if items[index] == "" -> "doctest {ordinal} of {shown}" else -> "doctest {ordinal} of {items[index]} in {shown}")
+    }
+    JetCLIDoctestFile{path: path, shown: shown, source: source, tests: tests, names: names}
+}
+
+// The item the `///` run holding the fence at 1-based `fence_line` documents:
+// the `name` of the first line after the run (past attribute lines) when it
+// declares `name: ...`, as `Outer.name` when it is a member of the unindented
+// `Outer: ...` it sits in; empty when the run documents no named item.
+jet_cli_doctest_item: fn(lines: [String], fence_line: Int) -> String Never! {
+    at := fence_line
+    loop at < lines.len() && lines[at].trim().starts_with("///") -> at += 1
+    loop at < lines.len() && lines[at].trim().starts_with("#") && !lines[at].trim().contains(" ") -> at += 1
+    if at >= lines.len() -> return ""
+    inner: jet_cli_doctest_declared(lines[at])
+    if inner == "" || !(lines[at].starts_with(" ") || lines[at].starts_with("\t")) -> return inner
+    above := fence_line - 2
+    loop above >= 0 {
+        line: lines[above]
+        if line.trim() != "" && !line.starts_with(" ") && !line.starts_with("\t") && !line.starts_with("/") {
+            outer: jet_cli_doctest_declared(line)
+            return if outer == "" -> inner else -> "{outer}.{inner}"
+        }
+        above -= 1
+    }
+    inner
+}
+
+// The `name` a `name: ...` declaration line (past `priv`) declares, else empty.
+jet_cli_doctest_declared: fn(line: String) -> String Never! {
+    text: line.trim()
+    raw: text.bytes()
+    start: if text.starts_with("priv ") -> 5 else -> 0
+    end: jet_cli_grammar_ident_end(raw, start)
+    if end == start || end >= raw.len() || raw[end] != (U8{58}) -> return ""
+    if end + 1 < raw.len() && raw[end + 1] == (U8{58}) -> return ""
+    semindex_doc_text(raw, start, end)
 }
 
 // The doctest files of `snapshot`'s entry root (every source of a package, or
@@ -57,10 +106,6 @@ jet_cli_doctest_overlay: fn(snapshot: &JetDriverAuthorizedSourceSnapshot, packag
     found
 }
 
-jet_cli_doctest_name: fn(doctests: JetCLIDoctestFile, test: JetCLIDocTest) -> String Never! {
-    "doctest at {doctests.shown}:{test.line}"
-}
-
 // `text` as the body of a Jet string literal.
 jet_cli_doctest_quote: fn(text: String) -> String Never! {
     text.replace("\\", "\\\\").replace("\"", "\\\"").replace("{{", "{{{{").replace("}}", "}}}}")
@@ -70,8 +115,10 @@ jet_cli_doctest_quote: fn(text: String) -> String Never! {
 // claim per doctest after its last line.
 jet_cli_doctest_source: fn(doctests: JetCLIDoctestFile) -> String Never! {
     out := if doctests.source.ends_with("\n") -> doctests.source else -> "{doctests.source}\n"
+    position := 0
     loop test in doctests.tests {
-        out = "{out}\n#Test(\"{jet_cli_doctest_quote(jet_cli_doctest_name(doctests, test))}\") {{\n"
+        out = "{out}\n#Test(\"{jet_cli_doctest_quote(doctests.names[position])}\") {{\n"
+        position += 1
         loop line in test.setup -> out = "{out}    {line}\n"
         loop expectation in test.expectations {
             if expectation.expression == "" -> next
@@ -83,8 +130,10 @@ jet_cli_doctest_source: fn(doctests: JetCLIDoctestFile) -> String Never! {
 }
 
 jet_cli_doctest_named: fn(doctests: JetCLIDoctestFile, name: String) -> JetCLIDocTest? Never! {
+    position := 0
     loop test in doctests.tests {
-        if jet_cli_doctest_name(doctests, test) == name -> return Val(test)
+        if doctests.names[position] == name -> return Val(test)
+        position += 1
     }
     None
 }
@@ -182,14 +231,23 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
 #Test("doctest claims append after the source and frame each rendering") {
     doctests: jet_cli_doctest_file("/work/run.jet", "run.jet", "/// ```jet\n/// n := 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}")
     assert_eq(doctests.tests.len(), 1)
-    assert_eq(jet_cli_doctest_source(doctests), "/// ```jet\n/// n := 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}\n\n#Test(\"doctest at run.jet:1\") {{\n    n := 21\n    print(\"\\tjet-doctest\\t{{n * 2}}\\tjet-doctest-end\\t\")\n}}\n")
+    assert_eq(jet_cli_doctest_source(doctests), "/// ```jet\n/// n := 21\n/// n * 2 // => 42\n/// // => skipped\n/// ```\nf: fn() {{}}\n\n#Test(\"doctest 1 of f in run.jet\") {{\n    n := 21\n    print(\"\\tjet-doctest\\t{{n * 2}}\\tjet-doctest-end\\t\")\n}}\n")
+}
+
+#Test("a doctest is named by the item it documents and its ordinal there, not by its line") {
+    source: "/// ```jet\n/// 1 // => 1\n/// ```\n/// ```jet\n/// 2 // => 2\n/// ```\nf: fn() {{}}\n\nP: struct {{\n    /// ```jet\n    /// 3 // => 3\n    /// ```\n    priv g: fn() {{}}\n}}\n\n/// ```jet\n/// 4 // => 4\n/// ```\n"
+    doctests: jet_cli_doctest_file("/work/a.jet", "a.jet", source)
+    assert_eq(doctests.names, ["doctest 1 of f in a.jet", "doctest 2 of f in a.jet", "doctest 1 of P.g in a.jet", "doctest 1 of a.jet"])
+    moved: jet_cli_doctest_file("/work/a.jet", "a.jet", "// a new first line\n\n{source}")
+    assert_eq(moved.tests[0].line, 3)
+    assert_eq(moved.names, doctests.names)
 }
 
 #Test("a doctest mismatch fails its claim with E2901 and keeps the claim's output") {
     source: "/// ```jet\n/// 2 + 2 // => 5\n/// ```\n"
     doctests: jet_cli_doctest_file("/work/a.jet", "a.jet", source)
     stdout: "setup\n{JET_CLI_DOCTEST_OPEN}4{JET_CLI_DOCTEST_CLOSE}"
-    wire: jet_cli_native_test_wire(JetNativeTestWire{flags: 1, name: "doctest at a.jet:1", stdout: stdout, stderr: ""})
+    wire: jet_cli_native_test_wire(JetNativeTestWire{flags: 1, name: "doctest 1 of a.jet", stdout: stdout, stderr: ""})
     rewrites := [JetCLIDocExpectation]{}
     mismatches := [JetCLITestStop]{}
     settled: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, rewrites, mismatches) ?? panic("a well-formed wire settles")
