@@ -47,11 +47,29 @@ use {
     root: cases_test_root("control-process")
     source: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} alive timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
     assert_eq(cases_test_advanced(root, "stopped", source).verdict.status, "PASS")
-    failed: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} alive timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\nwait: peer\n"
+    // A sleeping process uses no CPU, so its wall-clock guard ends the loop.
+    failed: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} alive timeout 50ms every 1ms fail \"process remained alive\"\nend repeat\nwait: peer\n"
     result: cases_test_advanced(root, "deadline", failed)
     assert_eq(result.verdict.status, "FAIL")
-    assert_eq(result.verdict.detail, "process remained alive")
+    assert(result.verdict.detail.starts_with("process remained alive: wall-clock guard 500 ms: used "))
     files.remove_all(root) ?? panic("remove process repeat scratch")
+}
+
+#Test("a process repeat is bounded by its process's CPU time, and its wall-clock guard is ten times the timeout up to 10 s past it") {
+    if sys.name() == "linux" {
+        root: cases_test_root("control-process-cpu")
+        spinning: "requires: os:unix\nspawn peer: jet -c 'while :; do :; done'\nrepeat while process {{pid:peer}} alive timeout 200ms every 1ms fail \"process kept running\"\nend repeat\nwait: peer\n"
+        result: cases_test_advanced(root, "cpu", spinning)
+        assert_eq(result.verdict.status, "FAIL")
+        assert(result.verdict.detail.starts_with("process kept running: cpu limit 200 ms: used "))
+        files.remove_all(root) ?? panic("remove process repeat CPU scratch")
+    }
+    env: KitEnv{root: "", scratch: "", jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
+    loop row in [(condition: "process 1 alive timeout 1s", wall: 10000000000), (condition: "process 1 alive timeout 3s", wall: 13000000000), (condition: "file: x exists timeout 3s", wall: 3000000000)] {
+        plan: kit_steps_parse_case("repeat while {row.condition} every 1ms fail \"x\"\nend repeat\n")
+        assert_eq(plan.error, "")
+        assert_eq(kit_steps_repeat_wall(plan.steps[0], env), row.wall)
+    }
 }
 
 #Test("line loops over repeated labels use the current iteration and capture subjects use their own text") {
@@ -120,10 +138,10 @@ use {
     loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
         stopped: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
         assert_eq(cases_test_advanced(root, "stopped", stopped).verdict.status, "PASS")
-        timeout: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\nwait peer\n"
+        timeout: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 50ms every 1ms fail \"process remained alive\"\nend repeat\nwait peer\n"
         failed: cases_test_advanced(root, "deadline", timeout)
         assert_eq(failed.verdict.status, "FAIL")
-        assert_eq(failed.verdict.detail, "process remained alive")
+        assert(failed.verdict.detail.starts_with("process remained alive: wall-clock guard 500 ms: used "))
         absent: "requires: os-name:linux\nrepeat while process -1 {mode} timeout 1s every 1ms fail \"unreachable\"\nstep: false\nend repeat\nstep: printf done\nstdout: = \"done\"\n"
         assert_eq(cases_test_advanced(root, "absent", absent).verdict.status, "PASS")
         malformed: cases_test_advanced(root, "malformed", "requires: os-name:linux\nrepeat while process invalid {mode} timeout 1s every 1ms fail \"unreachable\"\nend repeat\n")

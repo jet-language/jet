@@ -256,6 +256,8 @@ KitLoopFrame: struct {
     captures: [KitCapture]{[KitCapture]{}}
     bindings: [KitCapture]{[KitCapture]{}}
     started: Instant
+    // A process repeat's process's CPU time when the loop began.
+    cpu_ns: Int{0}
 }
 
 KitInventoryItem: struct {
@@ -535,7 +537,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                     loops = loops.slice(0, slot)
                     next
                 }
-                if loops[slot].started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+                if kit_steps_repeat_exceeded(opening, loops[slot], context, state) == .Val(failed) -> return kit_steps_finish(state, failed)
             }
         }
         index: cursor
@@ -580,7 +582,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 cursor = end + 1
                 next
             }
-            loops.push(KitLoopFrame{start: index, end: end, kind: "repeat", captures: state.captures, bindings: state.bindings, started: time.instant()})
+            loops.push(KitLoopFrame{start: index, end: end, kind: "repeat", captures: state.captures, bindings: state.bindings, started: time.instant(), cpu_ns: kit_steps_repeat_cpu(original, context, state)})
             next
         }
         if original.action == "end for" || original.action == "end repeat" {
@@ -592,9 +594,8 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 activity: kit_steps_repeat_check(opening, context, state)
                 if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
                 if activity.status == "PASS" {
-                    deadline: kit_steps_answer_deadline(context.env, kit_steps_duration_ns(opening.argv[6]) ?? 0)
-                    if frame.started.elapsed().ns >= deadline -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
-                    remaining: deadline - frame.started.elapsed().ns
+                    if kit_steps_repeat_exceeded(opening, frame, context, state) == .Val(failed) -> return kit_steps_finish(state, failed)
+                    remaining: kit_steps_repeat_wall(opening, context.env) - frame.started.elapsed().ns
                     interval: kit_steps_duration_ns(opening.argv[8]) ?? 0
                     time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
                     cursor = frame.start + 1

@@ -218,6 +218,16 @@ with exit code 2. A known-failing case waits at most 10 s for each answer
 product that never answers fails fast, and one that now answers still shows
 as an unexpected pass.
 
+A case's `repeat while file: PATH exists|absent timeout T every I fail "…"`
+ends at T of wall time. `repeat while process PID MODE timeout T …` waits for
+the process to end (for `alive`, to be reaped) and T bounds the CPU time that
+process uses while the loop waits, which other load on the host does not
+raise. The wall clock is only its guard: ten times T, and at most 10 s past
+it, so a loaded host can schedule an ending process and its reaper while a
+survivor asleep for tens of seconds still fails the loop. That FAIL is the
+case's message with the limit it hit (`cpu limit` or `wall-clock guard`) and
+the CPU and wall milliseconds the loop waited.
+
 UI comparison uses the corpus-relative source ID for the primary diagnostic
 location header, whether the compiler printed that ID or just its basename.
 This same normalization applies to expected and actual text; imported-source
