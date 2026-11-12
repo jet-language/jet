@@ -1,0 +1,31 @@
+// @programmable_build
+// @cli_build
+// A generator over the program's C bindings. Every obligation in the
+// boundary record beside the binding is proved, enforced or contained, so
+// both bindings are verified. The checker reports nothing, and the generator
+// hands their names and checked signatures to a generated module the program
+// prints.
+use libc: c.c
+
+build: fn(b: Build) {
+    checked := [String]{}
+    loop binding in b.program.foreign() {
+        if !binding.verified {
+            b.error(binding.span, "FFI01", "`{binding.name}` has unchecked evidence", "a foreign binding is used only when every obligation was checked", "regenerate the binding with `jet inspect bind`")
+            next
+        }
+        returns: binding.returns ?? "Unit"
+        params: binding.params.join(", ")
+        checked.push("{binding.name}({params}) -> {returns} in {binding.library}")
+    }
+    b.generate("checked_bindings") {
+        checked_bindings: fn() -> [String] { #{checked} }
+    }
+    app: b.add_executable("app", ["run.jet", ".jet/generated/checked/checked_bindings.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    loop binding in checked_bindings() -> print(binding)
+    print(libc.abs(-7))
+}

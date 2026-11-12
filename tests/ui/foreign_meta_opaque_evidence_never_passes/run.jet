@@ -1,0 +1,20 @@
+// @programmable_build
+// @cli_build
+// The same checker over a C binding with no boundary record. The binding
+// has no evidence, so it is never verified, and nothing reads as checked.
+use libc: c.c
+
+build: fn(b: Build) {
+    loop binding in b.program.foreign() {
+        if !binding.verified {
+            b.error(binding.span, "FFI01", "`{binding.name}` links `{binding.symbol}` on opaque evidence: {binding.evidence.len()} obligations were checked", "its binding has no boundary record, so no checker examined it", "regenerate the binding with `jet inspect bind`")
+        }
+    }
+    app: b.add_executable("app", ["run.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print(libc.strlen("hello, jet"))
+    print(libc.abs(-7))
+}

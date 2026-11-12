@@ -138,13 +138,18 @@ use {
         parse_lexed,
     ]
     jet_sema.[
+        SemaCheckedForeignFunction,
+        SemaCheckedForeignOwner,
+        SemaCheckedForeignProvider,
         SemaCompilerModuleSource,
         SemaComptimeReflectionSource,
         SemaGraphModuleResult,
         SemaGraphResult,
         SemaRegistrationGraph,
         SemaRegistrationModule,
+        SemaSourceSegment,
         SemaScopeMembersMarkerRegistry,
+        sema_checked_foreign_basis_verified,
         sema_compiler_semantic_index_from_checked,
         sema_comptime_reflection_arithmetic_facts,
         sema_comptime_reflection_callable_signature,
@@ -159,6 +164,7 @@ use {
         sema_comptime_reflection_source,
         sema_comptime_reflection_written_comments,
         sema_comptime_reflection_written_markers,
+        sema_source_location_at,
     ]
 }
 
@@ -218,6 +224,7 @@ jet_eval_compiler_services_span: fn(span: Span, file: String) -> TComptimeValue 
         TComptimeField{name: "file", value: jet_eval_compiler_services_string(file)},
         TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
         TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
+
     }}
 }
 
@@ -607,6 +614,83 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
     }}
 }
 
+// The ForeignInfo of one checked foreign declaration: its Jet name, the
+// symbol it links, its declaring module, language, library, calling
+// convention and checked signature (each parameter's type and the return
+// type), and the evidence its binding provider recorded. `providers` are the
+// checked providers of the declaring module; only a C module's declaration
+// has one. Evidence comes only from the provider's boundary record: one
+// ForeignEvidence row per obligation, naming the checker, its basis and the
+// assumptions it rests on, beside the target, the loaded artifact and the
+// artifact coverage digest the record is bound to. A declaration is verified
+// only when it has evidence and every row's basis verifies it
+// (sema_checked_foreign_basis_verified); one with no boundary record has no
+// evidence and is never verified. The span indexes the file it was written
+// in (jet_eval_compiler_services_segment_span).
+jet_eval_compiler_services_foreign_info: fn(function: SemaCheckedForeignFunction, providers: [SemaCheckedForeignProvider], segments: [SemaSourceSegment], file: String) -> TComptimeValue {
+    params := [TComptimeValue]{}
+    loop parameter in function.params -> params.push(jet_eval_compiler_services_string(type_name(parameter.ty)))
+    returns := String?{None}
+    if function.return_type == .Val(ty) -> returns = Val(type_name(ty))
+    library := ""
+    target := ""
+    artifact := ""
+    coverage := ""
+    evidence := [TComptimeValue]{}
+    verified := false
+    if function.owner == SemaCheckedForeignOwner.CModule {
+        loop provider in providers {
+            if provider.module_identity != function.module_identity -> next
+            library = provider.library.copy() // copy: the checked graph keeps its providers
+            if provider.boundary == .Val(boundary) {
+                target = boundary.target.copy() // copy: the checked graph keeps its providers
+                artifact = boundary.loaded_artifact.copy() // copy: the checked graph keeps its providers
+                coverage = boundary.artifact_coverage_digest.copy() // copy: the checked graph keeps its providers
+                verified = boundary.obligations.len() > 0
+                loop obligation in boundary.obligations {
+                    checked: sema_checked_foreign_basis_verified(obligation.basis)
+                    if !checked -> verified = false
+                    evidence.push(TComptimeValue.Struct{type_name: "ForeignEvidence", fields: [TComptimeField]{
+                        {name: "name", value: jet_eval_compiler_services_string(obligation.name)},
+                        {name: "basis", value: jet_eval_compiler_services_string(obligation.basis)},
+                        {name: "checker", value: jet_eval_compiler_services_string(obligation.checker)},
+                        {name: "assumptions", value: jet_eval_compiler_services_string_values(obligation.assumptions)},
+                        {name: "verified", value: TComptimeValue.Bool{value: checked}},
+                    }})
+                }
+            }
+            break
+        }
+    }
+    TComptimeValue.Struct{type_name: "ForeignInfo", fields: [TComptimeField]{
+        {name: "name", value: jet_eval_compiler_services_string(function.name)},
+        {name: "symbol", value: jet_eval_compiler_services_string(function.symbol)},
+        {name: "module", value: jet_eval_compiler_services_string(function.module_name)},
+        {name: "language", value: jet_eval_compiler_services_string(function.language)},
+        {name: "library", value: jet_eval_compiler_services_string(library)},
+        {name: "abi", value: jet_eval_compiler_services_string(function.abi)},
+        {name: "params", value: TComptimeValue.List{values: params}},
+        {name: "returns", value: jet_eval_compiler_services_option_string(returns)},
+        {name: "target", value: jet_eval_compiler_services_string(target)},
+        {name: "artifact", value: jet_eval_compiler_services_string(artifact)},
+        {name: "coverage", value: jet_eval_compiler_services_string(coverage)},
+        {name: "evidence", value: TComptimeValue.List{values: evidence}},
+        {name: "verified", value: TComptimeValue.Bool{value: verified}},
+        {name: "span", value: jet_eval_compiler_services_segment_span(function.span, segments, file)},
+    }}
+}
+
+// `span` of a module's text as a SourceSpan of the file it was written in. A
+// module assembled from several files (a C binding's cache, its overlays and
+// close adapters) indexes the assembly; the segment `span` falls in names
+// that file and where in it the segment starts. A span no written segment
+// holds indexes the module's `file` as given.
+jet_eval_compiler_services_segment_span: fn(span: Span, segments: [SemaSourceSegment], file: String) -> TComptimeValue Never! {
+    location: sema_source_location_at(segments, span) ?? return jet_eval_compiler_services_span(span, file)
+    shift: location.source_start - location.aggregate_start
+    jet_eval_compiler_services_span(Span{start: span.start + shift, end: span.end + shift}, location.source_path)
+}
+
 jet_eval_compiler_services_error_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never! {
     diagnostic.severity == DIAGNOSTIC_ERROR
 }
@@ -688,6 +772,8 @@ JetCompilerServicesProgramInfo: enum {
 // `packages` holds one PackageInfo per package, its modules in load order,
 // each listing every comment of its file; the built package's also lists
 // its effective settings with their origins.
+// `foreign` holds the ForeignInfo of every checked foreign declaration, in
+// module order (jet_eval_compiler_services_foreign_info).
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
@@ -697,6 +783,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
     packages := [JetCompilerServicesPackageRows]{}
+    foreign := [TComptimeValue]{}
     build_keys := [String]{}
     loop (module_index, module_row) in registration.modules {
         // Lexed whole: the ModuleInfo lists every comment, and each
@@ -732,6 +819,9 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 types.push(value.copy())
                 module_types.push(value)
             }
+        }
+        if checked == .Val(module_result) {
+            loop function in module_result.foreign_functions -> foreign.push(jet_eval_compiler_services_foreign_info(function, module_result.foreign_providers, module_row.source_segments, module_row.source_file))
         }
         at := -1
         loop (row, package) in packages {
@@ -784,6 +874,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         {name: "functions", value: TComptimeValue.List{values: functions}},
         {name: "packages", value: TComptimeValue.List{values: package_values}},
         {name: "revision", value: jet_eval_compiler_services_string(record_key_digest(revision_fields))},
+        {name: "foreign", value: TComptimeValue.List{values: foreign}},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
     }
     if index.value == .Struct(_, index_fields) {
@@ -824,7 +915,7 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
 // empty, so the build skips the snapshot.
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
-    loop name in ([String]{"types", "functions", "packages", "root_calls", "definitions", "references", "call_edges", "structural_nodes"}) {
+    loop name in ([String]{"types", "functions", "packages", "foreign", "root_calls", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}

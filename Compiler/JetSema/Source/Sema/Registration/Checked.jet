@@ -553,6 +553,14 @@ sema_checked_foreign_list_has: fn(values: [String], value: String) -> Bool Never
     false
 }
 
+// Whether boundary evidence of `basis` verifies its obligation: a checker
+// proved it, the generated wrapper enforces it, or the boundary contains it.
+// `trusted` evidence is an assumption nothing checked and `unknown` is opaque,
+// so neither ever reads as verified.
+sema_checked_foreign_basis_verified: fn(basis: String) -> Bool Never! {
+    basis == "proved" || basis == "enforced" || basis == "contained"
+}
+
 sema_checked_foreign_boundary: fn(input: SemaForeignBoundaryInput, library: String, span: Span, diagnostics: &[Diagnostic]) -> SemaCheckedForeignBoundary? {
     valid := true
     if input.schema == "" || input.digest == "" || input.language == "" || input.library == "" || input.effect_root == "" || input.effects == "" || input.source_authority == "" || input.artifact_coverage_digest == "" || input.loaded_artifact == "" || input.target == "" || input.generator == "" {

@@ -246,6 +246,42 @@ span's `file` and line, beside the compiler's own diagnostics, which a finding
 can't suppress. A code of the compiler's own, `E` or `W` followed only by
 digits, is refused as E3530.
 
+`b.program.foreign()` lists a `ForeignInfo` for every checked foreign
+declaration: its `name`, the `symbol` it links, its `module`, `language`,
+`library` and calling convention (`abi`), its checked `params` and `returns`
+types, and its `span`. The evidence is the binding provider's boundary record
+(`.jet/bindings/<lang>/<lib>.provenance`), read through the existing FFI
+contract and never re-derived: `target`, the loaded `artifact` and the
+`coverage` digest bind it to one artifact. Each `ForeignEvidence` row is a
+receipt of one obligation (`abi`, `layout`, `ownership`, …). It states the
+`checker` that examined it (a header, a symbol table, debug information or an
+executable probe), its `basis` and the `assumptions` it rests on. A row is
+`verified` only when its basis is `proved`, `enforced` or `contained`. A
+`trusted` row is an assumption nothing checked, and an `unknown` row is
+opaque, so neither ever reads as verified. A declaration is `verified` only
+when it has evidence and every row verifies it. A binding with no boundary
+record has no evidence and is never verified. A checker reports a mismatch
+with `b.error`, which fails the build before anything runs. A generator feeds
+the names it checked to `b.generate`:
+
+```jet
+build: fn(b: Build) {
+    checked := [String]{}
+    loop binding in b.program.foreign() {
+        if !binding.verified {
+            b.error(binding.span, "FFI01", "`{binding.name}` has no verified evidence",
+                "a foreign binding is used only when every obligation was checked",
+                "regenerate the binding with `jet inspect bind`")
+            next
+        }
+        checked.push(binding.name)
+    }
+    b.generate("checked_bindings") {
+        checked_bindings: fn() -> [String] { #{checked} }
+    }
+}
+```
+
 Each action declares its capabilities. Execution proceeds only when package
 and workspace policy permits them and the invocation supplies matching grants;
 dependency build scripts do not inherit root authority. The execution runtime
