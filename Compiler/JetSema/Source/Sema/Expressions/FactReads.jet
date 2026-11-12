@@ -14,6 +14,8 @@ use jet_foundation.[
     FactRead,
     Func,
     Item,
+    Marker,
+    MarkerDecl,
     NodeKind,
     PatSlot,
     Span,
@@ -33,6 +35,7 @@ use jet_foundation.[
     TargetMachine,
     TextEdit,
     Type,
+    TypeTupleField,
     UnitScaleProvenance,
     VariantPayload,
     ViewProvenance,
@@ -44,6 +47,9 @@ use jet_foundation.[
     jet_target_layout_pointer_size,
     symbol_id,
     type_name,
+    type_tuple_fields_canonical,
+    sema_casing_snake_words,
+    sema_casing_marker_qualifier,
     fact_read_detail_field,
     fact_read_kind,
     fact_read_reflection_kind,
@@ -69,7 +75,7 @@ sema_fact_read_kind: fn(member: String) -> FactRead? Never! {
     read: fact_read_kind(member) ?? return None
     if read == {
         .BuildPackageName | .BuildPackageVersion | .BuildOS | .BuildProfile | .BuildStampGit | .BuildStampDirty | .BuildStampToolchain | .BuildStampAt -> None
-        .Layout | .Name | .Fields | .Range | .Dimension | .Measure | .Exactness | .Classification | .Obligation | .States | .Effects | .Sendability | .Movedness | .Attribution | .Origin | .ViewProvenance | .UnitScaleProvenance | .Maturity | .RegisteredPlane(_) -> Val(read)
+        .Layout | .Name | .Fields | .Range | .Dimension | .Measure | .Exactness | .Classification | .Obligation | .States | .Effects | .Sendability | .Movedness | .Attribution | .Origin | .ViewProvenance | .UnitScaleProvenance | .Maturity | .Uses | .RegisteredPlane(_) -> Val(read)
     }
 }
 
@@ -289,6 +295,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
+    if type_name == "ItemInfo" -> return sema_fact_field_when(field == "name" || field == "path" || field == "module" || field == "kind", string)
     if type_name == "StateInfo" {
         return if {
             field == "name" -> Val(string)
@@ -1093,6 +1100,159 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
     Val(SemaFactReadValue{ty: sema_fact_named("FactValue"), value: sema_comptime_reflection_fact_value(plane, plane, [String]{}, None, None, "", None)})
 }
 
+// The marker whose uses `M.reflect().uses` lists: its declaring module and
+// declaration, and the field of each Use record that holds the marker's
+// value (the marker's snake_case name, `route` for `Route`).
+SemaFactUsesTarget: struct {
+    module_identity: String
+    marker: MarkerDecl
+    field: String
+}
+
+// `M.reflect().uses`: every use of marker struct `M` in
+// the whole program, a library's uses in the app build included, as a
+// `[(m: M, site: ItemInfo)]` folded to a constant after checking. Only `M`'s
+// own package may read it (E1136): the list depends on every package that
+// writes `M`, which no other package can see. `name` is the subject as
+// written (`Route`, `routes.Route`); `symbol` is what a bare name binds.
+sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
+    graph: program.registration_graph ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+    resolved: sema_fact_uses_marker(graph, environment.module_identity, name, symbol)
+    marker: resolved.declaration ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+    reader: sema_registration_module_index(graph, environment.module_identity) ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+    owner: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return sema_fact_read_no_value("$uses", span, diagnostics)
+    if graph.modules[reader].package_identity != graph.modules[owner].package_identity {
+        diagnostics.push(sema_error("E1136", span, "`{name}.reflect().uses` is read outside the package that declares `{name}`", "a marker's uses span every package that writes it, so only the marker's own package reads them", "read `{name}.reflect().uses` inside the package that declares `{name}`, and export what it builds from them"))
+        return sema_fact_read_failed()
+    }
+    target: SemaFactUsesTarget{module_identity: resolved.declaring_module_identity, marker: marker, field: sema_casing_snake_words(marker.name)}
+    uses := [TComptimeValue]{}
+    loop module_index in 0..<graph.modules.len() {
+        if !sema_fact_uses_in_items(graph, module_index, graph.modules[module_index].program.items, "", target, uses, span, diagnostics) -> return sema_fact_read_failed()
+    }
+    marker_type: sema_call_resolved_type(Type.Named{name: name}, environment, program)
+    use_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
+        TypeTupleField{name: target.field, ty: marker_type},
+        TypeTupleField{name: "site", ty: sema_fact_named("ItemInfo")},
+    })}
+    folded: sema_tree_node(Type.List{element: use_type}, TExprKind.CtLit{value: TComptimeValue.List{values: uses}}, span)
+    SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
+}
+
+// The marker declaration a `uses` subject names: the marker struct a bare
+// type name binds (local or imported), else a module-qualified path in its
+// marker spelling (`routes.Route` is `#Routes.Route`).
+sema_fact_uses_marker: fn(graph: SemaRegistrationGraph, module_identity: String, name: String, symbol: Symbol?) -> SemaMarkerModuleResolution {
+    if symbol == .Val(found) && found.kind == SymbolKind.Type {
+        index: sema_registration_module_index(graph, found.module_name) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: found.module_name, declaration: None}
+        return sema_marker_module_resolve_items(graph.modules[index].program.items, SemaMarkerModuleTarget{status: "found", module_identity: found.module_name, name: found.name, require_export: false})
+    }
+    parts: name.split(".").to_list()
+    if parts.len() < 2 -> return sema_marker_module_resolve(graph, module_identity, name)
+    qualifier: sema_casing_marker_qualifier(parts.slice(0, parts.len() - 1).join("."))
+    sema_marker_module_resolve(graph, module_identity, "{qualifier}.{parts[parts.len() - 1]}")
+}
+
+// The uses of the target marker on `items` of module `module_index` (a code
+// module's body under `scope`), in source order: a type, its fields,
+// variants and methods, a function, an `impl`'s methods and a code module.
+// False when a use's marker value is not known at compile time (reported).
+sema_fact_uses_in_items: fn(graph: SemaRegistrationGraph, module_index: Int, items: [Item], scope: String, target: SemaFactUsesTarget, uses: &[TComptimeValue], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    module_path: graph.modules[module_index].module_path
+    base: if scope == "" -> module_path.copy() else -> sema_fact_uses_path(module_path, scope)
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                owner: sema_fact_uses_path(base, definition.name)
+                if !sema_fact_uses_at(graph, module_index, definition.type_markers, definition.name, owner, "struct", target, uses, span, diagnostics) -> return false
+                loop field in definition.fields {
+                    if !sema_fact_uses_at(graph, module_index, field.serde_markers, field.name, sema_fact_uses_path(owner, field.name), "field", target, uses, span, diagnostics) -> return false
+                }
+                if !sema_fact_uses_in_methods(graph, module_index, definition.methods, owner, target, uses, span, diagnostics) -> return false
+                loop block in definition.trait_impls {
+                    if !sema_fact_uses_in_methods(graph, module_index, block.methods, owner, target, uses, span, diagnostics) -> return false
+                }
+            }
+            .Enum(definition) -> {
+                owner: sema_fact_uses_path(base, definition.name)
+                if !sema_fact_uses_at(graph, module_index, definition.type_markers, definition.name, owner, "enum", target, uses, span, diagnostics) -> return false
+                loop variant in definition.variants {
+                    if !sema_fact_uses_at(graph, module_index, variant.serde_markers, variant.name, sema_fact_uses_path(owner, variant.name), "variant", target, uses, span, diagnostics) -> return false
+                }
+                if !sema_fact_uses_in_methods(graph, module_index, definition.methods, owner, target, uses, span, diagnostics) -> return false
+                loop block in definition.trait_impls {
+                    if !sema_fact_uses_in_methods(graph, module_index, block.methods, owner, target, uses, span, diagnostics) -> return false
+                }
+            }
+            .Distinct(definition) -> {
+                if !sema_fact_uses_at(graph, module_index, definition.type_markers, definition.name, sema_fact_uses_path(base, definition.name), "distinct", target, uses, span, diagnostics) -> return false
+            }
+            .Func(function) -> {
+                if !sema_fact_uses_at(graph, module_index, function.markers, function.name, sema_fact_uses_path(base, function.name), "function", target, uses, span, diagnostics) -> return false
+            }
+            .Impl(implementation) -> {
+                if !sema_fact_uses_in_methods(graph, module_index, implementation.methods, sema_fact_uses_path(base, implementation.type_name), target, uses, span, diagnostics) -> return false
+            }
+            .CodeModule(code_module) -> {
+                inner: if scope == "" -> code_module.name.copy() else -> "{scope}.{code_module.name}"
+                if !sema_fact_uses_at(graph, module_index, code_module.markers, code_module.name, sema_fact_uses_path(base, code_module.name), "module", target, uses, span, diagnostics) -> return false
+                if code_module.body == .Val(body) {
+                    if !sema_fact_uses_in_items(graph, module_index, body, inner, target, uses, span, diagnostics) -> return false
+                }
+            }
+            .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    true
+}
+
+sema_fact_uses_in_methods: fn(graph: SemaRegistrationGraph, module_index: Int, methods: [Func], owner: String, target: SemaFactUsesTarget, uses: &[TComptimeValue], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    loop method in methods {
+        if !sema_fact_uses_at(graph, module_index, method.markers, method.name, sema_fact_uses_path(owner, method.name), "method", target, uses, span, diagnostics) -> return false
+    }
+    true
+}
+
+sema_fact_uses_path: fn(prefix: String, name: String) -> String Never! {
+    if prefix == "" -> name.copy() else -> "{prefix}.{name}"
+}
+
+// One Use record for each of `markers` that resolves to the target marker:
+// the marker's value at that site (its arguments, then the written defaults
+// of the parameters left out) and the site's ItemInfo.
+sema_fact_uses_at: fn(graph: SemaRegistrationGraph, module_index: Int, markers: [Marker], name: String, path: String, kind: String, target: SemaFactUsesTarget, uses: &[TComptimeValue], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    module_identity: graph.modules[module_index].module_identity
+    loop marker in markers {
+        if marker.negated -> next
+        resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+        declaration: resolved.declaration ?? next
+        if resolved.declaring_module_identity != target.module_identity || declaration.name_span.start != target.marker.name_span.start || declaration.name_span.end != target.marker.name_span.end -> next
+        receiver: sema_user_rule_receiver(declaration, marker)
+        bound: if receiver == .Struct(_, bound_fields) -> bound_fields.len() else -> 0
+        expected_count := 0
+        loop param in declaration.params {
+            if !param.name.starts_with("$") -> expected_count += 1
+        }
+        record := TComptimeValue?{None}
+        if bound == expected_count -> record = sema_checked_comptime(receiver)
+        value: record ?? {
+            diagnostics.push(sema_error("E0302", span, "`{target.marker.name}.reflect().uses` has no compile-time value for the use at `{path}`", "each Use record holds the marker's value at its site, so every argument written there is known at compile time", "write a literal argument to `#{marker.name}` at `{path}`"))
+            return false
+        }
+        site: sema_fact_struct("ItemInfo", [TComptimeField]{
+            TComptimeField{name: "name", value: TComptimeValue.String{value: name}},
+            TComptimeField{name: "path", value: TComptimeValue.String{value: path}},
+            TComptimeField{name: "module", value: TComptimeValue.String{value: graph.modules[module_index].module_path}},
+            TComptimeField{name: "kind", value: TComptimeValue.String{value: kind}},
+        })
+        // The record's members in the tuple type's canonical (sorted) order.
+        fields := [TComptimeField]{TComptimeField{name: target.field, value: value}, TComptimeField{name: "site", value: site}}
+        fields.sort_by((left: TComptimeField, right: TComptimeField) -> left.name <=> right.name)
+        uses.push(sema_fact_struct("Tuple", fields))
+    }
+    true
+}
+
 SemaFactReadValue: struct {
     ty: Type
     value: TComptimeValue
@@ -1158,6 +1318,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields -> return sema_fact_read_unhandled()
             return sema_fact_read_no_value(member, span, diagnostics)
         }
+        if !is_constant && read == FactRead.Uses -> return sema_fact_uses_check(name, symbol, span, expected, environment, program, diagnostics)
         if !is_constant {
             resolved: sema_fact_subject_value(read, name, symbol, environment, program) ?? {
                 if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields -> return sema_fact_read_unhandled()
@@ -1166,6 +1327,10 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             folded: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
             return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
         }
+    }
+    // `module.Marker.reflect().uses` names a marker struct of another module.
+    if base == .Field(_, _, _, _) && read == FactRead.Uses {
+        if sema_fact_expr_path(base) == .Val(path) -> return sema_fact_uses_check(path, None, span, expected, environment, program, diagnostics)
     }
     // `module.Type.reflect().name`: a qualified type path is no value to check; it reads
     // the reflected type it names.

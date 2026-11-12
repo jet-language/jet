@@ -1,0 +1,12 @@
+// Only the marker's own package reads its uses (E1136): they span every
+// package that writes the marker.
+use routes
+
+#Routes.Route("/")
+home: fn() -> String { "home" }
+
+COUNT: comptime { routes.Route.reflect().uses.len() }
+
+run: fn() {
+    print("{home()} {routes.COUNT} {COUNT}")
+}

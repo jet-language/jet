@@ -1,0 +1,52 @@
+// `M.reflect().uses` lists every use of marker struct `M` in the program:
+// each use's typed marker value, then the site that carries it. The list
+// folds to a constant after checking, so the route table and the entity
+// count below cost nothing at run time.
+Route: struct {
+    path: String
+    method: String { "GET" }
+
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+Entity: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+#Route("/")
+home: fn() -> String { "home" }
+
+#Route("/items", method: "POST")
+add_item: fn() -> String { "added" }
+
+#Entity
+Player: struct {
+    hp: Int
+}
+
+#Entity
+Enemy: struct {
+    hp: Int
+}
+
+// No marker: not a use.
+Scenery: struct {
+    hp: Int
+}
+
+ROUTES: comptime { Route.reflect().uses }
+
+ENTITIES: comptime { Entity.reflect().uses }
+
+ENTITY_COUNT: comptime { Entity.reflect().uses.len() }
+
+run: fn() {
+    print("entities: {ENTITY_COUNT}")
+    loop entry in ENTITIES -> print("entity: {entry.site.name} ({entry.site.kind})")
+    loop entry in ROUTES -> print("route: {entry.route.method} {entry.route.path} -> {entry.site.name} ({entry.site.kind})")
+    print("{home()} {add_item()} {Scenery{hp: 1}.hp}")
+}

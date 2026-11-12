@@ -345,6 +345,20 @@ comptime constant and `build: fn`, as
 shows: each rung reads the type's name, kind, identity, module, field and
 marker counts and `marker(Label)?.text`, and prints the same line.
 
+`M.reflect().uses` lists every use of the marker struct `M` in the whole
+program, a library's uses in the app build included. Each entry is a
+`(m: M, site: ItemInfo)` record: the marker's value at that use (its
+arguments, then the declared defaults of the fields left out), under `M`'s
+snake_case name (`route` for `Route`), and the carrying item's `ItemInfo`
+(`name`, `path`, `module`, and `kind`: `struct`, `enum`, `distinct`,
+`function`, `field`, `variant`, `method` or `module`). The list is in module
+order, then source order. It folds to a constant after checking, so a program
+reads it in a compile-time binding such as `ENTITY_COUNT: comptime {
+Entity.reflect().uses.len() }`. Only the package that declares `M` reads its
+uses; any other package's read is E1136. A use whose marker argument has no
+compile-time value is E0302. See
+[`MarkerUses`](../../../Examples/Metaprogramming/Reflection/MarkerUses.jet).
+
 The fact plane is deliberately typed and closed. The feature examples read
 range, dimension, state, effect, sendability, movedness, attribution, origin,
 view provenance, and maturity facts; consumers must use the registered fact

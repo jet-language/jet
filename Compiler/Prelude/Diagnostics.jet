@@ -9373,6 +9373,19 @@ MarkerLookupNotMarker: struct {
     }
 }
 
+MarkerUsesOutsidePackage: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E1136"
+        meaning: "a marker's uses read outside the marker's own package"
+        detail: true
+        what: fn(self) -> String { "`{self.name}.reflect().uses` is read outside the package that declares `{self.name}`." }
+        why: fn(self) -> String { "A marker's uses span every package that writes it, so only the marker's own package reads them." }
+        fix: fn(self) -> String { "Read `{self.name}.reflect().uses` inside the package that declares `{self.name}`, and export what it builds from them." }
+    }
+}
+
 UndischargedTask: struct {
     impl Diagnostic {
         code: "L1101"

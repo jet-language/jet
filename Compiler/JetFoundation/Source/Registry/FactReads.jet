@@ -2,7 +2,7 @@
 // the reflected fact kind, the detail slot and the planes each read covers.
 FactRead: enum {
     Layout Name Fields Range Dimension Measure Exactness Classification Obligation
-    States Effects Sendability Movedness Attribution Origin ViewProvenance UnitScaleProvenance Maturity
+    States Effects Sendability Movedness Attribution Origin ViewProvenance UnitScaleProvenance Maturity Uses
     RegisteredPlane(name: String)
     BuildPackageName BuildPackageVersion BuildOS BuildProfile BuildStampGit BuildStampDirty BuildStampToolchain BuildStampAt
 }
@@ -19,8 +19,9 @@ foundation_fact_read_row: fn(read: &&FactRead, member: &&String, reflection: &&S
     FoundationFactReadRow{read: read.move(), member: Val(member.move()), reflection: Val(reflection.move()), detail: detail.move(), planes: planes.move()}
 }
 
-// Typed reads in registry order, then the build profile, then the registered
-// value planes without a dedicated carrier in Prelude declaration order.
+// Typed reads in registry order, then the program-wide marker uses, then
+// the build profile, then the registered value planes without a dedicated
+// carrier in Prelude declaration order.
 FOUNDATION_FACT_READ_ROWS: comptime { [FoundationFactReadRow]{
     foundation_fact_read_row(FactRead.Layout, "$layout", "Layout", None, [String]{"Type.Layout"}),
     foundation_fact_read_row(FactRead.Name, "$name", "Nominal", None, [String]{"Type.Nominal"}),
@@ -40,6 +41,9 @@ FOUNDATION_FACT_READ_ROWS: comptime { [FoundationFactReadRow]{
     foundation_fact_read_row(FactRead.ViewProvenance, "$view_provenance", "ViewProvenance", Val("view_provenance"), [String]{"ViewProvenance"}),
     foundation_fact_read_row(FactRead.UnitScaleProvenance, "$unit_scale_provenance", "UnitScaleProvenance", Val("unit_scale_provenance"), [String]{"UnitScaleProvenance"}),
     foundation_fact_read_row(FactRead.Maturity, "$maturity", "Maturity", Val("maturity"), [String]{"Maturity"}),
+    // `M.reflect().uses`: every use of marker struct `M` in the program; no
+    // fact plane carries it.
+    FoundationFactReadRow{read: FactRead.Uses, member: Val("$uses"), reflection: None, detail: None, planes: [String]{}},
     FoundationFactReadRow{read: FactRead.BuildProfile, member: Val("$profile"), reflection: None, detail: None, planes: [String]{}},
     foundation_fact_read_row(FactRead.RegisteredPlane{name: "Flow"}, "$flow", "Flow", None, [String]{"Flow"}),
     foundation_fact_read_row(FactRead.RegisteredPlane{name: "Taint"}, "$taint", "Taint", None, [String]{"Taint"}),

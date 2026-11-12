@@ -88,6 +88,7 @@ tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: S
     assert(tool_facts_projection_matches(FactRead.ViewProvenance, Val("$view_provenance"), Val("ViewProvenance"), Val("view_provenance")))
     assert(tool_facts_projection_matches(FactRead.UnitScaleProvenance, Val("$unit_scale_provenance"), Val("UnitScaleProvenance"), Val("unit_scale_provenance")))
     assert(tool_facts_projection_matches(FactRead.Maturity, Val("$maturity"), Val("Maturity"), Val("maturity")))
+    assert(tool_facts_projection_matches(FactRead.Uses, Val("$uses"), None, None))
 }
 
 #Test("all build fact read projections exclude public and reflected value carriers") {
@@ -135,7 +136,7 @@ tool_facts_projection_matches: fn(read: FactRead, member: String?, reflection: S
 }
 
 #Test("fact read members retain complete typed build and registered order") {
-    expected: [String]{"$layout", "$name", "$fields", "$range", "$dimension", "$measure", "$exactness", "$classification", "$obligation", "$states", "$effects", "$sendability", "$movedness", "$attribution", "$origin", "$view_provenance", "$unit_scale_provenance", "$maturity", "$profile", "$flow", "$taint", "$duty"}
+    expected: [String]{"$layout", "$name", "$fields", "$range", "$dimension", "$measure", "$exactness", "$classification", "$obligation", "$states", "$effects", "$sendability", "$movedness", "$attribution", "$origin", "$view_provenance", "$unit_scale_provenance", "$maturity", "$uses", "$profile", "$flow", "$taint", "$duty"}
     assert(fact_read_members() == expected)
     loop member in fact_read_members() -> assert(fact_read_kind(member) != None)
 }
