@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6763,
-    "rev": 99846,
+    "rev": 99847,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98754,7 +98754,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:52:19.959Z",
-      "updated": "2026-11-12T06:56:00.610Z",
+      "updated": "2026-11-12T07:05:21.448Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -196422,6 +196422,156 @@
       "created": "2026-11-11T22:07:57.295Z",
       "outcome": "F",
       "ratifiedAt": "2026-11-12"
+    },
+    {
+      "id": "D-HOST-NONCE1",
+      "cardId": "c0mf9ybj",
+      "group": "effects",
+      "title": "Which permission covers the small reads that only make unique names or inspect the running program?",
+      "situation": "Some library operations quietly read a small fact from the computer while they work. A safe file save picks a throwaway name from the process number, and a temporary folder name mixes in the clock. Starting another program looks it up on PATH, and the scheduler reads files about its own process. Today none of these reads is listed under its own permission, so denying Env, Rand or Time does not stop them. They never change what a program computes: they only keep names from colliding, find the program to start, or watch the program itself. You are asked how a denial should treat them. We recommend writing them into the effect rules as part of the operation's own permission, so a denial means exactly what the rules say.",
+      "gist": "Should name-making and self-inspection reads count under the operation's own permission?",
+      "lesson": "A permission (an effect) names what code may touch: files, the clock, the environment. A denial says the program must never touch it. A few library steps read tiny facts only to make a unique throwaway name, to find the program being started, or to inspect the running program. The question is whether those steps belong to the operation's permission or need their own.",
+      "explainer": "",
+      "story": "Sam's backup tool may write files, and he runs it with Env, Rand and Time denied. It saves notes.txt with a safe write that first writes a hidden temporary file. Sam wants the save to keep working, and he wants the deny list to mean exactly what it says.",
+      "inWild": "// Deno documentation example, not executed in this review.\n// deno run --allow-write save.ts\n// Making a temporary folder needs only write permission,\n// though the name is random and the folder comes from TMPDIR.\nconst dir = await Deno.makeTempDir();\nawait Deno.writeTextFile(`${dir}/notes.txt`, \"hello\");\n// Source: https://docs.deno.com/api/deno/~/Deno.makeTempDir",
+      "detail": "The four reads come from Docs/spec/reference/host-reads.md. H6 is the clock sample and TMPDIR for a temporary name (core.files mkdtemp, files_temp_path and the temp_* constructors, -[FS]>). H7 is the process id in an atomic write's candidate name `.jet_tmp_<pid>_<sequence>` (core.files and core.crypto, FS.Write). H7 also covers a core.service store's temporary name (core.service __host_pid).\n\nH9 is PATH from the logical environment, read to resolve a command (runtime ProcessExecutionAuthority.jet, Exec). H10 is the process's own /proc/self and cgroup files (scheduler monitor, process scopes, Unix-socket paths, test reads; no row).\n\nThe reads that can change a result are already declared. They are core.service's clock, entropy and working directory (H3), the terminal-capability variables (H5) and path.home (H8). core.files mktemp already declares -[FS, Env, Time]> for H6's reads. Until this ballot is ruled, host-reads.md lists the four rows as open. No page or diagnostic claims that a denial blocks every host read of its kind.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Count them under the operation's own permission, written into the rules",
+          "detail": "spec.md \"Effects\" gains one rule. A read that only makes a collision-avoiding name, finds the program an Exec call starts, or inspects the running process belongs to the calling operation's effect. The temporary-name and atomic-write reads are part of FS.Write, the PATH lookup is part of Exec, and /proc/self reads are part of whatever call makes them.\n\nhost-reads.md lists each read by name under that rule. A new host read must either fit the rule or declare its own effect. Nothing changes for programs. A name such a read makes is documented as unspecified, so a program that prints it sees a different name each run under every option.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED A: prints \"saved\". The process id in the hidden name is part of FS.Write."
+        },
+        {
+          "key": "B",
+          "name": "Declare Env, Rand or Time on each operation that makes such a read",
+          "detail": "write_atomic, the temp_* constructors and mkdtemp declare Env and Time next to FS; core.process starts declare Env for PATH; every scheduler and process-scope entry declares FS.Read for /proc/self. A written authority row that allows only FS no longer covers a safe save.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED B: refused before it runs. write_atomic reaches Env (the process id)."
+        },
+        {
+          "key": "C",
+          "name": "Remove the reads where possible",
+          "detail": "Temporary and atomic-write names come from a per-process counter, seeded once by one start-up read that the runtime declares with its other start-up controls. No file operation reads the clock or the process id. PATH lookup and /proc/self reads can't be removed, because finding the program is the start and the scheduler must watch its own threads, so those two still need option A's rule.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED C: prints \"saved\". The hidden name comes from a counter seeded at start-up."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "These reads can't change what a program computes or prints beyond a throwaway name, so a denial that refused them would only break safe saves and program starts. Writing the rule down keeps every denial honest, because the rules list exactly which reads it covers.",
+        "tradeoff": "A denial of Env does not stop the process-id read inside a safe save. The effect rules say so by name, and that read can't leak anything into the program's results.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Beginners who allow only FS could no longer save a file safely, and every authority row grows for reads that never change a result."
+          },
+          {
+            "key": "C",
+            "reason": "It rewrites file naming and still needs option A's rule for PATH and the process's own files, so it adds work without removing the rule."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Denying Env still allows a hidden name's process-id read.",
+            "mitigation": "The effect rules list that read by name, and its only use is a throwaway name the program never relies on."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should reads that only make unique names, or inspect the running program, count under the operation's own permission?",
+        "lesson": "A permission names what code may touch, like files or the clock. A few library steps read tiny facts only to make a unique throwaway name, find the program being started, or inspect the running program. Should those steps belong to the operation's permission, or need their own?",
+        "trio": {
+          "current": {
+            "note": "Today a safe save reads the process id, and no permission lists that read.",
+            "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// Today: prints \"saved\", and no rule says why the process-id read is allowed."
+          },
+          "wild": {
+            "note": "Deno's temporary folder needs only write permission, though it reads TMPDIR and draws a random name.",
+            "lang": "TypeScript",
+            "code": "// deno run --allow-write save.ts\nconst dir = await Deno.makeTempDir();\nawait Deno.writeTextFile(`${dir}/notes.txt`, \"hello\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Part of the operation's own permission",
+            "gist": "Write the rule down: name-making, program lookup and self-inspection reads belong to the calling operation.",
+            "gains": [
+              "Safe saves and program starts keep working under any denial.",
+              "Every such read is listed by name in the rules.",
+              "Nothing changes for existing programs."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED A: prints \"saved\".\n// The process id in the hidden name is part of FS.Write."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Declare Env, Rand or Time on each operation",
+            "gains": [
+              "A denial of Env refuses every environment read, with no exceptions."
+            ],
+            "gist": "Each operation that makes such a read lists the extra permission.",
+            "losses": [
+              "A program allowing only FS can no longer save safely.",
+              "Authority lists grow for reads that never change a result."
+            ],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED B: refused before it runs.\n// write_atomic reaches Env through the process id."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Remove the reads where possible",
+            "gist": "Make hidden names from a counter seeded once at start-up.",
+            "gains": [
+              "File operations stop reading the clock and process id."
+            ],
+            "losses": [
+              "Program lookup and self-inspection still need option A's rule.",
+              "File naming code must be rewritten and tested again."
+            ],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED C: prints \"saved\".\n// The hidden name comes from a counter seeded at start-up."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "These reads can't change what a program computes or prints, so refusing them would only break safe saves and program starts. Writing the rule down keeps each denial honest.",
+          "gains": [
+            "Denials mean exactly what the written rules say.",
+            "Beginners write nothing new; experts read one listed rule."
+          ],
+          "losses": [
+            {
+              "loss": "Denying Env still allows a hidden name's process-id read.",
+              "mitigation": "The rules list that read by name, and it only makes a throwaway name."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Programs that only write files could no longer save safely."
+            },
+            {
+              "key": "C",
+              "reason": "It still needs option A's rule for program lookup and self-inspection."
+            }
+          ],
+          "tradeoff": "One written rule covers a few listed reads, instead of longer permission lists everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T07:05:21.448Z"
     }
   ],
   "questions": [
@@ -199629,6 +199779,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T07:05:21.448Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-HOST-NONCE1",
+      "note": "Which permission covers the small reads that only make unique names or inspect the running program?"
+    },
     {
       "at": "2026-11-12T07:04:39.663Z",
       "by": "Main",
