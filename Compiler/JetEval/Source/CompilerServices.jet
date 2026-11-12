@@ -149,6 +149,7 @@ use {
         sema_comptime_reflection_declared_function_facts,
         sema_comptime_reflection_location,
         sema_comptime_reflection_module_of,
+        sema_comptime_reflection_param_info,
         sema_comptime_reflection_written_markers,
     ]
 }
@@ -570,8 +571,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
             }
         }
     }
-    params := [TComptimeValue]{}
-    loop parameter in function.params -> params.push(jet_eval_compiler_services_string(parameter.name))
+    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
     arithmetic := sema_comptime_reflection_arithmetic_facts(function)
     identity := "{registration_module.module_name}::{function.name}"
     facts := sema_comptime_reflection_declared_function_facts(function, identity)

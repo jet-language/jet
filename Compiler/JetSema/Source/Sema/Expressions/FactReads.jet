@@ -111,6 +111,7 @@ sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
         enum_name == "Maturity" -> Val([String]{"Experimental", "Tested", "Hardened"})
         enum_name == "ExactnessKind" -> Val([String]{"Exact", "Approximate", "Measured"})
         enum_name == "ParamZone" -> Val([String]{"PositionalOnly", "Either", "LabelOnly"})
+        enum_name == "ParamAccess" -> Val([String]{"Read", "Write", "Move"})
         enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
         else -> None
     }
@@ -426,7 +427,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "FunctionInfo" {
         return if {
             field == "name" || field == "module" || field == "identity" || field == "package" -> Val(string)
-            field == "params" -> Val(Type.List{element: string})
+            field == "params" -> Val(sema_fact_list_of("ParamInfo"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
             field == "effects" -> Val(sema_fact_named("EffectInfo"))
@@ -466,7 +467,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "MethodInfo" {
         return if {
             field == "name" || field == "module" || field == "identity" || field == "return_type" || field == "signature" -> Val(string)
-            field == "params" -> Val(Type.List{element: string})
+            field == "params" -> Val(sema_fact_list_of("ParamInfo"))
             field == "effects" -> Val(sema_fact_named("EffectInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
@@ -495,6 +496,16 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
         }
     }
     if type_name == "DefaultInfo" -> return sema_fact_field_when(field == "source", sema_fact_named("SourceSpan"))
+    if type_name == "ParamInfo" {
+        return if {
+            field == "name" || field == "label" || field == "type" -> Val(string)
+            field == "zone" -> Val(sema_fact_named("ParamZone"))
+            field == "access" -> Val(sema_fact_named("ParamAccess"))
+            field == "default" -> Val(Type.Option{inner: sema_fact_named("DefaultInfo")})
+            field == "variadic" -> Val(Type.Bool)
+            else -> None
+        }
+    }
     if type_name == "TypeParamInfo" {
         return if {
             field == "name" -> Val(string)

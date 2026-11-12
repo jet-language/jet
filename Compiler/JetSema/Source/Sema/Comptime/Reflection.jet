@@ -28,6 +28,7 @@ use jet_foundation.[
     Measure,
     NamedSpan,
     NamedType,
+    Param,
     ParamZone,
     Program,
     STATE_ARROW_LABEL,
@@ -882,6 +883,34 @@ sema_comptime_reflection_default_info: fn(default: Span?) -> TComptimeValue Neve
     sema_comptime_reflection_none(Type.Named{name: "DefaultInfo"})
 }
 
+// One parameter's ParamInfo, the slot FunctionInfo and MethodInfo share: its
+// name, the label a call writes (its public label, else its name), the zone
+// that says whether the call labels it, its type, how it takes the argument,
+// where its default is written (read, never run) and whether it is variadic.
+sema_comptime_reflection_param_info: fn(param: Param) -> TComptimeValue Never! {
+    label: if param.public_label == .Val(written) -> written.name else -> param.name
+    zone: if param.zone == {
+        .PositionalOnly -> "PositionalOnly"
+        .Either -> "Either"
+        .LabelOnly -> "LabelOnly"
+    }
+    access: if param.convention == {
+        .Read -> "Read"
+        .Write -> "Write"
+        .Move -> "Move"
+    }
+    default: if param.default == .Val(expression) -> Val(expr_source_span(expression)) else -> None
+    sema_comptime_reflection_struct("ParamInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: param.name}},
+        SemaComptimeReflectionField{name: "label", value: TComptimeValue.String{value: label}},
+        SemaComptimeReflectionField{name: "zone", value: TComptimeValue.Enum{type_name: "ParamZone", variant: zone, args: [TComptimeEnumArg]{}}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(param.ty)}},
+        SemaComptimeReflectionField{name: "access", value: TComptimeValue.Enum{type_name: "ParamAccess", variant: access, args: [TComptimeEnumArg]{}}},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default)},
+        SemaComptimeReflectionField{name: "variadic", value: TComptimeValue.Bool{value: param.variadic}},
+    })
+}
+
 sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("TypeParamInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: parameter.name}},
@@ -948,7 +977,7 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
         SemaComptimeReflectionField{name: "return_type", value: TComptimeValue.String{value: return_type}},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(method)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(method.return_type)}},
-        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in parameter_texts -> TComptimeValue.String{value: parameter}}},
+        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in method.params -> sema_comptime_reflection_param_info(parameter)}},
         SemaComptimeReflectionField{name: "signature", value: TComptimeValue.String{value: "{method.name}: fn({parameter_texts.join(", ")}) {return_type}"}},
         SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: effects}})},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
@@ -1317,8 +1346,7 @@ sema_comptime_reflection_function_info: fn(function: Func, module_name: String, 
     if function.declared_effects == .Val(rows) {
         loop row in rows -> effects.push(TComptimeValue.String{value: row.name})
     }
-    params := [TComptimeValue]{}
-    loop param_index in 0..<function.params.len() -> params.push(TComptimeValue.String{value: function.params[param_index].name})
+    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
     info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_name}},

@@ -304,6 +304,16 @@ field without a written default, else a `DefaultInfo` whose `source` is the
 `SourceSpan` of the default expression. Reading `default` never runs the
 expression.
 
+A `FunctionInfo` and a `MethodInfo` share one parameter list: `params` is a
+`[ParamInfo]` in declaration order, the receiver included. Each `ParamInfo`
+carries the parameter's `name`; the `label` a call writes (its public label,
+else its name); its `zone` (`ParamZone`: `PositionalOnly`, `Either` or
+`LabelOnly`); its `type`; its `access` (`ParamAccess`: `Read`, `Write` for a
+`&` parameter, or `Move` for a `&&` one); its `default`, a `DefaultInfo?`
+read the same way as a field's and never run; and whether it is `variadic`.
+A catalog reads a callable's parameters without parsing a signature string
+(`Examples/Metaprogramming/Reflection/CallableCatalog.jet`).
+
 Every declaration record names where its declaration is written: the
 `location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
 `MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`

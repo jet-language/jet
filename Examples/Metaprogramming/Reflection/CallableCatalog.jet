@@ -1,0 +1,40 @@
+// Functions and methods reflect one typed parameter list. Each ParamInfo
+// carries the parameter's name, the label a call writes, its zone, its type,
+// how it takes the argument, where its default is written (read, never run)
+// and whether it is variadic, so nothing here parses a signature string.
+connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
+    "{host}:{seconds}:{tls}"
+}
+
+Log: struct {
+    lines: [String]
+
+    note: fn(self, text: String, tags: ...String) -> Int { self.lines.len() + tags.len() }
+
+    drain: fn(self, sink: &[String], batch: &&[String]) -> Int { sink.len() + batch.len() }
+}
+
+run: fn() {
+    loop param in connect.reflect().params {
+        zone: if param.zone == {
+            .PositionalOnly -> "positional"
+            .Either -> "either"
+            .LabelOnly -> "label-only"
+        }
+        default: if param.default == None -> "required" else -> "has a default"
+        print("connect {param.name}: label {param.label}, {zone}, {param.type}, {default}")
+    }
+    loop method in Log.reflect().methods {
+        loop param in method.params {
+            if param.name == "self" -> next
+            access: if param.access == {
+                .Read -> "reads"
+                .Write -> "writes"
+                .Move -> "takes"
+            }
+            shape: if param.variadic -> "variadic" else -> "single"
+            print("Log.{method.name} {access} {param.name} ({shape})")
+        }
+    }
+    print(connect("db"))
+}
