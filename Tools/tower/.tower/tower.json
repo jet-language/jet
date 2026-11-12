@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6770,
-    "rev": 99925,
+    "nextNum": 6771,
+    "rev": 99930,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99439,15 +99439,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named, with the lowering or ownership step that drops the Close of a reassigned close local and of its temporaries. The fix is at that root, and tests resource_close/reassigned_close_local_frees_its_old_buffer_once passes on O0, O1, O2, checked-alloc and web (jet test Compiler --profile golden or the resource_close suite, 0 FAIL/KF).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:16:29.859Z"
+        },
+        {
+          "n": 2,
+          "text": "A second program closes a reassigned local in a different shape (a loop that rebinds a Close value each iteration, plus a branch that rebinds it), and every Close runs exactly once on every tier (a case with expected output).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:16:30.917Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:05.809Z",
-      "updated": "2026-11-12T10:16:05.809Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-12T10:16:30.917Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0xphd0i",
@@ -99467,15 +99487,65 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named (why the built artifact keeps a string past its last use when jet run does not). The fix is at that root, and memory_semantics/strings_free_at_their_last_use passes for jet run at O0/O1/O2 and for the binary jet build produces (jet build --optimize=full, then run it).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:16:31.966Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T10:16:07.441Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-12T10:16:31.966Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0yysi3q",
+      "num": 6770,
+      "title": "Memo hit counts are wrong in Examples/Memory/Memoize (memo_computed_and_view_copy_examples_agree_across_execution_tiers)",
+      "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. memory_semantics/memo_computed_and_view_copy_examples_agree_across_execution_tiers fails on Examples/Memory/Memoize.out, under both --release and default. First diff: 'square stats: hits=0, misses=129' where the golden has 'hits=2, misses=130', and cube 'hits=0, misses=0, size=0' where the golden has 'hits=1, misses=1, size=1'. The memo does not record hits, and cube's memo never stores. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named. Examples/Memory/Memoize matches its golden (square hits=2 misses=130, cube hits=1 misses=1 size=1) at O0, O1 and O2, and memo_computed_and_view_copy_examples_agree_across_execution_tiers passes under default and --release.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:16:33.082Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:16:09.694Z",
+      "updated": "2026-11-12T10:16:33.082Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -200089,6 +200159,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:16:33.083Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yysi3q",
+      "note": "#1 The root is named. Examples/Memory/Memoize matches its golde"
+    },
+    {
+      "at": "2026-11-12T10:16:31.966Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xphd0i",
+      "note": "#1 The root is named (why the built artifact keeps a string pas"
+    },
+    {
+      "at": "2026-11-12T10:16:30.918Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06pt752",
+      "note": "#2 A second program closes a reassigned local in a different sh"
+    },
+    {
+      "at": "2026-11-12T10:16:29.859Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06pt752",
+      "note": "#1 The root is named, with the lowering or ownership step that "
+    },
+    {
+      "at": "2026-11-12T10:16:09.694Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0yysi3q",
+      "note": "Memo hit counts are wrong in Examples/Memory/Memoize (memo_computed_and_view_copy_examples_agree_across_execution_tiers)"
+    },
     {
       "at": "2026-11-12T10:16:07.441Z",
       "by": "Main",
