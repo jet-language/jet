@@ -49,6 +49,7 @@ use {
         check_pure_program_root,
         sema_check_comptime_item,
         sema_comptime_body_unfoldable,
+        sema_comptime_tree_reads_phase,
         sema_comptime_call_facts_impurity,
         sema_comptime_codec_methods,
         SemaCallSiteFact,
@@ -1014,7 +1015,9 @@ jet_driver_comptime_function_closure: fn(
     waiting := [String]{}
     complete := true
     incomplete := [SemaTotalityRow]{}
-    impurity := String?{None}
+    // A local value whose own initializer reads `#phase` stays run-time code,
+    // as one whose closure does (sema_comptime_body_unfoldable).
+    impurity := if local_value && sema_comptime_tree_reads_phase(request.expression.tree) -> Val("it reads `#phase`, the phase of the copy that runs it") else -> String?{None}
     // #3708: obligations against unannotated callees settle over the closure.
     failure_closure := SemaComptimeFailureClosure{}
     cursor := 0

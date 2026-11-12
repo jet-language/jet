@@ -424,7 +424,9 @@ its copy in the build entry (`build: fn` and what it calls) reads `.Build`,
 and its copy in the program reads `.Runtime`. Each copy folds its own
 `if #phase == ...`, so one helper called from a `#run` binding and from
 `run` returns `.Preparation` to the first and `.Runtime` to the second, and
-`print(#phase)` in `run` prints `Runtime` on every tier.
+`print(#phase)` in `run` prints `Runtime` on every tier. A local in `run`
+whose initializer reads `#phase`, itself or in a function it calls, is never
+computed while compiling, so it holds `.Runtime` too.
 [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet) shows both
 sites, and [`PhaseContract`](../../../Examples/Metaprogramming/Comptime/PhaseContract/run.jet)
 adds the `build: fn` copy, a helper whose copies differ, and a prepared record
