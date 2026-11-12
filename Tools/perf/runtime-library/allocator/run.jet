@@ -1,0 +1,271 @@
+// The Jet twin of Tools/perf/runtime-library/allocator.mjs: the matched
+// runtime-object cell, 1M 64-byte alloc/write/checksum/free operations. One C
+// driver (allocator.c) links against the Jet runtime at O0, at O1, and
+// against Rust's std::alloc (allocator.rs), and each binary runs seven
+// rounds, pinned with taskset, the arm order rotating each round. It reports
+// the numbers and applies no threshold; Main owns performance admission.
+//
+//   jet Tools/perf/runtime-library/allocator/run.jet -- OUTPUT O0_JET_OBJECT O1_JET_OBJECT REMAINING_NATIVE_STATICLIB CPU
+//
+// PQ_JOB, FINAL_E2_SHA and COMPOSED_SHA must be set (the held O1 runtime
+// epoch measure job). OUTPUT gets build.json (the pins and every build step),
+// a log per step, samples.jsonl (one line per run) and result.json, which is
+// also printed. Evidence already in OUTPUT is never overwritten. The exit is
+// 0 when every arm printed the expected checksum in all seven rounds, else 1;
+// a refusal or a failure ends the run with its report on stderr and exit 1.
+package: {
+    name: "runtime_allocator"
+    version: "0.0.1"
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    regex: core.regex
+    sys: core.sys
+    time: core.time
+}
+
+USAGE: "usage: allocator.mjs OUTPUT O0_JET_OBJECT O1_JET_OBJECT REMAINING_NATIVE_STATICLIB CPU"
+ROUNDS: 7
+EXPECTED: "4000024000000\n"
+JET_ENV: "Tools/agent/JetEnv.jet"
+ARMS: [String]{"O0", "O1", "Rust"}
+// spawnSync's maxBuffer for the build steps (16 MiB) and the timed runs (1 MiB).
+STEP_OUTPUT: 16777216
+RUN_OUTPUT: 1048576
+RUN_TIMEOUT_SECONDS: 300
+// The Linux signal names by number, as node names a stopped child's signal.
+SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
+
+// One build step as build.json records it: the exit code or null, the
+// signal's name or null, and why it did not start when it did not.
+#Encode
+Step: struct {
+    name: String
+    rc: Dyn
+    signal: Dyn
+    error: String?
+}
+
+#Encode
+Input: struct {
+    file: String
+    sha256: String
+}
+
+#Encode
+SourceHashes: struct {
+    driver: String
+    rust: String
+}
+
+#Encode
+Inputs: struct {
+    o0: Input
+    o1: Input
+    remaining: Input
+}
+
+#[Encode, Rename(.Camel)]
+Pins: struct {
+    cell: String
+    iterations: Int
+    words: Int
+    align: Int
+    cpu: String
+    final_e2: String
+    composed: String
+    source_hashes: SourceHashes
+    inputs: Inputs
+}
+
+#Encode
+Build: struct {
+    pins: Pins
+    steps: [Step]
+}
+
+// One timed run's samples.jsonl line.
+#[Encode, Rename(.Camel)]
+Sample: struct {
+    arm: String
+    round: Int
+    cpu: String
+    wall_ns: String
+    rc: Dyn
+    signal: Dyn
+    stdout: String
+    stderr: String
+    error: String?
+    verdict: String
+}
+
+// An arm in result.json: its median, least and most only when every round
+// printed the expected checksum.
+#[Encode, Rename(.Camel)]
+Measured: struct {
+    binary: String
+    sha256: String
+    verdict: String
+    samples: [Float]
+    median_ms: Float?
+    min_ms: Float?
+    max_ms: Float?
+}
+
+#Encode
+Arms: struct {
+    #Rename("O0") o0: Measured
+    #Rename("O1") o1: Measured
+    #Rename("Rust") rust: Measured
+}
+
+#Encode
+Ratios: struct {
+    #Rename("O0/Rust") o0: Float?
+    #Rename("O1/Rust") o1: Float?
+}
+
+#[Encode, Rename(.Camel)]
+Result: struct {
+    pins: Pins
+    expected: String
+    arms: Arms
+    ratios: Ratios
+    performance_admission: String
+    verdict: String
+}
+
+Arm: struct {
+    name: String
+    binary: String
+    sha256: String
+    verdict: String
+    samples: [Float]
+}
+
+// How one spawn ended, in spawnSync's terms.
+Ended: struct {
+    rc: Int?
+    signal: String?
+    error: String?
+    output: String
+    errors: String
+}
+
+run: fn() -> Never Err! {
+    args: process.args()
+    if args.len() < 5 || !regex.full_match(Regex{"[0-9]+(?:[-,][0-9]+)*"}, args[4]) -> return Err(USAGE)
+    cpu: args[4]
+    unset: ["PQ_JOB", "FINAL_E2_SHA", "COMPOSED_SHA"].filter(key -> process.env_get_or(key, "") == "")
+    if unset.len() > 0 -> return Err("missing {unset[0]}; run in the held O1 runtime epoch measure job")
+    source: files.dirname(files.dirname(sys.executable()))
+    tree: files.normalize(files.join(source, "../../.."))
+    out: files.resolve(args[0])
+    o0: files.resolve(args[1])
+    o1: files.resolve(args[2])
+    remaining: files.resolve(args[3])
+    if files.exists(files.join(out, "result.json")) || files.exists(files.join(out, "samples.jsonl")) -> return Err("refusing to overwrite cell evidence")
+    files.create_dir_all(out)
+    pins: Pins{
+        cell: "runtime-allocator-64B",
+        iterations: 1000000,
+        words: 8,
+        align: 8,
+        cpu: cpu.copy(),  // copy: the pins own their text
+        final_e2: process.env_get_or("FINAL_E2_SHA", ""),
+        composed: process.env_get_or("COMPOSED_SHA", ""),
+        source_hashes: {driver: hash(files.join(source, "allocator.c")), rust: hash(files.join(source, "allocator.rs"))},
+        inputs: {o0: {file: o0.copy(), sha256: hash(o0)}, o1: {file: o1.copy(), sha256: hash(o1)}, remaining: {file: remaining.copy(), sha256: hash(remaining)}},  // copy: the pins own their text
+    }
+    steps := [Step]{}
+    driver: files.join(out, "allocator-driver.o")
+    rust: files.join(out, "allocator-rust.a")
+    // Every step runs, a failed one too, so build.json records them all.
+    built: [Bool]{
+        step(steps, out, tree, "o0-exports", [JET_ENV, "jet", "run", "Tools/packaging/CheckRuntimeExports.jet", "--", o0, remaining]),
+        step(steps, out, tree, "o1-exports", [JET_ENV, "jet", "run", "Tools/packaging/CheckRuntimeExports.jet", "--", o1, remaining]),
+        step(steps, out, tree, "driver", ["cc", "-std=c11", "-O2", "-fno-lto", "-c", files.join(source, "allocator.c"), "-o", driver]),
+        step(steps, out, tree, "rust", [JET_ENV, "rustc", "--edition=2024", "-C", "opt-level=3", "--crate-type=staticlib", files.join(source, "allocator.rs"), "-o", rust]),
+    }
+    linked := [Bool]{}
+    if built.all(ok -> ok) {
+        loop link in [(arm: "O0", libraries: [o0, remaining]), (arm: "O1", libraries: [o1, remaining]), (arm: "Rust", libraries: [rust])] -> linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
+    }
+    files.write(files.join(out, "build.json"), "{json.stringify(Build{pins: pins.copy(), steps: steps}, 2)}\n")  // copy: result.json repeats the pins
+    if !built.concat(linked).all(ok -> ok) -> process.exit(1)
+    within: out.copy()  // copy: the arms' lambda takes its own
+    arms := ARMS.map(name -> Arm{name: name, binary: files.join(within, name), sha256: hash(files.join(within, name)), verdict: "PASS", samples: [Float]{}})
+    samples: files.join(out, "samples.jsonl")
+    loop round in 0..<ROUNDS {
+        // Rotate the arm order so no one arm owns the startup and cache position.
+        loop j in 0..<ARMS.len() {
+            k: (round + j) %% ARMS.len()
+            started: time.instant()
+            ended: spawn(process.cmd(["taskset", "-c", cpu, arms[k].binary]).output_limit(RUN_OUTPUT).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)), "taskset")
+            elapsed: started.elapsed().ns
+            ok: ended.rc == Val(0) && ended.output == EXPECTED && ended.errors == ""
+            files.append_all(samples, "{json.stringify(Sample{arm: arms[k].name.copy(), round: round + 1, cpu: cpu.copy(), wall_ns: "{elapsed}", rc: ended.rc.encode(), signal: ended.signal.encode(), stdout: ended.output.copy(), stderr: ended.errors.copy(), error: ended.error.copy(), verdict: if ok -> "PASS" else -> "WRONG"}, 0)}\n")  // copy: the arm and the run keep their text
+            if ok -> arms[k].samples.push(Float.from_int(elapsed) / 1000000.0) else -> arms[k].verdict = "WRONG"
+        }
+    }
+    measured := [Measured]{}
+    loop arm in arms {
+        sorted := arm.samples
+        sorted.sort()
+        // The median, least and most, when every round printed the expected checksum.
+        bounds: if arm.verdict == "PASS" && sorted.len() == ROUNDS -> [Float?]{Val(sorted[3]), Val(sorted[0]), Val(sorted[6])} else -> [Float?]{None, None, None}
+        measured.push(Measured{binary: arm.binary, sha256: arm.sha256, verdict: arm.verdict, samples: sorted, median_ms: bounds[0], min_ms: bounds[1], max_ms: bounds[2]})
+    }
+    correct: measured.all(arm -> arm.median_ms != None)
+    result: Result{
+        pins: pins,
+        expected: EXPECTED,
+        ratios: {o0: ratio(measured[0].median_ms, measured[2].median_ms), o1: ratio(measured[1].median_ms, measured[2].median_ms)},
+        arms: {o0: measured[0].copy(), o1: measured[1].copy(), rust: measured[2].copy()},  // copy: the arms list keeps its items
+        performance_admission: "Main-owned; no threshold applied",
+        verdict: if correct -> "CORRECT" else -> "WRONG",
+    }
+    text: json.stringify(result, 2)
+    files.write(files.join(out, "result.json"), "{text}\n")
+    print(text)
+    process.exit(if correct -> 0 else -> 1)
+}
+
+hash: fn(path: String) -[FS]> String Err! { crypto.sha256(files.read_bytes(path)).hex() }
+
+// One build step in the checkout: its output and errors go to OUT/NAME.log,
+// its ending to `steps`. True when it exited 0.
+step: fn(steps: &[Step], out: String, tree: String, name: String, argv: [String]) -[Exec, FS, IO, Time.Wait]> Bool Err! {
+    ended: spawn(process.cmd(argv).cwd(tree).output_limit(STEP_OUTPUT), argv[0])
+    files.write(files.join(out, "{name}.log"), "{ended.output}{ended.errors}")
+    steps.push(Step{name: name, rc: ended.rc.encode(), signal: ended.signal.encode(), error: ended.error})
+    Ok(ended.rc == Val(0))
+}
+
+// A spawnSync of `spec`: the child's exit code or signal name, or the error
+// that kept it from starting or ending (node's `spawnSync PROGRAM CODE`).
+spawn: fn(spec: ProcessSpec, program: String) -[Exec, Time.Wait]> Ended Never! {
+    receipt: spec.run() ?? return Ended{rc: None, signal: None, error: Val("spawnSync {program} {error_code(err)}"), output: "", errors: ""}
+    if receipt.timed_out -> return Ended{rc: None, signal: Val("SIGTERM"), error: Val("spawnSync {program} ETIMEDOUT"), output: receipt.output, errors: receipt.errors}
+    if receipt.signal == .Val(number) -> return Ended{rc: None, signal: Val(SIGNALS.get(number) ?? "SIG{number}"), error: None, output: receipt.output, errors: receipt.errors}
+    Ended{rc: Val(receipt.code), signal: None, error: None, output: receipt.output, errors: receipt.errors}
+}
+
+// The code node names a failed spawn by.
+error_code: fn(failure: IOError) -> String Never! {
+    if failure == {
+        .NotFound(_) -> "ENOENT"
+        .PermissionDenied(_) -> "EACCES"
+        .InvalidInput(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .AlreadyExists(_) | .Unsupported(_) | .ResourceLimit(_) -> "{failure}"
+    }
+}
+
+// The ARM/Rust ratio of the medians, none unless both arms are complete.
+ratio: fn(median: Float?, rust: Float?) -> Float? Never! {
+    if median == .Val(top) && rust == .Val(bottom) -> return Val(top / bottom)
+    None
+}
