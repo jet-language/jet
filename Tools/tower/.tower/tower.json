@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 100000,
+    "rev": 100002,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99565,6 +99565,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T10:46:33.179Z"
+        },
+        {
+          "n": 3,
+          "text": "A build-time constant's payload is mapped read-only: immutable folded data lands in a read-only ELF segment, not a writable one. Found by the D-COMPTIME-SIZE1 review on seed-b13. Proof: readelf of a built binary holding a large folded String shows its bytes in a non-writable PT_LOAD, and a case asserts it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:57:01.480Z"
+        },
+        {
+          "n": 4,
+          "text": "A consumer that needs only a large constant's length does no run-time scan of it. In the ballot program, `big.len()` of a folded 50 MB String folds to its constant, and the emitted IR holds no Unicode scalar count over it. Proof: jet inspect decisions shows the folded length, and a case checks the IR.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:57:03.266Z"
         }
       ],
       "refs": [],
@@ -99573,9 +99591,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T10:56:52.417Z",
+      "updated": "2026-11-12T10:57:03.266Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 4
     },
     {
       "id": "c0yysi3q",
@@ -200695,6 +200713,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:57:03.266Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xphd0i",
+      "note": "#4 A consumer that needs only a large constant's length does no"
+    },
+    {
+      "at": "2026-11-12T10:57:01.480Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xphd0i",
+      "note": "#3 A build-time constant's payload is mapped read-only: immutab"
+    },
     {
       "at": "2026-11-12T10:56:52.417Z",
       "by": "Main",
