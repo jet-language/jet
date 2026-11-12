@@ -119,6 +119,21 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
             }
         }
     }
+    // A path under `.jet/generated/` is what a producer of this build makes,
+    // so a target that compiles one, or a step that reads one, that nothing
+    // makes has no producer, even when an earlier build left a file there.
+    loop target in state.targets {
+        paths := target.sources
+        loop path in target.inputs -> paths.push(path.copy())
+        loop path in paths {
+            if build_session_unproduced(state, owners, path) -> return Val(build_session_missing_producer(path, "the target `{target.name}`", target.start, target.end))
+        }
+    }
+    loop action in state.actions {
+        loop path in action.inputs {
+            if build_session_unproduced(state, owners, path) -> return Val(build_session_missing_producer(path, "the step `{action.name}`", action.start, action.end))
+        }
+    }
     if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.TargetDependencyCycle{nodes: nodes}))
     if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) {
         // Reported at the `b.run` call of the step the chain starts from.
@@ -132,6 +147,21 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
         return Val(diagnostic)
     }
     None
+}
+// Whether `path` is under `.jet/generated/` and no producer of this build
+// makes it: no generated module (`b.generate`, `meta.add`,
+// `meta.rewrite_body`) and no step's declared output (`owners`).
+build_session_unproduced: fn(state: BuildSessionState, owners: [String:Int], path: String) -> Bool Never! {
+    if !path.starts_with(".jet/generated/") || owners.get(path) == .Val(_) -> return false
+    loop generated in state.generated {
+        if generated.path == path -> return false
+    }
+    true
+}
+// E3515, at the call that declared `user`, the target or step that uses the
+// path.
+build_session_missing_producer: fn(path: String, user: String, start: Int, end: Int) -> BuildSessionDiagnostic Never! {
+    {code: "E3515", what: "Nothing in this build makes `{path}`, which {user} uses", why: "A file under `.jet/generated/` is what this build's producers make, so one that none of them makes is stale or was never made, and nothing checks it", fix: "Restore the `b.generate`, `meta.add` or step output that made `{path}`, or remove it from {user}", start: start, end: end}
 }
 build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     targets := [BuildGraphTarget]{}

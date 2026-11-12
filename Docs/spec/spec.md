@@ -6098,12 +6098,14 @@ two names that share one path, and a step that writes a generated module's path
 are E3511, reported at the call that makes the second claim, before any step
 runs or any generated file is written; an empty name or item block is E3502.
 Steps that wait on each other are E3502 at the `b.run` call of the step the
-cycle starts from. A generated module that would shadow a hand-written one is
-E3510. When `run` or another hand-written function uses a module the build
-never made because it refused a call, the refusal is reported first and the
-check report follows. `--locked` checks generated input and output hashes before
-materializing and records provenance after the complete runtime bundle is
-checked (D-BUILDENTRY1).
+cycle starts from. A target source or an input under `.jet/generated/` that no
+`b.generate`, `meta.add` or step output makes is E3515, at the call that
+declared the target or step that uses it. A generated module that would shadow
+a hand-written one is E3510. When `run` or another hand-written function uses
+a module the build never made because it refused a call, the refusal is
+reported first and the check report follows. `--locked` checks generated input
+and output hashes before materializing and records provenance after the
+complete runtime bundle is checked (D-BUILDENTRY1).
 
 ### Remote execution and plugins
 

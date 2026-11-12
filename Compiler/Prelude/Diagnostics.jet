@@ -7158,6 +7158,21 @@ RewriteWithoutConsent: struct {
     }
 }
 
+MissingProducer: struct {
+    path: String
+    user: String
+
+    impl Diagnostic {
+        code: "E3515"
+        stage: [.Build]
+        meaning: "A target or step uses a `.jet/generated/` path that nothing in the build makes"
+        detail: true
+        what: fn(self) -> String { "Nothing in this build makes `{self.path}`, which {self.user} uses" }
+        why: fn(self) -> String { "A file under `.jet/generated/` is what this build's producers make, so one that none of them makes is stale or was never made, and nothing checks it" }
+        fix: fn(self) -> String { "Restore the `b.generate`, `meta.add` or step output that made `{self.path}`, or remove it from {self.user}" }
+    }
+}
+
 ReservedBuildRuleCode: struct {
     code: String
 

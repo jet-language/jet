@@ -292,7 +292,7 @@ build_session_add_target: fn(state: &BuildSessionState, method: String, args: [B
     if args.len() >= 4 -> deps = build_session_handles(state, args, 3, "BuildTarget") ?? return build_session_fail(state, "target dependencies do not belong to this build")
     if args.len() >= 5 -> probes = build_session_handles(state, args, 4, "BuildProbe") ?? return build_session_fail(state, "target probes do not belong to this build")
     if args.len() >= 6 -> toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "target toolchain does not belong to this build")
-    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None})
+    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None, start: state.start, end: state.end})
 }
 
 build_session_insert_target: fn(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
