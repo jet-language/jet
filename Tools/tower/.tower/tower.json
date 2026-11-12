@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100055,
+    "rev": 100059,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77078,12 +77078,12 @@
         },
         {
           "n": 6,
-          "text": "Owner order 2026-10-30: for every program in the size corpus (hello plus one program per required perf cell, each with a hand-written, optimized x86-64 assembly reference committed beside it), the default jet build is within 2x of the assembly reference size (target 1.5x). Every byte category above the reference is listed with the reason this program needs it.",
+          "text": "For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it that delivers the same features, fault reporting included), the default jet build holds only the code the program reaches: its size is at most the assembly reference size (Jet/ceiling at most 1.00 in bytes). Every byte category above the reference is listed with the root that keeps it and the card that removes it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T00:36:46.026Z"
+          "at": "2026-11-12T18:44:36.126Z"
         },
         {
           "n": 7,
@@ -77264,6 +77264,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:51:48.359Z"
+        },
+        {
+          "n": 28,
+          "text": "Hash reach: a program calling only crypto.sha256 links only SHA-256. Measured by Main on seed-b13, 2026-11-12 ($JET_SCRATCH_ROOT/lanes/Main/bin14/sha): 229,680 B with 183 KB .text, of which __core_crypto_md_compress (21.6 KB), md_hash_finish (16.5 KB), ripemd160_blocks (11.8 KB), md_hash (9.3 KB), sha512_blocks (6.7 KB) and keccak_absorb (6.7 KB) are other algorithms or a generic dispatch over all of them. The fix is in the general mechanism (a call whose algorithm is known statically reaches only that algorithm, through every Core layer), proven on sha256 alone and on a second program using a different hash family member.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T18:44:37.062Z"
+        },
+        {
+          "n": 29,
+          "text": "Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: core_encoding_json_parse_string 21,323 B, __core_encoding_stream_jcs_number 37,759 B, core_regex_scan 35,189 B, unit_unicode_upper_mapping and lower_mapping 28-29 KB each, and MemorySafetyFuzz_run_memory_safety_fuzz_axis 58,080 B. A dated breakdown names, for each function over 4 KB in the tool-twin binaries, what the bytes are (inlined callees, unrolled loops, tables as code, checks) and the general codegen or Core rule that shrinks it; each fix shows the gain on two programs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T18:44:37.916Z"
+        },
+        {
+          "n": 30,
+          "text": "Tool twins as binaries: every landed #5072 tool twin is recorded with its default jet build size, its function count and its run wall and peak against its original, beside the hand-written reference of c6. Baseline by Main on seed-b13, 2026-11-12: memory-safety-fuzz 1,850,952 B (1,141 functions, 1.51 MB .text), run-policy 757,008 B (700), timer 752,464 B (848 functions; it links base64, SHA-2 and JSON writers it does not need for a process timer); the hello floor is 37,648 B (56 functions, 24 KB .text, of which the production receipt renderer, writer and publisher are 3.5 KB).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T18:44:38.806Z"
         }
       ],
       "refs": [],
@@ -77274,9 +77301,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-11T12:45:12.175Z",
+      "updated": "2026-11-12T18:44:38.806Z",
       "updatedBy": "Main",
-      "criteriaLastN": 27
+      "criteriaLastN": 30
     },
     {
       "id": "c0l7lwif",
@@ -200284,6 +200311,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T18:44:38.806Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#30 Tool twins as binaries: every landed #5072 tool twin is reco"
+    },
+    {
+      "at": "2026-11-12T18:44:37.916Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#29 Per-function code size: no Core or generated function carrie"
+    },
+    {
+      "at": "2026-11-12T18:44:37.062Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#28 Hash reach: a program calling only crypto.sha256 links only "
+    },
+    {
+      "at": "2026-11-12T18:44:36.126Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c08r6ogl",
+      "note": "#6: Owner 2026-11-12: a binary holds literally only the bits it needs, as hand-optimized machine code would; no full modules. Replaces the 2x/1.5x band.; was: Owner order 2026-10-30: for every program in the size corpus (hello plus one program per required perf cell, each with a hand-written, optimized x86-64 assembly reference committed beside it), the def"
+    },
     {
       "at": "2026-11-12T17:56:24.996Z",
       "by": "Main",
