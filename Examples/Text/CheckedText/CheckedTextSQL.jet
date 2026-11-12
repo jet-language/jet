@@ -1,10 +1,14 @@
 // SQL and HTML are library-defined,
 // nominal String-backed types with ordinary `CheckedText` implementations.
-// Ordinary `{hole}` values are encoded by the checked type. An `HTML` hole
+// Ordinary `{hole}` values are encoded by the checked type: each SQL hole is
+// one bound parameter, in written order, and never spliced into the
+// template. A hole-free body is checked text too, and a backslash in the
+// body is SQL text as written, not a string escape. An `HTML` hole
 // composes directly. A runtime `String` can never fill a checked-text position.
 run_query: fn(q: SQL) {
     print("template: {q.template()}")
     print("param count: {q.params().len()}")
+    loop param in q.params() -> print("param: {param}")
 }
 
 render: fn(h: HTML) { print("html: {h.text()}") }
@@ -13,6 +17,10 @@ run: fn() {
     id: 42
     q: SQL{"select * from incidents where id = {id}"}
     run_query(q)
+    owner: "o'brien"
+    run_query(SQL{"select * from incidents where id = {id} and owner = {owner}"})
+    run_query(SQL{"select count(*) from incidents"})
+    run_query(SQL{"select * from files where path like 'C:\temp\%'"})
     name: "<script>alert(1)</script>"
     page: HTML{"<p>{name}</p>"}
     render(page)
