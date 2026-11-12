@@ -752,7 +752,7 @@ jet_driver_build_settings: fn(package: JetDriverPackageInfo, profile: String, co
     settings := [SemaBuildSetting]{}
     loop setting in package.settings {
         writers: jet_driver_setting_writers(package, setting, profile, contributions, overrides)
-        settings.push(SemaBuildSetting{name: setting.name, ty: setting.ty, value: jet_driver_setting_effective_text(writers)})
+        settings.push(jet_driver_setting_effective(setting, writers))
     }
     settings
 }

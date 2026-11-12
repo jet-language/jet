@@ -733,11 +733,25 @@ SemaBuildFacts: struct {
 }
 
 // One declared setting: its type as written (`Bool`, `Int`, `Char`,
-// `String` or a fieldless enum) and its value's text for this build.
+// `String` or a fieldless enum), its value's text for this build, its
+// declared default's text, and each writer of its chain from least to most
+// explicit layer, the one the contribution law selected marked.
 SemaBuildSetting: struct {
     name: String
     ty: String
     value: String
+    default: String
+    contributions: [SemaSettingContribution]
+}
+
+// One writer of a setting: its value's text, where it is written, its layer
+// as a ContributionKind variant (`Declaration`, `Profile`, `Build` or
+// `CommandLine`) and whether the contribution law selected it.
+SemaSettingContribution: struct {
+    value: String
+    source: String
+    kind: String
+    selected: Bool
 }
 
 // `debug(…)` traces are development-only. A shipped artifact or a

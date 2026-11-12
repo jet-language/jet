@@ -1,0 +1,31 @@
+// `b.program.packages()` lists the built package's settings: each one's type
+// as written, its default, the value this build selected, and every writer
+// of the value with its kind and where it is written, the selected one
+// marked `*`. Fn build writes `report` itself, so it reads the others.
+build: fn(b: Build) {
+    report := ""
+    loop package in b.program.packages() {
+        if package.name != "package_settings" -> next
+        loop setting in package.settings {
+            if setting.name == "report" -> next
+            written := ""
+            loop contribution in setting.contributions {
+                kind: if contribution.kind == {
+                    .Declaration -> "declaration"
+                    .Profile -> "profile"
+                    .Build -> "build"
+                    .CommandLine -> "command line"
+                }
+                mark: if contribution.selected -> "*" else -> ""
+                written = "{written} {kind}{mark}={contribution.value} at {contribution.source}"
+            }
+            if report != "" -> report = "{report} | "
+            report = "{report}{setting.name}: {setting.type} = {setting.selected}, default {setting.default};{written}"
+        }
+    }
+    b.contribute("report", report)
+}
+
+run: fn() {
+    print(#build.settings.report)
+}

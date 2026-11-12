@@ -130,7 +130,14 @@ vocabulary](vocabulary.md).
   module (Examples/Metaprogramming/Reflection/PackageMarker). fn build's
   `b.program.packages()` holds one PackageInfo per package: its `name`,
   `identity` and `version`, the ModuleInfo of each of its file `modules`,
-  and all their `types` and `functions`.
+  all their `types` and `functions`, and its `settings`. Each SettingInfo
+  names a declared setting, its `type` as written, its `default`, the value
+  this build `selected`, and its `contributions`: one ContributionInfo per
+  writer, least explicit first, with its `value`, its `source` (where it is
+  written), its `kind` (ContributionKind: `Declaration`, `Profile`, `Build`
+  or `CommandLine`) and whether it is the `selected` writer. The build takes
+  its settings from the built package alone, so any other package lists none
+  (Examples/Metaprogramming/Reflection/PackageSettings).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,

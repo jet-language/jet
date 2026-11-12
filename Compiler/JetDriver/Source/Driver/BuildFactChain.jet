@@ -1,10 +1,11 @@
 // One writer chain per build fact. The settings fold (jet_driver_build_settings)
-// reads the effective writer's text, and `jet explain <fact>` resolves and
-// prints the whole chain through the one contribution law (pkg_fact_resolve).
+// reads the effective writer's text and lists every writer, and `jet explain
+// <fact>` resolves and prints the whole chain through the one contribution
+// law (pkg_fact_resolve).
 use {
     jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE]
     jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, LockedBuildContribution, SourceScope, pkg_fact_resolve]
-    jet_sema.[SemaBuildFacts]
+    jet_sema.[SemaBuildFacts, SemaBuildSetting, SemaSettingContribution]
 }
 
 // One writer of a declared setting: its contribution and the value's text as
@@ -45,22 +46,42 @@ jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: Cont
     JetDriverSettingWriter{contribution: contribution, text: text}
 }
 
-// The text of the writer the contribution law selects. A chain the law
-// refuses is reported before any compile reads it
-// (jet_driver_setting_override_diagnostics); its last writer stands in.
-jet_driver_setting_effective_text: fn(writers: [JetDriverSettingWriter]) -> String Never! {
-    if writers.len() == 0 -> return ""
+// `setting` as the build reads it: the text of the writer the contribution
+// law selects, its declared default, and every writer with its layer, the
+// selected one marked. A chain the law refuses is reported before any compile
+// reads it (jet_driver_setting_override_diagnostics); its last writer stands
+// in.
+jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [JetDriverSettingWriter]) -> SemaBuildSetting Never! {
+    if writers.len() == 0 -> return SemaBuildSetting{name: setting.name, ty: setting.ty, value: setting.default, default: setting.default, contributions: [SemaSettingContribution]{}}
     contributions := [FactContribution]{}
     loop writer in writers -> contributions.push(writer.contribution)
+    at := writers.len() - 1
     if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Ok(resolved) {
         if resolved == .Val(fact) {
             effective: fact.provenance[fact.effective]
-            loop writer in writers {
-                if writer.contribution.layer == effective.layer && writer.contribution.source == effective.source -> return writer.text
+            loop (index, writer) in writers {
+                if writer.contribution.layer == effective.layer && writer.contribution.source == effective.source {
+                    at = index
+                    break
+                }
             }
         }
     }
-    writers[writers.len() - 1].text
+    rows := [SemaSettingContribution]{}
+    loop (index, writer) in writers {
+        rows.push(SemaSettingContribution{value: writer.text, source: writer.contribution.source, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
+    }
+    SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
+}
+
+// The ContributionKind variant of a setting writer's layer
+// (jet_driver_setting_writers): the declaration's default, the selected
+// `build:` profile, the package's `build: fn`, or a `--set`.
+jet_driver_setting_contribution_kind: fn(layer: ContributionLayer) -> String Never! {
+    if layer == .OptimizationBundle -> return "Profile"
+    if layer == .Environment -> return "Build"
+    if layer == .CommandLine -> return "CommandLine"
+    "Declaration"
 }
 
 // A declared setting's text as the contribution law compares and prints it,

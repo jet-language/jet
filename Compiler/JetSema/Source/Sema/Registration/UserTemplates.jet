@@ -654,9 +654,9 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
 
 // The entry package's PackageInfo, the record ProgramInfo lists for it: its
 // name, identity and version, a ModuleInfo for each of its modules in load
-// order, and the TypeInfo of each struct, enum and distinct type and the
-// FunctionInfo of each function its modules write. A file module carries no
-// written markers.
+// order, the TypeInfo of each struct, enum and distinct type and the
+// FunctionInfo of each function its modules write, and its effective
+// settings with their origins. A file module carries no written markers.
 sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
     modules := [CtValue]{}
     types := [CtValue]{}
@@ -699,6 +699,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
         NamedCtValue{name: "modules", value: CtValue.List{values: modules}},
         NamedCtValue{name: "types", value: CtValue.List{values: types}},
         NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
+        NamedCtValue{name: "settings", value: sema_user_template_ct_value(TComptimeValue.List{values: sema_comptime_reflection_setting_infos(graph.build_facts.settings)}) ?? return None},
     }})
 }
 

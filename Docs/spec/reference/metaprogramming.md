@@ -425,6 +425,20 @@ reads `target.marker(T)` at every site kind a marker body runs on, and
 [`PackageMarker`](../../../Examples/Metaprogramming/Reflection/PackageMarker/run.jet)
 runs one on the package record: a header line above `package.jet`'s first
 field.
+A PackageInfo's `settings` lists the built package's settings, one
+SettingInfo each: the setting's `name`, its `type` as written, its `default`,
+the value this build `selected`, and its `contributions`, one ContributionInfo
+per writer from least to most explicit. A ContributionInfo has the writer's
+`value`, its `source`, where the value is written (such as
+`package.jet:build.release.settings.level`), its `kind`
+(`ContributionKind.Declaration`, `.Profile`, `.Build` for the package's
+`build: fn`, or `.CommandLine` for `--set`) and `selected`, true for the
+writer the contribution law chose. Values are the setting's text as written.
+The build reads settings from the built package alone, so a dependency's
+PackageInfo lists none.
+[`PackageSettings`](../../../Examples/Metaprogramming/Reflection/PackageSettings/run.jet)
+prints each setting with its writers; under `--release` the profile's value
+is selected.
 [`ConsoleRegistry`](../../../Examples/Metaprogramming/Reflection/ConsoleRegistry/run.jet)
 builds a command registry this way in a plain library: `#CLI.Console` on a
 type reads its methods marked `#CLI.Command` and writes `run`, which parses

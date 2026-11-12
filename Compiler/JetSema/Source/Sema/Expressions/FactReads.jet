@@ -113,6 +113,7 @@ sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
         enum_name == "ParamZone" -> Val([String]{"PositionalOnly", "Either", "LabelOnly"})
         enum_name == "ParamAccess" -> Val([String]{"Read", "Write", "Move"})
         enum_name == "CallingConvention" -> Val([String]{"Jet", "Kernel", "Foreign"})
+        enum_name == "ContributionKind" -> Val([String]{"Declaration", "Profile", "Build", "CommandLine"})
         enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
         else -> None
     }
@@ -451,6 +452,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "modules" -> Val(sema_fact_list_of("ModuleInfo"))
             field == "types" -> Val(sema_fact_list_of("TypeInfo"))
             field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
+            field == "settings" -> Val(sema_fact_list_of("SettingInfo"))
             else -> None
         }
     }
@@ -460,6 +462,21 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "types" -> Val(sema_fact_list_of("TypeInfo"))
             field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            else -> None
+        }
+    }
+    if type_name == "SettingInfo" {
+        return if {
+            field == "name" || field == "type" || field == "default" || field == "selected" -> Val(string)
+            field == "contributions" -> Val(sema_fact_list_of("ContributionInfo"))
+            else -> None
+        }
+    }
+    if type_name == "ContributionInfo" {
+        return if {
+            field == "value" || field == "source" -> Val(string)
+            field == "kind" -> Val(sema_fact_named("ContributionKind"))
+            field == "selected" -> Val(Type.Bool)
             else -> None
         }
     }

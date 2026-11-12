@@ -960,6 +960,26 @@ sema_comptime_reflection_param_info: fn(param: Param) -> TComptimeValue Never! {
     })
 }
 
+// The built package's settings (SemaBuildFacts.settings) as SettingInfo
+// records: each declared setting's name, its type as written, its default's
+// text, the text this build selected, and a ContributionInfo for each writer
+// of its chain: the value's text, where it is written, its ContributionKind
+// and whether the contribution law selected it.
+sema_comptime_reflection_setting_infos: fn(settings: [SemaBuildSetting]) -> [TComptimeValue] Never! {
+    loop setting in settings -> sema_comptime_reflection_struct("SettingInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: setting.name}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: setting.ty}},
+        SemaComptimeReflectionField{name: "default", value: TComptimeValue.String{value: setting.default}},
+        SemaComptimeReflectionField{name: "selected", value: TComptimeValue.String{value: setting.value}},
+        SemaComptimeReflectionField{name: "contributions", value: TComptimeValue.List{values: loop writer in setting.contributions -> sema_comptime_reflection_struct("ContributionInfo", [SemaComptimeReflectionField]{
+            SemaComptimeReflectionField{name: "value", value: TComptimeValue.String{value: writer.value}},
+            SemaComptimeReflectionField{name: "source", value: TComptimeValue.String{value: writer.source}},
+            SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "ContributionKind", variant: writer.kind, args: [TComptimeEnumArg]{}}},
+            SemaComptimeReflectionField{name: "selected", value: TComptimeValue.Bool{value: writer.selected}},
+        })}},
+    })
+}
+
 sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("TypeParamInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: parameter.name}},
