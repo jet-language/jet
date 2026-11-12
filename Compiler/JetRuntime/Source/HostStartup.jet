@@ -109,7 +109,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool, restart
         // The envp array is word aligned: bit 0 tells capture it is a main's.
         _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
     }
-    rt_test_reads_arm(envp)
+    rt_test_reads_arm(envp, main)
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argc = count
     }
@@ -428,28 +428,47 @@ host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
 // (ProductionReceipt.jet) links neither the environment capture nor the
 // allocator.
 host_startup_environment_value: fn(key: I64) -> I64 {
-    if (host_envp_lives == I64{0} || host_envp == I64{0}) -> return I64{0}
-    key_data: rt_text_data(key)
-    key_length: rt_text_len(key)
-    index := I64{0}
-    loop {
-        entry := I64{0}
-        #Unsafe("a main's startup envp is a live, null-terminated pointer array") {
-            entry = os_load_i64(wrapping(host_envp + index * I64{8}))
+    if (host_envp_lives == I64{0}) -> return I64{0}
+    value: host_envp_value(host_envp, rt_text_data(key), rt_text_len(key))
+    if (value == I64{0}) -> return I64{0}
+    length: host_startup_byte_length(value)
+    at := I64{0}
+    loop at < length {
+        width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
+        if (width < I64{0}) -> return I64{0}
+        at = wrapping(at + width)
+    }
+    value
+}
+
+// The raw value bytes of the first row named `key` in the null-terminated
+// envp pointer array `envp`, or 0. A row's name ends at its first `=` after
+// byte zero (host_environment_split), so a key with `=` after byte zero names
+// no row. A row is compared only when its first byte matches, and the compare
+// stops at the row's NUL, so it never reads past a row.
+host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
+    if (envp == I64{0} || key_length == I64{0}) -> return I64{0}
+    at := I64{1}
+    first := I64{0}
+    #Unsafe("key_data lends key_length bytes") {
+        loop at < key_length {
+            if (os_load_u8(wrapping(key_data + at)) == I64{61}) -> return I64{0}
+            at = wrapping(at + I64{1})
         }
-        if (entry == I64{0}) -> return I64{0}
-        if (host_environment_split(entry) == key_length && rt_text_equal_bytes(entry, key_data, key_length)) {
-            value: wrapping(entry + key_length + I64{1})
-            length: host_startup_byte_length(value)
-            at := I64{0}
-            loop at < length {
-                width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
-                if (width < I64{0}) -> return I64{0}
-                at = wrapping(at + width)
+        first = os_load_u8(key_data)
+    }
+    cursor := envp
+    #Unsafe("envp is a live null-terminated pointer array of NUL-terminated rows") {
+        loop {
+            entry: os_load_i64(cursor)
+            if (entry == I64{0}) -> return I64{0}
+            if (os_load_u8(entry) == first) {
+                at = I64{1}
+                loop at < key_length && os_load_u8(wrapping(entry + at)) == os_load_u8(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
+                if (at == key_length && os_load_u8(wrapping(entry + key_length)) == I64{61}) -> return wrapping(entry + key_length + I64{1})
             }
-            return value
+            cursor = wrapping(cursor + I64{8})
         }
-        index = wrapping(index + I64{1})
     }
 }
 

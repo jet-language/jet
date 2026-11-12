@@ -2,8 +2,9 @@
 // most 32 bits and therefore already have the inline exact-Int carrier form.
 // Shared output is drained before every child/blocking/exit syscall here.
 host_call: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
-    // `jet test`'s read recorder (TestReads.jet) sees every path syscall here.
-    if (test_reads_fd >= I64{0}) -> rt_test_reads_call(number, a1, a2, a3)
+    // `jet test`'s read recorder (TestReads.jet) sees every path syscall here;
+    // the first host call of a main resolves it.
+    if (test_reads_fd != I64{-1}) -> rt_test_reads_call(number, a1, a2, a3)
     #Unsafe("the audited caller supplies the Linux syscall's valid word arguments") {
         return os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
     }
