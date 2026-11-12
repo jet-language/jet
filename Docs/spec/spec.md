@@ -121,8 +121,13 @@ vocabulary](vocabulary.md).
   derive reads there: a struct's or enum's TypeInfo, a field's or variant's
   FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
   TypeInfo, a code module's ModuleInfo (`name`, `identity`, `types`,
-  `functions` and its written `markers`), and a `.Block`'s text
-  (Examples/Metaprogramming/Reflection/MarkerSites.jet). fn build's
+  `functions` and its written `markers`), the package's PackageInfo for a
+  `.Package` marker, and a `.Block`'s text
+  (Examples/Metaprogramming/Reflection/MarkerSites.jet). A marker on the
+  package record is a header line above `package.jet`'s first field
+  (`#Stamp("package")`, D-PACKAGE-MARKER1=A); it resolves in the entry
+  module, is placed in `package.jet`, and what it generates joins the entry
+  module (Examples/Metaprogramming/Reflection/PackageMarker). fn build's
   `b.program.packages()` holds one PackageInfo per package: its `name`,
   `identity` and `version`, the ModuleInfo of each of its file `modules`,
   and all their `types` and `functions`.

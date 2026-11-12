@@ -1,0 +1,24 @@
+// A marker on the package record runs its `expand` over the package's
+// PackageInfo; its refusal points at its header line in package.jet.
+Unreleased: struct {
+    impl Diagnostic {
+        code: "E0927"
+        what: fn(self) -> String { "this package is not released yet" }
+        why: fn(self) -> String { "the release rule rejects a 0.x version" }
+        fix: fn(self) -> String { "publish a 1.0 version" }
+    }
+}
+
+Released: struct {
+    impl Marker {
+        sites: [.Package]
+
+        expand: fn(self, target: Target) {
+            if target.version.starts_with("0.") {
+                reject(Unreleased{})
+            }
+        }
+    }
+}
+
+run: fn() {}

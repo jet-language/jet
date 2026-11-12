@@ -3,8 +3,9 @@
 // read the type's name, kind, identity, module, field and marker counts, and
 // the typed `marker(Label)` argument, and each prints the same line. A type
 // without `Label` reads `marker(Label)` as None at every rung. fn build also
-// reads `marker(Label)` on a function's FunctionInfo, and the package's one
-// PackageInfo: its name, version, modules and types.
+// reads `marker(Label)` on a function's FunctionInfo; fn build and a marker
+// on the package record (package.jet's `#FromPackage`) read the package's
+// one PackageInfo, its name, version, modules and types, the same way.
 Label: struct {
     text: String
 
@@ -27,6 +28,21 @@ FromMarker: struct {
             seen: "{target.name} {target.kind} {target.identity} {target.module} fields={target.fields.len()} markers={target.markers.len()} label={label}"
             impl Rungs {
                 from_marker: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+// The marker-body rung on the package record: its `expand` reads the
+// package's PackageInfo and adds a method to `Rungs`.
+FromPackage: struct {
+    impl Marker {
+        sites: [.Package]
+
+        expand: fn(self, target: Target) {
+            seen: "{target.name} {target.version} modules={target.modules.len()} types={target.types.len()}"
+            impl Rungs {
+                from_package: fn() -> String { #{seen} }
             }
         }
     }
@@ -93,6 +109,7 @@ run: fn() {
     print("build:    {#build.settings.seen}")
     print("derive:   {Plain{value: 3}.described()}")
     print("comptime: {PLAIN}")
-    print("package:  {#build.settings.package}")
+    print("package marker: {Rungs.from_package()}")
+    print("package build:  {#build.settings.package}")
     print("function: {#build.settings.function}")
 }

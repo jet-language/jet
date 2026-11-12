@@ -37,6 +37,7 @@ use jet_foundation.[
     TComptimeValue,
     TraitImplBlock,
     diagnostic_with_detail,
+    diagnostic_with_source_path,
     expr_span,
     import_walk_bindings,
 ]
@@ -651,6 +652,81 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
     }})
 }
 
+// The entry package's PackageInfo, the record ProgramInfo lists for it: its
+// name, identity and version, a ModuleInfo for each of its modules in load
+// order, and the TypeInfo of each struct, enum and distinct type and the
+// FunctionInfo of each function its modules write. A file module carries no
+// written markers.
+sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
+    modules := [CtValue]{}
+    types := [CtValue]{}
+    functions := [CtValue]{}
+    loop module_index in 0..<graph.modules.len() {
+        module_row: graph.modules[module_index]
+        if module_row.package_identity != graph.package_identity -> next
+        registry := SemaScopeMembersMarkerRegistry?{None}
+        module_types := [CtValue]{}
+        module_functions := [CtValue]{}
+        loop item in module_row.program.items {
+            if item == {
+                .Struct(definition) -> module_types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? return None)
+                .Enum(definition) -> module_types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? return None)
+                .Distinct(definition) -> module_types.push(sema_user_template_type_info(graph, module_index, definition.name) ?? return None)
+                .Func(function) -> {
+                    if function.name == "build" -> next
+                    markers: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), function.markers, registry) ?? return None
+                    module_functions.push(sema_user_template_function_info(function, module_row, markers) ?? return None)
+                }
+                .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
+        }
+        // copy: each declaration is listed twice, in its module and in the package.
+        types.extend(module_types.copy())
+        // copy: as above, for the functions.
+        functions.extend(module_functions.copy())
+        modules.push(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
+            NamedCtValue{name: "name", value: CtValue.Str{value: module_row.module_name}},
+            NamedCtValue{name: "identity", value: CtValue.Str{value: module_row.module_name}},
+            NamedCtValue{name: "types", value: CtValue.List{values: module_types}},
+            NamedCtValue{name: "functions", value: CtValue.List{values: module_functions}},
+            NamedCtValue{name: "markers", value: CtValue.List{values: [CtValue]{}}},
+        }})
+    }
+    Val(CtValue.Struct{type_name: "PackageInfo", fields: [NamedCtValue]{
+        NamedCtValue{name: "name", value: CtValue.Str{value: graph.build_facts.package_name}},
+        NamedCtValue{name: "identity", value: CtValue.Str{value: graph.package_identity}},
+        NamedCtValue{name: "version", value: CtValue.Str{value: graph.build_facts.package_version}},
+        NamedCtValue{name: "modules", value: CtValue.List{values: modules}},
+        NamedCtValue{name: "types", value: CtValue.List{values: types}},
+        NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
+    }})
+}
+
+// The package site: each marker `package.jet`'s header writes
+// (SemaBuildFacts.package_markers, bound by sema_marker_package_check) runs
+// over the entry package's PackageInfo. What it generates joins the entry
+// module; its refusals point at its header line in `package.jet`. The
+// package's dependencies were fixed before any template ran, so a template
+// can't change them.
+sema_user_rule_expand_package: fn(graph: &SemaRegistrationGraph) {
+    if graph.build_facts.package_markers.len() == 0 -> return
+    entry: sema_registration_module_index(graph, graph.entry_module_identity) ?? return
+    generated := [Item]{}
+    diagnostics := [Diagnostic]{}
+    package_info := CtValue?{None}
+    loop marker in graph.build_facts.package_markers {
+        if marker.negated || marker.declaration_module == None -> next
+        rule: sema_user_rule_body(graph, graph.entry_module_identity, marker) ?? next
+        if package_info == None -> package_info = sema_user_template_package_info(graph)
+        info: package_info ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics) ?? next
+        if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
+        sema_user_rule_accept(graph.modules[entry].program.items, marker.name, None, marker.span, expanded, generated, diagnostics)
+    }
+    loop index in 0..<diagnostics.len() -> graph.diagnostics.push(diagnostic_with_source_path(diagnostics[index], graph.build_facts.package_manifest, 0))
+    sema_user_template_register(graph, entry, generated, [Diagnostic]{})
+}
+
 // The record named `member` in the `list` field ("fields" or "methods") of
 // a TypeInfo.
 sema_user_template_member_info: fn(type_info: CtValue?, list: String, member: String) -> CtValue? Never! {
@@ -872,6 +948,7 @@ sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
     }
     if !has_any_rule_body -> return
     loop module_index in 0..<graph.modules.len() -> sema_user_rule_expand_module(graph, module_index)
+    sema_user_rule_expand_package(graph)
     // A rule's warning-severity `reject` reports without failing the graph.
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)
 }

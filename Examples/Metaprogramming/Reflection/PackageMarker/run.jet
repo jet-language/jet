@@ -1,0 +1,27 @@
+// A marker's `expand` body runs on the package record too: `#Stamp` in
+// package.jet's header reads the package's PackageInfo (its name, version
+// and modules) and adds a function to `Stamps`, as it would at any other
+// site (MarkerSites.jet).
+Stamp: struct {
+    label: String
+
+    impl Marker {
+        sites: [.Package]
+
+        expand: fn(self, target: Target) {
+            made: "stamp_{self.label}"
+            seen: "{self.label} saw {target.name} {target.version} modules={target.modules.len()}"
+            impl Stamps {
+                #{made}: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+Stamps: struct {
+
+}
+
+run: fn() {
+    print(Stamps.stamp_package())
+}

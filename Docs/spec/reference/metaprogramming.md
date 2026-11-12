@@ -390,9 +390,14 @@ read gives the same answer in a marker body, a marker that adds methods, a
 comptime constant and `build: fn`, as
 [`ReflectionRungs`](../../../Examples/Metaprogramming/Reflection/ReflectionRungs/run.jet)
 shows: each rung reads the type's name, kind, identity, module, field and
-marker counts and `marker(Label)?.text`, and prints the same line.
+marker counts and `marker(Label)?.text`, and prints the same line; a marker
+on the package record and fn build read the package's PackageInfo the same
+way.
 [`MarkerSites`](../../../Examples/Metaprogramming/Reflection/MarkerSites.jet)
-reads `target.marker(T)` at every site kind a marker body runs on.
+reads `target.marker(T)` at every site kind a marker body runs on, and
+[`PackageMarker`](../../../Examples/Metaprogramming/Reflection/PackageMarker/run.jet)
+runs one on the package record: a header line above `package.jet`'s first
+field.
 
 `M.reflect().uses` lists every use of the marker struct `M` in the whole
 program, a library's uses in the app build included. Each entry is a
