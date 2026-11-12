@@ -49,6 +49,9 @@ TEXT_OPEN: Regex{"^        (what|why|fix): fn\(self\) -> String \{{$"}
 TEXT_BODY: Regex{"^            (\x22.*\x22)$"}
 LITERAL: Regex{"^\x22((?:[^\x22\\]|\\.)*)\x22$"}
 CASE: Regex{"^\.([A-Z][A-Za-z]*)$"}
+// `structured_fix: .Replace{from: "…", to: "…"}` and `.Remove{text: "…"}`.
+REPLACE_FIX: Regex{"^\.Replace\{{from: (\x22(?:[^\x22\\]|\\.)*\x22), to: (\x22(?:[^\x22\\]|\\.)*\x22)\}}$"}
+REMOVE_FIX: Regex{"^\.Remove\{{text: (\x22(?:[^\x22\\]|\\.)*\x22)\}}$"}
 STAGE_LIST: Regex{"^\[(\.[A-Z][a-z]*(?:, \.[A-Z][a-z]*)*)\]$"}
 LINT_NAME: Regex{"^[a-z][a-z0-9_]*$"}
 
@@ -263,7 +266,7 @@ constant_literal: fn(source: DiagnosticSource, name: String, fallback: String) -
 
 render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     context: "{source.name}: struct"
-    known: [String]{"code", "severity", "lint_name", "stage", "moment", "status", "meaning", "detail", "edit", "edit_from", "edit_to", "no_fix", "fix_next", "fix_safety"}
+    known: [String]{"code", "severity", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety"}
     loop constant in source.constants {
         if !known.contains(constant.name) -> return Err(rows_fail("{context}: unknown constant `{constant.name}`"))
     }
@@ -302,23 +305,24 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     meaning: constant_literal(source, "meaning", texts[0]) ?? return Err(err)
     detail: entry(source.constants, "detail") ?? "false"
     if detail != "true" && detail != "false" -> return Err(rows_fail("{context}: `detail` is `true` or `false`"))
-    has_from: entry(source.constants, "edit_from") != None
-    has_to: entry(source.constants, "edit_to") != None
-    edit_from: constant_literal(source, "edit_from", "") ?? return Err(err)
-    edit_to: constant_literal(source, "edit_to", "") ?? return Err(err)
-    written_edit: entry(source.constants, "edit") ?? ""
-    edit: if written_edit == "" -> "" else -> constant_case(written_edit, "{context}.edit") ?? return Err(err)
-    if {
-        edit == "Replace" && (!has_from || !has_to) -> return Err(rows_fail("{context}: a `.Replace` edit needs `edit_from` and `edit_to`"))
-        edit == "Remove" && (!has_from || has_to) -> return Err(rows_fail("{context}: a `.Remove` edit needs `edit_from` alone"))
+    written_fix: entry(source.constants, "structured_fix") ?? ""
+    edit := ""
+    structured := "None"
+    if REPLACE_FIX.match(written_fix) == .Val(replace) {
+        edit = "Replace"
+        from: literal_body(replace.groups[0], "{context}.structured_fix") ?? return Err(err)
+        to: literal_body(replace.groups[1], "{context}.structured_fix") ?? return Err(err)
+        structured = "Val(DiagnosticRegistryFix.Replace{{from: \"{from}\", to: \"{to}\"}})"
+    } else if REMOVE_FIX.match(written_fix) == .Val(remove) {
+        edit = "Remove"
+        text: literal_body(remove.groups[0], "{context}.structured_fix") ?? return Err(err)
+        structured = "Val(DiagnosticRegistryFix.Remove{{text: \"{text}\"}})"
+    } else if written_fix != "" {
+        edit = constant_case(written_fix, "{context}.structured_fix") ?? return Err(err)
+        if edit == "Replace" -> return Err(rows_fail("{context}: a `.Replace` fix is written `.Replace{{from: \"…\", to: \"…\"}}`"))
+        if edit == "Remove" -> return Err(rows_fail("{context}: a `.Remove` fix is written `.Remove{{text: \"…\"}}`"))
+        structured = "Val(DiagnosticRegistryFix.{edit})"
     }
-    structured: if {
-        edit == "Replace" -> "Val(DiagnosticRegistryFix.Replace{{from: \"{edit_from}\", to: \"{edit_to}\"}})"
-        edit == "Remove" -> "Val(DiagnosticRegistryFix.Remove{{text: \"{edit_from}\"}})"
-        edit != "" -> "Val(DiagnosticRegistryFix.{edit})"
-        else -> "None"
-    }
-    if edit != "Replace" && edit != "Remove" && (has_from || has_to) -> return Err(rows_fail("{context}: `edit_from` and `edit_to` belong to a `.Replace` or `.Remove` edit"))
     has_next: entry(source.constants, "fix_next") != None
     next_text: constant_literal(source, "fix_next", texts[2]) ?? return Err(err)
     written_no_fix: entry(source.constants, "no_fix") ?? ".Design"
@@ -386,7 +390,7 @@ plane_counts: fn(facts: [RowFacts]) -> [PlaneCount] DiagnosticRowsError! {
     counts := [PlaneCount]{}
     loop row in facts {
         if !row.active -> next
-        if row.edit && row.reason -> return Err(rows_fail("{row.code}: an active row has a structured `edit` or a `no_fix` reason, not both; write `no_fix: None` beside the edit"))
+        if row.edit && row.reason -> return Err(rows_fail("{row.code}: an active row has a `structured_fix` or a `no_fix` reason, not both; write `no_fix: None` beside the fix"))
         slot := counts.len()
         if slots.get(row.plane) == .Val(found) {
             slot = found
@@ -426,7 +430,7 @@ render_baseline: fn(facts: [RowFacts], committed: String) -> String DiagnosticRo
     loop count in counts {
         now: count.total - count.edits - count.reasons
         floor: before.get(count.plane) ?? 0
-        if now > floor -> return Err(rows_fail("plane `{count.plane}` would have {now} active rows with neither a structured `edit` nor a `no_fix` reason, up from {floor}; give the new row one"))
+        if now > floor -> return Err(rows_fail("plane `{count.plane}` would have {now} active rows with neither a `structured_fix` nor a `no_fix` reason, up from {floor}; give the new row one"))
         lines.push("{count.plane} {count.edits} {count.reasons} {count.total}")
     }
     Ok("{BASELINE_HEADER}{lines.join("\n")}\n")
@@ -968,6 +972,20 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
     assert(diagnostic_rows_error(row.replace("site", "si\\qte")).contains("backslash escape"))
 }
 
+#Test("a structured fix renders as its registry fix") {
+    row: MINIMAL_ROW
+    code: MINIMAL_CODE
+    replace: (render_rows(row.replace(code, "{code}        structured_fix: .Replace{{from: \"=\", to: \":\"}}\n        no_fix: None\n")) ?? panic(err.message)).text
+    assert(replace.contains("structured_fix: Val(DiagnosticRegistryFix.Replace{{from: \"=\", to: \":\"}}),"))
+    remove: (render_rows(row.replace(code, "{code}        structured_fix: .Remove{{text: \",\"}}\n        no_fix: None\n")) ?? panic(err.message)).text
+    assert(remove.contains("structured_fix: Val(DiagnosticRegistryFix.Remove{{text: \",\"}}),"))
+    plain: (render_rows(row.replace(code, "{code}        structured_fix: .SourceEdit\n        no_fix: None\n")) ?? panic(err.message)).text
+    assert(plain.contains("structured_fix: Val(DiagnosticRegistryFix.SourceEdit),"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Replace\n")).contains("is written `.Replace{{from:"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Remove\n")).contains("is written `.Remove{{text:"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        edit: .SourceEdit\n")).contains("unknown constant"))
+}
+
 #Test("only an active row has a stage") {
     row: MINIMAL_ROW
     code: MINIMAL_CODE
@@ -1077,7 +1095,7 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
     assert(baseline_error(uncovered, "{header}sema 0 0 1\n") == "")
     retired: uncovered.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired\n")
     assert(baseline_error(retired, "") == "")
-    both: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        edit: .Remove\n        edit_from: \"x\"\n")
+    both: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        structured_fix: .Remove{{text: \"x\"}}\n")
     assert(baseline_error(both, "").contains("not both"))
     assert(baseline_error(MINIMAL_ROW, "sema 0 1\n").contains("unparsed line"))
 }

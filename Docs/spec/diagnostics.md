@@ -14,8 +14,14 @@ Each diagnostic in
 [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet) is a struct that
 implements Core `Diagnostic`. Its fields are the named holes; its constants
 hold the stable code, stage, severity (`.Error` by default), timing, status, and
-structured-fix metadata; and `what`, `why`, and `fix` each return one string
-literal whose `{self.field}` holes the report fills. Preserve the code and its
+fix metadata; and `what`, `why`, and `fix` each return one string literal
+whose `{self.field}` holes the report fills. `structured_fix` is the one
+machine edit `jet fix` applies (`.Replace{from: "=", to: ":"}`,
+`.Remove{text: ","}`, or a named edit such as `.SourceEdit`), while the `fix`
+text stays the help a reader follows by hand. `tier` says which commands a
+finding fails: `.Error` (the default) fails every command, `.Tidy` fails
+`jet check` and `jet build` but never `jet run`, `jet dev` or `jet test`, and
+`.Report` is listed by `jet lint` and fails nothing. Preserve the code and its
 meaning when changing an impl. `Tools/agent/DiagnosticRows.jet` reads the impls
 as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`
 (`--check` proves they agree). Retired and reserved codes stay types with their

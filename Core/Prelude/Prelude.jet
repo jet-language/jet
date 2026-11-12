@@ -111,15 +111,18 @@ Phase: enum {
     Runtime
 }
 
-// A refusal the compiler reports. An error type is a struct whose fields are
-// the holes of its texts; its impl gives each text as one string literal that
-// reads only `self` fields, so `jet explain` can print it without running code.
-// `reject(value)` raises one while compiling. The constants are the registry
-// columns, and each has a default.
+// A finding the compiler or a package reports, and the only carrier of one.
+// An error type is a struct whose fields are the holes of its texts; its impl
+// gives each text as one string literal that reads only `self` fields, so
+// `jet explain` can print it without running code. `reject(value)` raises one
+// while compiling. The constants are the registry columns, and each has a
+// default.
 Diagnostic: trait {
     // The report's code. None: the type's path, such as `web.BadPath`.
     code: String?{None}
     severity: Severity{.Error}
+    // Which commands the finding fails.
+    tier: DiagnosticTier{.Error}
     // The name `#Allow` and lint policy use; a `.Lint` diagnostic needs one.
     lint_name: String?{None}
     // The pipeline stages that report it.
@@ -130,12 +133,9 @@ Diagnostic: trait {
     meaning: String?{None}
     // Whether `jet explain` prints the what, why and fix texts in full.
     detail: Bool{false}
-    // The machine edit `jet fix` applies, if any.
-    edit: DiagnosticEdit?{None}
-    // The text an `.Remove` edit deletes, or a `.Replace` edit replaces.
-    edit_from: String?{None}
-    // The text a `.Replace` edit writes.
-    edit_to: String?{None}
+    // The machine edit `jet fix` applies, if any. The `fix` text stays the
+    // help a reader follows by hand.
+    structured_fix: DiagnosticEdit?{None}
     // Why no machine edit can apply. None: an edit applies, or none is classified.
     no_fix: DiagnosticNoFix?{.Design}
     // The next step without a machine edit. None: the `fix` text.
@@ -144,6 +144,16 @@ Diagnostic: trait {
     what: fn(self) -> String
     why: fn(self) -> String
     fix: fn(self) -> String
+}
+
+// Which commands a finding fails. An `.Error` fails every command. A `.Tidy`
+// error is about untidy code that still runs: `jet check` and `jet build`
+// list it and fail, while `jet run`, `jet dev` and `jet test` never stop for
+// it. A `.Report` is advice that `jet lint` lists; it fails nothing.
+DiagnosticTier: enum {
+    Error
+    Tidy
+    Report
 }
 
 // How a diagnostic stops the build. `.Warning` and `.Lint` reports don't, and
@@ -188,13 +198,14 @@ DiagnosticStatus: enum {
     Retired
 }
 
-// The machine edit `jet fix` applies for a diagnostic.
+// The machine edit `jet fix` applies for a diagnostic. `.Replace` writes `to`
+// over the reported `from` text, and `.Remove` deletes the reported `text`.
 DiagnosticEdit: enum {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
-    Replace
-    Remove
+    Replace(from: String, to: String)
+    Remove(text: String)
     GeneratedMarkerGroup
     GeneratedMissingArms
     GeneratedScriptRun

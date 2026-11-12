@@ -33,7 +33,7 @@ InvalidStatement: struct {
         stage: [.Parse]
         meaning: "Statement parse error; expected a current statement form"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Expected a current statement form, found an unsupported or incomplete form" }
@@ -706,9 +706,7 @@ RetiredBodyMarker: struct {
         status: .Retired
         meaning: "Retired function body marker `::` or legacy `=`; named bodies use braces"
         detail: true
-        edit: .Replace
-        edit_from: "::"
-        edit_to: "->"
+        structured_fix: .Replace{from: "::", to: "->"}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This function uses the retired `::` or legacy `=` body marker." }
@@ -760,7 +758,7 @@ RetiredArrow: struct {
         status: .Retired
         meaning: "A callable, arm, or lambda uses a retired arrow, or a stray `:>` has no opening fence; use `->`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This callable, arm, or lambda uses a retired `=>` arrow, or a `:>` that closes no `<:` fence." }
@@ -877,7 +875,7 @@ ArrowFunctionBody: struct {
         stage: [.Parse]
         meaning: "A named function body follows an arrow instead of braces"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This named function body follows an arrow instead of braces." }
@@ -907,7 +905,7 @@ MixedLogicWithoutParentheses: struct {
         code: "E0082"
         stage: [.Parse]
         meaning: "`&&` and `||` are mixed without parentheses"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`&&` and `||` are mixed here without parentheses" }
@@ -927,7 +925,7 @@ UnclosedDelimiter: struct {
         code: "E0083"
         stage: [.Parse]
         meaning: "An opening parenthesis, bracket, or brace is never closed"
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.open}` opened on line {self.line} is never closed" }
@@ -1048,7 +1046,7 @@ StackedRuleLines: struct {
     impl Diagnostic {
         code: "E0999"
         stage: [.Parse]
-        edit: .GeneratedMarkerGroup
+        structured_fix: .GeneratedMarkerGroup
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "Teaching: stacked `#[…]` rule lines → one `#[A, B]` list or lone `#A`" }
@@ -1083,7 +1081,7 @@ MarkersAboveAndInside: struct {
     impl Diagnostic {
         code: "E0942"
         meaning: "A declaration writes markers both above it and as `#X: value` lines in its body"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This declaration writes markers both above it and inside its body" }
@@ -1097,7 +1095,7 @@ InBodyMarkerNeedsParentheses: struct {
         code: "E0943"
         stage: [.Parse, .Sema]
         meaning: "A `#X: value` marker line's value is not one simple value"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This marker line's value needs parentheses" }
@@ -1111,7 +1109,7 @@ ComptimeImportAtRuntime: struct {
         code: "E0944"
         stage: [.Sema]
         meaning: "Code that runs in the shipped program uses a name or a value from a `#run use` import"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Code that runs in the shipped program uses a name from a `#run use` import" }
@@ -1136,7 +1134,7 @@ UnknownFunction: struct {
         code: "E0102"
         meaning: "Unknown function (with suggestion)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Nothing named `pirnt` exists here" }
@@ -1196,7 +1194,7 @@ UnknownName: struct {
         code: "E0107"
         meaning: "Unknown name (with suggestion)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Nothing named `scor` exists here" }
@@ -1247,7 +1245,7 @@ ImmutableAssignment: struct {
         code: "E0111"
         meaning: "Changing a `:`, const, or read-only parameter"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This name was made with `:`, so it can't change" }
@@ -1398,7 +1396,7 @@ ReadOnlyValueNotOwned: struct {
         code: "E0120"
         meaning: "A read-only value cannot fill an owning destination because it is non-cloneable or `copies: .Explicit` is active"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`name` was not moved here, so it cannot fill this owning destination" }
@@ -1720,7 +1718,7 @@ TypestateUnknownState: struct {
         code: "E0151"
         meaning: "Typestate: `#State(X)` or `#State(A -> B)` references a state not in the owning `state {{ … }}` section"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.state}` is not a declared state of `{self.type}`." }
@@ -1758,7 +1756,7 @@ RetiredIncrement: struct {
         status: .Retired
         meaning: "Retired `++`/`--`; write `x += 1` / `x -= 1`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`++` and `--` are not Jet operators." }
@@ -1976,7 +1974,7 @@ DynAsCondition: struct {
         code: "E0170"
         meaning: "A range's written ends and step count in opposite directions"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "This range counts the wrong way for its written ends" }
@@ -2059,7 +2057,7 @@ UnusedLocalBinding: struct {
         lint_name: "unused_local_binding"
         meaning: "An unused local binding is dead code and may hide a missed use (warning)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Local binding `{self.name}` is never read." }
@@ -2077,7 +2075,7 @@ UnusedParameter: struct {
         lint_name: "unused_parameter"
         meaning: "An unused parameter is dead interface surface (warning)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Parameter `{self.name}` is never used." }
@@ -2095,7 +2093,7 @@ UnusedImport: struct {
         lint_name: "unused_import"
         meaning: "An unused import adds dead name and dependency surface (warning)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Import `{self.name}` is never used." }
@@ -2113,7 +2111,7 @@ UnusedPrivateFn: struct {
         lint_name: "unused_private_fn"
         meaning: "An unused private function is dead code (warning)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Private function `{self.name}` is never called or used as a value." }
@@ -2131,7 +2129,7 @@ UnreachableExport: struct {
         lint_name: "unreachable_export"
         meaning: "A package-scoped export has no reachable consumer"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Package export `{self.name}` is unreachable." }
@@ -2237,7 +2235,7 @@ RawPointerOutsideUnsafe: struct {
 MoveWithoutMarker: struct {
     impl Diagnostic {
         code: "E0209"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "A named binding a take parameter receives where the call is not its last use — it is read again later, on a later loop pass, or in another argument of the same call — or a value with cleanup that moves where no `x.move()` is written, or a std constructor consuming a borrowed value" }
@@ -2413,7 +2411,7 @@ UnusedPlaceMark: struct {
         stage: [.Parse, .Sema]
         meaning: "A place mark sits where nothing writes or takes a named place"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This mark does not match a call or move that writes or takes the marked place." }
@@ -2439,7 +2437,7 @@ CallMarkRequired: struct {
         code: "E0228"
         meaning: "Under `#Policy(writes: .Explicit)`, a call's `&` or `&&` mark doesn't match what its signature does to the named value"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "A call under `#Policy(writes: .Explicit)` is missing the `&` or `&&` mark its callee's signature implies for a named argument or receiver, or writes a mark the signature doesn't imply." }
@@ -2547,7 +2545,7 @@ SharedBusyWait: struct {
         severity: .Lint
         lint_name: "shared_busy_wait"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This unbounded loop polls `Shared` state without waiting" }
@@ -2565,7 +2563,7 @@ TolerantFormDecode: struct {
         stage: [.Sema]
         meaning: "A tolerant `core.http` form or query decode, listed for review"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.member}` keeps a broken escape as written and turns invalid UTF-8 into U+FFFD." }
@@ -2671,7 +2669,7 @@ ImplOnBuiltinType: struct {
 UnknownField: struct {
     impl Diagnostic {
         code: "E0302"
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Unknown field (with suggestion)" }
@@ -2683,7 +2681,7 @@ UnknownField: struct {
 InvalidConstructionField: struct {
     impl Diagnostic {
         code: "E0303"
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "struct/variant construction field errors" }
@@ -2695,7 +2693,7 @@ InvalidConstructionField: struct {
 UnknownEnumCase: struct {
     impl Diagnostic {
         code: "E0304"
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Unknown variant: enum (with suggestion)" }
@@ -2727,7 +2725,7 @@ NonExhaustiveDispatch: struct {
     impl Diagnostic {
         code: "E0307"
         detail: true
-        edit: .GeneratedMissingArms
+        structured_fix: .GeneratedMissingArms
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`if`/multi-head dispatch not exhaustive (lists missing)" }
@@ -2739,7 +2737,7 @@ NonExhaustiveDispatch: struct {
 UntypedNone: struct {
     impl Diagnostic {
         code: "E0308"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Bare `None` needs a known `T?` type" }
@@ -2771,7 +2769,7 @@ UnknownMethod: struct {
         code: "E0311"
         meaning: "static/instance method confusion or missing receiver method"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "This value does not provide the requested method, or a static/instance call uses the wrong receiver form" }
@@ -3251,7 +3249,7 @@ AcronymCasing: struct {
         code: "E0358"
         meaning: "A type-like name writes an acronym word-cased; acronyms stay in caps"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.old}` is spelled `{self.canonical}`." }
@@ -3439,7 +3437,7 @@ RetiredFenceSpelling: struct {
         status: .Retired
         meaning: "Retired fence digraph; fences use `<: … :>`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`{self.old}` is the retired fence spelling." }
@@ -3467,7 +3465,7 @@ ExplicitSemicolon: struct {
         stage: [.Parse]
         meaning: "Explicit semicolons are statement boundaries, not canonical Jet syntax"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This explicit semicolon is not part of canonical Jet syntax." }
@@ -3534,9 +3532,7 @@ RetiredAliasEquals: struct {
         status: .Retired
         meaning: "Teaching: retired alias binding `=`; write `:`"
         detail: true
-        edit: .Replace
-        edit_from: "="
-        edit_to: ":"
+        structured_fix: .Replace{from: "=", to: ":"}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This alias declaration uses the retired `=` binding." }
@@ -3550,8 +3546,7 @@ GuardAfterComma: struct {
         code: "E0379"
         meaning: "Teaching: a guard follows its source with no comma"
         detail: true
-        edit: .Remove
-        edit_from: ","
+        structured_fix: .Remove{text: ","}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A guard follows its source with no comma." }
@@ -3591,7 +3586,7 @@ RetiredAtCompileTime: struct {
         status: .Retired
         meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `#run {{ … }}`, `#if`, `#loop` and `#run fn`, a constant `@NAME: value` is `NAME: #run value`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `#{{method}}: fn`, `self.#{{field}}` or `.#{{left}}`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`{self.old}` is retired; write `{self.new}`." }
@@ -3609,7 +3604,7 @@ RetiredAtNumberParameter: struct {
         status: .Retired
         meaning: "Teaching: a compile-time number parameter is declared `<N: Int>`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`{self.old}` marks a number parameter with the retired `@` mark." }
@@ -3649,7 +3644,7 @@ NestedFalliblePattern: struct {
         code: "E0392"
         meaning: "Nested `.Ok(.Val(…))` / `.Ok(.None)` pattern on a `T? E!` value"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`{self.pattern}` wraps a state that `{self.type}` names directly." }
@@ -3668,7 +3663,7 @@ RetiredBindingTypeAnnotation: struct {
         status: .Retired
         meaning: "Teaching: a binding puts its type on the value, `name: Type{{ value }}`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`{self.name}: {self.type}` puts a type after the binding name, which Jet does not accept." }
@@ -3791,7 +3786,7 @@ RetiredInfixFallible: struct {
         status: .Retired
         meaning: "Retired infix fallible type spelling; write the suffix error contract"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`T ! E` is a retired infix fallible type spelling." }
@@ -3806,8 +3801,7 @@ RetiredBareFailure: struct {
         status: .Retired
         meaning: "Retired bare default failure contract; use implicit failure"
         detail: true
-        edit: .Remove
-        edit_from: "!"
+        structured_fix: .Remove{text: "!"}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`!` is a retired bare default failure contract." }
@@ -3822,7 +3816,7 @@ RetiredPrefixTypeMark: struct {
         status: .Retired
         meaning: "Retired prefix type mark; the mark follows the type it marks"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`?T` and `!E` are retired prefix type marks." }
@@ -3836,7 +3830,7 @@ UnparenthesizedErrorUnion: struct {
         code: "E-ERR-UNION"
         meaning: "Unparenthesized union error contract"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "`A | B!` marks only `B` as the error contract." }
@@ -3851,8 +3845,7 @@ BareQuestionMark: struct {
         stage: [.Parse]
         meaning: "A bare `?` after a fallible call"
         detail: true
-        edit: .Remove
-        edit_from: "?"
+        structured_fix: .Remove{text: "?"}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A bare `?` has no meaning." }
@@ -3936,7 +3929,7 @@ UnknownPrivQualifier: struct {
     impl Diagnostic {
         code: "E0414"
         stage: [.Parse]
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Unknown `priv(…)` qualifier, or `priv(package)` on a top-level declaration other than a module" }
@@ -3949,7 +3942,7 @@ VisibilitySectionLabel: struct {
     impl Diagnostic {
         code: "E0415"
         stage: [.Parse]
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Section visibility labels `pub:` / `priv:` rejected" }
@@ -3972,7 +3965,7 @@ RetiredDuplicatePubFile: struct {
 PackagePrivField: struct {
     impl Diagnostic {
         code: "E0417"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`priv(package)` on a field; a field is public or `priv` to its type's module" }
@@ -4178,7 +4171,7 @@ ValueThrownAway: struct {
 UntypedEmptyList: struct {
     impl Diagnostic {
         code: "E0501"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "Empty `[]` needs a context type" }
@@ -4353,7 +4346,7 @@ BranchArmTable: struct {
         stage: [.Parse]
         meaning: "Prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "Prefer an ordered arm table for this branch" }
@@ -4433,7 +4426,7 @@ RedundantTailReturn: struct {
         lint_name: "redundant_tail_return"
         meaning: "Redundant arm-table fallback return"
         detail: true
-        edit: .GeneratedRedundantTailReturn
+        structured_fix: .GeneratedRedundantTailReturn
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This arm table is followed by a default return that can be its explicit `else` arm" }
@@ -4451,7 +4444,7 @@ SameSubjectDispatch: struct {
         lint_name: "same_subject_dispatch"
         meaning: "Adjacent categorical guards can be one ordered subject table"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Adjacent categorical guards over `{self.subject}` can be one ordered subject table" }
@@ -4478,7 +4471,7 @@ MessageText: struct {
         severity: .Lint
         lint_name: "message_text"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "The default HTTP body text limit is passed through a lower-level body call" }
@@ -4493,7 +4486,7 @@ PathContainmentStringPrefix: struct {
         severity: .Lint
         lint_name: "path_containment_string_prefix"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A typed normalized Path is checked with a string prefix" }
@@ -4509,7 +4502,7 @@ RedundantFixedCleanup: struct {
         lint_name: "redundant_fixed_cleanup"
         meaning: "Fixed decimal output is immediately stripped of grouping separators"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "Plain `Fixed(n)` output immediately removes grouping separators" }
@@ -4525,7 +4518,7 @@ UnitScalarRewrap: struct {
         lint_name: "unit_scalar_rewrap"
         meaning: "Manual unit unwrap/scale/rewrap hides a direct scalar operation"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A policy-free unit unwrap/scale/rewrap can use direct scalar unit arithmetic" }
@@ -4544,7 +4537,7 @@ DisplayMigration: struct {
         lint_name: "display_migration"
         meaning: "Auto-printable struct used in bare `{{value}}` without `Display` (migration lint)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.type}` has no `Display` impl; use the explicit debug selector for this interpolation." }
@@ -4559,7 +4552,7 @@ CompleteAsciiCaseLadder: struct {
         severity: .Lint
         lint_name: "complete_ascii_case_ladder"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A complete ASCII case ladder repeats a direct case conversion" }
@@ -4574,7 +4567,7 @@ WalkFilesFilter: struct {
         severity: .Lint
         lint_name: "walk_files_filter"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "A direct fs.walk loop filters directories by hand" }
@@ -4592,7 +4585,7 @@ RepeatedListHead: struct {
         lint_name: "repeated_list_head"
         meaning: "A list repeats the same struct head on every element"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This list repeats `{self.type}` on every element" }
@@ -4608,7 +4601,7 @@ RawMultilineHtml: struct {
         lint_name: "raw_multiline_html"
         meaning: "A multiline HTML fragment is still a plain String"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "This multiline HTML fragment is still a plain `String`" }
@@ -4624,7 +4617,7 @@ MutableNeverReassigned: struct {
         lint_name: "mutable_never_reassigned"
         meaning: "Mutable binding is never reassigned"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This mutable binding receives no later write, so its mutability is unused" }
@@ -4640,7 +4633,7 @@ StateLoopUnchanged: struct {
         lint_name: "state_loop_unchanged"
         meaning: "State-loop condition reads unchanged header state"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "State-loop condition reads a mutable header binding without a body write before another turn" }
@@ -4656,7 +4649,7 @@ RedundantFinalReturn: struct {
         lint_name: "redundant_final_return"
         meaning: "Explicit final return is redundant"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "An explicit `return` is used on the final value line" }
@@ -4724,7 +4717,7 @@ MapGroupRoundTrip: struct {
         lint_name: "map_group_round_trip"
         meaning: "A group taken out of a Map, written and stored back copies the whole group"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.group}` copies the whole group out of `{self.map}` and stores it back" }
@@ -5307,7 +5300,7 @@ ClosedSetElse: struct {
     impl Diagnostic {
         code: "E0641"
         meaning: "An `else` arm stands for cases of a closed set: an enum, `T?`, `T E!`, or a union"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This `else` stands for cases of the closed set `{self.type}`" }
@@ -5534,7 +5527,7 @@ UnknownTag: struct {
         code: "E0733"
         meaning: "A value tag does not name a declared `tag`, with a suggestion from declared tags"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "There's no tag called `{self.tag}`." }
@@ -5566,7 +5559,7 @@ UnknownTagEndpoint: struct {
         code: "E0735"
         meaning: "A tag `deny` or `from` entry does not name a known effect, sink, or source path"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.path}` is not a known tag source or destination." }
@@ -5789,7 +5782,7 @@ UnknownEffectLeaf: struct {
         code: "E0750"
         meaning: "A dotted effect under a closed root is not one of the root's declared leaves"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.effect_name}` is not a declared effect leaf." }
@@ -7286,7 +7279,7 @@ DebugTraceInRelease: struct {
         code: "E3405"
         meaning: "A `debug(…)` trace is left in a shipped or release-profile build"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "A `debug` trace is left at `{self.site}`." }
@@ -7384,7 +7377,7 @@ AdjacentCallResult: struct {
         stage: [.Parse]
         meaning: "Function values use `.call(…)`, not an adjacent call `)(`"
         detail: true
-        edit: .GeneratedCallValue
+        structured_fix: .GeneratedCallValue
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "A function value is invoked with an adjacent call `)(`" }
@@ -7734,7 +7727,7 @@ UnknownAppliedRule: struct {
         stage: [.Parse, .Sema]
         meaning: "An applied rule name that is not registered or declared in scope"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`#{self.name}` isn't a known applied rule" }
@@ -8355,7 +8348,7 @@ IntegerOutOfRange: struct {
 UnknownCoreItem: struct {
     impl Diagnostic {
         code: "E1004"
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Unknown item in core module" }
@@ -9257,7 +9250,7 @@ StringViewOutlivesOwner: struct {
         code: "E2307"
         meaning: "A declared string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its public owner provenance"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "A declared string view would outlive a possible owning `String`, has no stable public owner set, or `copies: .Explicit` forbids the owning materialization needed at a non-view destination." }
@@ -10904,7 +10897,7 @@ DeprecatedPastWindow: struct {
         stage: [.Jet]
         meaning: "A deprecated item is used past its migration window (E2-M2)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "A deprecated item was used past its migration window." }
@@ -11266,7 +11259,7 @@ DeprecatedItem: struct {
         stage: [.Jet]
         meaning: "A deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2)"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "An item is deprecated in this edition." }
@@ -11315,7 +11308,7 @@ CryptoMisuse: struct {
         code: "E2702"
         meaning: "Compiler-known crypto API misuse at the boundary (E2-M9)"
         detail: true
-        edit: .CryptoMisuse
+        structured_fix: .CryptoMisuse
         no_fix: .Behavior
         fix_next: "Use the documented cryptographic bound or supply a runtime value when the value is not compiler-known"
         what: fn(self) -> String { "Crypto API misuse" }
@@ -11713,7 +11706,7 @@ ErrorNotPropagatable: struct {
         code: "E2404"
         stage: [.Compile]
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.callee}` fails with `{self.source}`, which can't propagate into `{self.target}` here" }
@@ -12003,7 +11996,7 @@ PrivateFailureMemberExposed: struct {
     impl Diagnostic {
         code: "E2421"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .APIChanging
         what: fn(self) -> String { "Public fallible function `{self.function}` exposes non-public failure carrier member `{self.member}`." }
@@ -12959,9 +12952,7 @@ RetiredLoopComma: struct {
         status: .Retired
         meaning: "Teaching: source loops join a binding and source with `in`, not a comma"
         detail: true
-        edit: .Replace
-        edit_from: ","
-        edit_to: "in"
+        structured_fix: .Replace{from: ",", to: "in"}
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "This source loop uses a retired comma between its binding and source." }
@@ -12999,7 +12990,7 @@ LogicalNotOnNonBool: struct {
         code: "E0398"
         meaning: "`!` applied to a non-Bool value"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`!` needs a Bool operand." }
@@ -13044,7 +13035,7 @@ PipeStepWithoutValue: struct {
         code: "E0438"
         meaning: "A pipe step never reads `<>`, the value it receives"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "This pipe step doesn't use `<>`" }
@@ -13061,7 +13052,7 @@ PipeValueTouchesAngle: struct {
         stage: [.Parse]
         meaning: "`<>` is written against another `<` or `>`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`<>` touches `{self.neighbor}`" }
@@ -13078,7 +13069,7 @@ EmptyTypeArgumentList: struct {
         stage: [.Parse]
         meaning: "A type is written with an empty type-argument list `<>`"
         detail: true
-        edit: .SuggestedSourceEdit
+        structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`{self.name}<>` has an empty type-argument list" }
@@ -13108,7 +13099,7 @@ AtomGroupWithoutParentheses: struct {
         stage: [.Parse]
         meaning: "A bare distributed atom group is a direct operand of `&&` or `||`"
         detail: true
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .Formatting
         what: fn(self) -> String { "Distributed atom groups need parentheses before `&&` or `||`." }
@@ -13403,7 +13394,7 @@ MarkerLibraryCasing: struct {
     impl Diagnostic {
         code: "E0087"
         meaning: "Marker library part not PascalCase"
-        edit: .SourceEdit
+        structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
         what: fn(self) -> String { "The library part of a qualified marker must be PascalCase." }
