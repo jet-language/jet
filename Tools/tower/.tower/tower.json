@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100115,
+    "rev": 100116,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56761,6 +56761,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "c3 (2026-11-12): the scenario.mjs port waits on `jet dev --canvas` (Front.jet:2786 refuses it as not built, card #6386; #5931 c6). Every scenario needs a live Canvas server, so no parity case can run until it exists. G4Ports-1 lands dlc2, then moves to c20."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "c3 (2026-11-12): sourcemap parity entry and the live CDP breakpoint wait on #5201 web source maps (new criterion there); G4Ports-1 does the driver-lifecycle parity entry and the scenario.mjs port meanwhile."
         },
         {
@@ -57572,7 +57577,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-12T22:26:50.259Z",
+      "updated": "2026-11-12T22:53:19.020Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -94028,92 +94033,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 3,
       "completedAt": "2026-11-10T01:33:15.249Z"
-    },
-    {
-      "id": "c0hzvj2s",
-      "num": 6692,
-      "title": "No C: the compiler's and tools' own C imports (JetDevserver, JetCli, JetTestKit, Tools/ci)",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nWatchService.jet declares close, inotify_add_watch, inotify_init1, pipe, poll, read and write through #FFI(c). WebHost02.jet declares mkdirat, openat, renameat and unlinkat. JetCli Host.jet has 2 C imports, JetTestKit RequireTool.jet and Assets/no_nix.jet 1 each, and Tools/ci/CompiledWorkloadPeerLauncher.jet 1. Replace each with the Core or runtime API that does the same job, adding the missing Core surface (an inotify-backed watch, say) where none exists, through the normal Core review.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "c2 blocked: JetDevserver does not parse on dev (454 problems, legacy syntax); its WatchService/WebHost cases can't run. That is a JetDevserver port, not C."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Batch b6d landed on dev (0073f4fc47): CFreeLead-2r2 4b56ee58a8 (process.exit_unmapped, the testing.skip leaf, no C import in no_nix.jet and the golden compiler double) and 3r2 d3862020bf (rows and leaves for sys.reset_signal and tasks.quiesce). The cutovers follow in the b parts. c1 and c2 are partial."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "dev d92be320f1 (CFreeLead-1c), batch b2r census rc=0: JetDevserver 14 C declarations removed, WebOutput #Tests pass; watch/web-host cases still blocked by the JetDevserver parse defect (BrowserWebAdapter.jet:467 E0002). c1/c2 stay open."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (Q23, recommendation): public #Unsafe(\"reason\") process.exit_unmapped(code) -> Never (audited like sys.stop) replaces the compiler and tool runtime exit imports, and public testing.skip(reason: String) marks the running #Test skipped (like Go t.Skip). No toolchain access to Core internal routes."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Reassigned 2026-11-08 by Main (owner raised the agent cap to 10): CFreeLead, starting now. It was queued for QuickLead after #6530 and #6677. Process (owner order 2026-11-08): leads write code and submit patches; Main builds, integrates and tests in batches and returns every failure to its author at once."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: QuickLead, after #6686."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "None of these files declares or imports a C function (census receipt).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev d4d45ded4b (d92be320f1, 4b56ee58a8, bf835f3b2d, d3862020bf): the #Import/#FFI(c) census finds 0 in WatchService.jet, WebHost02.jet, Host.jet, RequireTool.jet, no_nix.jet and CompiledWorkloadPeerLauncher.jet (CFreeLead3 audit)",
-          "at": "2026-11-09T16:11:36.062Z"
-        },
-        {
-          "n": 3,
-          "text": "The JetCli paths, the testkit's requires: probes and the peer launcher keep their behavior with no C import (their cases pass).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed b74782e99a on dev (train 1). Train-1 compiler from dev 0f193199cc: NoNix.jet 241 passed 0 failed; JetDebug/Tests/Native.jet 36 passed 0 failed; RequireTool.jet host-tool test passes and skips cleanly when the tool is absent; cases trace_file_names_each_task_lane_and_its_cpu_clock, a_missing_host_tool_skips_the_claim_that_needs_it, backend_gap_is_ice_101_with_a_row_per_function, link_failure_is_ice_101_with_a_native_link_row, core_os_interrupt_reaches_a_kept_run_program_while_its_full_build_runs, locked_build_names_the_unlocked_dependency_offline, the backend_ice/, explicit_exit_unmapped, local_nix_fallback and no_nix_ rows all PASS; with bwrap on PATH compiled_workload_peer_launcher_keeps_its_isolation_contract PASS and CompiledWorkloadPeerLauncherCheck.jet passes.",
-          "at": "2026-11-09T22:42:54.739Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:47:07.321Z",
-      "updated": "2026-11-09T22:43:15.615Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-09T22:43:15.615Z"
     },
     {
       "id": "c03a0dhc",
@@ -200643,6 +200562,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T22:53:19.020Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-12T22:43:01.695Z",
       "by": "Main",
