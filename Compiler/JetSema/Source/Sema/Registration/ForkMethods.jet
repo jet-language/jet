@@ -145,12 +145,16 @@ sema_fork_methods_name: fn(name: String, bound: [String], parts: [String:[Type]]
     loop part in own -> sema_fork_methods_names(part, own_bound, parts, params, reached)
 }
 
-// `__fork: fn(self) -> T { return self.copy() }`; the caller makes it as
-// visible as its type, so a copy anywhere the type is reached can call it.
+// `__fork: fn(self) -> T Never! { return self.copy() }`: a copy cannot fail,
+// so the function is infallible as written rather than left to inference,
+// which a function reaching itself through its parts cannot settle (each
+// list part's `.map(item -> item.copy())` would read as fallible). The caller
+// makes it as visible as its type, so a copy anywhere the type is reached can
+// call it.
 sema_fork_method: fn(type_name: String, span: Span) -> Func Never! {
     method := ast_func(FORK_METHOD_NAME, span, span)
     method.params = [Param]{Param{convention: AccessConvention.Read, root: false, name: "self", name_span: span, public_label: None, zone: ParamZone.Either, ty: Type.Named{name: ""}, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
-    method.return_type = Val(Type.Named{name: type_name.copy()})
+    method.return_type = Val(Type.Result{ok: Type.Named{name: type_name.copy()}, err: Type.Named{name: "Never"}})
     method.return_type_span = Val(span)
     method.compiler_generated = true
     copied: Expr.Copy{value: Expr.Ident{name: "self", span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}

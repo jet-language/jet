@@ -7587,6 +7587,42 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
     }
 }
 
+// The `close` method a value of type `ty` runs when it is closed, `ty` named
+// from module `module_identity`: the Close implementation of the nominal type
+// `ty` is. Lowering calls it by owner type, for a `close(value)`, a deferred
+// close and the drop that ends the value's scope, and no call fact records
+// it (sema_call_check_ambient_close).
+sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String) -> [(module_identity: String, key: String)] {
+    found := [(module_identity: String, key: String)]{}
+    owner: sema_expr_unwrap_tag(ty)
+    if !(owner == .Named(_) || owner == .Apply(_, _)) -> return found
+    row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return found
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+        implementation: graph.modules[reference.module_index].impls[reference.row]
+        symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
+        if implementation.trait_name != Val("Close") && symbol_name != "Close" -> next
+        if sema_type_graph_impl_target_nominal_key(graph, implementation) != Val(nominal.symbol.id.key) -> next
+        loop method in implementation.methods {
+            if method.symbol.name == "close" -> found.push((module_identity: graph.modules[reference.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+        }
+    }
+    // An `impl Close { … }` block in the type's own body, whose method the
+    // nominal registers.
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != "Close" -> next
+            loop method in nominal.methods {
+                if method.symbol.name != "close" -> next
+                loop written in block.methods {
+                    if written.span == method.declaration.span -> found.push((module_identity: graph.modules[row.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+                }
+            }
+        }
+    }
+    found
+}
+
 // Why the call sites `call_facts` keep an evaluation from running while
 // building, or None when they keep it pure: a call reaches a foreign body,
 // names an effect outside `Panic` and `Mem` in its row (files, network,
@@ -7611,7 +7647,13 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
         if runtime_runs && fact.runtime_export -> return Val("it calls {name}, which the runtime answers from the running program")
         if runtime_runs && fact.callee == .Val(callee) {
             if sema_registration_callable_row(graph, callee.key) == .Val(row) {
-                if row == .Foreign(_, _) -> return Val("it calls foreign code ({name})")
+                if row == {
+                    .Foreign(_, _) -> return Val("it calls foreign code ({name})")
+                    .Function(declaring, index) -> {
+                        if sema_guest_runtime_binding(graph.modules[declaring].package_identity, graph.modules[declaring].functions[index].declaration) -> return Val("it calls {name}, which the runtime answers from the running program")
+                    }
+                    .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> {}
+                }
                 if sema_comptime_callable_memoized(graph, row) -> return Val("it calls {name}, a `#Memo` function whose result store the running program keeps")
             }
         }

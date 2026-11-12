@@ -52,6 +52,7 @@ use {
         sema_comptime_tree_reads_phase,
         sema_comptime_call_facts_impurity,
         sema_comptime_codec_methods,
+        sema_comptime_close_methods,
         SemaCallSiteFact,
         sema_collect_comptime_declarations,
         sema_checked_shape_defaults,
@@ -205,7 +206,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -970,6 +971,19 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
     }
 }
 
+// The `close` method of each Close type an expression in `tree` has, as
+// `roots` and `body` reach it (sema_comptime_close_methods, named from
+// `module_identity`). Lowering calls it by owner type, for a `close(value)`,
+// a deferred close or the drop that ends the value's scope, and Sema records
+// no call fact for it, so the closure queues it like a callee and reads its
+// call sites: a close that reaches the outside world keeps the value from
+// being computed while building, where its effect would be lost.
+jet_driver_comptime_close_refs: fn(graph: SemaRegistrationGraph, module_identity: String, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+    loop type_id in ir_comptime_expression_types(tree, roots, body) {
+        loop method in sema_comptime_close_methods(graph, tree.types.types[type_id], module_identity) -> jet_driver_comptime_function_ref_add(queue, queued, method.module_identity, method.key)
+    }
+}
+
 // `environment` is the run's sema_comptime_environment, `program` its tables
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
@@ -1018,6 +1032,7 @@ jet_driver_comptime_function_closure: fn(
     }
     jet_driver_comptime_precise_refs(graph, index, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
     jet_driver_comptime_codec_refs(graph, index, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
+    jet_driver_comptime_close_refs(graph, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
     functions := [FnBody]{}
     foreign := [SemaCheckedForeignFunction]{}
     waiting := [String]{}
@@ -1068,6 +1083,7 @@ jet_driver_comptime_function_closure: fn(
                 }
                 jet_driver_comptime_precise_refs(graph, index, function.tree, defaults, function.body, queue, queued)
                 jet_driver_comptime_codec_refs(graph, index, current.module_identity, function.tree, defaults, function.body, queue, queued)
+                jet_driver_comptime_close_refs(graph, current.module_identity, function.tree, defaults, function.body, queue, queued)
                 functions.push(function)
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {

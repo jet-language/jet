@@ -571,6 +571,32 @@ ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptim
     body_each_expr_child(tree, node, (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
 }
 
+// The type ids of every expression a checked body and its root expressions
+// hold, each once. A value of a Close type runs its owner's `close` when it
+// is closed or dropped, which lowering calls by owner type with no call fact,
+// so a compile-time body queues those methods itself
+// (jet_driver_comptime_close_refs).
+ir_comptime_expression_types: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [Int] Never! {
+    seen := [Bool]{}
+    loop _ in tree.types.types -> seen.push(false)
+    ids := [Int]{}
+    loop root in roots -> ir_comptime_expression_types_tree(tree, root, seen, ids)
+    loop statement in body {
+        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_comptime_expression_types_tree(tree, child, seen, ids))
+    }
+    ids
+}
+
+ir_comptime_expression_types_tree: fn(tree: BodyTree, expression: Int, seen: &[Bool], ids: &[Int]) Never! {
+    if checked_expr_type_id(tree.expr_types, expression) == .Val(type_id) {
+        if type_id >= 0 && type_id < seen.len() && !seen[type_id] {
+            seen[type_id] = true
+            ids.push(type_id)
+        }
+    }
+    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> ir_comptime_expression_types_tree(tree, child, seen, ids))
+}
+
 // A Fraction division also tests its divisor (ir_precise_division), and a
 // Float or F32 `value.pow(y)` calls its power (ir_precise_power_name). A value
 // of a precise type may render (an interpolation, `print`, a List's text),

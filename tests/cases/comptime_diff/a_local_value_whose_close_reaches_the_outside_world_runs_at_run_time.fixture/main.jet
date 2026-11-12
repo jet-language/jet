@@ -1,0 +1,37 @@
+// Each local value calls a function that closes a Resource: through
+// `defer close(resource)`, through `close(resource)`, and through the drop at
+// the end of its scope. The close prints, so none of them is computed while
+// building, and every close line prints when the program runs.
+Resource: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+via_defer: fn() -> Int {
+    resource: Resource{name: "defer"}
+    defer close(resource)
+    3
+}
+
+via_close: fn() -> Int {
+    resource: Resource{name: "close"}
+    close(resource)
+    4
+}
+
+via_drop: fn() -> Int {
+    resource: Resource{name: "drop"}
+    5
+}
+
+run: fn() {
+    a: via_defer()
+    print("defer {a}")
+    b: via_close()
+    print("close {b}")
+    c: via_drop()
+    print("drop {c}")
+}

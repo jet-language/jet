@@ -1,0 +1,18 @@
+# A local value whose closure closes a value of a Close type reaches that
+# type's `close`: lowering calls it by owner type, for `close(value)`, a
+# deferred close and the drop that ends the value's scope, with no call fact.
+# The closure reads that `close` like a callee, so a close that prints keeps
+# the local run-time code, and its output is not lost to the build, on every
+# tier.
+fixture: a_local_value_whose_close_reaches_the_outside_world_runs_at_run_time.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step O0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "close defer\ndefer 3\nclose close\nclose 4\nclose drop\ndrop 5\n"
+step O1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "close defer\ndefer 3\nclose close\nclose 4\nclose drop\ndrop 5\n"
+step O2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "close defer\ndefer 3\nclose close\nclose 4\nclose drop\ndrop 5\n"

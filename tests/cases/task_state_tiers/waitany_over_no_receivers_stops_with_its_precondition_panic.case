@@ -1,17 +1,24 @@
 # tasks.waitany needs at least one receiver: over an empty list it stops
 # with its precondition panic, the same E3001 report and exit 70 on O0, O1
-# and O2, after the output printed before it.
+# and O2, after the output printed before it. The report names the fault's
+# Core file and function, not its line, so an edit to Core/Tasks keeps it.
 fixture: waitany_over_no_receivers_stops_with_its_precondition_panic.fixture
 env: NO_COLOR=1
 step O0: jet run --optimize=none main.jet
 exit: 70
 stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
-stderr: = waitany_over_no_receivers_stops_with_its_precondition_panic.err.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> <corelib>/Core/Tasks/Tasks.jet:" # the fault's Core file; its line moves with Core edits
+stderr: ~ " in waitany" # the fault's function
 step O1: jet run --optimize=basic main.jet
 exit: 70
 stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
-stderr: = waitany_over_no_receivers_stops_with_its_precondition_panic.err.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> <corelib>/Core/Tasks/Tasks.jet:" # the fault's Core file; its line moves with Core edits
+stderr: ~ " in waitany" # the fault's function
 step O2: jet run --optimize=full main.jet
 exit: 70
 stdout: = waitany_over_no_receivers_stops_with_its_precondition_panic.out
-stderr: = waitany_over_no_receivers_stops_with_its_precondition_panic.err.out
+stderr: ~ "Stop [E3001]: `panic: waitany needs at least one receiver`" # the precondition's report
+stderr: ~ "--> <corelib>/Core/Tasks/Tasks.jet:" # the fault's Core file; its line moves with Core edits
+stderr: ~ " in waitany" # the fault's function
