@@ -52,7 +52,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 ## Derives
 
 - [AutoDerivePolicy](Derives/AutoDerivePolicy/) — Auto-derive policy: Package policy sets the default.
-- [FieldTypes](Derives/FieldTypes.jet) — A reflected record names its type `type`: a derive reads `field.type`, and so does `T.reflect()`.
+- [FieldTypes](Derives/FieldTypes.jet) — A reflected record names its type `type`, a TypeId: a derive reads `field.type.name`, and so does `T.reflect()`; its `identity` names a declared type by its module.
 - [MarkerDerives](Derives/MarkerDerives.jet)
 - [SerdeDerive](Derives/SerdeDerive.jet)
 - [UserDerive](Derives/UserDerive.jet) — a user-authored provider written as a marker template, plus `target.reflect()` Demonstrates: marker template bodies are checked Jet items with typed holes.

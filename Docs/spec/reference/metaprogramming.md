@@ -298,11 +298,15 @@ Jet has two related reflection paths:
    `build: fn` and ordinary code; in the running program it is a constant.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
-Each struct field's `FieldInfo` carries its `type`, its `offset` in bytes
-(`None` where the layout is not computed) and its `default`: `None` for a
-field without a written default, else a `DefaultInfo` whose `source` is the
-`SourceSpan` of the default expression. Reading `default` never runs the
-expression.
+Each struct field's `FieldInfo` carries its `type`, a TypeId (below), its
+`offset` in bytes (`None` where the layout is not computed) and its
+`default`: `None` for a field without a written default, else a
+`DefaultInfo` whose `source` is the `SourceSpan` of the default expression.
+Reading `default` never runs the expression. An enum case's `FieldInfo`
+names its payload as a TypeId: `Unit` for none, the payload type for one,
+and the written record `{x: Float, y: Float}` for named fields. A template
+compares a field's type by its `name` (`field.type.name == "Float"`) or,
+across modules, by its `identity`.
 
 A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
 a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,

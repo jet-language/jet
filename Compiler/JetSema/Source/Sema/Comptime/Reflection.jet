@@ -1154,10 +1154,14 @@ sema_comptime_reflection_written_markers: fn(
 }
 // One stored field or payload field, at `index` among its owner's fields. A
 // field row has no nested `fields`; those are an enum variant's payload rows
-// (sema_comptime_reflection_enum_variant_info). `default` is where the
-// field's written default expression stands, read without running it, and
-// `offset` its byte offset on the selected target when the layout knows it.
+// (sema_comptime_reflection_enum_variant_info). Its `type` is the field type's
+// TypeId, qualified from the module `caller` of its declaration. `default` is
+// where the field's written default expression stands, read without running
+// it, and `offset` its byte offset on the selected target when the layout
+// knows it.
 sema_comptime_reflection_field_info: fn(
+    registration: SemaRegistrationGraph,
+    caller: Int,
     name: String,
     ty: Type,
     index: Int,
@@ -1171,7 +1175,7 @@ sema_comptime_reflection_field_info: fn(
 ) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
-        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, ty)},
         SemaComptimeReflectionField{name: "index", value: TComptimeValue.Int{value: index}},
         SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(markers, registry)}},
@@ -1265,9 +1269,14 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // `name` is the type as the checker prints it (`Point`, `[Point]`). `caller`
 // is the row of the module the type is written in, -1 for none.
 sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
+    sema_comptime_reflection_type_id_record(type_name(sema_comptime_reflection_qualified_type(graph, caller, ty)), type_name(ty))
+}
+
+// The TypeId record of an `identity` and the `name` it prints as.
+sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> TComptimeValue {
     sema_comptime_reflection_struct("TypeId", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: type_name(sema_comptime_reflection_qualified_type(graph, caller, ty))}},
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
     })
 }
 
@@ -1893,35 +1902,39 @@ sema_comptime_reflection_bound_signature: fn(signature: &&TComptimeValue, bindin
     sema_comptime_reflection_with_field(signature, "generic_bindings", sema_comptime_reflection_binding_infos(bindings))
 }
 
-sema_comptime_reflection_enum_variant_fields: fn(definition: EnumDef, variant: Variant, registry: SemaScopeMembersMarkerRegistry) -> [TComptimeValue] Never! {
+sema_comptime_reflection_enum_variant_fields: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, variant: Variant, registry: SemaScopeMembersMarkerRegistry) -> [TComptimeValue] Never! {
     if variant.payload == {
         .Unit -> return [TComptimeValue]{}
         .Single(ty, span) -> return [TComptimeValue]{
-            sema_comptime_reflection_field_info("value", ty, 0, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry, None, None),
+            sema_comptime_reflection_field_info(registration, caller, "value", ty, 0, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry, None, None),
         }
         .Named(fields) -> {
             result := [TComptimeValue]{}
             loop (index, field) in fields {
-                result.push(sema_comptime_reflection_field_info(field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry, None, None))
+                result.push(sema_comptime_reflection_field_info(registration, caller, field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry, None, None))
             }
             return result
         }
     }
 }
 
-sema_comptime_reflection_enum_variant_type: fn(payload: VariantPayload) -> String Never! {
+// A variant's payload type as a TypeId: `Unit` for none, the payload type for
+// one, and the written record `{name: Type, ...}` for named fields, each
+// field type qualified in `identity` as a TypeId's is.
+sema_comptime_reflection_variant_type_id: fn(registration: SemaRegistrationGraph, caller: Int, payload: VariantPayload) -> TComptimeValue Never! {
     if payload == {
-        .Unit -> "Unit"
-        .Single(ty, _) -> type_name(ty)
+        .Unit -> sema_comptime_reflection_type_id_record("Unit", "Unit")
+        .Single(ty, _) -> sema_comptime_reflection_type_id(registration, caller, ty)
         .Named(fields) -> {
+            identities: loop field in fields -> "{field.name}: {type_name(sema_comptime_reflection_qualified_type(registration, caller, field.ty))}"
             names: loop field in fields -> "{field.name}: {type_name(field.ty)}"
-            "{{{names.join(", ")}}}"
+            sema_comptime_reflection_type_id_record("{{{identities.join(", ")}}}", "{{{names.join(", ")}}}")
         }
     }
 }
 
-sema_comptime_reflection_enum_variant_info: fn(definition: EnumDef, variant: Variant, index: Int, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
-    fields := sema_comptime_reflection_enum_variant_fields(definition, variant, registry)
+sema_comptime_reflection_enum_variant_info: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, variant: Variant, index: Int, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue Never! {
+    fields := sema_comptime_reflection_enum_variant_fields(registration, caller, definition, variant, registry)
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
     if variant.payload == {
@@ -1937,7 +1950,7 @@ sema_comptime_reflection_enum_variant_info: fn(definition: EnumDef, variant: Var
     }
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: variant.name}},
-        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: sema_comptime_reflection_enum_variant_type(variant.payload)}},
+        SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_variant_type_id(registration, caller, variant.payload)},
         SemaComptimeReflectionField{name: "index", value: TComptimeValue.Int{value: index}},
         SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: fields}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(variant.serde_markers, registry)}},
@@ -2203,6 +2216,8 @@ sema_comptime_reflection_type_info_fields: fn(
 }
 
 sema_comptime_reflection_struct_type_info: fn(
+    registration: SemaRegistrationGraph,
+    caller: Int,
     definition: StructDef,
     registered_module: SemaRegistrationModule,
     identity: String,
@@ -2222,7 +2237,7 @@ sema_comptime_reflection_struct_type_info: fn(
         if field.default == .Val(expression) -> default = Val(expr_source_span(expression))
         offset := Int?{None}
         if sema_comptime_reflection_layout_field(layout_facts, field.name) == .Val(layout_field) -> offset = layout_field.offset
-        reflection_fields.push(sema_comptime_reflection_field_info(field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry, default, offset))
+        reflection_fields.push(sema_comptime_reflection_field_info(registration, caller, field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry, default, offset))
         dimensions.extend(sema_comptime_reflection_type_dimensions(field.ty))
     }
     method_values := [TComptimeValue]{}
@@ -2273,6 +2288,8 @@ sema_comptime_reflection_state_fact: fn(owner: String, name: String) -> TComptim
 }
 
 sema_comptime_reflection_enum_type_info: fn(
+    registration: SemaRegistrationGraph,
+    caller: Int,
     definition: EnumDef,
     registered_module: SemaRegistrationModule,
     identity: String,
@@ -2285,7 +2302,7 @@ sema_comptime_reflection_enum_type_info: fn(
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
     loop (index, variant) in definition.variants {
-        variant_values.push(sema_comptime_reflection_enum_variant_info(definition, variant, index, registry))
+        variant_values.push(sema_comptime_reflection_enum_variant_info(registration, caller, definition, variant, index, registry))
         if variant.payload == {
             .Unit -> {}
             .Single(ty, _) -> {
@@ -2432,9 +2449,9 @@ sema_comptime_reflection_type_info: fn(
                     break
                 }
             }
-            if bindings.len() == 0 -> sema_comptime_reflection_struct_type_info(definition, registered_module, identity, engine, registry, state_graph, constants, bindings) else -> sema_comptime_reflection_struct_type_info(sema_comptime_reflection_specialize_struct(definition, bindings), registered_module, identity, engine, registry, state_graph, constants, bindings)
+            if bindings.len() == 0 -> sema_comptime_reflection_struct_type_info(graph, index, definition, registered_module, identity, engine, registry, state_graph, constants, bindings) else -> sema_comptime_reflection_struct_type_info(graph, index, sema_comptime_reflection_specialize_struct(definition, bindings), registered_module, identity, engine, registry, state_graph, constants, bindings)
         }
-        .Enum(definition) -> if bindings.len() == 0 -> sema_comptime_reflection_enum_type_info(definition, registered_module, identity, engine, registry, constants, bindings) else -> sema_comptime_reflection_enum_type_info(sema_comptime_reflection_specialize_enum(definition, bindings), registered_module, identity, engine, registry, constants, bindings)
+        .Enum(definition) -> if bindings.len() == 0 -> sema_comptime_reflection_enum_type_info(graph, index, definition, registered_module, identity, engine, registry, constants, bindings) else -> sema_comptime_reflection_enum_type_info(graph, index, sema_comptime_reflection_specialize_enum(definition, bindings), registered_module, identity, engine, registry, constants, bindings)
         .Distinct(definition) -> sema_comptime_reflection_distinct_type_info(definition, registered_module, identity, engine, registry, constants)
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }

@@ -1,6 +1,8 @@
-// A reflected record names its type `type`. A derive reads `field.type` for
-// each field of the marked type, and `T.reflect()` gives the same records at
-// compile time. `field.ty` is E0302, whose fix writes `.type`.
+// A reflected record names its type `type`, a TypeId. A derive reads
+// `field.type.name` for each field of the marked type, and `T.reflect()`
+// gives the same records at compile time. A TypeId's `identity` names a
+// declared type by its module, as the type's own TypeInfo.identity does.
+// `field.ty` is E0302, whose fix writes `.type`.
 FieldTypes: struct {
     impl Marker {
         sites: [.Type]
@@ -8,22 +10,30 @@ FieldTypes: struct {
         expand: fn(self, target: Target) {
             #loop field in target.reflect().fields {
                 method: "type_of_{field.reflect().name}"
-                #{method}: fn(self) -> String { field.type }
+                #{method}: fn(self) -> String { field.type.name }
             }
         }
     }
+}
+
+Ore: enum {
+    Iron
+    Gold
 }
 
 #FieldTypes
 Rock: struct {
     size: Float
     name: String
+    ore: Ore
 }
 
 run: fn() {
-    rock: Rock{size: 1.0, name: "rock"}
+    rock: Rock{size: 1.0, name: "rock", ore: Ore.Gold}
     print("size: {rock.type_of_size()}")
     print("name: {rock.type_of_name()}")
+    print("ore: {rock.type_of_ore()}")
     info: #run Rock.reflect()
-    loop field in info.fields -> print("{field.name}: {field.type}")
+    loop field in info.fields -> print("{field.name}: {field.type.name}")
+    print("ore names Ore: {info.fields[2].type.identity == Ore.reflect().identity}")
 }

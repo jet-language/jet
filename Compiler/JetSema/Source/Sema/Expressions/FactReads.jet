@@ -548,7 +548,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "FieldInfo" {
         return if {
-            field == "name" || field == "type" -> Val(string)
+            field == "name" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
             field == "index" -> Val(Type.Int)
             field == "fields" -> Val(sema_fact_list_of("FieldInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))

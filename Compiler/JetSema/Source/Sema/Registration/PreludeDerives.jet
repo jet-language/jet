@@ -31,7 +31,7 @@ Equatable: struct {
                                 if rhs == {
                                     .#{left} -> {
                                         #loop field in left.reflect().fields {
-                                            #if field.type == target.reflect().name {
+                                            #if field.type.name == target.reflect().name {
                                                 if self.#{field}.equal(rhs.#{field}) == false -> return false
                                             } else {
                                                 if self.#{field} != rhs.#{field} -> return false
@@ -90,7 +90,7 @@ Comparable: struct {
                                         #loop field in left.reflect().fields {
                                             // A Float payload orders by IEEE totalOrder, as `.compare` does;
                                             // its plain `<` stays the IEEE comparison.
-                                            #if field.type == target.reflect().name || field.type == "Float" || field.type == "F32" {
+                                            #if field.type.name == target.reflect().name || field.type.name == "Float" || field.type.name == "F32" {
                                                 if self.#{field}.compare(rhs.#{field}) == {
                                                     .Less -> return .Less
                                                     .Greater -> return .Greater
@@ -114,7 +114,7 @@ Comparable: struct {
                 } else {
                     #if target.kind == "struct" {
                         #loop field in target.reflect().fields {
-                            #if field.type == "Float" || field.type == "F32" {
+                            #if field.type.name == "Float" || field.type.name == "F32" {
                                 if self.#{field}.compare(rhs.#{field}) == {
                                     .Less -> return .Less
                                     .Greater -> return .Greater

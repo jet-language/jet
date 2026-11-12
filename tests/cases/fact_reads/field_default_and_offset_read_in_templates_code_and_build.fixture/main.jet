@@ -1,14 +1,14 @@
-// A field's `type`, `default` and `offset` read the same way in a marker's
-// `expand`, in a `#run` value and through `T.reflect()` in the program.
-// `default` says where a field's written default stands, without running
-// it; a field with none reads `None`.
+// A field's `type` (a TypeId), `default` and `offset` read the same way in a
+// marker's `expand`, in a `#run` value and through `T.reflect()` in the
+// program. `default` says where a field's written default stands, without
+// running it; a field with none reads `None`.
 FieldFacts: struct {
     impl Marker {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
             info: target.reflect()
-            mass_type: info.fields[0].type
+            mass_type: info.fields[0].type.name
             mass_offset: info.fields[0].offset ?? 99
             mass_site: info.fields[0].default?.source
             mass_default: mass_site?.start ?? 0
@@ -38,7 +38,7 @@ describe: fn(info: TypeInfo) -> String {
     rows := [String]{}
     loop (index, field) in info.fields {
         default: if default_start(info, index) > 0 -> "default" else -> "no default"
-        rows.push("{field.name}: {field.type} at {field.offset ?? 99}, {default}")
+        rows.push("{field.name}: {field.type.name} at {field.offset ?? 99}, {default}")
     }
     rows.join("; ")
 }

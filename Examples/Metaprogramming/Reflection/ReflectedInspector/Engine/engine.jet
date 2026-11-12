@@ -123,7 +123,7 @@ Entity: struct {
                     rows := [engine.Row]{}
                     #loop f in target.fields {
                         #if f.marker(Hidden) == None {
-                            rows.push(engine.Row{name: f.name, type: f.type, value: "{self.#{f}}", grey: self.#{f} == fresh.#{f}})
+                            rows.push(engine.Row{name: f.name, type: f.type.name, value: "{self.#{f}}", grey: self.#{f} == fresh.#{f}})
                         }
                     }
                     rows
@@ -134,16 +134,16 @@ Entity: struct {
                 set: fn(&self, field: String, text: String) -> Bool Never! {
                     #loop f in target.fields {
                         if field == f.name {
-                            #if f.type == "String" {
+                            #if f.type.name == "String" {
                                 self.#{f} = text
                             }
-                            #if f.type == "Int" {
+                            #if f.type.name == "Int" {
                                 self.#{f} = engine.parse_int(text) ?? return false
                             }
-                            #if f.type == "Float" {
+                            #if f.type.name == "Float" {
                                 self.#{f} = engine.parse_float(text) ?? return false
                             }
-                            #if f.type == "Bool" {
+                            #if f.type.name == "Bool" {
                                 self.#{f} = engine.parse_bool(text) ?? return false
                             }
                             return true

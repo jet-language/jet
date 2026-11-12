@@ -9,7 +9,7 @@ build: fn(b: Build) {
     rows := [String]{}
     loop field in info.fields {
         default: if field.default == None -> "no default" else -> "default"
-        rows.push("{field.name}: {field.type} at {field.offset ?? 99}, {default}")
+        rows.push("{field.name}: {field.type.name} at {field.offset ?? 99}, {default}")
     }
     b.error(b.program.types()[0].span, "FIELDS", rows.join("; "), "the build entry read the fields of {info.name}", "none")
 }
