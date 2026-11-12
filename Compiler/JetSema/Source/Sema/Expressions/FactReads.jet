@@ -1055,16 +1055,29 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment
 
 // `FunctionInfo` for a declared function (`f.reflect()`): its source shape,
 // its written markers and where it is written, named by its module and
-// package.
-sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph) -> TComptimeValue? {
+// package. `args` names a specialization (`f.reflect(types: [Int])`): one
+// type per type parameter, else E0119 at `span` and None. With no `args` it
+// is the declaration.
+sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: [Type]?, span: Span, diagnostics: &[Diagnostic]) -> TComptimeValue? {
     index: sema_registration_module_index(graph, symbol.module_name) ?? return None
     registered_module: graph.modules[index]
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     registry := SemaScopeMembersMarkerRegistry?{None}
     loop registered in registered_module.functions {
         if registered.symbol.id.key != symbol.id.key -> next
+        bindings := [SemaInferenceBinding]{}
+        if args == .Val(written) {
+            declared: registered.declaration.type_params.len()
+            if written.len() != declared {
+                diagnostics.push(sema_call_generic_count_diagnostic(registered.declaration.name, declared, written.len(), span))
+                return None
+            }
+            bindings = sema_comptime_reflection_specialization(registered.declaration.type_params, written)
+        }
         markers: sema_comptime_reflection_written_markers(graph, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
-        return Val(sema_comptime_reflection_function_info(registered.declaration, registered_module.module_name, "{registered_module.module_name}::{registered.declaration.name}", registered_module.package_identity, registered_module, markers))
+        identity: "{registered_module.module_name}::{registered.declaration.name}"
+        if bindings.len() == 0 -> return Val(sema_comptime_reflection_function_info(registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
+        return Val(sema_comptime_reflection_function_info(sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
     }
     None
 }

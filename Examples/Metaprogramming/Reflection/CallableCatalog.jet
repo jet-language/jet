@@ -14,7 +14,8 @@
 // A generic type named with its arguments (`Shelf<Int>.reflect()`) reflects
 // that specialization: its identity names the arguments, its fields and
 // method signatures read them in place of `T`, and each signature's
-// `generic_bindings` pairs `T` with its argument.
+// `generic_bindings` pairs `T` with its argument. A generic function names
+// its specialization with `types:`: `pick.reflect(types: [String])`.
 connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host}:{seconds}:{tls}"
 }
@@ -34,6 +35,8 @@ Shelf: struct<T> {
 }
 
 send: fn(text: String) -[Net]> Int { text.len() }
+
+pick: fn<T>(first: T, second: T) -> T { first }
 
 capture_mode: fn(mode: CaptureMode) -> String {
     if mode == {
@@ -113,4 +116,10 @@ run: fn() {
     print("Shelf<Int> and Shelf<String> are distinct instances: {shelf.identity != words.identity}")
     numbers: Shelf<Int>{items: [Int]{1, 2}}
     print("a Shelf<Int> of 2 with 1 more holds {numbers.size_with([Int]{3})}")
+    picked: pick.reflect(types: [String])
+    picks: (loop param in picked.signature.params -> "{param.name}: {param.type}").join(", ")
+    chose: (loop binding in picked.signature.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
+    print("pick({picks}) -> {picked.signature.return_type ?? "nothing"}, binding {chose}")
+    print("pick for String and for Int are distinct instances: {picked.identity != pick.reflect(types: [Int]).identity}")
+    print("pick of a and b is {pick("a", "b")}")
 }

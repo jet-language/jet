@@ -36,6 +36,7 @@ use jet_foundation.[
     core_module_has_type,
     diagnostic_registry_row,
     expr_span,
+    foundation_named_type,
     jet_target_layout_atomic_scalar_type,
     symbol_id,
     type_identity_equal,
@@ -1036,12 +1037,15 @@ sema_call_static_reflect_builtin: fn(name: String, span: Span, expected: Type?, 
 
 // `f.reflect()` on a declared function: its FunctionInfo record, computed
 // while compiling, as `T.reflect()` is for a type; on a local bound once to a
-// lambda, the lambda's ClosureInfo. None when `name` binds neither (another
-// local of that name shadows the function).
-sema_call_static_reflect_function: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+// lambda, the lambda's ClosureInfo. `f.reflect(types: [Int])` reflects the
+// specialization of a generic function by those type arguments, in
+// declaration order. None when `name` binds neither (another local of that
+// name shadows the function) or `args` is not that one `types:` list.
+sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if args.len() > 1 || (args.len() == 1 && !sema_call_static_reflect_is_types_arg(args[0])) -> return None
     local: sema_scope_resolve_index(scopes, name)
     // A local bound to a lambda reflects as its ClosureInfo.
-    if local == .Val(closure_index) {
+    if args.len() == 0 && local == .Val(closure_index) {
         if scopes.bindings[closure_index].closure == .Val(closure) {
             // copy: the binding keeps its record for every later read.
             closure_info: sema_tree_node(sema_fact_named("ClosureInfo"), TExprKind.CtLit{value: closure.copy()}, span)
@@ -1051,16 +1055,61 @@ sema_call_static_reflect_function: fn(name: String, span: Span, expected: Type?,
     graph: program.registration_graph ?? return None
     resolved: if local == .Val(index) -> sema_scope_binding_symbol(environment, scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None)
     if resolved.kind != SymbolKind.Function -> return None
-    info: sema_fact_function_info(resolved, graph) ?? return None
+    types := [Type]?{None}
+    if args.len() == 1 && args[0].expr == .ListLit(elements, _, _) {
+        listed := [Type]{}
+        loop element in elements {
+            written: sema_call_static_reflect_type_arg(element, environment, graph) ?? {
+                diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Box<Int>`, or `[Int]` for a list"))
+                return Val(SemaMethodSpecialCheck{handled: true, value: None})
+            }
+            listed.push(written)
+        }
+        types = Val(listed)
+    }
+    diagnostics_before: diagnostics.len()
+    info: sema_fact_function_info(resolved, graph, types, span, diagnostics) ?? {
+        if diagnostics.len() > diagnostics_before -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        return None
+    }
     folded: sema_tree_node(sema_fact_named("FunctionInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)})
+}
+
+// Whether `arg` is the `types: [...]` list of `f.reflect(types: [...])`.
+sema_call_static_reflect_is_types_arg: fn(arg: CallArg) -> Bool Never! {
+    if arg.spread -> return false
+    if arg.label == .Val(label) && label.name == "types" -> return arg.expr == .ListLit(_, _, _)
+    false
+}
+
+// The type a `types:` element writes where a value goes: a builtin or
+// declared type name (`Int`, `Shelf`), a generic type (`Shelf<Int>`), or a
+// one-element list (`[Int]`, a list of that type). None for any other value.
+sema_call_static_reflect_type_arg: fn(element: Expr, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Type? {
+    // copy: the specialization owns its argument type; the call keeps its tree.
+    if element == .TypeValue(ty, _, _) -> return Val(ty.copy())
+    if element == .ListLit(inner, _, _) {
+        if inner.len() != 1 -> return None
+        item: sema_call_static_reflect_type_arg(inner[0], environment, graph) ?? return None
+        return Val(Type.List{element: item})
+    }
+    if element == .Ident(name, _, _) {
+        named: foundation_named_type(name)
+        if named == .Named(_) {
+            symbol: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
+            if sema_resolved_symbol(graph, symbol).kind != SymbolKind.Type -> return None
+        }
+        return Val(named)
+    }
+    None
 }
 
 sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor, _) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if receiver == .Ident(name, _, _) {
-        if method == "reflect" && args.len() == 0 && owner_type_args.len() == 0 && type_args.len() == 0 {
-            if sema_call_static_reflect_function(name, span, expected, environment, program, scopes, diagnostics) == .Val(reflected) -> return reflected
+        if method == "reflect" && owner_type_args.len() == 0 && type_args.len() == 0 {
+            if sema_call_static_reflect_function(name, args, span, expected, environment, program, scopes, diagnostics) == .Val(reflected) -> return reflected
         }
     }
     static_owner: sema_call_static_source_owner(receiver, method, owner_type_args, environment, program, scopes) ?? {

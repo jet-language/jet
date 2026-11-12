@@ -311,9 +311,20 @@ returns, a `String?` that is `None` when it returns no value; its `effects` is a
 its `calling_convention` is a `CallingConvention` (`Jet`, `Kernel` for a
 `#Kernel` function, or `Foreign` for one whose body is inline foreign code); and
 its `generic_bindings` is a `[GenericBindingInfo]`, empty on a declaration,
-which binds no generic parameter, and on a specialization's method pairs each
-of the owner's type parameters with its argument. No record carries the
-signature as text.
+which binds no generic parameter, and on a specialization pairs each type
+parameter with its argument. No record carries the signature as text.
+
+A generic function's specialization reflects with the type arguments listed
+as `types:`: `pick.reflect(types: [String])` is the `FunctionInfo` of `pick`
+with `T` bound to `String`. Its parameter and return types read `String`
+where the declaration writes `T`, its `identity` names the arguments (so
+`pick.reflect(types: [Int])` has another), and its signature's
+`generic_bindings` is `[T = String]`. Each element is a type written where a
+value goes: a type name (`Int`, `Shelf`), a generic type (`Shelf<Int>`), or a
+one-element list for a list type (`[Int]`). A list with a count other than the
+function's type parameter count is E0119, as is an element that names no
+type. A method of a specialized type (`Shelf<Int>.reflect().methods`) binds
+its owner's parameters the same way.
 
 Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 (its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,

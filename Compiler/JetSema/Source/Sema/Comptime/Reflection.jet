@@ -1649,14 +1649,16 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
 // effect row; the solved row is read after the check,
 // jet_eval_compiler_services_function_info), its written `markers`
 // (MarkerInfo rows) and where it is written. `module_name`, `identity` and
-// `package` are the names its reader shows.
-sema_comptime_reflection_function_info: fn(function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue]) -> TComptimeValue {
+// `package` are the names its reader shows. For a specialization, `function`
+// is already specialized and `bindings` are the signature's
+// `generic_bindings`.
+sema_comptime_reflection_function_info: fn(function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue], bindings: [SemaInferenceBinding]) -> TComptimeValue {
     info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_name}},
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
         SemaComptimeReflectionField{name: "package", value: TComptimeValue.String{value: package}},
-        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_callable_signature(function, None)},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_bound_signature(sema_comptime_reflection_callable_signature(function, None), bindings)},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
