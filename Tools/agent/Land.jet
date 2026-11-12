@@ -1146,16 +1146,14 @@ guard_shard: fn(snap: String, out: String, seed_jet: String, identity: String, s
 }
 
 // The failing tests of a `jet test` run's output, and a line when it did not
-// finish (no `N passed, M failed` tally; the runner may add `, K skipped` and
-// further counts after it).
+// finish (no `N passed, M failed` tally).
 guard_failures: fn(text: String) -> [String] Never! {
     out := [String]{}
     finished := false
     loop line in text.lines() {
         if line.ends_with(": FAIL") -> out.push("  FAIL {line.removesuffix(": FAIL")}")
         tally: line.partition(" passed, ")
-        failed: tally.tail.partition(" failed")
-        if tally.sep != "" && (Int.parse(tally.head) ?? -1) >= 0 && failed.sep != "" && (Int.parse(failed.head) ?? -1) >= 0 && (failed.tail == "" || failed.tail.starts_with(", ")) -> finished = true
+        if tally.sep != "" && (Int.parse(tally.head) ?? -1) >= 0 && tally.tail.ends_with(" failed") -> finished = true
     }
     if !finished -> out.push("  did not finish (no `N passed, M failed` tally)")
     out
@@ -4075,8 +4073,6 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 #Test("a guard shard fails on a FAIL line or a missing tally") {
     assert_eq(guard_failures("a: pass\nb c: FAIL\n3 passed, 1 failed\n"), [String]{"  FAIL b c"})
     assert_eq(guard_failures("a: pass\n1 passed, 0 failed\n"), [String]{})
-    assert_eq(guard_failures("a: pass\n36 passed, 0 failed, 0 skipped\n"), [String]{})
-    assert_eq(guard_failures("a: pass\n0 passed, 0 failed, 0 skipped, 1 expected-fail\n"), [String]{})
     assert_eq(guard_failures("a: pass\n"), [String]{"  did not finish (no `N passed, M failed` tally)"})
     shards: [PassRun]{PassRun{name: "guards", rc: 0, seconds: 70, peak: 0, note: "shard 1/2 rc=0", lines: [String]{}}, PassRun{name: "guards", rc: 1, seconds: 90, peak: 0, note: "shard 2/2 rc=1", lines: [String]{"  FAIL x"}}}
     run: guards_run(shards)
