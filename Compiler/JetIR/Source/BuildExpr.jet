@@ -480,9 +480,11 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 if ir_clear_string(m, p, b, binding, value) -> return
                 if ir_clear_list(m, p, b, binding, value, span) -> return
             }
-            right: ir_expr(m, p, b, value)
+            right := ir_expr(m, p, b, value)
             if ir_failed(b) -> return
             current: ir_read_binding(m, b, binding)
+            if op == None -> right = ir_union_assigned(m, p, b, right, b.f.slot_type[current], span)
+            if ir_failed(b) -> return
             // `s += text` on a String place that always holds its value (a
             // variable that still owns it, or a write parameter's place)
             // appends in place: jet_rt_string_append consumes the old value,
@@ -1187,6 +1189,23 @@ ir_list_destructure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, co
     ir_release(m, b, list)
 }
 
+// A plain write's value `slot` where a variable or field of type row `row`
+// holds it: a member value of a union `row` is boxed as that member's
+// variant, as a binding's initializer or a field's value is (ir_adapt). The
+// box owns the value, cloned first when it is a read; any other value is
+// `slot` itself.
+ir_union_assigned: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
+    if slot < 0 || b.f.slot_type[slot] == row -> return slot
+    member_ty: m.types[b.f.slot_type[slot]].ty
+    union_ty: m.types[row].ty
+    if !(ir_untag(union_ty) == .Union(_)) || ir_untag(member_ty) == .Union(_) -> return slot
+    payload: ir_own(m, p, b, slot)
+    boxed: ir_union_box(m, p, b, payload, member_ty, union_ty, span)
+    if ir_failed(b) -> return -1
+    b.fresh[boxed] = true
+    boxed
+}
+
 // `receiver.field (op)= value` through the aggregate's storage, and
 // `list[index] (op)= value` through the element's. The value comes first,
 // then the place (its Assign lowering): a value that grows a List on the
@@ -1215,6 +1234,8 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
             if ir_failed(b) -> return
         }
         result := right
+        if op == None -> result = ir_union_assigned(m, p, b, right, member.ty, span)
+        if ir_failed(b) -> return
         if op == .Val(binary) {
             current: ir_member_read(m, b, base, member)
             site: b.line

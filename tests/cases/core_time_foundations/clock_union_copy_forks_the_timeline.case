@@ -1,0 +1,12 @@
+# A copy of a union value that holds a Clock forks it in user code on every
+# tier; a member that holds no Clock copies as it always does.
+fixture: clock_union_copy_forks_the_timeline/input
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "forked\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "forked\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "forked\n"

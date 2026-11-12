@@ -1,0 +1,40 @@
+// A member value assigned to a union variable, field or list element is
+// stored as that member, as the place's initializer is: a later match sees
+// the member it holds.
+Slot: struct {
+    value: Int | String
+}
+
+reading: fn(value: Int | String) -> String {
+    if value == {
+        .Int(number) -> "int {number}"
+        .String(text) -> "text {text}"
+    }
+}
+
+start: fn() -> Int | String {
+    3
+}
+
+run: fn() {
+    held := start()
+    print(reading(held))
+    held = "seven"
+    print(reading(held))
+    word: "nine"
+    held = word
+    print(reading(held))
+    print(word)
+    held = 12
+    print(reading(held))
+    slot := Slot{value: 1}
+    slot.value = "field"
+    print(reading(slot.value))
+    slot.value = 2
+    print(reading(slot.value))
+    list := [Int | String]{4, "five"}
+    list[0] = "four"
+    list[1] = 5
+    print(reading(list[0]))
+    print(reading(list[1]))
+}

@@ -2923,6 +2923,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
     sema_serde_expand_builtin_items(module_row.program.items)
+    // A user type that holds itself and a Clock gains its generated fork
+    // function, the copy that forks each Clock it holds (ForkMethods.jet).
+    if !sema_module_is_core_source(module_row.module_identity) -> sema_fork_methods_expand(module_row.program.items)
     // S62 delegation and default bodies become written impl methods
     // before registration (TraitImpls.jet).
     sema_trait_impls_synthesize(module_row.program.items)

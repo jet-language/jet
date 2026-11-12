@@ -1,0 +1,34 @@
+use time: core.time
+
+// A copy of a union value that holds a Manual clock forks that clock: the
+// copy's clock ticks on its own and the original's stays put. A member that
+// holds no clock copies as it always does.
+Slot: struct {
+    value: Int | time.Clock
+}
+
+reading: fn(value: Int | time.Clock) -> Int {
+    if value == {
+        .Int(number) -> number
+        .Clock(clock) -> clock.now()
+    }
+}
+
+run: fn() {
+    original: Slot{value: time.Clock.new(4)}
+    copied := original.value.copy()
+    if copied == {
+        .Clock(clock) -> {
+            ticking := clock
+            assert_eq(ticking.advance(11), 11)
+        }
+        .Int(_) -> {}
+    }
+    assert_eq(reading(copied), 11)
+    assert_eq(reading(original.value), 4)
+    whole := original.copy()
+    assert_eq(reading(whole.value), 4)
+    number: Slot{value: 7}
+    assert_eq(reading(number.value.copy()), 7)
+    print("forked")
+}

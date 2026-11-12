@@ -204,11 +204,13 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
     if written.len() > 0 {
         // Generated items take the written items' capability passes
         // (Items.jet module registration): selected Prelude derives and
-        // codecs, then `Self` in impl signatures, so a generated `#Codable`
-        // struct registers with its `impl T.Decode` like a written one.
+        // codecs, a fork function, then `Self` in impl signatures, so a
+        // generated `#Codable` struct registers with its `impl T.Decode` like
+        // a written one.
         generated := written
         sema_derive_expand_builtin_items(generated, problems)
         sema_serde_expand_builtin_items(generated)
+        if !sema_module_is_core_source(graph.modules[module_index].module_identity) -> sema_fork_methods_expand(generated)
         sema_registration_expand_impl_self(generated)
         module_row := graph.modules[module_index]
         first_nominal: module_row.nominals.len()

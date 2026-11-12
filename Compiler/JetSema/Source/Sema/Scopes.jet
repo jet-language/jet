@@ -755,10 +755,10 @@ SemaCheckContext: struct {
     // receiver is not reported. A `#Test` body is user code and is not.
     compiler_generated: Bool{false}
     // The types whose semantic copy is being rebuilt from its parts' copies
-    // (sema_expr_copy_fork), outermost first: a type that reaches itself is
-    // refused, the rebuild reads and writes the private fields the copied
-    // value already owns, and a part's copy inside it records no second
-    // `Clock copy` effect.
+    // (sema_expr_copy_fork), outermost first: a type that reaches itself
+    // without a generated fork function is refused, the rebuild reads and
+    // writes the private fields the copied value already owns, and a part's
+    // copy inside it records no second `Clock copy` effect.
     fork_copy_rebuilding: [String]{[String]{}}
     // The function being checked declares its result's owners (`-> T from
     // self | param`): a returned place read is a view of them, not a copy.

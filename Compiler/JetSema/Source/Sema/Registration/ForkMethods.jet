@@ -1,0 +1,159 @@
+// A copy forks every Clock the copied value holds by rebuilding the value
+// from its parts' own copies (sema_expr_copy_fork). A type that holds itself
+// has no fixed set of parts to rebuild in place, so before registration each
+// non-generic struct or enum of a user module that reaches itself through
+// its parts and names a Clock among them gains a compiler-generated
+// `__fork: fn(self) -> Self`, the type's own copy function. A copy of the type
+// calls it, and its body is the copy of `self`: one level of the value is
+// rebuilt there, and each part of the type's own kind inside calls the
+// function again.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    Expr,
+    Func,
+    Item,
+    Param,
+    ParamZone,
+    Span,
+    Stmt,
+    Type,
+    TypeParam,
+    ast_func,
+]
+
+FORK_METHOD_NAME: "__fork"
+
+sema_fork_methods_expand: fn(items: &[Item]) Never! {
+    // The part types of each type the items declare, and the type
+    // parameters a generic one names its parts with.
+    parts := [String:[Type]]{}
+    params := [String:[String]]{}
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                stored := [Type]{}
+                loop field in definition.fields {
+                    if field.computed == None -> stored.push(field.ty.copy())
+                }
+                parts[definition.name.copy()] = stored
+                params[definition.name.copy()] = sema_fork_methods_param_names(definition.type_params)
+            }
+            .Enum(definition) -> {
+                payloads := [Type]{}
+                loop variant in definition.variants {
+                    if variant.payload == {
+                        .Unit -> {}
+                        .Single(ty, _) -> payloads.push(ty.copy())
+                        .Named(fields) -> {
+                            loop field in fields -> payloads.push(field.ty.copy())
+                        }
+                    }
+                }
+                parts[definition.name.copy()] = payloads
+                params[definition.name.copy()] = sema_fork_methods_param_names(definition.type_params)
+            }
+            .TypeAlias(definition) -> {
+                parts[definition.name.copy()] = [Type]{definition.target.copy()}
+                params[definition.name.copy()] = sema_fork_methods_param_names(definition.type_params)
+            }
+            .Distinct(definition) -> parts[definition.name.copy()] = [Type]{definition.base.copy()}
+            .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    loop index in 0..<items.len() {
+        if items[index] == {
+            .Struct(definition) -> {
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) -> next
+                updated := definition.copy()
+                method := sema_fork_method(definition.name, definition.name_span)
+                method.is_pub = definition.is_pub
+                method.is_package_pub = definition.is_package_pub
+                updated.methods.push(method)
+                items[index] = Item.Struct{value: updated}
+            }
+            .Enum(definition) -> {
+                if !sema_fork_methods_wanted(definition.name, definition.type_params, definition.methods, parts, params) -> next
+                updated := definition.copy()
+                method := sema_fork_method(definition.name, definition.name_span)
+                method.is_pub = definition.is_pub
+                method.is_package_pub = definition.is_package_pub
+                updated.methods.push(method)
+                items[index] = Item.Enum{value: updated}
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+sema_fork_methods_param_names: fn(type_params: [TypeParam]) -> [String] Never! {
+    loop param in type_params -> param.name.copy()
+}
+
+// A non-generic type gets its fork function when its parts reach the type
+// itself and name a Clock, and it declares no `__fork` of its own.
+sema_fork_methods_wanted: fn(name: String, type_params: [TypeParam], methods: [Func], parts: [String:[Type]], params: [String:[String]]) -> Bool Never! {
+    if type_params.len() > 0 -> return false
+    loop method in methods {
+        if method.name == FORK_METHOD_NAME -> return false
+    }
+    own: parts.get(name) ?? return false
+    reached := [String:Bool]{}
+    loop part in own -> sema_fork_methods_names(part, [String]{}, parts, params, reached)
+    if reached.get(name) == None -> return false
+    loop reached_name in reached.keys() {
+        if reached_name == "Clock" || reached_name.ends_with(".Clock") -> return true
+    }
+    false
+}
+
+// Every type name `ty` reaches, through the parts of each type the module
+// declares; the parameters `bound` of a generic type's parts name no type. A
+// `Shared` value is one handle on its state, and a function or trait value
+// has no parts a copy rebuilds, so none of them is walked.
+sema_fork_methods_names: fn(ty: Type, bound: [String], parts: [String:[Type]], params: [String:[String]], reached: &[String:Bool]) Never! {
+    if ty == {
+        .Named(name) -> sema_fork_methods_name(name, bound, parts, params, reached)
+        .Apply(name, args) -> {
+            loop argument in args -> sema_fork_methods_names(argument, bound, parts, params, reached)
+            sema_fork_methods_name(name, bound, parts, params, reached)
+        }
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_fork_methods_names(inner, bound, parts, params, reached)
+        .Map(key, _, value) -> {
+            sema_fork_methods_names(key, bound, parts, params, reached)
+            sema_fork_methods_names(value, bound, parts, params, reached)
+        }
+        .Result(ok, err) -> {
+            sema_fork_methods_names(ok, bound, parts, params, reached)
+            sema_fork_methods_names(err, bound, parts, params, reached)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> sema_fork_methods_names(field.ty, bound, parts, params, reached)
+        }
+        .Union(members) -> {
+            loop member in members -> sema_fork_methods_names(member, bound, parts, params, reached)
+        }
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> {}
+    }
+}
+
+sema_fork_methods_name: fn(name: String, bound: [String], parts: [String:[Type]], params: [String:[String]], reached: &[String:Bool]) Never! {
+    if bound.contains(name) || reached.get(name) != None -> return
+    reached[name.copy()] = true
+    own: parts.get(name) ?? return
+    own_bound: params.get(name) ?? [String]{}
+    loop part in own -> sema_fork_methods_names(part, own_bound, parts, params, reached)
+}
+
+// `__fork: fn(self) -> T { return self.copy() }`; the caller makes it as
+// visible as its type, so a copy anywhere the type is reached can call it.
+sema_fork_method: fn(type_name: String, span: Span) -> Func Never! {
+    method := ast_func(FORK_METHOD_NAME, span, span)
+    method.params = [Param]{Param{convention: AccessConvention.Read, root: false, name: "self", name_span: span, public_label: None, zone: ParamZone.Either, ty: Type.Named{name: ""}, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
+    method.return_type = Val(Type.Named{name: type_name.copy()})
+    method.return_type_span = Val(span)
+    method.compiler_generated = true
+    copied: Expr.Copy{value: Expr.Ident{name: "self", span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}
+    method.body = [Stmt]{Stmt.Return{value: Val(copied), span: span}}
+    method
+}

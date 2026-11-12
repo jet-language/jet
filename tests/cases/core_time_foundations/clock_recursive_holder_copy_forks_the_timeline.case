@@ -1,0 +1,13 @@
+# A copy of a struct or enum that holds a Clock through a part of its own type
+# forks every Clock in the whole value in user code on every tier, through the
+# type's generated fork function.
+fixture: clock_recursive_holder_copy_forks_the_timeline/input
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "forked\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "forked\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "forked\n"

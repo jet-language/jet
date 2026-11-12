@@ -96,6 +96,9 @@ use {
         checked_symbol_local,
         type_identity_equal,
         type_name,
+        type_union_member_tag,
+        measure_literal_value,
+        SwitchArm,
         CORE_SOURCE_OWNED_ROWS,
         Lambda,
         LambdaBody,
@@ -5689,6 +5692,9 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
         return sema_check_expression(fork, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if user_code && sema_expr_copy_forks_holder(checked.ty, environment, program, context) -> return sema_expr_copy_fork(value, checked.ty, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    // A type's generated fork function is called only by a copy that forks,
+    // so for any other type its body is never reached.
+    if sema_expr_copy_in_fork_function(value, context) -> return sema_check_expression(sema_expr_copy_fork_unreached(span), expected, environment, program, scopes, state, tail_store, context, diagnostics)
     window_copy: sema_call_compute_window_copy(checked, span, expected, environment, program, diagnostics)
     if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, context, diagnostics, sema_expr_copy_string_view(value, scopes), false)
@@ -5696,10 +5702,31 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
 
 // Copying a value that holds an observable Clock (Rust expr.rs, the Copy arm)
 // reads ambient time (E3403 `Clock copy` in a pure body). A part's copy
-// inside a rebuild is the same copy, already recorded.
+// inside a rebuild, or inside a type's generated fork function, is the same
+// copy as the one that called it, already recorded there.
 sema_expr_copy_record_clock: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    if context.fork_copy_rebuilding.len() > 0 || !sema_copy_observable_clock(ty, environment, program, context.generic_params) -> return
+    if context.fork_copy_rebuilding.len() > 0 || sema_expr_in_fork_function(context) || !sema_copy_observable_clock(ty, environment, program, context.generic_params) -> return
     _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)
+}
+
+// The body of a type's generated fork function (ForkMethods.jet).
+sema_expr_in_fork_function: fn(context: SemaCheckContext) -> Bool Never! {
+    context.compiler_generated && context.function_name == FORK_METHOD_NAME
+}
+
+// The copy of `self` that is the whole body of a type's generated fork
+// function: it rebuilds the value in place rather than calling the function
+// again.
+sema_expr_copy_in_fork_function: fn(value: Expr, context: SemaCheckContext) -> Bool Never! {
+    if !sema_expr_in_fork_function(context) || context.fork_copy_rebuilding.len() > 0 -> return false
+    if value == .Ident(name, _, _) -> return name == "self"
+    false
+}
+
+sema_expr_copy_fork_unreached: fn(span: Span) -> Expr Never! {
+    message: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "a fork function ran for a type whose copy does not fork"}}, span: span, id: AST_NODE_GENERATED}
+    argument: CallArg{convention: AccessConvention.Read, expr: message, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
 }
 
 // Whether a copy of `ty` is a rebuild: a holder, not a Clock itself, that
@@ -5719,25 +5746,30 @@ sema_expr_sees_private_fields: fn(context: SemaCheckContext) -> Bool Never! {
 FORK_COPY_DEPTH: 32
 
 // A fork copy reads its value once: a place is read again for each part, and
-// any other value is bound to a pipe step's hidden name. A type the rebuild
-// reaches inside itself is refused, and so is a rebuild nested past
-// FORK_COPY_DEPTH (a generic type that holds itself at a growing type
-// argument): neither has a fixed set of parts to rebuild.
+// any other value is bound to a pipe step's hidden name. A type with a
+// generated fork function (one that holds itself) is copied by a call of it.
+// A type the rebuild reaches inside itself is refused, and so is a rebuild
+// nested past FORK_COPY_DEPTH (a generic type that holds itself at a growing
+// type argument): neither has a fixed set of parts to rebuild.
 sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     place: sema_expr_copy_fork_place(value)
     row: sema_copy_fork_row(ty, environment, program)
+    if sema_expr_copy_fork_function(row, program) && !sema_expr_copy_in_fork_function(value, context) {
+        call: Expr.MethodCall{receiver: value.copy(), method: FORK_METHOD_NAME, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        return sema_check_expression(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     key := type_name(ty)
     if row == .Val(found) {
         if program.registration_graph == .Val(graph) -> key = "{graph.modules[found.module_index].nominals[found.row].identity_key}<{key}>"
     }
     if context.fork_copy_rebuilding.contains(key) || context.fork_copy_rebuilding.len() >= FORK_COPY_DEPTH {
-        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "`{type_name(ty)}` holds a Clock through a part of its own type, so a copy that forks every Clock it holds has no fixed set of parts to rebuild"))
+        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "`{type_name(ty)}` holds a Clock through a part of its own type, and only a non-generic struct or enum that names the Clock in its own module gets the fork function that copies such a type"))
         return None
     }
     hidden: pipe_value_name(span.start)
     subject: if place -> value.copy() else -> Expr.Ident{name: hidden.copy(), span: span, id: AST_NODE_GENERATED}
     body: sema_expr_copy_fork_body(subject, ty, row, context.fork_copy_rebuilding.len(), span, program) ?? {
-        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "a copy forks every Clock the value holds, and Jet rebuilds only a list, option, map value, result, tuple, struct or enum part by part"))
+        diagnostics.push(sema_expr_copy_fork_refused(ty, span, "a copy forks every Clock the value holds, and Jet rebuilds only a list, fixed list, option, map value, result, tuple, union, struct or enum part by part"))
         return None
     }
     whole: if place -> body else -> Expr.Pipe{head: value.copy(), steps: [PipeStep]{PipeStep{name: hidden, value: body, reads: 1, span: span}}, span: span, id: AST_NODE_GENERATED}
@@ -5746,6 +5778,16 @@ sema_expr_copy_fork: fn(value: Expr, ty: Type, span: Span, expected: Type?, envi
     _ := context.fork_copy_rebuilding.pop()
     result := rebuilt ?? return None
     sema_expr_expected_owned(result, expected, environment, program, diagnostics)
+}
+
+// Whether the nominal `row` has its generated fork function.
+sema_expr_copy_fork_function: fn(row: SemaRegistrationRowRef?, program: SemaProgramTables) -> Bool Never! {
+    found: row ?? return false
+    graph: program.registration_graph ?? return false
+    loop method in graph.modules[found.module_index].nominals[found.row].methods {
+        if method.declaration.name == FORK_METHOD_NAME && method.declaration.compiler_generated -> return true
+    }
+    false
 }
 
 sema_expr_copy_fork_refused: fn(ty: Type, span: Span, why: String) -> Diagnostic Never! {
@@ -5786,12 +5828,20 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
             parts: loop field in fields -> TupleField{name: field.name.copy(), value: sema_expr_copy_fork_part(Expr.Field{base: subject.copy(), member: field.name.copy(), span: span, id: AST_NODE_GENERATED}, span)}
             Val(Expr.TupleLit{fields: parts, span: span, ty: None, id: AST_NODE_GENERATED})
         }
+        // A fixed list is the literal of its elements' copies, each read at
+        // a literal index.
+        .FixedList(_, len) -> {
+            count: measure_literal_value(len) ?? return None
+            elements: loop position in 0..<count -> sema_expr_copy_fork_part(Expr.Index{base: subject.copy(), index: Expr.Int{value: position, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}, span)
+            Val(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED})
+        }
+        .Union(members) -> Val(sema_expr_copy_fork_union(subject, members, depth, span))
         .Named(_) | .Apply(_, _) -> {
             found: row ?? return None
             if program.registration_graph == .Val(graph) -> return Val(sema_expr_copy_fork_nominal(subject, graph.modules[found.module_index].nominals[found.row], depth, span))
             None
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -5803,12 +5853,34 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
 sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never! {
     made: "__fork_map{depth}"
     key: "__fork_key{depth}"
-    start: Stmt.Val{binding: Binding{mutable: true, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: made.copy(), name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: subject, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
     read: Expr.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
     write: Stmt.Assign{target: LValue.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: sema_expr_copy_fork_part(read, span)}
     keys: Expr.MethodCall{receiver: sema_expr_copy_fork_name(made, span), method: "keys", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
     each: Stmt.For{var: key.copy(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
-    body: [Stmt]{start, each, Stmt.Expr{expr: sema_expr_copy_fork_name(made, span)}}
+    sema_expr_copy_fork_over_share(made, subject, each, span)
+}
+
+// A union takes its member's own copy, written over a share of the value so
+// each arm's copy widens to the union as it is stored:
+// `(() -> { made := u; if u == { .A(member) -> made = member.copy() … } made })()`.
+sema_expr_copy_fork_union: fn(subject: Expr, members: [Type], depth: Int, span: Span) -> Expr Never! {
+    made: "__fork_union{depth}"
+    member: "__fork_member{depth}"
+    arms := [SwitchArm]{}
+    loop member_type in members {
+        test: Expr.PatternTest{subject: subject.copy(), pattern: Pattern.Variant{variant: type_union_member_tag(member_type), bindings: [PatSlot]{PatSlot.Bind{name: member.copy(), span: span}}, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
+        write: Stmt.Assign{target: LValue.Local{name: made.copy(), name_span: span}, op: None, op_span: span, value: sema_expr_copy_fork_part(sema_expr_copy_fork_name(member, span), span)}
+        arms.push(SwitchArm{cond: test, body: [Stmt]{write}, span: span})
+    }
+    each: Stmt.Switch{subject: subject.copy(), arms: arms, else_body: None, span: span}
+    sema_expr_copy_fork_over_share(made, subject, each, span)
+}
+
+// `(() -> { made := subject; step; made })()`: `step` replaces the parts of
+// the share `made` that hold a Clock with their copies.
+sema_expr_copy_fork_over_share: fn(made: String, subject: Expr, step: Stmt, span: Span) -> Expr Never! {
+    start: Stmt.Val{binding: Binding{mutable: true, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: made.copy(), name_span: span, sigil_span: None, pattern: None, ty: None, ty_span: None, init: subject, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+    body: [Stmt]{start, step, Stmt.Expr{expr: sema_expr_copy_fork_name(made, span)}}
     rebuild: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}
     Expr.CallValue{callee: Expr.Paren{value: Expr.Lambda{lambda: rebuild, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, args: [CallArg]{}, span: span, id: AST_NODE_GENERATED}
 }

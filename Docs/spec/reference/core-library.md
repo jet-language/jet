@@ -3460,12 +3460,16 @@ run: fn() {
 Ordinary `Clock` copies fork independent timelines, including copies inside
 lists and other aggregates. One rule covers every holder: `value.copy()`
 follows the value's type and forks each `Clock` it holds at any depth, in a
-list, option, map value, result, tuple, struct field or enum payload, while
-every other part copies as it always does. A `Shared<Clock>` is one timeline
-that its copies share. A copy that cannot fork every Clock it holds is refused
-with E0211: a type that holds a Clock through a part of its own type, and a
-fixed list or union of Clocks. A map's copy keeps its keys, since a map key
-can't hold a Clock (E0502). A generic body's
+list, fixed list, option, map value, result, tuple, union member, struct field
+or enum payload, while every other part copies as it always does. A
+non-generic struct or enum that holds itself and names a Clock in its own
+module, such as a tree of timers, gets a compiler-generated fork function, so
+its copy forks every Clock in the whole value. A `Shared<Clock>` is one
+timeline that its copies share. A copy that cannot fork every Clock it holds
+is refused with E0211: a generic type that holds a Clock through a part of
+its own type, or a type that reaches itself only through another module's
+types. A map's copy keeps its keys, since a map key can't hold a Clock
+(E0502). A generic body's
 copy of a type parameter copies as it always does. A system-clock copy
 rebases its own monotonic start at the original clock's current value.
 Internal expiry observers are
