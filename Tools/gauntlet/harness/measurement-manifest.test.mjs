@@ -253,7 +253,7 @@ test("expert peer comparisons use the matched Jet expert AOT row", () => {
 });
 
 test("compile-only metrics are explicitly not applicable on interpreted tiers", () => {
-  const entry = { name: "tier-fixture", mode: "batch", languages: ["jet", "rust"] };
+  const entry = { name: "tier-fixture", mode: "batch", languages: ["jet", "python"] };
   const metrics = {
     runtime_wall_seconds: 1,
     runtime_peak_rss_kb: 1,
@@ -268,24 +268,69 @@ test("compile-only metrics are explicitly not applicable on interpreted tiers", 
   };
   const rows = {
     jet: { status: "ok", metrics },
-    rust: { status: "ok", metrics: Object.fromEntries(Object.keys(metrics).map((metric) => [metric, 2])) },
+    python: { status: "ok", metrics: Object.fromEntries(Object.keys(metrics).map((metric) => [metric, 2])) },
   };
   const tiers = {
     aot: { status: "ok", metrics },
-    run: { status: "ok", metrics },
+    run: { status: "ok", metrics, cache_states: { edited: { status: "ok", metrics }, repeat: { status: "ok", metrics } } },
     dev: { status: "unavailable", metrics: {} },
   };
   const result = comparisons(entry, Object.keys(rows), rows, tiers);
-  assert.equal(result.rust.tiers.aot.metrics.binary_bytes.status, "measured");
-  assert.equal(result.rust.tiers.run.metrics.binary_bytes.status, "not_applicable");
-  assert.equal(result.rust.tiers.run.metrics.binary_bytes.applicability.basis, "no_compile_phase");
-  assert.equal(result.rust.tiers.run.metrics.loc.status, "measured");
-  assert.equal(result.rust.tiers.run.metrics.loc.jet, 1);
-  assert.equal(result.rust.tiers.run.metrics.loc.peer, 2);
+  assert.equal(result.python.tiers.aot.metrics.binary_bytes.status, "measured");
+  assert.equal(result.python.tiers.run.metrics.binary_bytes.status, "not_applicable");
+  assert.equal(result.python.tiers.run.metrics.binary_bytes.applicability.basis, "no_compile_phase");
+  assert.equal(result.python.tiers.run.metrics.loc.status, "measured");
+  assert.equal(result.python.tiers.run.metrics.loc.jet, 1);
+  assert.equal(result.python.tiers.run.metrics.loc.peer, 2);
+});
+
+test("the run tier is judged against the interpreted peers in every gated cache state", () => {
+  const entry = { name: "run-fixture", mode: "batch", languages: ["jet", "rust", "python"] };
+  const metrics = (wall) => ({
+    runtime_wall_seconds: wall,
+    runtime_peak_rss_kb: 1,
+    runtime_first_stdout_seconds: wall,
+    cold_build_seconds: 1,
+    warm_build_seconds: 1,
+    binary_bytes: 1,
+    loc: 1,
+    source_bytes: 1,
+    tokens: 1,
+    source_tokens: 1,
+  });
+  const rows = {
+    jet: { status: "ok", metrics: metrics(1) },
+    rust: { status: "ok", metrics: metrics(2) },
+    python: { status: "ok", metrics: metrics(4) },
+  };
+  const tiers = {
+    aot: { status: "ok", metrics: metrics(1) },
+    run: {
+      status: "ok",
+      metrics: metrics(5),
+      cache_states: {
+        edited: { status: "ok", metrics: metrics(5) },
+        repeat: { status: "ok", metrics: metrics(3) },
+        fresh_install: { status: "ok", metrics: metrics(50) },
+      },
+    },
+    dev: { status: "unavailable", metrics: {} },
+  };
+  const result = comparisons(entry, Object.keys(rows), rows, tiers);
+  assert.deepEqual(Object.keys(result.rust.tiers), ["aot"]);
+  assert.deepEqual(result.rust.required_tiers, ["aot"]);
+  const wall = result.python.tiers.run.metrics.runtime_wall_seconds;
+  assert.equal(wall.cache_state, "edited");
+  assert.equal(wall.verdict, "loss");
+  assert.deepEqual(Object.keys(wall.cache_states), ["edited", "repeat"]);
+  assert.equal(wall.cache_states.repeat.verdict, "win");
+  const unmeasured = comparisons(entry, Object.keys(rows), rows, { ...tiers, run: { ...tiers.run, cache_states: { repeat: tiers.run.cache_states.repeat } } });
+  assert.equal(unmeasured.python.tiers.run.metrics.runtime_wall_seconds.cache_state, "edited");
+  assert.equal(unmeasured.python.tiers.run.metrics.runtime_wall_seconds.status, "unmeasured");
 });
 
 test("web comparisons require artifact bytes and bind them to the AOT tier", () => {
-  const entry = { name: "web-fixture", mode: "web", languages: ["jet", "rust"] };
+  const entry = { name: "web-fixture", mode: "web", languages: ["jet", "node"] };
   const metrics = Object.fromEntries([
     ["runtime_first_stdout_seconds", 1],
     ["runtime_wall_seconds", 1],
@@ -302,19 +347,20 @@ test("web comparisons require artifact bytes and bind them to the AOT tier", () 
   ]);
   const rows = {
     jet: { status: "ok", metrics },
-    rust: { status: "ok", metrics: Object.fromEntries(Object.entries(metrics).map(([metric, value]) => [metric, value * 2])) },
+    node: { status: "ok", metrics: Object.fromEntries(Object.entries(metrics).map(([metric, value]) => [metric, value * 2])) },
   };
+  const runMetrics = { ...metrics, artifact_bytes: null, wasm_bytes: null };
   const tiers = {
     aot: { status: "ok", metrics },
-    run: { status: "ok", metrics: { ...metrics, artifact_bytes: null, wasm_bytes: null } },
+    run: { status: "ok", metrics: runMetrics, cache_states: { edited: { status: "ok", metrics: runMetrics }, repeat: { status: "ok", metrics: runMetrics } } },
     dev: { status: "unavailable", metrics: {} },
   };
   const result = comparisons(entry, Object.keys(rows), rows, tiers);
-  assert.equal(result.rust.tiers.aot.metrics.artifact_bytes.status, "measured");
-  assert.equal(result.rust.tiers.run.metrics.artifact_bytes.status, "not_applicable");
-  const missing = { ...rows.rust, metrics: { ...rows.rust.metrics, artifact_bytes: null } };
-  const missingResult = comparisons(entry, ["jet", "rust"], { ...rows, rust: missing }, tiers);
-  assert.equal(missingResult.rust.tiers.aot.metrics.artifact_bytes.status, "unmeasured");
+  assert.equal(result.node.tiers.aot.metrics.artifact_bytes.status, "measured");
+  assert.equal(result.node.tiers.run.metrics.artifact_bytes.status, "not_applicable");
+  const missing = { ...rows.node, metrics: { ...rows.node.metrics, artifact_bytes: null } };
+  const missingResult = comparisons(entry, ["jet", "node"], { ...rows, node: missing }, tiers);
+  assert.equal(missingResult.node.tiers.aot.metrics.artifact_bytes.status, "unmeasured");
 });
 
 test("candidate peer loss is retained in the aggregate cell verdict", () => {
@@ -674,14 +720,14 @@ test("a cell passes on the peer floor; its ceiling ratio is reported only", () =
 test("the peer floor fails a planted wall-time or peak-memory loss and names the cell, peer, metric and ratio", () => {
   const tower = { status: "available", revision: 1, cards: new Map() };
   for (const metric of ["runtime_wall_seconds", "runtime_peak_rss_kb"]) {
-    // Jet/peer = 1 / 0.5 = 2.000 on both ratio tiers.
+    // Jet/peer = 1 / 0.5 = 2.000 on the AOT tier, the only tier a compiled peer is judged on.
     const fixture = scoreboardFixture({ lossMetrics: [metric] });
     const scoreboard = buildScoreboard(fixture.matrix, [fixture.result], fixture.manifest, tower);
     assert.equal(scoreboard.cells[0].verdict, "loss");
     assert.equal(scoreboard.cells[0].metric_verdicts[metric], "loss");
     const publication = fixturePublication(fixture, scoreboard);
     assert.equal(publication.complete, false);
-    assert.ok(publication.blockers.includes(`fixture.cell/rust/${metric}: metric loss (aot Jet/rust 2.000 is at or above 1.00; run Jet/rust 2.000 is at or above 1.00)`), publication.blockers.join("\n"));
+    assert.ok(publication.blockers.includes(`fixture.cell/rust/${metric}: metric loss (aot Jet/rust 2.000 is at or above 1.00)`), publication.blockers.join("\n"));
   }
   // Parity is a loss: Jet/peer = 1.00 is not below 1.00.
   const parity = scoreboardFixture();
@@ -697,7 +743,7 @@ test("a missing peak-memory reading for Jet or a peer is uncovered and fails the
   const noJet = scoreboardFixture({ missingMetrics: ["runtime_peak_rss_kb"] });
   const noJetBoard = buildScoreboard(noJet.matrix, [noJet.result], noJet.manifest, tower);
   assert.equal(noJetBoard.cells[0].verdict, "unmeasured");
-  assert.ok(fixturePublication(noJet, noJetBoard).blockers.includes("fixture.cell/rust/runtime_peak_rss_kb: metric unmeasured (uncovered: no aot runtime_peak_rss_kb reading for jet and rust; uncovered: no run runtime_peak_rss_kb reading for jet and rust)"));
+  assert.ok(fixturePublication(noJet, noJetBoard).blockers.includes("fixture.cell/rust/runtime_peak_rss_kb: metric unmeasured (uncovered: no aot runtime_peak_rss_kb reading for jet and rust)"));
 
   const noPeer = scoreboardFixture();
   noPeer.result.rows.rust.metrics.runtime_peak_rss_kb = null;
@@ -740,6 +786,10 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     ratio_tiers: ["aot", "run"],
     trace_only_tiers: [],
     sample_binding: "immutable_peer_row_reused_per_declared_jet_tier",
+    run_tier_peers: ["lua", "luajit", "python", "node"],
+    compiled_peer_tiers: ["aot"],
+    run_cache_states: { gated: ["edited", "repeat"], reported: ["fresh_install"] },
+    run_reference_margin_seconds: 0.0005,
   });
   assert.deepEqual(manifest.report_contract.metric_applicability, {
     default: "required",

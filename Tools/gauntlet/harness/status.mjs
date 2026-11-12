@@ -42,7 +42,7 @@ const STATUS_POLICY_TERRITORIES = Object.freeze({
   critical_areas: Object.freeze([
     { id: "web", required: true, cells: ["webfront.widget", "webfront.app"], metrics: "all" },
     { id: "games", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
-    { id: "cli_and_scripts", required: true, cells: ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
+    { id: "cli_and_scripts", required: true, cells: ["cli.app", "cli.hello", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
     { id: "data_analysis", required: true, cells: ["formats.csv-cli", "numerics.script", "numerics.notebook"], metrics: "all" },
     { id: "backend_services", required: true, cells: ["concurrency.service", "netserv.service"], metrics: "all" },
     { id: "ai_ml_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
@@ -463,7 +463,10 @@ function statusMatrixPeerLanguages(matrix, cell = null) {
     ...(Array.isArray(rails.perf) ? rails.perf : []),
     ...(typeof incumbent === "string" ? [incumbent] : (cell ? [] : Object.values(isObject(rails.incumbents) ? rails.incumbents : {}))),
   ].filter((language) => typeof language === "string" && language !== "jet" && !language.endsWith("-expert"));
-  return [...new Set(peers.length ? peers : ["rust"])].sort();
+  // The run rail joins every cell with a run tier (run.mjs matrixPeerLanguages).
+  const runTier = cell === null || (STATUS_TIER_POLICY_BY_MODE[statusMatrixMode(cell)] ?? []).includes("run");
+  const run = runTier && Array.isArray(rails.run) ? rails.run : [];
+  return [...new Set([...(peers.length ? peers : ["rust"]), ...run])].sort();
 }
 
 function statusPolicyIssues(matrix) {

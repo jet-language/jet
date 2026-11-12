@@ -21,6 +21,8 @@ const timer = path.join(harnessDir, "timer.py");
 
 const TOOL_VERSION_COMMANDS = Object.freeze({
   python3: ["python3", "--version"],
+  lua: ["lua", "-v"],
+  luajit: ["luajit", "-v"],
   rustc: ["rustc", "--version"],
   gcc: ["gcc", "--version"],
   zig: ["zig", "version"],
@@ -146,7 +148,7 @@ const STRICT_PERFORMANCE_POLICY = Object.freeze({
   critical_areas: Object.freeze([
     { id: "web", required: true, cells: ["webfront.widget", "webfront.app"], metrics: "all" },
     { id: "games", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
-    { id: "cli_and_scripts", required: true, cells: ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
+    { id: "cli_and_scripts", required: true, cells: ["cli.app", "cli.hello", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
     { id: "data_analysis", required: true, cells: ["formats.csv-cli", "numerics.script", "numerics.notebook"], metrics: "all" },
     { id: "backend_services", required: true, cells: ["concurrency.service", "netserv.service"], metrics: "all" },
     { id: "ai_ml_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
@@ -164,11 +166,36 @@ const METRIC_APPLICABILITY_POLICY = {
   missing: "unmeasured_and_publication_blocked",
 };
 const STRUCTURAL_NOT_APPLICABLE_BASES = new Set(["no_compile_phase", "no_wasm_artifact"]);
+// The run tier times `jet run` from launch to answer, and its ratio peers are
+// the interpreters that answer a script the same way, each through its own
+// command (runCommand). A compiled peer's row is a prebuilt binary, so compiled
+// peers are judged on the AOT tier, whose metrics include the build times, and
+// never on the run tier. The run tier is timed in each cache state: `edited`
+// (the script changed since its last run, Jet's shipped libraries prebuilt) and
+// `repeat` (nothing changed) gate the cell; `fresh_install` (the first run with
+// an empty cache) is reported only. On an entry that names a `run_reference`,
+// a minimal hand-written program for the same answer, Jet's run tier must also
+// finish within `run_reference_margin_seconds` of that program in every gated
+// cache state.
+const RUN_TIER_PEERS = Object.freeze(["lua", "luajit", "python", "node"]);
+const RUN_CACHE_STATES = Object.freeze({ gated: Object.freeze(["edited", "repeat"]), reported: Object.freeze(["fresh_install"]) });
 const PEER_MEASUREMENT_POLICY = {
   ratio_tiers: ["aot", "run"],
   trace_only_tiers: [],
   sample_binding: "immutable_peer_row_reused_per_declared_jet_tier",
+  run_tier_peers: RUN_TIER_PEERS,
+  compiled_peer_tiers: ["aot"],
+  run_cache_states: RUN_CACHE_STATES,
+  run_reference_margin_seconds: 0.0005,
 };
+
+// The tiers a peer is compared on: the run-tier peers on every declared tier,
+// a compiled peer or an expert pair on the AOT tier only.
+function peerTierPolicy(entry, language) {
+  const policy = tierPolicy(entry.mode);
+  if (!language.endsWith("-expert") && RUN_TIER_PEERS.includes(language)) return policy;
+  return Object.fromEntries(Object.entries(policy).filter(([tier]) => PEER_MEASUREMENT_POLICY.compiled_peer_tiers.includes(tier)));
+}
 const LOSS_OWNER_CATEGORY_BY_METRIC = {
   runtime_wall_seconds: "runtime",
   runtime_first_stdout_seconds: "runtime",
@@ -243,7 +270,11 @@ const LANGUAGE_FILES = {
   go: "main.go",
   js: "main.mjs",
   node: "main.mjs",
+  lua: "main.lua",
+  luajit: "main.lua",
 };
+// LuaJIT runs the entry's Lua program; every other language has its own directory.
+const LANGUAGE_SOURCE_DIRS = { luajit: "lua" };
 
 function baseLanguage(language) {
   return language.endsWith("-expert") ? language.slice(0, -"-expert".length) : language;
@@ -970,12 +1001,15 @@ function ceilingCell(cell, references, measurements, required) {
 function matrixPeerLanguages(matrix, cell = null) {
   const rails = matrix?.rails ?? {};
   const incumbent = cell?.domain && isObject(rails.incumbents) ? rails.incumbents[cell.domain] : null;
+  const runTier = cell === null || Object.hasOwn(tierPolicy(matrixCellMode(cell)), "run");
   const peers = [
     ...(Array.isArray(rails.always) ? rails.always : []),
     ...(Array.isArray(rails.perf) ? rails.perf : []),
     ...(typeof incumbent === "string" ? [incumbent] : (cell ? [] : Object.values(isObject(rails.incumbents) ? rails.incumbents : {}))),
   ].filter((language) => typeof language === "string" && baseLanguage(language) !== "jet");
-  return sortedUnique(peers.length ? peers : ["rust"]);
+  // The run rail (PEER_MEASUREMENT_POLICY.run_tier_peers) joins every cell with a run tier.
+  const run = runTier && Array.isArray(rails.run) ? rails.run : [];
+  return sortedUnique([...(peers.length ? peers : ["rust"]), ...run]);
 }
 
 function matrixCellMode(cell) {
@@ -1378,6 +1412,9 @@ function validateEntryShape(item, matrix) {
 async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, fullScope) {
   const issues = [];
   issues.push(...strictPerformancePolicyIssues(matrix));
+  if (JSON.stringify(matrix?.rails?.run) !== JSON.stringify(RUN_TIER_PEERS)) {
+    issues.push(`matrix run rail must be the run tier's peers: ${RUN_TIER_PEERS.join(", ")}`);
+  }
   if (JSON.stringify(matrix?.metric_applicability) !== JSON.stringify(METRIC_APPLICABILITY_POLICY)) {
     issues.push("matrix is missing the metric applicability policy");
   }
@@ -1460,6 +1497,8 @@ function runCommand(language, sourceDir, artifact, args) {
   language = baseLanguage(language);
   if (language === "jet") return [artifact, ...args];
   if (language === "python") return ["python3", "main.py", ...args];
+  if (language === "lua") return ["lua", "main.lua", ...args];
+  if (language === "luajit") return ["luajit", "main.lua", ...args];
   if (language === "js" || language === "node") return ["node", "main.mjs", ...args];
   return [artifact, ...args];
 }
@@ -1485,10 +1524,10 @@ async function verifySequence(cwd, commands, expected, reset = null, { full = fa
 async function makeStateReset(sourceDir) {
   const baseline = `${sourceDir}.baseline`;
   await fs.rm(baseline, { recursive: true, force: true });
-  await fs.cp(sourceDir, baseline, { recursive: true });
+  await fs.cp(sourceDir, baseline, { recursive: true, preserveTimestamps: true });
   return async () => {
     for (const item of await fs.readdir(sourceDir)) await fs.rm(path.join(sourceDir, item), { recursive: true, force: true });
-    await fs.cp(baseline, sourceDir, { recursive: true });
+    await fs.cp(baseline, sourceDir, { recursive: true, preserveTimestamps: true });
   };
 }
 
@@ -1882,9 +1921,109 @@ function comparisonEvidence(metric, jetValue, peerValue, jetRuntime, peerRuntime
   };
 }
 
+// One metric cell of one tier: Jet's value against the peer row's value.
+function metricComparisonCell(entry, language, metric, tier, { tierReady, unavailableReason, jetMetrics, jetRuntime, peer, jetConfiguration }) {
+  const applicability = metricApplicability(entry, language, metric);
+  if (applicability.status === "invalid") {
+    return {
+      status: "unmeasured",
+      applicability,
+      jet: null,
+      peer: null,
+      ratio: null,
+      verdict: null,
+      reason: applicability.reason,
+    };
+  }
+  if (applicability.status === "not_applicable") {
+    return {
+      status: "not_applicable",
+      applicability,
+      jet: null,
+      peer: null,
+      ratio: null,
+      verdict: null,
+    };
+  }
+  if (!metricComparableAtTier(metric, tier)) {
+    return {
+      status: "not_applicable",
+      applicability: {
+        status: "not_applicable",
+        basis: "no_compile_phase",
+        reason: `${metric} is a compile-only measurement and the interpreted ${tier} tier has no compile phase.`,
+        evidence: "Build, rebuild, and binary metrics are measured only from the AOT artifact; interpreted tiers have no compile phase.",
+      },
+      jet: null,
+      peer: null,
+      ratio: null,
+      verdict: null,
+    };
+  }
+  const jetValue = positiveMetricValue(metric, jetMetrics?.[metric]) ? jetMetrics[metric] : null;
+  const peerMetrics = peer?.metrics ?? {};
+  const peerValue = positiveMetricValue(metric, peerMetrics[metric]) ? peerMetrics[metric] : null;
+  const ratio = tierReady && peer?.status === "ok" && peerValue !== null && jetValue !== null
+    ? jetValue / peerValue
+    : null;
+  const evidence = comparisonEvidence(metric, jetValue, peerValue, jetRuntime, peer?.runtime, jetMetrics, peerMetrics);
+  const evidenceReady = !evidence ||
+    (evidence.jet?.confidence?.status === "available" && evidence.peer?.confidence?.status === "available" &&
+      evidence.jet?.noise && evidence.peer?.noise &&
+      evidence.jet.raw_samples?.length > 0 && evidence.peer.raw_samples?.length > 0);
+  const verdict = evidenceReady ? ratioVerdict(ratio) : null;
+  return {
+    status: verdict === null ? (evidence && !evidenceReady ? "inconclusive" : "unmeasured") : "measured",
+    jet: jetValue,
+    peer: peerValue,
+    ratio,
+    verdict,
+    evidence,
+    noise: evidence ? { jet: evidence.jet?.noise ?? null, peer: evidence.peer?.noise ?? null } : null,
+    confidence: evidence ? { jet: evidence.jet?.confidence ?? null, peer: evidence.peer?.confidence ?? null } : null,
+    reason: verdict === null
+      ? (evidence && !evidenceReady ? "sub-millisecond comparison lacks paired confidence evidence"
+        : !tierReady ? (unavailableReason ?? `matched Jet ${jetConfiguration} ${tier} tier is unavailable`)
+          : peer?.status !== "ok" ? "peer row is unavailable"
+            : jetValue === null ? `matched Jet ${jetConfiguration} metric is missing or invalid`
+              : peerValue === null ? "peer metric is missing or invalid"
+                : "invalid metric ratio")
+      : null,
+  };
+}
+
+// The run tier's cell judges every gated cache state: it carries the first
+// state without a verdict, or else the state with the highest Jet/peer ratio,
+// so the cell wins only when every gated state wins.
+function runTierMetricCell(entry, language, metric, runTier, context) {
+  const ordered = RUN_CACHE_STATES.gated.map((state) => {
+    const measured = runTier?.cache_states?.[state];
+    return [state, metricComparisonCell(entry, language, metric, "run", {
+      ...context,
+      tierReady: runTier?.status === "ok" && measured?.status === "ok",
+      unavailableReason: runTier?.status === "ok" ? `matched Jet ${context.jetConfiguration} run tier has no measured ${state} cache state` : undefined,
+      jetMetrics: measured?.metrics,
+      jetRuntime: measured?.runtime,
+    })];
+  });
+  const [state, cell] = ordered.find(([, item]) => item.status !== "measured" && item.status !== "not_applicable") ??
+    ordered.reduce((worst, candidate) => ((candidate[1].ratio ?? 0) > (worst[1].ratio ?? 0) ? candidate : worst));
+  return {
+    ...cell,
+    cache_state: state,
+    cache_states: Object.fromEntries(ordered.map(([name, item]) => [name, {
+      status: item.status,
+      jet: item.jet,
+      peer: item.peer,
+      ratio: item.ratio,
+      verdict: item.verdict,
+      reason: item.reason ?? null,
+    }])),
+  };
+}
+
 function comparisons(entry, languages, rows, tiers = {}) {
   const metrics = comparisonMetrics(entry.mode);
-  const policy = tierPolicy(entry.mode);
   const rowMap = rows && typeof rows === "object" && !Array.isArray(rows) ? rows : {};
   const defaultJet = rowMap.jet;
   const output = {};
@@ -1902,7 +2041,7 @@ function comparisons(entry, languages, rows, tiers = {}) {
           },
         }
       : tiers;
-    const comparisonPolicy = expertPeer ? { aot: { required: true } } : policy;
+    const comparisonPolicy = peerTierPolicy(entry, language);
     const comparisonRequiredTiers = Object.entries(comparisonPolicy)
       .filter(([, value]) => value.required)
       .map(([tier]) => tier);
@@ -1914,7 +2053,8 @@ function comparisons(entry, languages, rows, tiers = {}) {
       applicable: peer?.status === "not_applicable" ? declaredPeerNonApplicable === undefined : true,
       basis: peer?.status === "not_applicable"
         ? (declaredPeerNonApplicable ? "declared-non-applicability" : "undeclared-non-applicability")
-        : expertPeer ? "jet-expert-aot-and-matched-peer" : "jet-aot-and-run",
+        : expertPeer ? "jet-expert-aot-and-matched-peer"
+          : Object.hasOwn(comparisonPolicy, "run") ? "jet-aot-and-run" : "jet-aot",
       jet_configuration: jetConfiguration,
       jet_tiers_ready: matchedJetTiersReady,
       required_tiers: comparisonRequiredTiers,
@@ -1942,8 +2082,13 @@ function comparisons(entry, languages, rows, tiers = {}) {
       continue;
     }
     for (const tier of Object.keys(comparisonPolicy)) {
-      const tierReady = comparisonTiers[tier]?.status === "ok";
-      const jetMetrics = tier === "aot" ? matchedJet?.metrics : comparisonTiers[tier]?.metrics;
+      const context = {
+        tierReady: comparisonTiers[tier]?.status === "ok",
+        jetMetrics: tier === "aot" ? matchedJet?.metrics : comparisonTiers[tier]?.metrics,
+        jetRuntime: tier === "aot" ? matchedJet?.runtime : comparisonTiers[tier]?.runtime,
+        peer,
+        jetConfiguration,
+      };
       const tierComparison = {
         metrics: {},
         peer_sample: {
@@ -1954,84 +2099,9 @@ function comparisons(entry, languages, rows, tiers = {}) {
         },
       };
       for (const metric of metrics) {
-        const applicability = metricApplicability(entry, language, metric);
-        if (applicability.status === "invalid") {
-          tierComparison.metrics[metric] = {
-            status: "unmeasured",
-            applicability,
-            jet: null,
-            peer: null,
-            ratio: null,
-            verdict: null,
-            reason: applicability.reason,
-          };
-          continue;
-        }
-        if (applicability.status === "not_applicable") {
-          tierComparison.metrics[metric] = {
-            status: "not_applicable",
-            applicability,
-            jet: null,
-            peer: null,
-            ratio: null,
-            verdict: null,
-          };
-          continue;
-        }
-        if (!metricComparableAtTier(metric, tier)) {
-          tierComparison.metrics[metric] = {
-            status: "not_applicable",
-            applicability: {
-              status: "not_applicable",
-              basis: "no_compile_phase",
-              reason: `${metric} is a compile-only measurement and the interpreted ${tier} tier has no compile phase.`,
-              evidence: "Build, rebuild, and binary metrics are measured only from the AOT artifact; interpreted tiers have no compile phase.",
-            },
-            jet: null,
-            peer: null,
-            ratio: null,
-            verdict: null,
-          };
-          continue;
-        }
-        const jetValue = positiveMetricValue(metric, jetMetrics?.[metric]) ? jetMetrics[metric] : null;
-        const peerMetrics = peer?.metrics ?? {};
-        const peerValue = positiveMetricValue(metric, peerMetrics[metric]) ? peerMetrics[metric] : null;
-        const ratio = tierReady && peer?.status === "ok" && peerValue !== null && jetValue !== null
-          ? jetValue / peerValue
-          : null;
-        const evidence = comparisonEvidence(
-          metric,
-          jetValue,
-          peerValue,
-          tier === "aot" ? matchedJet?.runtime : comparisonTiers[tier]?.runtime,
-          peer?.runtime,
-          jetMetrics,
-          peerMetrics,
-        );
-        const evidenceReady = !evidence ||
-          (evidence.jet?.confidence?.status === "available" && evidence.peer?.confidence?.status === "available" &&
-            evidence.jet?.noise && evidence.peer?.noise &&
-            evidence.jet.raw_samples?.length > 0 && evidence.peer.raw_samples?.length > 0);
-        const verdict = evidenceReady ? ratioVerdict(ratio) : null;
-        tierComparison.metrics[metric] = {
-          status: verdict === null ? (evidence && !evidenceReady ? "inconclusive" : "unmeasured") : "measured",
-          jet: jetValue,
-          peer: peerValue,
-          ratio,
-          verdict,
-          evidence,
-          noise: evidence ? { jet: evidence.jet?.noise ?? null, peer: evidence.peer?.noise ?? null } : null,
-          confidence: evidence ? { jet: evidence.jet?.confidence ?? null, peer: evidence.peer?.confidence ?? null } : null,
-          reason: verdict === null
-            ? (evidence && !evidenceReady ? "sub-millisecond comparison lacks paired confidence evidence"
-              : !tierReady ? `matched Jet ${jetConfiguration} ${tier} tier is unavailable`
-                : peer?.status !== "ok" ? "peer row is unavailable"
-                  : jetValue === null ? `matched Jet ${jetConfiguration} metric is missing or invalid`
-                    : peerValue === null ? "peer metric is missing or invalid"
-                      : "invalid metric ratio")
-            : null,
-        };
+        tierComparison.metrics[metric] = tier === "run"
+          ? runTierMetricCell(entry, language, metric, comparisonTiers.run, context)
+          : metricComparisonCell(entry, language, metric, tier, context);
       }
       comparison.tiers[tier] = tierComparison;
       comparison.verdicts[tier] = tierComparison.metrics[comparison.primary_metric]?.verdict ?? null;
@@ -2057,6 +2127,78 @@ function jetTierCommands(entry, tier, jetBin) {
     : [jetBin, "dev", "--watch=off", "run.jet", "--"];
   if (entry.mode === "batch-steps") return (entry.spec?.steps ?? []).map((args) => [...prefix, ...args]);
   return [[...prefix, ...(entry.spec?.args ?? [])]];
+}
+
+function serviceTierMetrics(service) {
+  return {
+    runtime_wall_seconds: null,
+    runtime_first_stdout_seconds: null,
+    runtime_peak_rss_kb: service.rssKb ?? null,
+    service_startup_seconds: service.startupSeconds ?? null,
+    service_startup_samples_seconds: service.startup_samples_seconds ?? [],
+    service_startup_noise: service.startup_noise ?? null,
+    service_startup_confidence: service.startup_confidence ?? null,
+    service_latency_ms_p50: service.latencyMs?.median ?? null,
+    service_latency_ms_p99: service.latencyMs?.p99 ?? null,
+    service_latency_samples_ms: service.latency_samples_ms ?? [],
+    service_latency_noise: service.latency_noise ?? null,
+    service_latency_confidence: service.latency_confidence ?? null,
+    binary_bytes: null,
+  };
+}
+
+// Times the run tier in each cache state (PEER_MEASUREMENT_POLICY.run_cache_states).
+// `measure(stateCommand, prepare)` runs the state's samples, calling `prepare`
+// before each one and running every command through `stateCommand`. `repeat`
+// goes first, while run.jet is still as the tier's verification run left it;
+// `edited` rewrites run.jet with a new trailing comment before every sample;
+// `fresh_install` gives every sample an empty cache home. run.jet gets its
+// bytes and times back afterward.
+async function measureRunCacheStates(jetDir, measure) {
+  const script = path.join(jetDir, "run.jet");
+  const original = await fs.readFile(script, "utf8");
+  const originalStat = await fs.stat(script);
+  const cacheHome = `${jetDir}.fresh-cache`;
+  const states = {};
+  try {
+    for (const state of ["repeat", "edited", "fresh_install"]) {
+      let edits = 0;
+      const stateCommand = (command) => state === "fresh_install" ? ["env", `XDG_CACHE_HOME=${cacheHome}`, ...command] : command;
+      const prepare = async () => {
+        if (state === "edited") {
+          edits += 1;
+          await fs.writeFile(script, `${original}\n// gauntlet edit ${edits}\n`);
+        } else if (state === "fresh_install") {
+          await fs.rm(cacheHome, { recursive: true, force: true });
+          await fs.mkdir(cacheHome, { recursive: true });
+        }
+      };
+      states[state] = { cache_state: state, gated: RUN_CACHE_STATES.gated.includes(state), ...(await measure(stateCommand, prepare)) };
+    }
+  } finally {
+    await fs.writeFile(script, original);
+    await fs.utimes(script, originalStat.atime, originalStat.mtime);
+    await fs.rm(cacheHome, { recursive: true, force: true });
+  }
+  return states;
+}
+
+// The run tier is broken when a gated cache state is; otherwise its row carries
+// the slower gated state's runtime and metrics, so it never reads faster than
+// either. Comparisons judge every gated state on its own (runTierMetricCell).
+function settleRunTier(tierRow, metric, sourceMetrics, verificationKind) {
+  const gated = RUN_CACHE_STATES.gated.map((state) => tierRow.cache_states?.[state]);
+  const failed = gated.find((state) => state?.status !== "ok");
+  if (failed) {
+    tierRow.status = "broken";
+    tierRow.reason = `${failed?.cache_state ?? "gated"} cache state: ${failed?.reason ?? "unmeasured"}`;
+    tierRow.verification = { status: "failed", kind: verificationKind, reason: tierRow.reason };
+    return;
+  }
+  const slower = gated.reduce((worst, state) => ((state.metrics[metric] ?? 0) > (worst.metrics[metric] ?? 0) ? state : worst));
+  tierRow.cache_state = slower.cache_state;
+  tierRow.runtime = slower.runtime;
+  tierRow.metrics = { ...sourceMetrics, ...slower.metrics };
 }
 
 async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
@@ -2115,7 +2257,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   const rows = {};
   const resets = {};
   for (const language of languages) {
-    const sourceDir = path.join(entryDir, language);
+    const sourceDir = path.join(entryDir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
     const sourceFile = LANGUAGE_FILES[baseLanguage(language)];
     const row = { language, status: "broken", metrics: {}, diagnostics: [] };
     rows[language] = row;
@@ -2414,31 +2556,34 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       const commandFor = (port) => tier === "run"
         ? [jetBin, "run", "run.jet", "--", String(port)]
         : [jetBin, "dev", "--watch=off", "run.jet", "--", String(port)];
-      const service = await runService("jet", jetDir, null, entry, commandFor);
       const tierRow = {
         applicable: true,
         required: policy.required,
-        status: service.failure ? "broken" : "ok",
-        reason: service.failure,
         command: commandFor("<port>"),
-        verification: { status: service.failure ? "failed" : "passed", kind: "service_probe_sequence", reason: service.failure },
-        metrics: {
-          ...sourceMetricValues(jetRow?.metrics),
-          runtime_wall_seconds: null,
-          runtime_first_stdout_seconds: null,
-          runtime_peak_rss_kb: service.rssKb ?? null,
-          service_startup_seconds: service.startupSeconds ?? null,
-          service_startup_samples_seconds: service.startup_samples_seconds ?? [],
-          service_startup_noise: service.startup_noise ?? null,
-          service_startup_confidence: service.startup_confidence ?? null,
-          service_latency_ms_p50: service.latencyMs?.median ?? null,
-          service_latency_ms_p99: service.latencyMs?.p99 ?? null,
-          service_latency_samples_ms: service.latency_samples_ms ?? [],
-          service_latency_noise: service.latency_noise ?? null,
-          service_latency_confidence: service.latency_confidence ?? null,
-          binary_bytes: null,
-        },
+        metrics: {},
       };
+      if (tier === "run") {
+        tierRow.cache_states = await measureRunCacheStates(jetDir, async (stateCommand, prepare) => {
+          await prepare();
+          const service = await runService("jet", jetDir, null, entry, (port) => stateCommand(commandFor(port)));
+          return {
+            status: service.failure ? "broken" : "ok",
+            reason: service.failure,
+            command: stateCommand(commandFor("<port>")),
+            runtime: null,
+            metrics: serviceTierMetrics(service),
+          };
+        });
+        tierRow.status = "ok";
+        tierRow.verification = { status: "passed", kind: "service_probe_sequence" };
+        settleRunTier(tierRow, primaryMetric(entry.mode), sourceMetricValues(jetRow?.metrics), "service_probe_sequence");
+      } else {
+        const service = await runService("jet", jetDir, null, entry, commandFor);
+        tierRow.status = service.failure ? "broken" : "ok";
+        tierRow.reason = service.failure;
+        tierRow.verification = { status: service.failure ? "failed" : "passed", kind: "service_probe_sequence", reason: service.failure };
+        tierRow.metrics = { ...sourceMetricValues(jetRow?.metrics), ...serviceTierMetrics(service) };
+      }
       tiers[tier] = tierRow;
       continue;
     }
@@ -2456,14 +2601,35 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       verification: { status: tierVerification ? "failed" : "passed", kind: "byte_exact_stdout", reason: tierVerification },
       metrics: {},
     };
+    const runs = selectedRuns ?? (entry.perf ? 7 : 3);
     if (tierVerification) {
       tierRow.status = "broken";
       tierRow.reason = tierVerification;
+    } else if (tier === "run") {
+      tierRow.status = "ok";
+      tierRow.cache_states = await measureRunCacheStates(jetDir, async (stateCommand, prepare) => {
+        const stateCommands = commands.map(stateCommand);
+        const beforeSample = async () => {
+          if (reset) await reset();
+          await prepare();
+        };
+        const runtime = stateCommands.length > 1
+          ? await measureSequenceRuns(jetDir, stateCommands, runs, beforeSample)
+          : await measureRuns(jetDir, stateCommands[0], runs, { reset: beforeSample });
+        return {
+          status: runtime.valid === true ? "ok" : "broken",
+          reason: runtime.valid === true ? undefined : "measured run samples are invalid",
+          command: stateCommands.length === 1 ? stateCommands[0] : stateCommands,
+          runtime,
+          metrics: { ...runtimeMetrics(runtime), binary_bytes: null },
+        };
+      });
+      settleRunTier(tierRow, primaryMetric(entry.mode), sourceMetricValues(jetRow?.metrics), "timed_run");
     } else {
       tierRow.status = "ok";
       tierRow.runtime = commands.length > 1
-        ? await measureSequenceRuns(jetDir, commands, selectedRuns ?? (entry.perf ? 7 : 3), reset ?? (async () => {}))
-        : await measureRuns(jetDir, command, selectedRuns ?? (entry.perf ? 7 : 3), { reset: jetFixtureReset });
+        ? await measureSequenceRuns(jetDir, commands, runs, reset ?? (async () => {}))
+        : await measureRuns(jetDir, command, runs, { reset: jetFixtureReset });
       if (tierRow.runtime.valid !== true) {
         tierRow.status = "broken";
         tierRow.reason = "measured run samples are invalid";
@@ -2659,6 +2825,48 @@ function unmeasuredMetricComparison(declaredTiers, applicability, reason) {
     tiers,
     verdict: "unmeasured",
     reason,
+  };
+}
+
+// An entry's `run_reference` names the language row holding a minimal
+// hand-written program for the same answer. Jet's run tier, in every gated
+// cache state, must finish within PEER_MEASUREMENT_POLICY.run_reference_margin_seconds
+// of that program's wall time. Null when the entry names no reference.
+function runReferenceVerdict(entry, rows, tiers) {
+  const reference = entry?.run_reference;
+  if (typeof reference !== "string") return null;
+  const margin = PEER_MEASUREMENT_POLICY.run_reference_margin_seconds;
+  const row = rows?.[reference];
+  const referenceWall = row?.status === "ok" && positiveMetricValue("runtime_wall_seconds", row.metrics?.runtime_wall_seconds)
+    ? row.metrics.runtime_wall_seconds
+    : null;
+  const cacheStates = Object.fromEntries(RUN_CACHE_STATES.gated.map((state) => {
+    const measured = tiers?.run?.status === "ok" ? tiers.run.cache_states?.[state] : null;
+    const jet = measured?.status === "ok" && positiveMetricValue("runtime_wall_seconds", measured.metrics?.runtime_wall_seconds)
+      ? measured.metrics.runtime_wall_seconds
+      : null;
+    const limit = referenceWall === null ? null : referenceWall + margin;
+    return [state, {
+      jet,
+      reference: referenceWall,
+      limit,
+      verdict: jet === null || limit === null ? "unmeasured" : (jet <= limit ? "win" : "loss"),
+    }];
+  }));
+  const states = Object.entries(cacheStates);
+  const unmeasured = states.find(([, item]) => item.verdict === "unmeasured");
+  const lost = states.filter(([, item]) => item.verdict === "loss");
+  const verdict = unmeasured ? "unmeasured" : (lost.length ? "loss" : "win");
+  return {
+    reference,
+    margin_seconds: margin,
+    cache_states: cacheStates,
+    verdict,
+    reason: unmeasured
+      ? `uncovered: no ${unmeasured[0]} run-tier reading for jet or no ${reference} reference reading`
+      : lost.length
+        ? lost.map(([state, item]) => `${state} run tier ${item.jet.toFixed(6)}s is more than ${margin}s over ${reference} ${item.reference.toFixed(6)}s`).join("; ")
+        : null,
   };
 }
 
@@ -2893,6 +3101,11 @@ function validateResultShape(result, matrix = null) {
           issues.push(`${name}/jet/${tier}/${metric}: required tier metric is missing or invalid`);
         }
       }
+      if (tier === "run") {
+        for (const state of RUN_CACHE_STATES.gated) {
+          if (tierResult.cache_states?.[state]?.status !== "ok") issues.push(`${name}/jet/run/${state}: gated cache state is missing or not measured`);
+        }
+      }
     }
   }
   for (const tier of Object.keys(tierMap)) {
@@ -2940,7 +3153,7 @@ function validateResultShape(result, matrix = null) {
         issues.push(`${name}/${language}/${scope}: peer sample identity does not match its row`);
       }
     }
-    const expectedComparisonPolicy = language.endsWith("-expert") ? { aot: { required: true } } : policy;
+    const expectedComparisonPolicy = peerTierPolicy(entry, language);
     const comparisonPolicy = comparison.tier_policy && typeof comparison.tier_policy === "object" &&
       !Array.isArray(comparison.tier_policy) ? comparison.tier_policy : {};
     if (JSON.stringify(comparisonPolicy) !== JSON.stringify(expectedComparisonPolicy)) {
@@ -3028,11 +3241,17 @@ function buildScoreboard(matrix, results, manifest, tower, ceiling = { reference
       const requiredTiers = Object.entries(jetTierPolicy)
         .filter(([, policy]) => policy.required)
         .map(([tier]) => tier);
-      const peers = (Array.isArray(result.entry.languages) ? result.entry.languages : [])
-        .filter((language) => typeof language === "string" && language !== "jet" && language !== "jet-expert")
+      const declaredLanguages = (Array.isArray(result.entry.languages) ? result.entry.languages : [])
+        .filter((language) => typeof language === "string" && language !== "jet" && language !== "jet-expert");
+      // A run-rail peer the entry has no program for stays in the record, unmeasured.
+      const runRail = Array.isArray(matrix?.rails?.run) ? matrix.rails.run : [];
+      const missingRunPeers = Object.hasOwn(jetTierPolicy, "run")
+        ? runRail.filter((language) => !declaredLanguages.includes(language))
+        : [];
+      const peers = [...declaredLanguages, ...missingRunPeers]
         .map((language) => {
           const comparison = result.comparisons?.[language];
-          const comparisonPolicy = comparison?.tier_policy ?? jetTierPolicy;
+          const comparisonPolicy = comparison?.tier_policy ?? peerTierPolicy(result.entry, language);
           const comparisonTiers = Object.keys(comparisonPolicy);
           const metricComparisons = Object.fromEntries(metrics.map((item) => [
             item,
@@ -3080,14 +3299,21 @@ function buildScoreboard(matrix, results, manifest, tower, ceiling = { reference
       const jetTierStatuses = Object.fromEntries(Object.keys(jetTierPolicy).map((tier) => [tier, result.jet_tiers?.[tier]?.status ?? "unavailable"]));
       const tiersReady = requiredTiers.every((tier) => jetTierStatuses[tier] === "ok");
       const applicablePeers = peers.filter((peer) => peer.applicable !== false);
+      const runReference = runReferenceVerdict(result.entry, result.rows, result.jet_tiers);
       const metricVerdicts = Object.fromEntries(metrics.map((item) => [
         item,
-        cellVerdict(applicablePeers.map((peer) => peer.metric_verdicts[item] ?? null)),
+        cellVerdict([
+          ...applicablePeers.map((peer) => peer.metric_verdicts[item] ?? null),
+          ...(runReference && item === "runtime_wall_seconds" ? [runReference.verdict] : []),
+        ]),
       ]));
       const metricFailures = Object.entries(metricVerdicts)
         .filter(([, verdict]) => !["win", "not_applicable"].includes(verdict))
         .map(([item, verdict]) => {
-          const peerFailures = applicablePeers.flatMap((peer) => peer.metric_failures.filter((failure) => failure.metric === item));
+          const peerFailures = applicablePeers.flatMap((peer) => peer.metric_failures.filter((failure) => failure.metric === item))
+            .concat(runReference && item === "runtime_wall_seconds" && runReference.verdict !== "win"
+              ? [{ metric: item, peer: runReference.reference, verdict: runReference.verdict, reason: runReference.reason, tiers: { run: runReference.cache_states }, owner: runReference.verdict === "loss" ? liveLossOwner(declaredOwners[result.entry.name], item, towerState) : null }]
+              : []);
           return {
             metric: item,
             verdict,
@@ -3112,6 +3338,7 @@ function buildScoreboard(matrix, results, manifest, tower, ceiling = { reference
         jet_tiers: jetTierStatuses,
         tiers_ready: tiersReady,
         peers,
+        run_reference: runReference,
         metric_verdicts: metricVerdicts,
         metric_failures: metricFailures,
         loss_owners: lossOwners,
@@ -3966,6 +4193,8 @@ async function toolchainFingerprint(runDir, jetBin) {
     go: toolVersionCommand("go"),
     js: toolVersionCommand("node"),
     node: toolVersionCommand("node"),
+    lua: toolVersionCommand("lua"),
+    luajit: toolVersionCommand("luajit"),
   };
   const versions = {};
   for (const [language, command] of Object.entries(commands)) {

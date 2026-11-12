@@ -55,6 +55,7 @@
     { "id": "concurrency.app", "domain": "concurrency", "kind": "application", "personas": ["switcher-sys", "generalist", "agent"], "description": "Structured task fan-out over real work." },
     { "id": "concurrency.service", "domain": "concurrency", "kind": "service", "personas": ["switcher-sys", "agent"], "description": "Long-lived concurrent worker (queue/scheduler)." },
     { "id": "cli.app", "domain": "cli", "kind": "cli", "personas": ["novice", "generalist", "agent"], "description": "Typed-args CRUD CLI application." },
+    { "id": "cli.hello", "domain": "cli", "kind": "scripting", "personas": ["novice", "generalist", "agent"], "description": "The smallest script: time from `jet run` to its one-line answer." },
     { "id": "webfront.widget", "domain": "webfront", "kind": "web", "personas": ["student", "generalist"], "description": "Finite wasm widget with JS bridge." },
     { "id": "webfront.app", "domain": "webfront", "kind": "application", "personas": ["generalist", "agent"], "description": "Long-lived interactive DOM application." },
     { "id": "netserv.client", "domain": "netserv", "kind": "cli", "personas": ["generalist", "agent"], "description": "HTTP client: fetch, parse, report." },
@@ -66,6 +67,7 @@
   "rails": {
     "always": ["rust", "python", "node"],
     "perf": ["c", "zig"],
+    "run": ["lua", "luajit", "python", "node"],
     "incumbents": { "webfront": "js", "netserv": "go" }
   },
   "metric_applicability": {
@@ -99,7 +101,7 @@
     "critical_areas": [
       { "id": "web", "required": true, "cells": ["webfront.widget", "webfront.app"], "metrics": "all" },
       { "id": "games", "required": false, "activation": "first_party_battery", "cells": [], "metrics": "all" },
-      { "id": "cli_and_scripts", "required": true, "cells": ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], "metrics": "all" },
+      { "id": "cli_and_scripts", "required": true, "cells": ["cli.app", "cli.hello", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], "metrics": "all" },
       { "id": "data_analysis", "required": true, "cells": ["formats.csv-cli", "numerics.script", "numerics.notebook"], "metrics": "all" },
       { "id": "backend_services", "required": true, "cells": ["concurrency.service", "netserv.service"], "metrics": "all" },
       { "id": "ai_ml_applications", "required": false, "activation": "first_party_battery", "cells": [], "metrics": "all" },
