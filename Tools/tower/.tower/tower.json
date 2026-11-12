@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6758,
-    "rev": 99746,
+    "nextNum": 6759,
+    "rev": 99748,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98793,6 +98793,47 @@
       "updated": "2026-11-12T03:36:41.495Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0d72itt",
+      "num": 6758,
+      "title": "Compile-time folding bakes vDSO reads: rt.clock_mono_ns() in a local became one build's constant",
+      "body": "Found by G4Ports-1, 2026-11-11, root of the run-cold-context parity failure. sema's comptime-local folding treated an initializer as pure when the seccomp filter saw no syscall. vDSO reads such as clock_gettime never trap, so 'now: rt.clock_mono_ns()' in Core/Http/Client.jet __client_until held one build's reading: every 500 ms HTTP send failed at once in a process older than that. The same latent bake sits in the Tls, Db, Server, Web and Wayland deadlines. Fix: G4Ports-clock.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Sema folds a local at compile time only when the solved effect row of its initializer is empty. An initializer that reaches Time, Rand or any other effect is never folded, whatever syscall path it takes (vDSO included), and seccomp is only a backstop. Proof: a #Test that fails on the base compiler (two clock reads in one process equal) and passes on the fix, a second test for another vDSO-backed read, and the run-cold-context PortBars parity cases 2, 5, 6 and 7 passing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T03:48:33.892Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T03:48:27.281Z",
+      "updated": "2026-11-12T03:48:33.892Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -199256,6 +199297,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T03:48:33.892Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0d72itt",
+      "note": "#1 Sema folds a local at compile time only when the solved effe"
+    },
+    {
+      "at": "2026-11-12T03:48:27.281Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0d72itt",
+      "note": "Compile-time folding bakes vDSO reads: rt.clock_mono_ns() in a local became one build's constant"
+    },
     {
       "at": "2026-11-12T03:36:41.495Z",
       "by": "Main",
