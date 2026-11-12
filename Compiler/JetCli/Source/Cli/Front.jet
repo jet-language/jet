@@ -1600,6 +1600,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
             if !jet_cli_form_ported("build --target={name}") -> return jet_cli_not_ported("build --target={name}", color)
         }
     }
+    if args.len() > 2 -> return jet_cli_build_extra_refused(args, color)
     // A package (no file given, or a directory): its `build: fn(b: Build)` when it declares one,
     // otherwise the stock build of its run entry.
     if args.len() < 2 || cli_files.is_dir(args[1]) {
@@ -1665,6 +1666,13 @@ jet_cli_build_verbose: fn(jet_argv: [String]) -> Bool Never! {
 // words, so they are refused, never dropped.
 jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `build: fn`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `build.jet` declares `build: fn(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
+}
+
+// `jet build <entry> <word>…`: a build takes one file or directory and no
+// program arguments, so the extra words are refused, never dropped.
+jet_cli_build_extra_refused: fn(args: [String], color: Bool) -> JetCLIPlan Never! {
+    extra: jet_cli_tail(args, 2).join(" ")
+    jet_cli_fail("E2104", "`jet build` takes one file or directory, and `{extra}` follows `{args[1]}`", jet_cli_why("E2104"), "remove `{extra}`, or pass it to `build: fn` after `--`: `jet build {args[1]} -- {extra}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // `jet {command} <file>` of a C or C++ file (#6686): its plan at the
@@ -1807,9 +1815,15 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     entry: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _, _, _, _, _) -> {
-            // `jet dev` of a browser program serves its web build.
+            // `jet dev` of a browser program serves its web build, which
+            // starts no program to read words, so they are refused.
             if watch && jet_cli_dev_web_selected(jet_argv, source) {
                 port: jet_cli_dev_web_port(jet_argv) ?? return jet_cli_fail("E2104", "`--port` needs a TCP port number from 0 to 65535", jet_cli_why("E2104"), "write `--port=8080`, or leave it out to let the preview listener choose a port", color, JET_DRIVER_EXIT_USAGE)
+                unread: passthrough ?? jet_cli_tail(args, 2)
+                if unread.len() > 0 {
+                    extra: unread.join(" ")
+                    return jet_cli_fail("E2104", "`jet dev` serves this program's web build, which reads no program arguments, and `{extra}` follows it", jet_cli_why("E2104"), "remove `{extra}`; `jet dev` passes words to a native program, as `jet run` does", color, JET_DRIVER_EXIT_USAGE)
+                }
                 return JetCLIPlan.DevWeb{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, port: port}
             }
             // A web-targeted program builds browser artifacts; only an
@@ -1952,7 +1966,10 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
         }
         index += 1
     }
-    if positionals.len() > 2 -> return jet_cli_test_option_error("`jet test` accepts one target and one positional filter, got {positionals.len()} positionals", color)
+    if positionals.len() > 2 {
+        extra: jet_cli_tail(positionals, 2).join(" ")
+        return jet_cli_fail("E2104", "`jet test` takes one target and one filter, and `{extra}` follows them", jet_cli_why("E2104"), "remove `{extra}`: `jet test {positionals[0]} {positionals[1]}`", color, JET_DRIVER_EXIT_USAGE)
+    }
     if positionals.len() == 2 {
         filter: positionals[1]
         if test_settings_get(flags, "filter") == .Val(previous) {

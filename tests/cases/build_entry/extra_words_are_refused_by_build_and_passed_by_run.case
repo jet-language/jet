@@ -1,0 +1,27 @@
+# #5069 c3: `jet build` and `jet test` take no program arguments, so a word
+# their command line cannot use is refused with E2104
+# (tests/cli/build_extra_word_e2104.txt, tests/cli/test_extra_word_e2104.txt),
+# never dropped. `jet run` and `jet dev` pass every word after the file to
+# the program; a `jet dev` that serves a web build (`--port`) runs no program
+# to read them, so it refuses them.
+fixture: extra_words_are_refused_by_build_and_passed_by_run.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build -A main.jet extra.bin
+exit: 2
+stderr: = ../../cli/build_extra_word_e2104.txt
+step: jet build main.jet one two
+exit: 2
+stderr: ~ "`jet build` takes one file or directory, and `one two` follows `main.jet`" # every extra word is named
+step: jet test main.jet smoke extra.bin
+exit: 2
+stderr: = ../../cli/test_extra_word_e2104.txt
+step run: jet run main.jet extra.bin one two
+exit: 0
+stdout: = "args: extra.bin one two\n"
+step dev: jet dev --watch=off main.jet extra.bin one two
+exit: 0
+stdout: = "args: extra.bin one two\n"
+step: jet dev --port=0 main.jet extra.bin
+exit: 2
+stderr: ~ "`jet dev` serves this program's web build, which reads no program arguments, and `extra.bin` follows it" # refused before the preview listener starts
