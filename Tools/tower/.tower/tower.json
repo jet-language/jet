@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6753,
-    "rev": 99673,
+    "rev": 99674,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -198892,6 +198892,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-12T01:02:46.834Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0sdhr8t",
+      "note": "Gaps against hand-written code: every identified root (2026-11-11 late evening)"
+    },
+    {
       "at": "2026-11-12T01:02:11.642Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -203844,6 +203851,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0sdhr8t",
+      "title": "Gaps against hand-written code: every identified root (2026-11-11 late evening)",
+      "body": "# Gaps against hand-written code: every identified root (2026-11-11, late evening)\n\nThis revision replaces briefing0o7180b. Every number is measured unless marked as an estimate. Nothing below has landed yet: each fix is staged or held, and lands only on a measured win under the paired rule at the end.\n\n## 1. Hot-loop instructions (CodegenCeiling kernels)\n\nJet against hand-written, in loop instructions: list_sum 254/5, gather 273/8, point 213/9, collatz 180/11, byte_count 119/7, stride 71/6.\n\n|#|Root|Cost (list_sum / gather)|Fix|\n|---|---|---|---|\n|R1|Versioning re-versions its own fallback loop after inlining: three guarded copies plus the original|132 / 120|G9: list_sum 254→122, gather 273→153, about −40% on every kernel. Held; re-judged under the paired rule|\n|R2|The cold bounds-stop path (19 instructions) is laid out inside the loop body|0 / 76|next SUB; G12 and G14 move fail arms out of hot code in general|\n|R3|Each pass re-runs big-integer guards on the index and the sum, because `i += 1` isn't accepted as a stepped index|42 / 42|next SUB|\n|R4|An error return after `ret` jumps back into the epilogue and forms a false loop|10 / 10, in every kernel|next SUB|\n|R5|The fallback loop spills to stack slots and tests the same values twice|about 31 / 40|after R2|\n|R6|The length is reloaded every pass|4 / 8|last|\n|R7|The exact-integer fallback is a second copy of the loop, where hand code uses one `jo` to a shared cold path|the remaining gap|design in progress|\n\nAfter R1–R4 the estimate is list_sum about 81 and gather about 40. Reaching 5 and 8 needs R7. The gate itself doesn't change.\n\nOther code-generation roots, each with a staged fix:\n\n- G10r2: r8 and r9 don't hold values across exact-integer paths, causing extra spills.\n- G12/G14: fail arms are laid out in hot code, and aggregate copies read every field.\n- G13: short byte runs become text through a store-forwarding stall.\n- G15: `||` and `&&` chains build a boolean instead of branching once per link.\n- G17: a one-byte find runs the general search.\n- G18: a runtime stop that never returns is treated as a call.\n- G19: a jcc that only skips a jmp. It caused 45% of regexlogscan's branch misses, and the +7.5% regression.\n- G22: inlining weighs cold fail paths as hot.\n- G25: the overflow check on `x + 1` stays when a dominating `x < y` rules it out.\n- G33: a multiply by a constant loads the constant into a register first.\n- G16/G21: time parsing boxes an Option needlessly and doesn't inline a two-digit helper.\n- G11: slices of unchanged text are allocated and copied, where they could be frame views.\n\n## 2. Binary size (hello: 31,439 B against hand-written 1,453 B with the same features)\n\n38 bytes are the program. The rest is the runtime floor every program links.\n\n|Root|Hand (B)|Jet (B)|Fix|\n|---|---:|---:|---|\n|The crash receipt writer is reached through overflow checks that can't fire|0|12,080|G23|\n|The fault report maps the executable to find a build ID that is at a fixed address|858|3,584|G26, about −1.3 KB|\n|A startup refusal path for stops that can't happen in a one-thread start|0|2,501|G30|\n|A 12 KiB stdout buffer, a TCGETS probe and an exit flush, though hello's print writes directly|82|1,827|G27, about −1.6 KB, −12 KiB RSS and −2 syscalls|\n|A general-purpose out-of-memory writer|259|1,662|G31|\n|Argument registration through globals|78|824|not yet staged|\n|Every numeric stop text is linked into every module|—|about 4 KB|G32|\n|Data that no function reaches is kept|—|—|G20|\n\nThe call-graph estimate for G23+G26+G27 is about 21.5 KB of code down to about 7.4 KB. Not yet measured.\n\nThree size items change behavior and will go on owner ballots:\n\n- the 3,832 B gap before the code page, which keeps code on its own page;\n- the test-read recorder armed at every start (468 B plus an environment scan);\n- the crash receipt and fault report (14.6 KB), which only a new public flag such as `--minimal` could drop.\n\n## 3. Run-time memory\n\n- hello maps a 12 KiB stdout buffer it never uses (G27).\n- Per-program peak memory against hand-written code hasn't been rooted for any other cell yet.\n\n## 4. Compile time and compiler memory\n\nA cold script costs about 1.8 s and 250 MB against the shell's 30 ms.\n\n- All of Core is loaded: a bare `math.sqrt` pulled 1,785 functions from 39 modules. G8Scope-38..45 make loading follow use. With -45 the count is 1,364 functions and the check takes 734 ms instead of 915 ms. The target is a few dozen functions.\n- Parsing runs at 136k lines/s, about 220× short of 30M. Lexing is 45% of parsing, and float bignum conversion is 22% of lexing.\n- `jet check` peaks at 6–9 GB on the compiler roots. Its cause isn't found yet. #6527 c11 caps a root at 3 GB and is G8Scope-3's next item.\n\n## Not yet rooted\n\nOnly the seven kernels, hello, sieve (whose +16.8% was startup and page-fault variance with identical code) and regexlogscan are rooted. nbody, wordfreq, csvtransform and the other cells are measured against hand-written references but not yet broken down.\n\n## Proof integrity tonight\n\nFour false-credit vectors have been found and closed:\n\n1. b4–b7 deferred proofs were credited without being read (90 credits). The jq fix and a canary case closed it.\n2. PortBars didn't check a timed run's exit code. ScriptAPI-63 closes it.\n3. `jet test` exits 0 for SKIP-HOST and KNOWN-FAILING rows. The PASS-only judge and a known-failing canary close it. Audit3 found 25 zero-pass lines; no met criterion rested on one.\n4. Meet lines were labeled with a criterion they didn't run. Each meet line now names its proof's source.\n\nOnly #6129 c64 had to be reopened.\n\nTwo more findings:\n\n- I4: 397 of 977 registered diagnostic codes have no UI snapshot. Card #6752.\n- Hosts: the 38 host-skipped rows get chromium, firefox and 16 toolchains, installed after b9's self-check.\n\n## Measurement rule (adopted tonight)\n\nPer cell:\n\n- instructions:u may rise by at most 0.1%;\n- the claimed static win (loop instructions or bytes) must be shown;\n- cycles are judged by 10 ABBA pairs on one pinned CPU, and a regression is at least 8 of 10 pairs slower with a median above +1%;\n- a consistent loss under 1% lands only with that loss recorded in the gains file and on #6414.\n\n## Releases\n\nb8's admission failed on a census parser defect: tallies ending in \", 0 skipped\" read as unfinished. The fix e7d517a402 is in b9, so the next a0.0.N comes from b9. b9 built in 74 s and its self-check is running. The newest admitted release is still a0.0.44.\n",
+      "by": "Main",
+      "created": "2026-11-12T01:02:46.834Z",
+      "sections": []
+    },
     {
       "id": "briefing0o7180b",
       "title": "Gaps against hand-written code and cold-script cost: update (2026-11-11 night)",
