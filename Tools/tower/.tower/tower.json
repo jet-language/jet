@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6756,
-    "rev": 99714,
+    "rev": 99716,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-12T01:34:56.977Z"
+    "completionCursor": "2026-11-12T02:10:58.008Z"
   },
   "epochs": [
     {
@@ -55408,7 +55408,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T01:53:04.776Z",
+      "updated": "2026-11-12T02:15:44.209Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -195698,8 +195698,8 @@
       "group": "effects",
       "title": "Where the effect for reading a task's context lives",
       "situation": "Reading a task's deadline or thread index adds Context to a function's effects. Two earlier votes require that dependency to remain visible. The kernel vote lists twelve built-in roots, but the compiler now has thirteen, including Context. We recommend declaring Context in Core while keeping its name and read effect. This is not just moving a declaration: authority checks must still distinguish a context dependency from permission to touch the machine. Keeping a runtime-context root is a credible alternative, but needs an explicit amendment to the twelve-root rule. This vote does not remove context reads at compile time: an earlier vote expressly permits reading the build's root context.",
-      "gist": "Should Context be declared in Core, stay built in, use an existing root, or be a language input that is not an effect at all?",
-      "lesson": "Reading context touches no machine and needs no permission. Rows track it only as a hidden input that #Memo, pure functions and C callbacks must not depend on. Today Context is a thirteenth built-in root beyond the kernel vote's twelve. Options A to E keep a visible Context row and differ in where it is declared. F drops the row and the deny but keeps the purity protection. Compile-time reads keep the build-root rule.",
+      "gist": "Should Context be an effect declared somewhere, or an implicit input to every function, as in Jai?",
+      "lesson": "Reading context touches no machine and needs no permission. Jai passes its context to every procedure as a hidden argument, and reading it is ordinary. Options A to E keep a visible Context effect and differ only in where it is declared. F follows Jai: context is an implicit input, so a function stays deterministic in its arguments plus its context. #Memo keys on the context it reads. C callbacks get no context unless they install one.",
       "explainer": "",
       "story": "Priya's helper checks the deadline installed by its caller. She can omit its effect row; her reviewer can inspect the inferred Context dependency. A package that must not depend on that ambient input can deny Context. The question is where to declare that effect, not whether to make Priya write a row.",
       "inWild": "// Go: explicit parameter, not a purity or ambient-read guarantee.\n// Source: https://go.dev/src/context/context.go, lines 34-54 and 72-76.\nfunc timeLeft(ctx context.Context, now time.Time) time.Duration {\n    if d, ok := ctx.Deadline(); ok { return d.Sub(now) }\n    return 0\n}",
@@ -195742,10 +195742,10 @@
         },
         {
           "key": "F",
-          "name": "Context is a language input, not an effect",
-          "detail": "Context is part of every function, like Jai's implicit context. Reading it adds nothing to an effect row, and `Context` is no longer an effect name. Nobody writes, grants or denies it. A function with a written row such as `-[IO]>` may read context freely.\n\nThe compiler still infers, through calls, function values, generics and trait calls, whether a function reaches a context read. It keeps one protection: a pure `-[]>` function, a `#Memo` function and a C callback may not reach a context read. Each refusal names the read. #Memo caches by arguments, so a cached result computed under one deadline or thread would be returned under another. A pure function promises its result depends only on its arguments. A C callback has no task context to read.\n\nBeginner: unchanged; omit the row. Expert: writes rows without Context and loses `deny: [Context]`. Spawn, block restoration and build-root reads keep their meaning.",
-          "technical": "Keep the inference that records a context read at Expressions/Places.jet, but mark it as a hidden purity fact, not a row entry. It is excluded from written-row ceilings, authority, package budgets and jet inspect rows. It stays in the solved set that the pure check, the #Memo check (E0938) and the C-callback check read.\n\nRemove the Context root from EffectRoots, the named grant exemption at Policy/Authority.jet:42-47, the Driver/Pipeline.jet:4795 budget insertion and the deny path. A registered refusal with a UI snapshot replaces the misleading E3401 call wording for context reads.\n\nOne mechanism, the effect solver, still does the inference; only the user-visible spelling goes. Migrate every -[Context]> row, deny entry, snapshot, example and spec line in one cutover. This amends the read-effect clauses of D-JAI-CONTEXT1 and D-CONTEXT1: their purity and C-callback protection stays, the visible row and the deny go.",
-          "code": "// Proposed behavior\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nlog_time: fn(now: Int) -[IO]> Unit { print(time_left(now)) } // allowed: a context read is not an effect\n#Memo\ncached: fn(now: Int) -> Int { time_left(now) } // refused: a memoized function cannot read the task context\nexact: fn(now: Int) -[]> Int { time_left(now) } // refused: a pure function cannot read the task context"
+          "name": "Context is an implicit input to every function, as in Jai",
+          "detail": "Every Jet function receives the task context as an implicit input, the way Jai passes its context to every procedure. Reading it is not an effect. It adds nothing to a row, and nobody writes, grants or denies it. `Context` is no longer an effect name.\n\nA function's result depends on its arguments and its context, so it is deterministic in both. A pure `-[]>` function may read context.\n\n`#Memo` keys its cache on the arguments plus the context fields the function can reach. A result computed under one deadline is never reused under another.\n\nA C callback, like Jai's #c_call, receives no context. Reading context there is a registered error until the callback installs one. Using a context field is separate from reading it: time left until a deadline reads the clock, which stays Time.",
+          "technical": "Context becomes an implicit parameter of every Jet-convention function, which matches how the runtime already threads the task context. Remove the Context root from EffectRoots, the grant exemption at Policy/Authority.jet:42-47, the budget insertion at Driver/Pipeline.jet:4795 and the deny path.\n\nThe read inference at Expressions/Places.jet stays, but only as a sema fact naming the context fields a function can reach. #Memo uses it as the extra cache key. A function that can reach no context read keys on its arguments alone, so it pays nothing.\n\nWhere sema cannot bound the reach, as with an unknown function value, #Memo keys on the whole context. The C-callback check stays in sema as a calling-convention fact with a registered diagnostic.\n\nMigrate every -[Context]> row, deny entry, snapshot, example and spec line in one cutover. This amends the read-effect clauses of D-JAI-CONTEXT1 and D-CONTEXT1. The convenience they ratified, Jai-style context without forwarding parameters, is unchanged.",
+          "code": "// Proposed behavior\ntime_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nlog_time: fn(now: Int) -[IO]> Unit { print(time_left(now)) } // allowed: reading context is not an effect\nexact: fn(now: Int) -[]> Int { time_left(now) } // allowed: deterministic in now plus the context\n#Memo\ncached: fn(now: Int) -> Int { time_left(now) } // cached per (now, context.deadline)"
         }
       ],
       "comparisons": [
@@ -195834,7 +195834,7 @@
           },
           {
             "key": "F",
-            "reason": "F matches context being part of every function and keeps the purity, #Memo and C-callback protection. It drops the package deny and amends two ratified clauses. Its cross-family review is pending; if the owner prefers context outside the effect system, F is the form to pick."
+            "reason": "F follows Jai and the owner's stated view that context is an input. It drops the package deny, adds a context key to #Memo where context is read, and amends two ratified clauses. A vote for F authorizes the direction; its build card's first criterion is the passing cross-family adversarial review."
           }
         ],
         "tradeoff": "A retains runtime-dependent Context facts outside the machine-root enum. It must preserve one effect mechanism while distinguishing dependency tracking from authority grants; a bare #FX declaration alone is not that proof."
@@ -195848,7 +195848,7 @@
       },
       "checkInstructions": "Run the unchanged origin/dev Tools/agent/ballots/Validate.jet scratch copy with seed-b5 on ballot.json. Probe sources and exact results are in the named scratch directory. Use nice -n 10 ionice -c3 for Jet commands. Validation checks payload shape and prose, not semantic completion or whether Tower identifiers are live.",
       "surface": {
-        "gist": "Where should Context live: in Core, built in, under Env, or outside the effect system as a language input?",
+        "gist": "Is reading Context an effect to declare, or an implicit input to every function, as in Jai?",
         "lesson": "Reading context adds a dependency to a function's effects, even though it needs no permission. The kernel vote lists twelve roots; code adds Context as thirteen. A moves its declaration to Core. Beginners still omit rows. Compile-time reads keep the earlier rule: they see the build's root context.",
         "trio": {
           "current": {
@@ -195934,18 +195934,20 @@
           },
           {
             "key": "F",
-            "name": "A language input, not an effect",
-            "gist": "Context reads never appear in rows, but pure, #Memo and C-callback functions still cannot read it.",
+            "name": "An implicit input, as in Jai",
+            "gist": "Context is a hidden argument to every function. Reading it is never an effect, and #Memo keys on it.",
             "gains": [
-              "Matches the view that context is part of every function.",
-              "Experts write rows without Context."
+              "Matches Jai: context is part of every function.",
+              "Pure functions may read context; they stay deterministic in their inputs.",
+              "No row, grant or deny to write."
             ],
             "losses": [
               "No package can deny context reads.",
+              "#Memo caches grow a context key where context is read.",
               "Amends two ratified read-effect clauses."
             ],
             "proposed": {
-              "code": "time_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nlog_time: fn(now: Int) -[IO]> Unit { print(time_left(now)) } // allowed\nexact: fn(now: Int) -[]> Int { time_left(now) } // refused: reads the task context"
+              "code": "time_left: fn(now: Int) -> Int { (context.deadline ?? now) - now }\nexact: fn(now: Int) -[]> Int { time_left(now) } // allowed: deterministic in now plus the context"
             }
           }
         ],
@@ -195980,7 +195982,7 @@
             },
             {
               "key": "F",
-              "reason": "Keeps purity protection without a row, but drops the package deny and amends two votes. Review pending."
+              "reason": "Follows Jai: context is an input, so no row or deny exists. The review runs first on its build card."
             }
           ],
           "tradeoff": "Library placement does not make an ambient dependency pure. Keep that distinction checked."
@@ -199196,6 +199198,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T02:15:44.209Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CONTEXT-EFFECT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-12T02:10:58.008Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-12T02:10:58.008Z"
+    },
     {
       "at": "2026-11-12T02:02:27.341Z",
       "by": "Main",
