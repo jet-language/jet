@@ -1,0 +1,20 @@
+# Claim (#6753): a package's `FS.Read("<path>")` grant names a path relative
+# to the directory that holds its manifest, not to where the run starts. The
+# same package run from its own directory and from another one reads the same
+# granted file and is refused the same other file.
+fixture: package_allow_read_path_confines_reads_to_the_granted_paths.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+step home: jet run tools/s.jet {work}/data/a.txt {work}/other.txt
+normalize: replace "{work}" "<work>"
+exit: 0
+stdout: = "<work>/data/a.txt: data-a\n<work>/other.txt: permission denied during read `<work>/other.txt`: Permission denied (os error 13); E1803: this run may read only <work>/data (`--allow='FS.Read(\"<path>\")'`)\n"
+stderr: = ""
+mkdir: elsewhere
+step away: jet run {work}/tools/s.jet {work}/data/a.txt {work}/other.txt
+cwd: {work}/elsewhere
+normalize: replace "{work}" "<work>"
+exit: 0
+stdout: == home
+stderr: = ""

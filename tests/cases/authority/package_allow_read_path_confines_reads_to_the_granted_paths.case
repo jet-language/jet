@@ -1,0 +1,19 @@
+# Claim (#6753): a package's `authority: { allow: [FS.Read("<path>")] }` grant
+# means what `jet run --allow='FS.Read("<path>")'` means: the run holds
+# `FS.Read`, reads the granted path, and every read outside it is refused with
+# E1803 naming the grant. An unscoped `--allow=FS.Read` on the command line
+# lifts the confinement, as it does for a scoped `--allow` row. The grant's
+# path is the manifest directory's `data`, so E1803 names it absolute.
+fixture: package_allow_read_path_confines_reads_to_the_granted_paths.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+step granted: jet run tools/s.jet data/a.txt other.txt
+normalize: replace "{work}" "<work>"
+exit: 0
+stdout: = "data/a.txt: data-a\nother.txt: permission denied during read `other.txt`: Permission denied (os error 13); E1803: this run may read only <work>/data (`--allow='FS.Read(\"<path>\")'`)\n"
+stderr: = ""
+step unscoped: jet run --allow=FS.Read tools/s.jet data/a.txt other.txt
+exit: 0
+stdout: = "data/a.txt: data-a\nother.txt: other\n"
+stderr: = ""

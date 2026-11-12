@@ -53,12 +53,12 @@ use {
 }
 
 // Names the kept-program records; a new layout is a new name.
-JET_CLI_SCRIPT_RECORD: "jet.script-run/v5"
+JET_CLI_SCRIPT_RECORD: "jet.script-run/v6"
 
 // The rows of a slot record before its toolchain rows: the record name, the
-// program file, the sources hash, the optimize level and the four authority
+// program file, the sources hash, the optimize level and the five authority
 // rows. The toolchain rows end with one row per Core file the compile read.
-JET_CLI_SCRIPT_RECORD_HEAD: 8
+JET_CLI_SCRIPT_RECORD_HEAD: 9
 
 // The toolchain rows of a record (jet_cli_script_toolchain), before its Core
 // rows.
@@ -429,11 +429,13 @@ jet_cli_eval_lines: fn(code: String) -> String Never! {
 
 // A slot record: the program file it names, the sources hash, the optimize
 // level the program was built at, the program's authority (its required
-// rights and its package policy, one row each, so a rerun checks this
-// invocation's rows as a compile would), then the toolchain rows and the rows
-// of the Core files the compile read (jet_cli_script_core_rows).
+// rights, its package policy and the paths that policy confines its reads to,
+// one row each, so a rerun checks this invocation's rows as a compile would),
+// then the toolchain rows and the rows of the Core files the compile read
+// (jet_cli_script_core_rows). The read paths are tab-separated: a scope
+// argument can hold a comma but never a tab (effect_scope_argument_valid).
 jet_cli_script_record_encode: fn(program: String, keep: JetCLIScriptKeep, level: String, authority: JetCLIAuthority, core_rows: [String]) -> String Never! {
-    head: "{JET_CLI_SCRIPT_RECORD}\n{program}\n{keep.sources}\n{level}\n{authority.required.join(",")}\n{authority.granted.join(",")}\n{authority.denied.join(",")}\n{authority.authority}\n{keep.toolchain}"
+    head: "{JET_CLI_SCRIPT_RECORD}\n{program}\n{keep.sources}\n{level}\n{authority.required.join(",")}\n{authority.granted.join(",")}\n{authority.denied.join(",")}\n{authority.authority}\n{authority.read_scope.join("\t")}\n{keep.toolchain}"
     if core_rows.len() == 0 -> return head
     "{head}\n{core_rows.join("\n")}"
 }
@@ -465,14 +467,15 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     program: jet_cli_script_record_program(rows) ?? return None
     if !jet_cli_script_record_matches(rows, keep) || rows[3] != build_options_value(options, "optimize") -> return None
     executable: x64_executable_kept("{directory}/{program}") ?? return None
-    authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}}
+    read_scope: if rows[8] == "" -> [String]{} else -> rows[8].split("\t").to_list()
+    authority := JetCLIAuthority{required: jet_cli_script_rights(rows[4]), granted: jet_cli_script_rights(rows[5]), denied: jet_cli_script_rights(rows[6]), authority: rows[7], invocation_denied: [String]{}, read_scope: read_scope}
     jet_cli_with_invocation(authority, invocation)
     refused: jet_cli_authority_report(file, source, color, json, authority)
     if refused.move() == .Val(report) -> return Val(JetCLIRunStep.Output{output: report})
     stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
     if stopped.move() == .Val(output) -> return Val(JetCLIRunStep.Output{output: output})
     jet_cli_script_used(record, text)
-    Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color})
+    Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: authority.read_scope.copy(), verbose: false, color: color})
 }
 
 // Whether the complete slot record `rows` names exactly `keep`'s sources and

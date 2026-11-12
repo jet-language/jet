@@ -61,6 +61,25 @@ effect_scope_argument_valid: fn(scope: String) -> Bool Never! {
     true
 }
 
+// The paths that `FS.Read("<path>")` rights among the canonical `rights`
+// confine a run's reads to, in order: the run may read those files and
+// directories and nothing else. A grant written as a `jet run --allow` row
+// and one written in a package's `authority.allow` row mean the same thing.
+// Empty when no right names a path, or when another right grants every read
+// (`FS`, `FS.Read`), since a scoped right never narrows a bare one.
+effect_scope_read_paths: fn(rights: [String]) -> [String] Never! {
+    paths := [String]{}
+    loop right in rights {
+        split: effect_scope_split(right)
+        if split.scope == .Val(path) {
+            if split.base == "FS.Read" && !paths.contains(path) -> paths.push(path.copy())
+            next
+        }
+        if split.base == "FS" || split.base == "FS.Read" -> return [String]{}
+    }
+    paths
+}
+
 // The scope kind of an effect root: `path` for `FS`, `host` for `Net`, and
 // `value` for every other root, whose arguments cover by equality.
 effect_scope_kind: fn(base: String) -> String Never! {

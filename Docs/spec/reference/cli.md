@@ -913,7 +913,11 @@ relative to the working directory. The kernel enforces it (Linux Landlock,
 symbolic link leads out, and processes the program starts are confined too.
 Any other read fails with a `PermissionDenied` error whose cause names E1803
 and the granted paths (`JET_READ_SCOPE`). A kernel that can't confine the
-run refuses it instead of running it unconfined.
+run refuses it instead of running it unconfined. A package's
+`authority: { allow: [FS.Read("<path>")] }` row grants the same thing: its
+runs read only those paths, an `--allow` row's paths join them, and
+`--allow=FS.Read` lifts the confinement. A package's paths are relative to
+the directory holding its manifest, wherever the run starts.
 
 `jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
 summary (L2201). Command entries are not library API: a module-level `run: fn`,

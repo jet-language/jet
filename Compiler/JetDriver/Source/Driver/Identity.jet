@@ -596,6 +596,10 @@ JetDriverPackageInfo: struct {
     // `authority.grants`: per-dependency rights the effect budget adds to
     // `allow` for that dependency's code.
     authority_grants: [PackageGrant]{[PackageGrant]{}}
+    // The absolute paths `authority_allow`'s `FS.Read("<path>")` grants
+    // confine the package's runs' reads to, each resolved at load against the
+    // directory holding its manifest (Loader.jet jet_driver_package_read_scope).
+    authority_read_scope: [String]{[String]{}}
     entry: JetDriverPackageEntry?
     manifest_path: String?
     // The canonical Package policy reader's declarations; their source is the
@@ -753,6 +757,9 @@ JetDriverAuthorityPolicy: struct {
     deny: [String]?
     // The package's declared name: the subject a workspace build grant names.
     subject: String{""}
+    // The absolute paths the package's `FS.Read("<path>")` grants confine its
+    // runs' reads to (JetDriverPackageInfo.authority_read_scope).
+    read_scope: [String]{[String]{}}
 }
 
 JetDriverCompileResult: struct {

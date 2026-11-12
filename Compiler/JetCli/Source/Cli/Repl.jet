@@ -680,7 +680,7 @@ jet_cli_repl_child: fn(invocation: JetCLIInvocationAuthority?) -> JetDriverVerbO
     length: if newline < 0 -> -1 else -> Int.parse(jet_cli_repl_bytes(framed, 0, newline)) ?? -1
     if length < 0 || newline + 1 + length > framed.count_bytes() -> return jet_cli_repl_child_failed("the turn binary's path is not framed as `<byte length>\\n<path>`")
     binary: jet_cli_repl_bytes(framed, newline + 1, newline + 1 + length)
-    launch: jet_cli_launch_plan(binary, [String]{}, build_options_stock("run"), invocation, [JetCLIEnvVar]{})
+    launch: jet_cli_launch_plan(binary, [String]{}, build_options_stock("run"), invocation, jet_cli_read_scope(invocation), [JetCLIEnvVar]{})
     jet_cli_launch_failed(x64_file_exec(binary, launch), false)
 }
 

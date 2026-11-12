@@ -303,15 +303,26 @@ pkg_parse_grants: fn(body: String) -> [PackageGrant] PackageParseError! {
     Ok(out)
 }
 
+// An effect list of `authority.allow`, `authority.deny` or a grant. A right
+// may name a scope as a quoted argument, the same right `jet run --allow`
+// takes: `FS.Read("data/")` grants reads of that folder alone, and
+// `Net("api.example.com")` that one host. `FFI.C("c")` names one C library,
+// and `Mem.Alloc(above: 65536)`, a memory bound, belongs in a deny list only.
 pkg_parse_effect_list: fn(field: String, value: String) -> [String] PackageParseError! {
     names: pkg_parse_string_list(value) ?? return Err(PackageParseError.BadEffectsBlock("`{field}:` must be a list like `[DB, Net]`"))
     loop name in names {
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
         if name.contains("(") {
-            if authority_root(name) == "FFI" {
+            root: authority_root(name)
+            if root == "FFI" {
                 if pkg_authority_ffi_library(name) == .Val(reason) -> return Err(PackageParseError.BadEffectsBlock(reason))
                 next
             }
+            if effect_scope_split(name).scope == .Val(scope) {
+                if !effect_scope_argument_valid(scope) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid scope argument — name a folder, host or device, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
+                next
+            }
+            if root != "Mem" -> return Err(PackageParseError.BadEffectsBlock("`{name}` names its scope without quotes — write the scope as a string, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
             if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
             if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
         }
@@ -331,16 +342,16 @@ pkg_authority_ffi_library: fn(name: String) -> String? Never! {
     None
 }
 
-// The reason for an `FFI` right written with an argument in
-// `authority.needs`, such as `FFI.C("nativeffi")` (#6281 c144): that is the
-// foreign-call effect naming a library, not a memory denial, and a guest's
-// needs name the right alone. None for every other root.
-pkg_authority_ffi_argument: fn(name: String, place: String) -> String? {
-    if authority_root(name) != "FFI" -> return None
-    open: name.find("(")
-    if open < 0 -> return None
-    right: String.from_bytes_lossy(name.bytes()[0..<open])
-    Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
+// Why a right written with an argument can't be declared in
+// `authority.needs`: needs name a right alone (#6281 c144). `FFI.C("c")` is
+// the foreign-call effect naming a library, `FS.Read("data/")` a right with a
+// scope, and only a `Mem` argument is a memory denial.
+pkg_authority_needs_argument: fn(name: String) -> String {
+    right: String.from_bytes_lossy(name.bytes()[0..<name.find("(")])
+    root: authority_root(name)
+    if root == "FFI" -> return "`{name}` is the foreign-call effect `{right}` with a library argument; `authority.needs` names a right without an argument, so write `{right}`"
+    if root == "Mem" -> return "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"
+    "`{name}` is the right `{right}` with a scope argument; `authority.needs` names a right without an argument, so write `{right}`"
 }
 
 pkg_parse_authority_needs: fn(value: String) -> [String] PackageParseError! {
@@ -348,7 +359,7 @@ pkg_parse_authority_needs: fn(value: String) -> [String] PackageParseError! {
     loop name in needs {
         if syntax_is_ui_capability(name) -> next
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect or UI capability"))
-        if name.contains("(") -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_ffi_argument(name, "`authority.needs`") ?? "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+        if name.contains("(") -> return Err(PackageParseError.BadEffectsBlock(pkg_authority_needs_argument(name)))
     }
     loop right in needs {
         root: authority_root(right)

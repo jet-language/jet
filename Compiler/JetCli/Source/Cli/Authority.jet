@@ -23,6 +23,7 @@ use {
         diagnostic_from_registry,
         effect_scope_argument_valid,
         effect_scope_covers,
+        effect_scope_read_paths,
         effect_scope_split,
     ]
     jet_sema.[
@@ -45,6 +46,10 @@ JetCLIAuthority: struct {
     // The rights this invocation's `--deny` removed: E1803 names the command
     // line, not the policy, when one of them stops the run.
     invocation_denied: [String]
+    // The only paths the run may read (jet_cli_merged_read_scope): its
+    // package's `FS.Read("<path>")` grants with this invocation's. Empty when
+    // its reads are not confined.
+    read_scope: [String]
 }
 
 // The `--allow`, `--deny` and `-A` (`--allow-all`) rows of this invocation,
@@ -142,16 +147,22 @@ jet_cli_effect_projection: fn(authority: JetCLIAuthority) -> SemEffectProjection
 // The authority of a program that requires `required` under its package
 // `policy`, before this invocation's rows.
 jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuthorityPolicy?) -> JetCLIAuthority Never! {
-    authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(AUTHORITY_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT, invocation_denied: [String]{}}
+    authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(AUTHORITY_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT, invocation_denied: [String]{}, read_scope: [String]{}}
     policy: authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path != None {
         if policy.allow == None && policy.deny == None {
             authority.authority = if policy.inline_package -> JET_CLI_INLINE_PACKAGE_DEFAULT else -> JET_CLI_PACKAGE_DEFAULT
         } else {
-            // A written allow row adds to the floor; deny still wins.
+            // A written allow row adds to the floor; deny still wins. Its
+            // `FS.Read("<path>")` grants hold `FS.Read` itself and confine the
+            // run's reads to their paths, as `--allow` rows do; the loader
+            // resolved those paths against the manifest's directory.
+            allowed: jet_cli_policy_effects(policy.allow ?? [String]{})
             granted := [String]{}
             loop right in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(right)
-            loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> granted.push(right)
+            loop right in allowed -> granted.push(right.copy())
+            authority.read_scope = policy.read_scope.copy()
+            if authority.read_scope.len() > 0 -> granted.push("FS.Read")
             authority.granted = jet_cli_sorted_set(granted)
             authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
             authority.authority = if policy.inline_package -> "inline Package authority" else -> "package.jet authority"
@@ -163,7 +174,7 @@ jet_cli_policy_authority: fn(required: [String], authority_policy: JetDriverAuth
 // `authority` with this invocation's rows merged in: `-A` grants every
 // grantable right, `--allow` its rights, and `--deny` denies, which wins.
 // `--allow='FS.Read("<path>")'` grants `FS.Read` itself: the run it launches
-// can read only those paths (jet_cli_read_scope).
+// can read only those paths (jet_cli_merged_read_scope).
 jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvocationAuthority?) Never! {
     rows: invocation ?? return
     if !rows.all && rows.allow.len() == 0 && rows.deny.len() == 0 -> return
@@ -177,10 +188,20 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
     // copy: as `granted` above.
     denied := authority.denied.copy()
     loop right in rows.deny -> denied.push(right)
+    authority.read_scope = jet_cli_merged_read_scope(authority, rows)
     authority.granted = jet_cli_sorted_set(granted)
     authority.denied = jet_cli_sorted_set(denied)
     authority.invocation_denied = jet_cli_sorted_set(rows.deny)
     authority.authority = "{authority.authority} + CLI invocation"
+}
+
+// The rows of `names` that parse as rights (jet_cli_parse_right), in order.
+jet_cli_parsed_rights: fn(names: [String]) -> [String] Never! {
+    rights := [String]{}
+    loop name in names {
+        if jet_cli_parse_right(name) == .Val(right) -> rights.push(right)
+    }
+    rights
 }
 
 // The paths `--allow='FS.Read("<path>")'` rows confine a run's reads to: its
@@ -190,14 +211,36 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
 jet_cli_read_scope: fn(invocation: JetCLIInvocationAuthority?) -> [String] Never! {
     rows: invocation ?? return [String]{}
     if rows.all -> return [String]{}
-    paths := [String]{}
-    loop raw in rows.allow {
-        right: jet_cli_parse_right(raw) ?? next
-        if right == "FS" || right == "FS.Read" -> return [String]{}
-        split: effect_scope_split(right)
-        if split.base == "FS.Read" && split.scope == .Val(path) -> paths.push(path)
+    effect_scope_read_paths(jet_cli_parsed_rights(rows.allow))
+}
+
+// The paths a run's reads are confined to once this invocation's `rows` join
+// the package policy of `authority` (jet_cli_policy_authority): the policy's
+// `FS.Read("<path>")` paths and the invocation's together, as one grant set
+// reads them. None when either grants every read (`-A`, a bare `FS` or
+// `FS.Read` row): a scoped grant never narrows a bare one.
+jet_cli_merged_read_scope: fn(authority: JetCLIAuthority, rows: JetCLIInvocationAuthority) -> [String] Never! {
+    if rows.all -> return [String]{}
+    allowed: jet_cli_parsed_rights(rows.allow)
+    if jet_cli_covers_any(allowed, "FS.Read") -> return [String]{}
+    // The policy holds `FS.Read` with no path of its own only when its row
+    // grants every read.
+    if authority.read_scope.len() == 0 && jet_cli_covers_any(authority.granted, "FS.Read") -> return [String]{}
+    // copy: the merged scope is the authority's new row.
+    paths := authority.read_scope.copy()
+    loop path in effect_scope_read_paths(allowed) {
+        if !paths.contains(path) -> paths.push(path)
     }
     paths
+}
+
+// The paths a run under the package policy `authority`
+// (jet_cli_policy_authority) and `invocation` may read
+// (jet_cli_merged_read_scope); empty when its reads are not confined.
+jet_cli_run_read_scope: fn(authority: JetCLIAuthority, invocation: JetCLIInvocationAuthority?) -> [String] Never! {
+    // copy: the launch owns its scope.
+    rows: invocation ?? return authority.read_scope.copy()
+    jet_cli_merged_read_scope(authority, rows)
 }
 
 // The required rights nobody acknowledged: not one no policy grants (the

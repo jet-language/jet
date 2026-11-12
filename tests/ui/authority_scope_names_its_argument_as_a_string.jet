@@ -1,0 +1,11 @@
+// A scope argument is a quoted string in `authority.allow`, as it is in
+// `jet run --allow`: `FS.Read(data)` is refused with that fix, not as a memory
+// denial; `FS.Read("data")` is the grant.
+package: {
+    name: "unquoted_scope"
+    authority: { allow: [FS.Read(data), IO] }
+}
+
+run: fn() {
+    print("granted")
+}

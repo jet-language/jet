@@ -1752,10 +1752,11 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
 // (`jet run [--profile=…] [--optimize=…] [--log=…] [--deep-checks=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
-// A run confined by `--allow='FS.Read("<path>")'` (jet_cli_read_scope) reads
-// only those paths, and JET_READ_SCOPE names them, so the runtime's refusal
-// of any other read names the grant.
-jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
+// A run confined by `FS.Read("<path>")` grants, its package's or this
+// invocation's (jet_cli_merged_read_scope), reads only the paths of
+// `read_scope`, and JET_READ_SCOPE names them, so the runtime's refusal of
+// any other read names the grant.
+jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], vars: [JetCLIEnvVar]) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
     loop argument in program_args -> argv.push(argument.copy())
@@ -1774,11 +1775,10 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if rows.allow.len() > 0 -> relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
-    scope: jet_cli_read_scope(invocation)
     // copy: `vars` is the caller's; the launch's rows own their own.
     env_vars := vars.copy()
-    if scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: "JET_READ_SCOPE", value: scope.join(", ")})
-    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: scope}
+    if read_scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: "JET_READ_SCOPE", value: read_scope.join(", ")})
+    X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: read_scope.copy()}
 }
 
 // The environment of an observed run (`jet run --observe`, `jet perf test`):
@@ -1829,7 +1829,7 @@ jet_cli_perf_map: fn(executable: X64Executable, pid: Int) {
 // (jet_cli_launch).
 JetCLIRunStep: enum {
     Output(output: JetDriverVerbOutput)
-    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool)
+    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool)
 }
 
 // Finish `step` on this thread: run its program (jet_cli_launch) with the
@@ -1838,13 +1838,13 @@ JetCLIRunStep: enum {
 jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
-        .Launch(executable, file, binary, program_args, options, invocation, verbose, color) -> {
+        .Launch(executable, file, binary, program_args, options, invocation, read_scope, verbose, color) -> {
             vars := jet_cli_production_receipt_env(file, program_args)
             if options.observe {
                 // copy: the observed run's fields join the receipt's.
                 loop field in jet_cli_observe_env(file) -> vars.push(field.copy())
             }
-            jet_cli_launch(executable, file, binary, program_args, options, invocation, vars, verbose, color)
+            jet_cli_launch(executable, file, binary, program_args, options, invocation, read_scope, vars, verbose, color)
         }
     }
 }
@@ -1858,8 +1858,8 @@ jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
 // memory refused, its address range taken) it is written to the file
 // `binary` and runs from there; `--verbose` says why. Returns only when jet
 // must report or exit itself.
-jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar], verbose: Bool, color: Bool) -> JetDriverVerbOutput {
-    launch: jet_cli_launch_plan(file, program_args, options, invocation, vars)
+jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], vars: [JetCLIEnvVar], verbose: Bool, color: Bool) -> JetDriverVerbOutput {
+    launch: jet_cli_launch_plan(file, program_args, options, invocation, read_scope, vars)
     loaded: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {
@@ -2017,10 +2017,11 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
 // `jet run <file>`: build it (jet_cli_run_build), then hand its program to
 // the main thread (jet_cli_run_step).
 jet_cli_run_result: fn(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIRunStep {
+    read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
     built := jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot)
     if built.move() == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
-        .Image(executable, path) -> JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: path, program_args: program_args, options: options, invocation: invocation, verbose: verbose, color: color}
+        .Image(executable, path) -> JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: path, program_args: program_args, options: options, invocation: invocation, read_scope: read_scope, verbose: verbose, color: color}
     }
 }
 
@@ -2091,7 +2092,7 @@ jet_cli_script_launch: fn(keep: JetCLIScriptKeep?, authority: JetCLIAuthority, e
     if keep == .Val(kept) {
         _: jet_cli_script_keep(kept, executable, authority, build_options_value(options, "optimize"))
     }
-    JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color}
+    JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: jet_cli_run_read_scope(authority, invocation), verbose: false, color: color}
 }
 
 jet_cli_native_test_unrun_check_report: fn() -> String Never! {
@@ -3701,7 +3702,8 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
             }
             .Checked(result, inputs, snapshot) -> {
                 read = result.comptime_inputs.copy()
-                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+                read_scope: jet_cli_run_read_scope(jet_cli_policy_authority([String]{}, result.authority_policy), invocation)
+                if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, inputs, snapshot), file, program_args, config.port, options, invocation, read_scope, verbose, color)
             }
         }
         first = false
@@ -3734,13 +3736,13 @@ JetCLIDevChild: enum {
 
 // Start `jet dev`'s program from its build `built` (a failed build prints
 // its report; jet_cli_dev_launch runs a built one).
-jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetCLIDevChild {
+jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
     if built == {
         .Failed(output) -> {
             cli_term.eprint(output.stderr)
             JetCLIDevChild.Idle
         }
-        .Image(executable, binary) -> jet_cli_dev_launch(executable, binary, file, program_args, port, options, invocation, verbose, color)
+        .Image(executable, binary) -> jet_cli_dev_launch(executable, binary, file, program_args, port, options, invocation, read_scope, verbose, color)
     }
 }
 
@@ -3748,13 +3750,13 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 // jet_cli_launch runs it, else from its file `binary`, written first. It
 // gets the environment that lets it write a production-failure receipt;
 // `port` is the dev server's (JET_DEV_PORT).
-jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetCLIDevChild {
+jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
     vars := jet_cli_production_receipt_env(file, program_args)
     if port == .Val(number) {
         vars.push(JetCLIEnvVar{name: "JET_DEV_PORT", value: "{number}"})
         cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")
     }
-    launch: jet_cli_launch_plan(file, program_args, options, invocation, vars)
+    launch: jet_cli_launch_plan(file, program_args, options, invocation, read_scope, vars)
     loaded: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {

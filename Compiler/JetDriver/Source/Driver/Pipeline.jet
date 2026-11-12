@@ -109,6 +109,7 @@ use {
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_CONTEXT_ROOT,
         AUTHORITY_PANIC_ROOT,
+        effect_scope_read_paths,
         body_fixed_timing,
         BuildSettingOverride,
         DeepChecks,
@@ -541,7 +542,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
 
 jet_driver_authority_policy: fn(load: JetDriverLoadResult) -> JetDriverAuthorityPolicy? {
     loop package in load.packages {
-        if package.identity == load.package_identity -> return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, inline_package: package.inline_package, allow: package.authority_allow, deny: package.authority_deny, subject: package.name})
+        if package.identity == load.package_identity -> return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, inline_package: package.inline_package, allow: package.authority_allow, deny: package.authority_deny, subject: package.name, read_scope: package.authority_read_scope})
     }
     None
 }
@@ -4894,7 +4895,10 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
 // authority"). A `deny` over the root's own code is sema's E0749, checked at
 // every function of the package. The written `allow` row adds to the
 // beginner floor every program holds (spec.md:1764-1769) and to the task
-// context, which no policy has to grant. No budget, no diagnostic.
+// context, which no policy has to grant. A row's `FS.Read("<path>")` grant
+// holds `FS.Read` itself, as `jet run --allow='FS.Read("<path>")'` does: the
+// run's reads are confined to its paths (jet-cli Authority.jet
+// jet_cli_merged_read_scope). No budget, no diagnostic.
 jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDriverPackageEffectRows) -> [Diagnostic] {
     root: load.packages[jet_driver_effect_budget_root(load) ?? return [Diagnostic]{}]
     manifest := PackageFacts.default()
@@ -4904,6 +4908,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
         loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> row.push(name)
         row.push(AUTHORITY_CONTEXT_ROOT)
         loop name in allow -> row.push(name.copy())
+        if effect_scope_read_paths(allow).len() > 0 -> row.push("FS.Read")
         manifest.authority.allow = Val(row.move())
     }
     manifest.authority.deny = root.authority_deny

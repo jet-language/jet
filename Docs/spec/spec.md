@@ -2487,7 +2487,8 @@ on stderr whose `effects` field lists the noticed rights, beside
 `required_effects`, on every run with an effect to name.
 `-A` (`--allow-all`) acknowledges every effect and hides
 the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
-scoped right (`--allow='FS.Read("data/")'`) still confines the run through the host sandbox.
+scoped right (`--allow='FS.Read("data/")'`) still confines the run through the host sandbox,
+and so does the same right in the package's `authority.allow` row.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops
 with E1803 before host state changes. A host read that runs under another
 effect's row is denied only as [host-reads.md](reference/host-reads.md)

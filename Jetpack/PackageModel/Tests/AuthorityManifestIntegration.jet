@@ -25,6 +25,19 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     }
 }
 
+#Test("authority allow takes a scoped grant as jet run --allow does") {
+    facts: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO, FS.Read(\"data/\"), Net(\"api.example.com\")], deny: [FS.Read(\"data/private/\"), Mem.Alloc(above: 65536)] }}\n", "package.jet") ?? panic("scoped allow parses")
+    assert_eq(facts.effects_allow, Val([String]{"IO", "FS.Read(\"data/\")", "Net(\"api.example.com\")"}))
+    assert_eq(facts.effects_deny, Val([String]{"FS.Read(\"data/private/\")", "Mem.Alloc(above: 65536)"}))
+    unquoted: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [FS.Read(data)] }}\n")
+    assert_eq(unquoted.code, "E1221")
+    assert(unquoted.why.contains("`FS.Read(data)` names its scope without quotes"), unquoted.why)
+    memory: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [Mem.Alloc(above: 65536)] }}\n")
+    assert(memory.why.contains("belongs only in an `authority.deny` list"), memory.why)
+    needs: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ needs: [FS.Read(\"data/\")] }}\n")
+    assert(needs.why.contains("`FS.Read(\"data/\")` is the right `FS.Read` with a scope argument"), needs.why)
+}
+
 #Test("retired_authority_fields_name_the_new_block") {
     blocks: [String]{"grants: {{ \"dep\": [Net] }}", "policy: {{ trust: {{ default: prompt }} }}", "policy: {{ providers: {{ nix: {{ registry: \"nixpkgs\" }} }} }}"}
     loop block in blocks {

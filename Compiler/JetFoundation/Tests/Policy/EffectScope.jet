@@ -9,6 +9,7 @@ use jet_foundation.[
     effect_scope_name,
     effect_scope_of_argument,
     effect_scope_published_effect,
+    effect_scope_read_paths,
     effect_scope_split,
     sema_effect_covers,
 ]
@@ -81,6 +82,13 @@ COVERS_TABLE: [String]{
     assert(effect_scope_split("FS.Read").scope == None, "a bare effect has no scope")
     assert(effect_scope_split("Mem.Alloc(above: 64)").scope == None, "a memory bound is not a scope")
     assert_eq(effect_scope_name("Net", "api.example.com"), "Net(\"api.example.com\")")
+}
+
+#Test("scoped read grants confine reads to their paths unless a bare grant reads everything") {
+    assert_eq(effect_scope_read_paths([String]{"IO", "FS.Read(\"data/\")", "FS.Read(\"a.txt\")", "FS.Read(\"data/\")"}), [String]{"data/", "a.txt"})
+    assert_eq(effect_scope_read_paths([String]{"FS.Read(\"data/\")", "FS"}).len(), 0)
+    assert_eq(effect_scope_read_paths([String]{"FS.Read", "FS.Read(\"data/\")"}).len(), 0)
+    assert_eq(effect_scope_read_paths([String]{"FS.Write(\"out/\")", "Net(\"api.example.com\")", "IO"}).len(), 0)
 }
 
 #Test("a path scope covers by whole components after normalization") {

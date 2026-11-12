@@ -6,6 +6,7 @@ use {
         AppRouteRoot,
         Expr,
         ast_visit_body,
+        authority_parse_right,
         BUILTIN_METHOD_ROWS,
         BuiltinMethodLowering,
         CORE_CALLS,
@@ -53,6 +54,7 @@ use {
         effect_scope_argument_valid,
         effect_scope_is_scoped,
         effect_scope_name,
+        effect_scope_read_paths,
         effect_scope_split,
         jet_ring_parse_manifest_layer,
         LOG_FILTER_FIX,
@@ -246,16 +248,16 @@ jet_driver_authority_diagnostic: fn(span: Span, detail: String) -> Diagnostic {
     jet_driver_diagnostic("E1221", span, "the package's `authority:` block is malformed", detail, "`authority:` declares `allow`, `deny`, `needs`, `grants`, `trust`, and `providers` using canonical rights")
 }
 
-// E1221's reason for an `FFI` right written with an argument in
-// `authority.needs`, such as `FFI.C("nativeffi")` (#6281 c144): that is the
-// foreign-call effect naming a library, not a memory denial, and a guest's
-// needs name the right alone. None for every other root.
-jet_driver_authority_ffi_argument: fn(name: String, place: String) -> String? {
-    if sema_effect_root(name) != "FFI" -> return None
-    open: name.find("(")
-    if open < 0 -> return None
-    right: String.from_bytes_lossy(name.bytes()[0..<open])
-    Val("`{name}` is the foreign-call effect `{right}` with a library argument; {place} names a right without an argument, so write `{right}`")
+// E1221's reason for a right written with an argument in `authority.needs`:
+// needs name a right alone (#6281 c144). `FFI.C("c")` is the foreign-call
+// effect naming a library, `FS.Read("data/")` a right with a scope, and only
+// a `Mem` argument is a memory denial.
+jet_driver_authority_needs_argument: fn(name: String) -> String {
+    right: String.from_bytes_lossy(name.bytes()[0..<name.find("(")])
+    root: sema_effect_root(name)
+    if root == "FFI" -> return "`{name}` is the foreign-call effect `{right}` with a library argument; `authority.needs` names a right without an argument, so write `{right}`"
+    if root == "Mem" -> return "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"
+    "`{name}` is the right `{right}` with a scope argument; `authority.needs` names a right without an argument, so write `{right}`"
 }
 
 // E1221's reason for an `FFI` right written with an argument that is no
@@ -314,7 +316,7 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
                         root: sema_effect_root(name)
                         if {
                             !jet_driver_is_ui_capability(name) && sema_effect_parse_name(root) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect or UI capability"))
-                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_ffi_argument(name, "`authority.needs`") ?? "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+                            name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_needs_argument(name)))
                             root == "Panic" || root == "Mem" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is deny-only and cannot be declared in `authority.needs`"))
                             else -> needs.push(name)
                         }
@@ -383,6 +385,7 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
             jet_driver_authority_ffi_library(name) == .Val(ffi_library) -> diagnostics.push(jet_driver_authority_diagnostic(span, ffi_library))
             effect_scope_is_scoped(name) && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid scope argument - name a folder, host or device, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
+            name.contains("(") && !effect_scope_is_scoped(name) && sema_effect_root(name) != "Mem" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` names its scope without quotes - write the scope as a string, like `FS.Read(\"data/\")` or `Net(\"api.example.com\")`"))
             name.contains("(") && !effect_scope_is_scoped(name) && !field.ends_with("deny") -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
             name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> names.push(name)
@@ -876,6 +879,30 @@ jet_driver_parent_path: fn(path: String) -> String Never! {
     _ := parts.pop()
     parent: parts.join("/")
     if parent.len() == 0 -> "/" else -> parent
+}
+
+// The absolute paths a package's `FS.Read("<path>")` grants among `allow`
+// confine its runs' reads to (effect_scope_read_paths over the canonical
+// rights), each resolved against `directory`, the directory holding its
+// manifest, so the grant names the same files wherever a run starts. An
+// absolute path is kept as written.
+jet_driver_package_read_scope: fn(allow: [String]?, directory: String) -> [String] Never! {
+    written: allow ?? [String]{}
+    rights := [String]{}
+    loop name in written {
+        if authority_parse_right(name) == .Val(right) -> rights.push(right)
+    }
+    scope := [String]{}
+    loop path in effect_scope_read_paths(rights) {
+        resolved: jet_driver_dependency_path(directory, path)
+        if {
+            path.starts_with("/") -> scope.push(path)
+            resolved.valid -> scope.push(resolved.path)
+            // A `..` above the file-system root: the kernel resolves it.
+            else -> scope.push("{directory}/{path}")
+        }
+    }
+    scope
 }
 
 jet_driver_resolve_package_dependencies: fn(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
@@ -1427,7 +1454,9 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
         diagnostic_index += 1
     }
     identity: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
+    manifest_directory: jet_driver_dependency_path(root.canonical_path, "{root.files[manifest].relative_path}/..")
+    read_scope: jet_driver_package_read_scope(authority_allow, if manifest_directory.valid -> manifest_directory.path else -> root.canonical_path)
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
 }
 
 // The header markers of `package.jet` as the Jet parser reads them, each
