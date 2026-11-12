@@ -132,7 +132,7 @@ domain_files: fn(name: String, target: Int, r: &Seeded) -> [String:String] {
         // copy: the entry name outlives the unit
         entries.push(made.entry.copy())
         // copy: the helper names outlive the unit
-        loop helper in made.helpers -> helpers.push(helper.copy())
+        helpers.extend(made.helpers.map(helper -> helper.copy()))
         size: code_of(made.lines)
         file_code += size
         code += size + 1

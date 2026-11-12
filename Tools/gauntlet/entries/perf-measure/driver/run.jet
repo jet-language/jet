@@ -1,9 +1,10 @@
 // The gauntlet driver of the kit's Measure module (#5072 c7), the twin of
-// driver.mjs beside it: one command per measure.mjs export, printing its
-// result as JSON.
+// Tools/gauntlet/harness/drivers/perf-measure.mjs: one command per
+// measure.mjs export, printing its result as JSON.
 //
 //   jet driver trace FILE | strict FILE IDENTITY | phases TRACE SAMPLES OFFSET
 //              | cpu SAMPLES TIMES | counters FILE | tree | run | timeout
+//              | constants
 //
 // A value that starts with `-` takes its named form (`--offset -12345.5`,
 // `--times -5,0`); TIMES is a comma-separated list.
@@ -17,7 +18,7 @@ package: {
 
 use {
     files: core.files
-    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, Sample, completed_from, counters_json, cpu_at, field, items, json_stringify, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
+    jet_perf_kit.[KIT_ZERO, MeasureError, MeasureOptions, SAMPLE_MS, Sample, completed_from, counters_json, cpu_at, field, gnu_time, items, json_stringify, measure_host, number_from_text, parse_counters, phase_table, phase_table_json, read_failure, read_trace, run_measured, safe_integer, sample_tree, to_number]
     json: core.encoding.json
     process: core.process
     time: core.time
@@ -26,18 +27,15 @@ use {
 QUIET: "sleep 3 </dev/null >/dev/null 2>&1"
 
 // An error's message (a JSON refusal is a SyntaxError) and exit 1.
-fail: fn(error: MeasureError) -[Exec, IO]> Never {
+fail: fn(error: MeasureError) -> Never {
     if error.syntax -> print("error: SyntaxError") else -> print("error: {error.message}")
     process.exit(1)
 }
 
-// JSON.parse(readFileSync(file)).
-read_json: fn(file: String) -[Exec, FS, IO]> Dyn {
+// JSON.parse(readFileSync(file)) of a samples file, as the kit's samples.
+read_samples: fn(file: String) -> [Sample] {
     text: files.read(file) ?? fail(read_failure(file, err))
-    json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
-}
-
-samples_of: fn(value: Dyn) -> [Sample] {
+    value: json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
     out := [Sample]{}
     loop item in items(Val(value)) -> out.push(Sample{t_ns: to_number(field(item, "tNs")), cpu_ns: to_number(field(item, "cpuNs")), threads: 0, rss_bytes: 0, processes: 0})
     out
@@ -51,7 +49,8 @@ Driver: struct {
     }
 
     #Doc("readTrace of FILE against the completed process in IDENTITY") strict: fn(self, file: String, identity: String) -[Exec, FS, IO]> {
-        process_identity: read_json(identity)
+        text: files.read(identity) ?? fail(read_failure(identity, err))
+        process_identity: json.parse(text) ?? fail(MeasureError{message: "{err}", syntax: true})
         completed: completed_from(safe_integer(field(Val(process_identity), "exitCode")), field(Val(process_identity), "pid"), field(Val(process_identity), "startedUnixMs"), field(Val(process_identity), "finishedUnixMs"))
         events: read_trace(file, Val(completed)) ?? fail(err)
         print("{events.len()} events")
@@ -59,12 +58,12 @@ Driver: struct {
 
     #Doc("phaseTable of TRACE with the SAMPLES at OFFSET") phases: fn(self, trace: String, samples: String, offset: String) -[Exec, FS, IO]> {
         events: read_trace(trace, None) ?? fail(err)
-        table: phase_table(events, samples_of(read_json(samples)), number_from_text(offset))
+        table: phase_table(events, read_samples(samples), number_from_text(offset))
         print(json_stringify(phase_table_json(table), 2))
     }
 
     #Doc("cpuAt of the SAMPLES at each of the comma-separated TIMES") cpu: fn(self, samples: String, times: String) -[Exec, FS, IO]> {
-        read: samples_of(read_json(samples))
+        read: read_samples(samples)
         out := [Dyn]{}
         loop at in times.split(",") -> out.push(Dyn.Float(cpu_at(read, number_from_text(at))))
         print(json_stringify(Dyn.Array(out), 0))
@@ -101,6 +100,11 @@ Driver: struct {
         time.sleep(1500ms)
         code: if measured.code == .Val(number) -> "{number}" else -> "null"
         print("code {code} signal {measured.signal ?? "null"} killed {measured.killed} late {files.exists("late.txt")}")
+    }
+
+    #Doc("SAMPLE_MS, and whether the GNU time it runs under exists") constants: fn(self) -[Env, FS, IO]> {
+        gnu: gnu_time()
+        print("sample {SAMPLE_MS} ms, GNU time {gnu.ends_with("/time") && files.exists(gnu)}")
     }
 }
 

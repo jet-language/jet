@@ -7,8 +7,9 @@
 // interpreter other than jet) is refused unless a gauntlet entry under
 // Tools/gauntlet/entries/ pairs it with its Jet twin in the same change.
 // The exemptions sit in one place, EXEMPTIONS: JavaScript that runs in a
-// browser, and the test and example subjects (files a case, fixture or
-// example reads or runs as its subject, not tooling). The peer programs a
+// browser, and the test, example and workload subjects (files a case,
+// fixture, example or measured workload reads or runs as its subject, not
+// tooling). The peer programs a
 // gauntlet comparison runs Jet against are exempt too (peer_program): an
 // optimization fixture's peer-* programs and the files of an axis's rails
 // other than its jet/ rail. Nix files are not scripts by this rule.
@@ -124,12 +125,16 @@ EXEMPTIONS: [Exemption]{
     // ships, and the website.
     Exemption{root: "Compiler/JetCanvas/", class: .Browser, js_only: true},
     Exemption{root: "Docs/site/", class: .Browser, js_only: true},
-    // Test and example subjects.
+    // Test, example and workload subjects.
     Exemption{root: "tests/cases/", class: .Subject, js_only: false},
     Exemption{root: "tests/fixtures/", class: .Subject, js_only: false},
     Exemption{root: "tests/run/", class: .Subject, js_only: false},
     Exemption{root: "tests/agent_workloads/inputs/", class: .Subject, js_only: false},
     Exemption{root: "Examples/", class: .Subject, js_only: false},
+    // The self-hosting study's workloads: Tools/perf/selfhost/run.mjs copies
+    // each into an isolated workspace and runs its inputs there (a native
+    // provider's build script among them); the driver itself is a tool.
+    Exemption{root: "Tools/perf/selfhost/workloads/", class: .Subject, js_only: false},
 }
 
 // A script the entries pair: the entry and the Jet twin.
@@ -816,6 +821,21 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert(rows.contains("Compiler/JetCanvas/Source/CanvasAssets/js/clock.js\tbrowser\t"))
     assert(rows.contains("tests/cases/port_python/input.py\tsubject\t"))
     assert_eq(census_counts(rows), "scripts 9: paired 4, unpaired 3, browser 1, subject 1, covered 0, peer 0")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a selfhost workload's script is a subject; a tool script beside the workloads still needs its pair") {
+    dir: planted_repo()
+    plant(dir, "Tools/perf/selfhost/workloads/ffi/native/build.sh", "#!/bin/sh\ncc -c foreign.c\n")
+    plant(dir, "Tools/perf/selfhost/report.mjs", "console.log(1)\n")
+    added: added_files(dir, "HEAD", .Own) ?? panic(err.message)
+    refused: refusals(dir, added, read_entries(dir))
+    assert_eq(refused.len(), 1)
+    assert(refused[0].starts_with("Tools/perf/selfhost/report.mjs: a script in another language with no gauntlet pair; "))
+    rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), read_entries(dir))
+    assert(rows.contains("Tools/perf/selfhost/workloads/ffi/native/build.sh\tsubject\t"))
+    assert(rows.any(row -> row.starts_with("Tools/perf/selfhost/report.mjs\tunpaired\t")))
+    assert_eq(census_counts(rows), "scripts 2: paired 0, unpaired 1, browser 0, subject 1, covered 0, peer 0")
     files.remove_all(dir) ?? ()
 }
 

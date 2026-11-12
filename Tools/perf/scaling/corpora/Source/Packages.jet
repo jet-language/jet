@@ -64,7 +64,10 @@ impl Seeded {
 
 seeded: fn(seed: Int, draw: Draw) -> Seeded { Seeded{state: wrapping(U32{seed}), draw: draw} }
 
-lines: fn(text: String) -> [String] { text.split("\n").to_list() }
+// A file's lines. A leading U+FEFF is the file's encoding mark, not line
+// text, and goes; is_code_line keeps Unicode White_Space trimming, which
+// leaves U+FEFF in a line's text.
+lines: fn(text: String) -> [String] { text.removeprefix("﻿").split("\n").to_list() }
 
 is_code_line: fn(line: String) -> Bool {
     text: line.trim()

@@ -39,6 +39,18 @@ md: fn(value: Int) -> Int { value % M }
 
 blend: fn(left: Int, right: Int, weight: Int) -> Int { md(left * weight + right) }
 
+// The physical and code lines of `text`; a final newline ends the last line
+// rather than starting another. The twin of mixed.mjs's countLines.
+LineCount: struct {
+    physical: Int
+    code: Int
+}
+
+count_lines: fn(text: String) -> LineCount {
+    counted: lines(text.removesuffix("\n"))
+    LineCount{physical: counted.len(), code: code_of(counted)}
+}
+
 Stats: struct {
     functions: Int
     types: Int
@@ -135,9 +147,8 @@ records_value: fn(p: RecordsModel, seed: Int) -> Int {
         accumulator = if weights[index] > p.threshold -> md(accumulator * 3 + 2) else -> md(accumulator + identifiers[index] * 5)
     }
     chosen: p.index < p.count
-    identifier: if chosen -> identifiers[p.index] else -> 0
-    label: if chosen -> labels[p.index] else -> "none".len()
-    md(accumulator + identifier + label)
+    // The chosen record's identifier and label length, or "none"'s length.
+    md(accumulator + (if chosen -> identifiers[p.index] + labels[p.index] else -> "none".len()))
 }
 
 shapes_value: fn(p: ShapesModel, seed: Int) -> Int {

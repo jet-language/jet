@@ -1,0 +1,147 @@
+// The gauntlet driver of the jet_scaling_corpora package (#5072 c7), the
+// twin of Tools/gauntlet/harness/drivers/scaling-corpora.mjs: one command per
+// export of corpora.mjs, domains.mjs, mixed.mjs and package.mjs, printing its
+// result.
+//
+//   jet driver shapes | layouts | domains | modulus
+//              | corpus SHAPE N SEED LAYOUT | mixed CODE_LINES SEED
+//              | lines TEXT | digest NAME TEXT ... | manifest NAME
+//              | random SEED COUNT | tree COUNT PREFIX
+//              | finish NAME ROOTS [MAIN] | pack PREFIX SIZES [PER_FILE]
+//
+// ROOTS and SIZES are comma-separated; N, SEED, COUNT and PER_FILE are
+// integers. Where one is not, each command does what the original does with
+// JavaScript's NaN, as its comment says.
+package: {
+    name: "scaling_corpora_driver"
+    version: "0.0.1"
+    deps: {
+        jet_scaling_corpora: ../../../../perf/scaling/corpora,
+    }
+}
+
+use {
+    jet_scaling_corpora.[MODULUS, all, check_inputs, code_lines, consumer_tree, corpus, count_lines, finish, is_code_line, layouts, lines, manifest, mixed_sources, pack, seeded, shape_of, shapes, source_digest]
+    process: core.process
+}
+
+WORDS: [String]{"alpha", "bravo", "cedar"}
+
+run: fn() {
+    command: process.args()
+    args: command.slice(1, command.len())
+    // Each argument as an integer, 0 where it is not one: a NaN count makes
+    // no entries or draws, and a NaN seed is 0 after `>>> 0`.
+    numbers: args.map(arg -> Int.parse(arg) ?? 0)
+    files := [String:String]{}
+    if (command.get(0) ?? "") == {
+        "shapes" -> print(shapes().map(shape -> "{shape.name} {"{shape.kind:Debug}".lower()} {if shape.kind == .Stress -> "n" else -> "lines"} {shape.base}: {shape.dimension}").join("\n"))
+        "layouts" -> print(layouts().join(" "))
+        "domains" -> print(all().map(domain -> "{domain.name}: {domain.dimension}").join("\n"))
+        "modulus" -> print("package {MODULUS} mixed {MODULUS}")
+        "corpus" -> {
+            // corpus refuses a NaN N as it does an N below 1, after the shape
+            // check.
+            shape: shape_of(args[0], numbers[1]) ?? {
+                print("error: {err.message}")
+                process.exit(1)
+            }
+            if !layouts().contains(args[3]) {
+                print("error: Unknown layout: {args[3]}")
+                process.exit(1)
+            }
+            built: corpus(shape, numbers[1], numbers[2], args[3])
+            names := built.files.keys().map(name -> name.copy()).to_list()  // copy: the names are sorted apart from the map
+            names.sort()
+            print("{"{built.kind:Debug}".lower()} diagnostics {built.diagnostics} code {built.code_lines} sha {built.source_sha256}")
+            print("files {names.join(" ")}")
+        }
+        "mixed" -> {
+            // mixedSources refuses a NaN code-line count or seed, as
+            // check_inputs does 0 lines and a negative seed.
+            code: numbers[0]
+            seed: Int.parse(args[1]) ?? -1
+            check_inputs(code, seed) ?? {
+                print("error: {err.message}")
+                process.exit(1)
+            }
+            built: mixed_sources(code, seed)
+            s: built.stats
+            print("sha {built.source_sha256} expected {built.expected.trim()}")
+            print("physical {built.physical_lines} code {built.code_lines} bytes {built.bytes} functions {s.functions} types {s.types} comptime {s.comptime_items} sections {s.sections}")
+        }
+        "lines" -> {
+            counted: count_lines(args[0])
+            print("physical {counted.physical} code {counted.code}")
+            // mixed.mjs and package.mjs define isCodeLine with the same body,
+            // which the package keeps once, so both columns call it.
+            loop (index, line) in lines(args[0]) -> print("{index} {is_code_line(line)} {is_code_line(line)}")
+        }
+        "digest" -> {
+            at := 0
+            loop at + 1 < args.len() {
+                files[args[at].copy()] = args[at + 1].copy()  // copy: the map owns its names and texts
+                at += 2
+            }
+            // mixed.mjs and package.mjs define sourceDigest with the same
+            // body, which the package keeps once.
+            print("package {source_digest(files)} mixed {source_digest(files)} code {code_lines(files)}")
+        }
+        "manifest" -> print(manifest(args[0]).removesuffix("\n"))
+        "random" -> {
+            raw := seeded(numbers[0], .Scaled)
+            ints := seeded(numbers[0], .Scaled)
+            picks := seeded(numbers[0], .Scaled)
+            draws := [String]{}
+            sides := [String]{}
+            words := [String]{}
+            loop _ in 0..<numbers[1] {
+                draws.push("{raw.next()}")
+                sides.push("{ints.int(1, 6)}")
+                words.push(picks.pick(WORDS))
+            }
+            print(draws.join(" "))
+            print(sides.join(" "))
+            print(words.join(" "))
+        }
+        "tree" -> {
+            entries := [String]{}
+            loop index in 0..<numbers[0] -> entries.push("entry_{index}")
+            print("roots {consumer_tree(files, entries, args[1]).join(" ")}")
+            names := files.keys().map(name -> name.copy()).to_list()  // copy: the names are sorted apart from the map
+            names.sort()
+            loop name in names -> print("{name} {files[name].split("\n").to_list().len()}")
+            print("code {code_lines(files)} sha {source_digest(files)}")
+        }
+        "finish" -> {
+            if args.len() > 2 -> files["main.jet"] = args[2].copy()  // copy: the map owns the main file's text
+            finish(args[0], files, args[1].split(",").to_list())
+            print_files(files)
+        }
+        "pack" -> {
+            items := [[String]]{}
+            // A NaN size is an empty item.
+            loop (item, size) in args[1].split(",").to_list() {
+                item_lines := [String]{}
+                loop line in 0..<(Int.parse(size) ?? 0) -> item_lines.push("item_{item}_{line}")
+                items.push(item_lines)
+            }
+            // `size >= NaN` never holds, so a NaN PER_FILE packs every item
+            // into the one file the end flushes: more lines than all items hold.
+            if args.len() > 2 -> pack(files, args[0], items, Int.parse(args[2]) ?? items.map(item_lines -> item_lines.len()).sum() + 1) else -> pack(files, args[0], items)
+            print_files(files)
+        }
+        else -> {
+            print("usage: driver shapes|layouts|domains|modulus|corpus|mixed|lines|digest|manifest|random|tree|finish|pack ...")
+            process.exit(2)
+        }
+    }
+}
+
+// Each file's lines under its name, each after `|`, so a blank line or a final
+// newline shows. Every command that prints files writes at least one.
+print_files: fn(files: [String:String]) {
+    names := files.keys().map(name -> name.copy()).to_list()  // copy: the names are sorted apart from the map
+    names.sort()
+    print(names.map(name -> "== {name}\n{files[name].split("\n").map(line -> "|{line}").join("\n")}").join("\n"))
+}

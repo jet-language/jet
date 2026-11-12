@@ -1,16 +1,18 @@
 // The gauntlet driver of Tools/perf/throughput/measure.mjs (#5072 c7): one
-// command per export, printing its result as JSON. driver/run.jet is the twin
-// on the kit's Measure module.
+// command per export, printing its result as JSON.
+// Tools/gauntlet/entries/perf-measure/driver/run.jet is the twin on the kit's
+// Measure module.
 //
-//   node driver.mjs trace FILE | strict FILE IDENTITY | phases TRACE SAMPLES OFFSET
-//                   | cpu SAMPLES TIMES | counters FILE | tree | run | timeout
+//   node perf-measure.mjs trace FILE | strict FILE IDENTITY
+//                         | phases TRACE SAMPLES OFFSET | cpu SAMPLES TIMES
+//                         | counters FILE | tree | run | timeout | constants
 //
 // A value that starts with `-` takes its named form (`--offset -12345.5`,
 // `--times -5,0`), as the twin's typed command line reads it; TIMES is a
 // comma-separated list.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { cpuAt, parseCounters, phaseTable, readTrace, runMeasured, sampleTree } from '../../../perf/throughput/measure.mjs';
+import { GNU_TIME, SAMPLE_MS, cpuAt, parseCounters, phaseTable, readTrace, runMeasured, sampleTree } from '../../../perf/throughput/measure.mjs';
 
 const [command, ...words] = process.argv.slice(2);
 // The command's positional values, and its named ones (`--name VALUE`).
@@ -61,8 +63,10 @@ try {
     const measured = await runMeasured(['sh', '-c', '(sleep 1; echo late > late.txt) & sleep 5'], { stdoutPath: 'out.txt', stderrPath: 'err.txt', timeoutMs: 300 });
     await new Promise((resolve) => setTimeout(resolve, 1500));
     console.log(`code ${measured.code} signal ${measured.signal} killed ${measured.killed} late ${fs.existsSync('late.txt')}`);
+  } else if (command === 'constants') {
+    console.log(`sample ${SAMPLE_MS} ms, GNU time ${GNU_TIME.endsWith('/time') && fs.existsSync(GNU_TIME)}`);
   } else {
-    console.log('usage: driver trace|strict|phases|cpu|counters|tree|run|timeout ...');
+    console.log('usage: driver trace|strict|phases|cpu|counters|tree|run|timeout|constants ...');
     process.exit(2);
   }
 } catch (error) {

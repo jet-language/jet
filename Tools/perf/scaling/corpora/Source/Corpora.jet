@@ -266,7 +266,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
                 &entity.bump()
                 total := entity.weight()
             """))
-        loop k in chosen -> body.push("    total = (total + capability_{k}_total([{named}{k}]{{entity}})) % {M}")
+        body.extend(chosen.map(k -> "    total = (total + capability_{k}_total([{named}{k}]{{entity}})) % {M}"))
         body.extend(["    total", "}}"])
         types.push(body)
         entries.push("entity_{i}_use")
@@ -675,8 +675,7 @@ single_file: fn(files: [String:String]) -> [String:String] {
     names := files.keys().filter(name -> !["package.jet", "main.jet"].contains(name)).map(name -> name.copy()).to_list()
     names.sort()
     names.push("main.jet")
-    lines := [String]{}
-    loop name in names -> lines.extend("// ---- {name}\n{files[name]}".split("\n").to_list())
+    lines: names.map(name -> "// ---- {name}\n{files[name]}").join("\n").split("\n").to_list()
     uses := combinatorics.unique(lines.filter(line -> line.starts_with("use ")))
     uses.push("")
     uses.extend(lines.filter(line -> !line.starts_with("use ")))
