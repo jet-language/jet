@@ -1187,7 +1187,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     reportContract.missing_metric_verdict !== "unmeasured" || reportContract.output_verification !== "byte_exact_utf8_or_declared_probe_sequence" ||
     reportContract.loss_owner_required_for !== "any_comparable_metric_loss" ||
     JSON.stringify(reportContract.peer_measurement) !== JSON.stringify(PEER_MEASUREMENT_POLICY) ||
-    JSON.stringify(manifest.integrated_gate?.required_metrics_by_mode) !== JSON.stringify(requiredMetricsByMode) ||
+    JSON.stringify(reportContract.required_metrics_by_mode) !== JSON.stringify(requiredMetricsByMode) ||
     JSON.stringify(reportContract.axis_schemas) !== JSON.stringify({
       live_reload: "gauntlet-axis-live-reload-v1",
       memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",

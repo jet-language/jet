@@ -747,8 +747,8 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     missing: "unmeasured_and_publication_blocked",
   });
   assert.deepEqual(manifest.report_contract.aot_only_metrics, ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"]);
-  assert.ok(manifest.integrated_gate.required_metrics_by_mode.web.includes("artifact_bytes"));
-  assert.ok(manifest.integrated_gate.required_metrics_by_mode["web-app"].includes("artifact_bytes"));
+  assert.ok(manifest.report_contract.required_metrics_by_mode.web.includes("artifact_bytes"));
+  assert.ok(manifest.report_contract.required_metrics_by_mode["web-app"].includes("artifact_bytes"));
   assert.deepEqual(manifest.performance_surface_pairs.pair_measurement, {
     inputs: { iterations: 100000, range: "0..<100000", expected_sum: 4999950000 },
     tier: "native",
