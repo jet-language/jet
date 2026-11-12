@@ -267,7 +267,7 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
 
 sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_method" || method == "marker"
-    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "marker"
+    if owner == "FieldInfo" || owner == "MethodInfo" || owner == "FunctionInfo" -> return method == "marker"
     false
 }
 
@@ -281,7 +281,7 @@ sema_call_reflection_marker_name: fn(expression: Expr) -> String? Never! {
     None
 }
 
-// `info.marker(T)` on a TypeInfo, FieldInfo or MethodInfo: the marker `T`
+// `info.marker(T)` on a TypeInfo, FieldInfo, MethodInfo or FunctionInfo: the marker `T`
 // written on the reflected item, read as a `T` whose fields are its
 // arguments, or None when the item does not carry it. `T` names a marker
 // struct (one with an `impl Marker` block) visible here or a Prelude marker

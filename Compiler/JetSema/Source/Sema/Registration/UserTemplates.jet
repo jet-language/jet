@@ -626,8 +626,9 @@ sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: In
 }
 
 // A code module's rules see a ModuleInfo, PackageInfo's shape for one
-// module: its name and identity, the TypeInfo of each struct and enum and
-// the FunctionInfo of each function written in its body.
+// module: its name and identity, the TypeInfo of each struct and enum, the
+// FunctionInfo of each function written in its body and the module's own
+// written markers.
 sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule, generated: &[Item], diagnostics: &[Diagnostic]) {
     items: graph.modules[module_index].program.items
     module_info := CtValue?{None}
@@ -660,11 +661,14 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
             }
         }
     }
+    written: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), code_module.markers, registry) ?? return None
+    markers: sema_user_template_ct_values(written) ?? return None
     Val(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
         NamedCtValue{name: "name", value: CtValue.Str{value: code_module.name}},
         NamedCtValue{name: "identity", value: CtValue.Str{value: "{module_row.module_name}::{code_module.name}"}},
         NamedCtValue{name: "types", value: CtValue.List{values: types}},
         NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
+        NamedCtValue{name: "markers", value: CtValue.List{values: markers}},
     }})
 }
 

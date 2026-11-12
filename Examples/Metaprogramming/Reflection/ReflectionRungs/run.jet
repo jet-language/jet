@@ -2,12 +2,13 @@
 // adds a method to the type it marks, a comptime constant and fn build each
 // read the type's name, kind, identity, module, field and marker counts, and
 // the typed `marker(Label)` argument, and each prints the same line. A type
-// without `Label` reads `marker(Label)` as None at every rung.
+// without `Label` reads `marker(Label)` as None at every rung. fn build also
+// reads `marker(Label)` on a function's FunctionInfo.
 Label: struct {
     text: String
 
     impl Marker {
-        sites: [.Type]
+        sites: [.Type, .Function]
     }
 }
 
@@ -58,7 +59,7 @@ Plain: struct {
 }
 
 // The comptime and fn build rungs share one ordinary function.
-describe: fn(info: TypeInfo) -> String {
+#Label("rung") describe: fn(info: TypeInfo) -> String {
     label: info.marker(Label)?.text ?? "none"
     "{info.name} {info.kind} {info.identity} {info.module} fields={info.fields.len()} markers={info.markers.len()} label={label}"
 }
@@ -70,6 +71,12 @@ PLAIN: comptime { describe(Plain.reflect()) }
 build: fn(b: Build) {
     loop info in b.program.types() {
         if info.name == "Point" -> b.contribute("seen", describe(info))
+    }
+    loop function in b.program.functions() {
+        if function.name == "describe" {
+            label: function.marker(Label)?.text ?? "none"
+            b.contribute("function", "{function.name} markers={function.markers.len()} label={label}")
+        }
     }
     loop package in b.program.packages() {
         b.contribute("package", "{package.name} {package.identity} types={package.types.len()}")
@@ -84,4 +91,5 @@ run: fn() {
     print("derive:   {Plain{value: 3}.described()}")
     print("comptime: {PLAIN}")
     print("package:  {#build.settings.package}")
+    print("function: {#build.settings.function}")
 }

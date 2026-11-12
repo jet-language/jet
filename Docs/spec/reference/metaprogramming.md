@@ -335,7 +335,8 @@ field's `value()` lists that struct's own fields, so `.fields()[i].value()`
 walks a nested value level by level. A generic reflection value retains the
 substituted field type, as the same example shows for `Box<Int>`.
 
-`info.marker(T)` on a `TypeInfo`, `FieldInfo` or `MethodInfo` reads the marker
+`info.marker(T)` on a `TypeInfo`, `FieldInfo`, `MethodInfo` or `FunctionInfo`
+(and, in a marker body, on a module's `ModuleInfo`) reads the marker
 `T` written on the reflected item as a `T?`: a `T` whose fields are the
 marker's arguments, or `None` when the item does not carry it. `T` names a
 marker struct (one with an `impl Marker` block) or a Prelude marker, so
@@ -346,6 +347,8 @@ comptime constant and `build: fn`, as
 [`ReflectionRungs`](../../../Examples/Metaprogramming/Reflection/ReflectionRungs/run.jet)
 shows: each rung reads the type's name, kind, identity, module, field and
 marker counts and `marker(Label)?.text`, and prints the same line.
+[`MarkerSites`](../../../Examples/Metaprogramming/Reflection/MarkerSites.jet)
+reads `target.marker(T)` at every site kind a marker body runs on.
 
 `M.reflect().uses` lists every use of the marker struct `M` in the whole
 program, a library's uses in the app build included. Each entry is a
