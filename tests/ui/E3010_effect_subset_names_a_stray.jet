@@ -1,0 +1,26 @@
+// A subset view of the effect vocabulary checks its cases while building,
+// as Jetpack's BuildEffect does against JetFoundation EFFECT_VOCABULARY_ROOTS;
+// a case the vocabulary does not declare stops the build naming it.
+ROOTS: [String]{"Net", "FS", "IO", "DB", "Time"}
+
+VIEW_CASES: [String]{"Net", "Disk", "Time"}
+
+strays: fn(found: [String], known: [String]) -> [String] {
+    out := [String]{}
+    loop name in found {
+        if !known.contains(name) -> out.push(name.copy())
+    }
+    out
+}
+
+subset_count: fn(cases: [String], roots: [String]) -> Int {
+    found: strays(cases, roots)
+    if found.len() > 0 -> panic("BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{found.join(", ")}]")
+    cases.len()
+}
+
+VIEW_COUNT: comptime { subset_count(VIEW_CASES, ROOTS) }
+
+run: fn() {
+    print(VIEW_COUNT)
+}

@@ -35,7 +35,9 @@
 // compiler admits as that Core row. Core/Effects/Effects.jet, Core's service
 // effects, and Core/Compiler/Meta.jet, the metaprogramming effects, are part
 // of the canonical effect source: each gets CoreSourceRows.jet's check, then
-// its own `jet check`. Any other Core path with no row fails.
+// its own `jet check`. Core/Compiler/Lang.jet holds CoreSourceRows.jet's
+// generated Effect and FFILanguage block, so it gets that check, then the
+// Core check. Any other Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice (its Jet tool runs under $JET too, not the seed),
@@ -323,10 +325,20 @@ generator_check: fn(repo: String, generator: [String], relative: String) -[Env, 
 // `jet check`.
 CORE_EFFECTS_SOURCE: "Core/Effects/Effects.jet"
 META_EFFECTS_SOURCE: "Core/Compiler/Meta.jet"
+// Core/Compiler/Lang.jet is a Core module whose Effect and FFILanguage enums
+// are a block CoreSourceRows.jet writes from the effect sources, so its check
+// is CoreSourceRows.jet's, then the Core check.
+LANG_SOURCE: "Core/Compiler/Lang.jet"
 
 core_effects_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     generated: generator_check(repo, [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}, relative)
     checked: run_check(repo, jet, [String]{"check", target}, scratch)
+    Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
+}
+
+core_lang_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    generated: generator_check(repo, [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}, relative)
+    checked: core_check(repo, jet, relative, target, scratch)
     Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
 }
 
@@ -391,6 +403,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
             return 1
         }
         relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> ran = core_effects_check(repo, jet, relative, target, scratch)
+        relative == LANG_SOURCE -> ran = core_lang_check(repo, jet, relative, target, scratch)
         relative.starts_with("Core/") && relative.ends_with(".jet") -> ran = core_check(repo, jet, relative, target, scratch)
         else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
     }

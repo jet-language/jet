@@ -1,6 +1,17 @@
 // Build-effect view of the canonical Prelude effect table, ported from
-// jet_foundation::BuildEffects. The build projection excludes runtime-only
+// Foundation's BuildEffects. The build projection excludes runtime-only
 // FFI, Browser, and Secret roots while keeping the public effect identities.
+// It is a subset view of the one effect vocabulary: while the compiler
+// builds, BUILD_EFFECT_COUNT checks that each case (this file's text) is a
+// root the toolchain tree's effect sources declare (JetFoundation
+// EFFECT_VOCABULARY_ROOTS) and that `parse` and `name` give it back, and a
+// stray stops the build (E3010) naming it.
+use {
+    jet_foundation.[EFFECT_VOCABULARY_ROOTS, effect_vocabulary_enum_cases, effect_vocabulary_strays]
+}
+
+BUILD_EFFECT_COUNT: comptime { build_effect_count(embed_file("BuildEffect.jet"), EFFECT_VOCABULARY_ROOTS) }
+
 BuildEffect: enum {
     Net
     FS
@@ -107,4 +118,36 @@ BuildEffect: enum {
         out.sort_by(written -> written.rank())
         out
     }
+}
+
+// The number of build effects, once each BuildEffect case (in `text`, this
+// file) is one of `roots` and round-trips through `parse` and `name`; else
+// the build stops naming the strays.
+build_effect_count: fn(text: String, roots: [String]) -> Int {
+    problem: build_effect_problem(text, roots)
+    if problem != "" -> panic(problem)
+    (effect_vocabulary_enum_cases(text, "BuildEffect") ?? [String]{}).len()
+}
+
+// What is wrong with the cases of `BuildEffect: enum { … }` in `text`: each
+// case that is no root of `roots`, and each case `parse` and `name` do not
+// give back, or "".
+build_effect_problem: fn(text: String, roots: [String]) -> String {
+    cases: effect_vocabulary_enum_cases(text, "BuildEffect") ?? return "BuildEffect.jet declares no `BuildEffect: enum {{ … }}`"
+    strays: effect_vocabulary_strays(cases, roots)
+    if strays.len() > 0 -> return "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [{strays.join(", ")}]"
+    unread := [String]{}
+    loop case_name in cases {
+        if (BuildEffect.parse(case_name)?.name() ?? "") != case_name -> unread.push(case_name.copy())
+    }
+    if unread.len() > 0 -> return "BuildEffect.jet: BuildEffect.parse and name do not give back [{unread.join(", ")}]"
+    ""
+}
+
+#Test("each BuildEffect case is a declared effect root, and a stray is named") {
+    roots: [String]{"Net", "FS", "DB", "Mem"}
+    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net\n    FS\n    DB\n\n    name: fn(self) -> String {{\n}}\n", roots), "")
+    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net\n    Disk\n}}\n", roots), "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [Disk]")
+    assert(build_effect_problem("BuildEffect: enum {{\n    Mem\n}}\n", roots).contains("do not give back [Mem]"))
+    assert_eq(BUILD_EFFECT_COUNT, 10)
 }

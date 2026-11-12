@@ -9,9 +9,11 @@
 // may use. A source that breaks this form stops the build (E3010) naming the
 // file and line.
 //
-// The compiler's closed `Effect` type, the machine roots alone, is generated
-// from the same Effects.jet into Registry/EffectRoots.jet by
-// Tools/agent/CoreSourceRows.jet, whose `--check` holds it current.
+// The compiler's closed `Effect` type, the machine roots alone, is authored
+// in Registry/EffectRoots.jet and checked against EFFECT_VOCABULARY_MACHINE_ROOTS
+// while the compiler builds; Jetpack's BuildEffect is checked to name only
+// roots of EFFECT_VOCABULARY_ROOTS. Both checks read the authored enum with
+// effect_vocabulary_enum_cases.
 
 EffectVocabularyRow: struct {
     name: String
@@ -29,6 +31,10 @@ EFFECT_VOCABULARY_ROOTS: comptime { effect_vocabulary_names(EFFECT_VOCABULARY_RO
 
 // The declared leaves (`Root.Member`), in source order.
 EFFECT_VOCABULARY_LEAVES: comptime { effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, true) }
+
+// The roots Compiler/Prelude/Effects.jet declares (the machine roots), in
+// source order.
+EFFECT_VOCABULARY_MACHINE_ROOTS: comptime { effect_vocabulary_names(effect_vocabulary_source_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), EFFECT_VOCABULARY_MACHINE_PATH, None), false) }
 
 // The canonical effect source: the three files in order, each without its
 // trailing blank lines, one blank line between them.
@@ -59,6 +65,37 @@ effect_vocabulary_names: fn(rows: [EffectVocabularyRow], leaf: Bool) -> [String]
     out := [String]{}
     loop row in rows {
         if row.name.contains(".") == leaf -> out.push(row.name.copy())
+    }
+    out
+}
+
+// The cases of `<type_name>: enum { … }` in `text`: the words of a one-line
+// declaration, or those of a block's lines up to its first blank line (where
+// the enum's methods start) or its closing brace. None when `text` declares
+// no such enum.
+effect_vocabulary_enum_cases: fn(text: String, type_name: String) -> [String]? {
+    head: "{type_name}: enum {{"
+    cases := [String]{}
+    inside := false
+    loop line in text.split("\n") {
+        if inside {
+            if line == "}}" || line.trim() == "" -> return Val(cases)
+            loop word in effect_vocabulary_words(line) -> cases.push(word)
+            next
+        }
+        if !line.starts_with(head) -> next
+        if line.ends_with("}}") && line != head -> return Val(effect_vocabulary_words(line.removeprefix(head).removesuffix("}}")))
+        if line != head -> return None
+        inside = true
+    }
+    if inside -> Val(cases) else -> None
+}
+
+// The names of `found` that `known` does not hold, in `found`'s order.
+effect_vocabulary_strays: fn(found: [String], known: [String]) -> [String] {
+    out := [String]{}
+    loop name in found {
+        if !known.contains(name) -> out.push(name.copy())
     }
     out
 }
