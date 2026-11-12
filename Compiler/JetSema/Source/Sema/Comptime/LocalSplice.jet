@@ -156,9 +156,10 @@ sema_local_splice_slot: fn(functions: [FnBody], key: String) -> Int? Never! {
 // body pass put on its finalized check `finalized`: the projected `T Never!`
 // carrier (sema_failure_reconcile_infallible), the solved effects and their
 // scope frames (sema_effects_check_modules), the masked branches and the
-// fixed tags (sema_mark_masked_branches). The fresh body's types are its
-// finalized check's, less those of the replaced initializers, so it carries
-// a fixed tag only when the finalized body did.
+// fixed tags (sema_mark_masked_branches), and the web bucket
+// (sema_web_partition_check). The fresh body's types are its finalized
+// check's, less those of the replaced initializers, so it carries a fixed tag
+// only when the finalized body did.
 sema_local_splice_settle: fn(body: &FnBody, finalized: FnBody) Never! {
     if finalized.ret == .Val(.Result(_, err)) {
         never: Type.Named{name: "Never"}
@@ -167,6 +168,7 @@ sema_local_splice_settle: fn(body: &FnBody, finalized: FnBody) Never! {
     body.effects = finalized.effects.copy()
     body.effect_scope = finalized.effect_scope.copy()
     body.masked = finalized.masked.copy()
+    body.web_bucket = finalized.web_bucket
     if finalized.fixed_tags.len() > 0 && sema_fixed_types(body.tree.types.types, finalized.fixed_tags) -> body.fixed_tags = finalized.fixed_tags.copy()
 }
 
