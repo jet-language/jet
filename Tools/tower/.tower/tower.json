@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 100027,
+    "rev": 100034,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22046,13 +22046,18 @@
       "track": "sidequest",
       "epoch": "e17",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement D-CONC-ALLNAMED1=A at runtime. `task.all {first: f(), second: g()}` returns an anonymous record whose fields hold each branch's result. Positional `task.all {…}` keeps its ordering and failure behavior on every tier.\n\n## Current state\n- Criteria 1-4 and 6 are met. That covers Syntax.rs, syntax-decisions, grammars, snapshots, and the mixed-form diagnostic at `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:14988-14992`.\n- The checker is done: `Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:600-613` types a named tuple of Tasks as `Type.Tuple` of their success types.\n- Codegen routes it: `Compiler/JetCodegen/Source/Codegen/Expressions.jet:4590-4619`. `jet_codegen_task_group_result_tasks` accepts `.Tuple`, and `jet_codegen_lower_task_group_value` emits `jet_std::jet_task_all_result` with one operand. `Compiler/JetEval/Source/Evaluator.jet:7952-8013` validates the same route but only assembles positional lists.\n- Runtime is wrong. `Examples/features/concurrency/task_all.jet:11-12` printed 0/0/0 on 2026-09-15; the golden `Examples/features/expected/concurrency/task_all.out` is `10`/`20`/`30`.\n- The Rust fix commit 39b9ffd41 (\"Support named task.all results across tiers\") is not an ancestor of HEAD. It touches `crates/jet-codegen/src/Codegen/MIREval.rs`, `MIRRust.rs`, `MIRWeb.rs` and `Prelude/Scheduler.rs` (+152/-24).\n\n## Changes\n1. **Jet compiler first.** In `Compiler/JetCodegen/Source/Codegen/Expressions.jet` (`jet_codegen_lower_task_group_value`), when `tasks.ty` is a named tuple, carry the field names and order to the join. The joined value is then built as the record type (`expression.ty`), not a list.\n2. **Both Jet emitters.** In `Compiler/JetCodegen/Source/Emit/*.jet` (Rust text) and `Emit/Web`, assemble the record from the scheduler's joined ids.\n3. **Jet evaluator.** In `Compiler/JetEval/Source/Evaluator.jet` (`jet_eval_task_group_exchange`), build the named record for a tuple operand.\n4. **Retained host and shipped-binary mirror.** Cherry-pick 39b9ffd41. Its `Prelude/Scheduler.rs` join is the retained host piece, and the MIREval/MIRRust/MIRWeb edits are the mirror the shipped binary needs to prove the fix. Resolve any conflicts against current HEAD.\n5. Leave positional behavior untouched.\n\n## Proof\n- `jet test Compiler --profile golden concurrency/task_all`: pass.\n- `jet test Compiler --profile golden concurrency/task_all`: O0, O1 and O2 match the golden.\n- `jet test Compiler --profile golden concurrency/task_group`: positional goldens unchanged.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Web: `Tools/agent/jet-env jet build --target=web Examples/features/concurrency/task_all.jet`, run the emitted module under the existing web harness (node), and confirm stdout matches the golden.\n\n## Batch\n`batch-jetc-back`: the change lives in lowering, the emitters and the evaluator.\n\n## Dependencies\nNone.\n",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Every criterion is met on dev ac5106301d."
+        },
         {
           "at": "2026-11-10",
           "by": "Main",
@@ -22140,8 +22145,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Syntax.rs:347-350 records D-CONC-ALLNAMED1=A and canonical task.all selector.",
-          "at": "2026-08-30T07:34:06.123Z"
+          "evidence": "On dev ac5106301d the syntax registry (Compiler/JetFoundation/Data/Syntax/Spellings.jet:126 TASK_ALL, EffectsSurface.jet:156) holds the task.all entry; Syntax.rs was retired at the Rust cutover. Earlier check: Syntax.rs:347-350.",
+          "at": "2026-11-12T11:56:38.935Z"
         },
         {
           "n": 2,
@@ -22149,8 +22154,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "syntax-decisions.md:2445-2453 records ratified named task.all semantics.",
-          "at": "2026-08-30T07:34:27.196Z"
+          "evidence": "On dev ac5106301d, Docs/spec/syntax-decisions.md:3381 holds the D-CONC-ALLNAMED1=A entry for named task.all results.",
+          "at": "2026-11-12T11:56:39.819Z"
         },
         {
           "n": 3,
@@ -22158,8 +22163,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Fresh jet self devtools grammars regenerated all four editor grammar outputs.",
-          "at": "2026-08-30T07:34:30.757Z"
+          "evidence": "On dev ac5106301d the generated editor grammars carry task.all (Tools/editors/tree-sitter/grammar.js, 3 lines); first regenerated by jet self devtools grammars.",
+          "at": "2026-11-12T11:56:40.713Z"
         },
         {
           "n": 4,
@@ -22167,8 +22172,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "tests/ui/task_all_mixed_forms.stderr matches fresh NO_COLOR jet check E1117 output and concrete fix.",
-          "at": "2026-08-30T07:34:34.358Z"
+          "evidence": "On dev ac5106301d tests/ui/task_all_mixed_forms.jet and .stderr are present (E1117 with its fix); first matched against a fresh NO_COLOR jet check.",
+          "at": "2026-11-12T11:56:41.580Z"
         },
         {
           "n": 5,
@@ -22176,8 +22181,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Examples/features/concurrency/task_all.jet `results :: task.all {first: work(10, 10000), second: work(20, 1), third: work(30, 100)}` then `print(results.first, results.second, results.third)`: run3.sh on w9b o0/o1/o2 \"stdout == .../expected/concurrency/task_all.out\" (10 20 30) [exit 0]; build1.sh AOT basic: same [run exit 0]",
-          "at": "2026-10-31T14:24:02.514Z"
+          "evidence": "G12Docs-63 on dev ac5106301d: named_task_all_maps_reverse_completion_by_field_name and named_and_positional_task_all_print_alike_on_every_tier pass on seed-b13 (fields match the branch names and keep each branch result), along with the TaskAllNamed golden at O0/O1/O2 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G12Docs-63/).",
+          "at": "2026-11-12T11:56:42.492Z"
         },
         {
           "n": 6,
@@ -22185,8 +22190,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Fresh jet check of mixed named/positional fixture emitted exactly registered E1117 with one concrete all-named/all-positional fix.",
-          "at": "2026-08-30T07:34:42.560Z"
+          "evidence": "On dev ac5106301d tests/ui/task_all_mixed_forms.jet and .stderr hold the one registered E1117, with its fix to all named or all positional.",
+          "at": "2026-11-12T11:56:43.400Z"
         },
         {
           "n": 7,
@@ -22228,14 +22233,15 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-08-28T16:03:40.015Z",
-      "updated": "2026-11-12T11:55:59.670Z",
+      "updated": "2026-11-12T11:56:44.914Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 10,
+      "completedAt": "2026-11-12T11:56:44.914Z"
     },
     {
       "id": "c0wa0sjv",
@@ -199961,6 +199967,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T11:56:44.915Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0509i8n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-12T11:56:43.400Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-12T11:56:42.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-12T11:56:41.580Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-12T11:56:40.713Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-12T11:56:39.819Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-12T11:56:38.935Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0509i8n",
+      "note": "#1"
+    },
     {
       "at": "2026-11-12T11:55:59.670Z",
       "by": "Main",
