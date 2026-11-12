@@ -106,8 +106,13 @@ sema_comptime_reflection_struct: fn(type_name: String, fields: [SemaComptimeRefl
     TComptimeValue.Struct{type_name: type_name, fields: values}
 }
 
-sema_comptime_reflection_span: fn(span: Span) -> TComptimeValue Never! {
+// `span` as a SourceSpan of the text of `file`, the module whose text its
+// offsets index. A declaration's records are built before their module is
+// known to them: they pass "", and sema_comptime_reflection_located names
+// the module's file.
+sema_comptime_reflection_span: fn(span: Span, file: String) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("SourceSpan", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "file", value: TComptimeValue.String{value: file}},
         SemaComptimeReflectionField{name: "start", value: TComptimeValue.Int{value: span.start}},
         SemaComptimeReflectionField{name: "end", value: TComptimeValue.Int{value: span.end}},
     })
@@ -162,11 +167,13 @@ sema_comptime_reflection_location: fn(segments: [SemaSourceSegment], module_path
 
 // `value` with a `location` and a `documentation` on each declaration record
 // in it (TypeInfo, FieldInfo, MethodInfo, FunctionInfo), read from the
-// record's `span` in `segments` and in `source`. A record that already has
-// one keeps it. A generic instance bound later keeps its definition's.
+// record's `span` in `segments` and in `source`, and with `source.file` on
+// each SourceSpan in it that names no file. A record that already has one
+// keeps it. A generic instance bound later keeps its definition's.
 sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourceSegment], module_path: String, source: SemaComptimeReflectionSource) -> TComptimeValue Never! {
     if value == {
         .Struct(record, fields) -> {
+            if record == "SourceSpan" -> return sema_comptime_reflection_in_file(value, source.file)
             located := loop field in fields -> TComptimeField{name: field.name, value: sema_comptime_reflection_located(field.value, segments, module_path, source)}
             declaration: record == "TypeInfo" || record == "FieldInfo" || record == "MethodInfo" || record == "FunctionInfo"
             if declaration {
@@ -190,31 +197,49 @@ sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourc
     }
 }
 
+// `value` with `file` on each SourceSpan in it that names no file: every
+// span in it indexes the text of the module `file` holds.
+sema_comptime_reflection_in_file: fn(value: TComptimeValue, file: String) -> TComptimeValue Never! {
+    if value == {
+        .Struct(record, fields) -> {
+            unnamed: TComptimeValue.String{value: ""}
+            filed := loop field in fields -> TComptimeField{name: field.name, value: if record == "SourceSpan" && field.name == "file" && field.value == unnamed -> TComptimeValue.String{value: file} else -> sema_comptime_reflection_in_file(field.value, file)}
+            TComptimeValue.Struct{type_name: record, fields: filed}
+        }
+        .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_in_file(item, file)}
+        .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_in_file(inner, file)}
+        // copy: a scalar leaf of the producer's value; the caller keeps the original
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> value.copy()
+    }
+}
+
 // A module's text as reflection reads its comments: the bytes its spans
-// index and their tokens, comments included. The lexer finds the comments,
-// so a `//` inside a string or a marker argument stays text.
+// index and their tokens, comments included, and the `file` it is read
+// from. The lexer finds the comments, so a `//` inside a string or a marker
+// argument stays text.
 SemaComptimeReflectionSource: struct {
     bytes: [U8]
     tokens: [Token]
+    file: String
 }
 
 // The source of a declaration made by no file: no comments.
 sema_comptime_reflection_no_source: fn() -> SemaComptimeReflectionSource Never! {
-    SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}}
+    SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}, file: ""}
 }
 
-// `source` with its tokens.
-sema_comptime_reflection_source: fn(source: String) -> SemaComptimeReflectionSource {
+// `source`, the text of `file`, with its tokens.
+sema_comptime_reflection_source: fn(source: String, file: String) -> SemaComptimeReflectionSource {
     bytes: source.bytes()
     lexed: lex(bytes)
-    SemaComptimeReflectionSource{bytes: bytes, tokens: lexed.tokens}
+    SemaComptimeReflectionSource{bytes: bytes, tokens: lexed.tokens, file: file}
 }
 
-// `source` read for its declarations' documentation: a text with no `///`
-// documents nothing, so it isn't lexed.
-sema_comptime_reflection_doc_source: fn(source: String) -> SemaComptimeReflectionSource {
-    if !source.contains("///") -> return sema_comptime_reflection_no_source()
-    sema_comptime_reflection_source(source)
+// `source`, the text of `file`, read for its declarations' documentation: a
+// text with no `///` documents nothing, so it isn't lexed.
+sema_comptime_reflection_doc_source: fn(source: String, file: String) -> SemaComptimeReflectionSource {
+    if !source.contains("///") -> return SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}, file: file}
+    sema_comptime_reflection_source(source, file)
 }
 
 // `token`'s CommentKind: `Documentation` for a `///` line, `Line` for any
@@ -244,7 +269,7 @@ sema_comptime_reflection_comment_info: fn(source: SemaComptimeReflectionSource, 
     if start < end -> text = String.from_bytes(source.bytes[start..<end]) ?? return None
     Val(sema_comptime_reflection_struct("CommentInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "text", value: TComptimeValue.String{value: text}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(token.span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(token.span, source.file)},
         SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "CommentKind", variant: kind, args: [TComptimeEnumArg]{}}},
     }))
 }
@@ -680,13 +705,13 @@ sema_comptime_reflection_declared_effect_names: fn(function: Func) -> [String]? 
 // called, and the type bound to each generic parameter (empty on a
 // declaration; a specialization's methods name their owner's arguments, see
 // sema_comptime_reflection_method_info).
-sema_comptime_reflection_callable_signature: fn(function: Func, inferred: [String]?) -> TComptimeValue Never! {
+sema_comptime_reflection_callable_signature: fn(function: Func, inferred: [String]?, file: String) -> TComptimeValue Never! {
     convention: if {
         function.kernel != None -> "Kernel"
         function.inline_foreign != None -> "Foreign"
         else -> "Jet"
     }
-    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
+    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter, file)
     sema_comptime_reflection_signature_record(params, function.return_type, sema_comptime_reflection_declared_effect_names(function), inferred, convention)
 }
 
@@ -711,7 +736,7 @@ sema_comptime_reflection_signature_record: fn(params: [TComptimeValue], returned
 // closure's parameters are positional and it writes no effect row; its body
 // row is solved after the check, so a read folded inside the check has no
 // `inferred` row, as on a function.
-sema_comptime_reflection_closure_info: fn(name: String, span: Span, lambda: TLambda, location: TComptimeValue) -> TComptimeValue Never! {
+sema_comptime_reflection_closure_info: fn(name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue Never! {
     params := [TComptimeValue]{}
     index := 0
     loop index < lambda.source_params.len() && index < lambda.param_types.len() {
@@ -719,19 +744,19 @@ sema_comptime_reflection_closure_info: fn(name: String, span: Span, lambda: TLam
         if lambda.host_param_conventions == .Val(conventions) {
             if index < conventions.len() -> access = sema_comptime_reflection_access_name(conventions[index])
         }
-        params.push(sema_comptime_reflection_param_record(lambda.source_params[index], lambda.source_params[index], "PositionalOnly", type_name(lambda.param_types[index]), access, None))
+        params.push(sema_comptime_reflection_param_record(lambda.source_params[index], lambda.source_params[index], "PositionalOnly", type_name(lambda.param_types[index]), access, None, file))
         index += 1
     }
     captures := loop capture in lambda.captures -> sema_comptime_reflection_struct("CaptureInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: capture.source}},
         SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(capture.ty)}},
         SemaComptimeReflectionField{name: "mode", value: TComptimeValue.Enum{type_name: "CaptureMode", variant: sema_comptime_reflection_capture_mode(capture.source, lambda.capture_facts), args: [TComptimeEnumArg]{}}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(capture.local.span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(capture.local.span, file)},
     })
     sema_comptime_reflection_struct("ClosureInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_signature_record(params, lambda.ret, None, None, "Jet")},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span, file)},
         SemaComptimeReflectionField{name: "location", value: location},
         SemaComptimeReflectionField{name: "captures", value: TComptimeValue.List{values: captures}},
     })
@@ -1153,15 +1178,15 @@ sema_comptime_reflection_field_info: fn(
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: sema_comptime_reflection_type_dimensions(ty)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_type_fact_rows(path, ty)}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: is_pub}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span)},
-        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span, "")},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default, "")},
         SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(offset)},
     })
 }
 
-sema_comptime_reflection_default_info: fn(default: Span?) -> TComptimeValue Never! {
+sema_comptime_reflection_default_info: fn(default: Span?, file: String) -> TComptimeValue Never! {
     if default == .Val(source) -> return sema_comptime_reflection_some(sema_comptime_reflection_struct("DefaultInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_span(source)},
+        SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_span(source, file)},
     }))
     sema_comptime_reflection_none(Type.Named{name: "DefaultInfo"})
 }
@@ -1170,7 +1195,7 @@ sema_comptime_reflection_default_info: fn(default: Span?) -> TComptimeValue Neve
 // name, the label a call writes (its public label, else its name), the zone
 // that says whether the call labels it, its type, how it takes the argument,
 // where its default is written (read, never run) and whether it is variadic.
-sema_comptime_reflection_param_info: fn(param: Param) -> TComptimeValue Never! {
+sema_comptime_reflection_param_info: fn(param: Param, file: String) -> TComptimeValue Never! {
     label: if param.public_label == .Val(written) -> written.name else -> param.name
     zone: if param.zone == {
         .PositionalOnly -> "PositionalOnly"
@@ -1178,7 +1203,7 @@ sema_comptime_reflection_param_info: fn(param: Param) -> TComptimeValue Never! {
         .LabelOnly -> "LabelOnly"
     }
     default: if param.default == .Val(expression) -> Val(expr_source_span(expression)) else -> None
-    sema_comptime_reflection_param_record(param.name, label, zone, type_name(param.ty), sema_comptime_reflection_access_name(param.convention), default, variadic: param.variadic)
+    sema_comptime_reflection_param_record(param.name, label, zone, type_name(param.ty), sema_comptime_reflection_access_name(param.convention), default, file, variadic: param.variadic)
 }
 
 // The ParamAccess variant of `convention`.
@@ -1191,14 +1216,14 @@ sema_comptime_reflection_access_name: fn(convention: AccessConvention) -> String
 }
 
 // A ParamInfo record of its parts (see sema_comptime_reflection_param_info).
-sema_comptime_reflection_param_record: fn(name: String, label: String, zone: String, ty: String, access: String, default: Span?, variadic: Bool{false}) -> TComptimeValue Never! {
+sema_comptime_reflection_param_record: fn(name: String, label: String, zone: String, ty: String, access: String, default: Span?, file: String, variadic: Bool{false}) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("ParamInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "label", value: TComptimeValue.String{value: label}},
         SemaComptimeReflectionField{name: "zone", value: TComptimeValue.Enum{type_name: "ParamZone", variant: zone, args: [TComptimeEnumArg]{}}},
         SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: ty}},
         SemaComptimeReflectionField{name: "access", value: TComptimeValue.Enum{type_name: "ParamAccess", variant: access, args: [TComptimeEnumArg]{}}},
-        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default)},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default, file)},
         SemaComptimeReflectionField{name: "variadic", value: TComptimeValue.Bool{value: variadic}},
     })
 }
@@ -1319,7 +1344,7 @@ sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeV
     sema_comptime_reflection_struct("TypeParamInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: parameter.name}},
         SemaComptimeReflectionField{name: "bounds", value: sema_comptime_reflection_string_list(parameter.bounds)},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(parameter.name_span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(parameter.name_span, "")},
     })
 }
 
@@ -1379,21 +1404,21 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
     facts.extend(sema_comptime_reflection_type_fact_rows(method.name, signature_type))
     sema_comptime_reflection_struct("MethodInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: method.name}},
-        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_bound_signature(sema_comptime_reflection_callable_signature(method, None), bindings)},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_bound_signature(sema_comptime_reflection_callable_signature(method, None, ""), bindings)},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(method)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(method.return_type)}},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
-        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method)}},
+        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method, "")}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(method.markers, registry)}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: method.is_pub}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(method.name_span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(method.name_span, "")},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_path}},
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: "{identity}.{method.name}"}},
     })
 }
 
-sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact) -> TComptimeValue Never! {
+sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact, file: String) -> TComptimeValue Never! {
     operation: fact.operation ?? ArithmeticOperation.Add
     operation_name: if operation == {
         .Add -> "add"
@@ -1410,8 +1435,8 @@ sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact) -> TCom
     sema_comptime_reflection_struct("ArithmeticOperationInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "operation", value: TComptimeValue.String{value: operation_name}},
         SemaComptimeReflectionField{name: "policy", value: TComptimeValue.String{value: ".{mode}"}},
-        SemaComptimeReflectionField{name: "operation_span", value: sema_comptime_reflection_span(fact.operation_span)},
-        SemaComptimeReflectionField{name: "scope_span", value: sema_comptime_reflection_span(fact.scope_span)},
+        SemaComptimeReflectionField{name: "operation_span", value: sema_comptime_reflection_span(fact.operation_span, file)},
+        SemaComptimeReflectionField{name: "scope_span", value: sema_comptime_reflection_span(fact.scope_span, file)},
     })
 }
 
@@ -1659,8 +1684,8 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &Sema
     }
 }
 
-sema_comptime_reflection_arithmetic_facts: fn(function: Func) -> [TComptimeValue] {
-    loop fact in sema_arithmetic_policy_facts(function) -> sema_comptime_reflection_arithmetic_fact(fact)
+sema_comptime_reflection_arithmetic_facts: fn(function: Func, file: String) -> [TComptimeValue] {
+    loop fact in sema_arithmetic_policy_facts(function) -> sema_comptime_reflection_arithmetic_fact(fact, file)
 }
 
 sema_comptime_reflection_maturity: fn(method: Func) -> TComptimeValue Never! {
@@ -1752,16 +1777,16 @@ sema_comptime_reflection_function_info: fn(function: Func, module_name: String, 
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_name}},
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
         SemaComptimeReflectionField{name: "package", value: TComptimeValue.String{value: package}},
-        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_bound_signature(sema_comptime_reflection_callable_signature(function, None), bindings)},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_bound_signature(sema_comptime_reflection_callable_signature(function, None, registered_module.source_file), bindings)},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span, registered_module.source_file)},
         SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
-        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function)}},
+        SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function, registered_module.source_file)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
     })
-    sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source))
+    sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file))
 }
 
 sema_comptime_reflection_append_methods: fn(methods: [Func], module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding], values: &[TComptimeValue]) {
@@ -1918,8 +1943,8 @@ sema_comptime_reflection_enum_variant_info: fn(definition: EnumDef, variant: Var
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
         SemaComptimeReflectionField{name: "is_pub", value: TComptimeValue.Bool{value: definition.is_pub}},
-        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(variant.name_span)},
-        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(None)},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(variant.name_span, "")},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(None, "")},
         SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(None)},
     })
 }
@@ -2147,7 +2172,7 @@ sema_comptime_reflection_type_info_fields: fn(
     if kind != "distinct" -> values.push(SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}})
     values.extend([SemaComptimeReflectionField]{
         {name: "layout", value: layout},
-        {name: "span", value: sema_comptime_reflection_span(span)},
+        {name: "span", value: sema_comptime_reflection_span(span, "")},
         {name: "fields", value: TComptimeValue.List{values: fields}},
         {name: "methods", value: TComptimeValue.List{values: methods}},
         {name: "type_params", value: TComptimeValue.List{values: type_params}},
@@ -2396,7 +2421,7 @@ sema_comptime_reflection_type_info: fn(
     constants: sema_comptime_reflection_constants(graph, SemaRegistrationRowRef{module_index: index, row: nominal_row})
     // Each record names where its declaration is written and its documentation.
     module_path: sema_comptime_reflection_module_of(registered_module)
-    source: sema_comptime_reflection_doc_source(registered_module.source)
+    source: sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file)
     info: if declaration == {
         .Struct(definition) -> {
             state_graph := SemaStateGraphFact?{None}

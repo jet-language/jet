@@ -210,8 +210,12 @@ jet_eval_compiler_services_string: fn(value: String) -> TComptimeValue Never! {
     TComptimeValue.String{value: value}
 }
 
-jet_eval_compiler_services_span: fn(span: Span) -> TComptimeValue Never! {
+// `span` as a SourceSpan of the text of `file`. A text a query was given as a
+// value (`compiler.lex`, `compiler.parse`) and a query's own call site name
+// no file: their `file` is empty.
+jet_eval_compiler_services_span: fn(span: Span, file: String) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
+        TComptimeField{name: "file", value: jet_eval_compiler_services_string(file)},
         TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
         TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
     }}
@@ -222,8 +226,8 @@ jet_eval_compiler_services_option_string: fn(value: String?) -> TComptimeValue N
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}}
 }
 
-jet_eval_compiler_services_option_span: fn(value: Span?) -> TComptimeValue Never! {
-    if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_span(item)}
+jet_eval_compiler_services_option_span: fn(value: Span?, file: String) -> TComptimeValue Never! {
+    if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_span(item, file)}
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
@@ -235,7 +239,7 @@ jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic) -> TComp
         TComptimeField{name: "message", value: jet_eval_compiler_services_string(diagnostic.what)},
         TComptimeField{name: "why", value: jet_eval_compiler_services_string(diagnostic.why)},
         TComptimeField{name: "fix", value: jet_eval_compiler_services_string(diagnostic.fix)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_option_span(diagnostic.span, diagnostic.source_path ?? "")},
     }}
 }
 
@@ -367,7 +371,7 @@ jet_eval_compiler_services_token_value: fn(tables: TokenTables, token: Token) ->
     TComptimeValue.Struct{type_name: "CompilerToken", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
         TComptimeField{name: "text", value: jet_eval_compiler_services_string(token_text(tables, token))},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(token.span, "")},
     }}
 }
 
@@ -529,7 +533,7 @@ jet_eval_compiler_services_syntax_node: fn(item: Item) -> TComptimeValue Never! 
     TComptimeValue.Struct{type_name: "CompilerNode", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
         TComptimeField{name: "name", value: jet_eval_compiler_services_option_string(name)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(span)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(span, "")},
     }}
 }
 
@@ -582,7 +586,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
             }
         }
     }
-    arithmetic := sema_comptime_reflection_arithmetic_facts(function)
+    arithmetic := sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
     identity := "{registration_module.module_name}::{function.name}"
     facts := sema_comptime_reflection_declared_function_facts(function, identity)
     TComptimeValue.Struct{type_name: "FunctionInfo", fields: [TComptimeField]{
@@ -590,8 +594,8 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
         TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
         TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
-        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(function, solved_effects)},
-        TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
+        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(function, solved_effects, registration_module.source_file)},
+        TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, registration_module.source_file)},
         TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
         TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
@@ -620,7 +624,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     effects := [TComptimeValue]{}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     loop registration_module in input.registration.modules {
-        module_text: sema_comptime_reflection_doc_source(registration_module.source)
+        module_text: sema_comptime_reflection_doc_source(registration_module.source, registration_module.source_file)
         checked_module := SemaGraphModuleResult?{None}
         loop candidate in input.graph.modules {
             if candidate.module_identity == registration_module.module_identity -> checked_module = Val(candidate)
@@ -695,7 +699,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     loop module_row in registration.modules {
         // Lexed whole: the ModuleInfo lists every comment, and each
         // FunctionInfo its documentation.
-        module_text: sema_comptime_reflection_source(module_row.source)
+        module_text: sema_comptime_reflection_source(module_row.source, module_row.source_file)
         checked := SemaGraphModuleResult?{None}
         loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
         if checked == None -> return .Missing(fact: "module `{module_row.module_identity}` has no checked result")
@@ -805,7 +809,7 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
                     {name: "caller", value: jet_eval_compiler_services_string(call.caller_key)},
                     {name: "callee", value: jet_eval_compiler_services_string(name)},
                     {name: "module", value: jet_eval_compiler_services_string(checked.module_path)},
-                    {name: "span", value: jet_eval_compiler_services_span(call.span)},
+                    {name: "span", value: jet_eval_compiler_services_span(call.span, module_row.source_file)},
                 }})
             }
         }

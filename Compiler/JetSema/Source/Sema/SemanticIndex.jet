@@ -93,8 +93,11 @@ sema_compiler_index_module_source: fn(module_sources: [SemaCompilerModuleSource]
 sema_compiler_index_string: fn(value: String) -> TComptimeValue Never! { TComptimeValue.String{value: value} }
 sema_compiler_index_int: fn(value: Int) -> TComptimeValue Never! { TComptimeValue.Int{value: value} }
 sema_compiler_index_bool: fn(value: Bool) -> TComptimeValue Never! { TComptimeValue.Bool{value: value} }
-sema_compiler_index_span: fn(value: Span) -> TComptimeValue Never! {
+// `value` as a SourceSpan of the text of `file`, the module whose text its
+// offsets index.
+sema_compiler_index_span: fn(value: Span, file: String) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
+        TComptimeField{name: "file", value: sema_compiler_index_string(file)},
         TComptimeField{name: "start", value: sema_compiler_index_int(value.start)},
         TComptimeField{name: "end", value: sema_compiler_index_int(value.end)},
     }}
@@ -108,9 +111,9 @@ sema_compiler_index_strings: fn(values: [String]) -> TComptimeValue Never! {
     loop value in values -> output.push(sema_compiler_index_string(value))
     TComptimeValue.List{values: output}
 }
-sema_compiler_index_span_list: fn(values: [Span]) -> TComptimeValue Never! {
+sema_compiler_index_span_list: fn(values: [Span], file: String) -> TComptimeValue Never! {
     output := [TComptimeValue]{}
-    loop value in values -> output.push(sema_compiler_index_span(value))
+    loop value in values -> output.push(sema_compiler_index_span(value, file))
     TComptimeValue.List{values: output}
 }
 
@@ -119,6 +122,15 @@ sema_compiler_index_module_path: fn(registration: SemaRegistrationGraph, module_
         if registration.modules[registered_module_index].module_name == module_name -> return registration.modules[registered_module_index].module_path
     }
     module_name.copy()
+}
+
+// The source file of the module named `module_name`; "" when no module of
+// `registration` has that name.
+sema_compiler_index_module_file: fn(registration: SemaRegistrationGraph, module_name: String) -> String Never! {
+    loop registered_module in registration.modules {
+        if registered_module.module_name == module_name -> return registered_module.source_file
+    }
+    ""
 }
 
 sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> String Never! {
@@ -290,7 +302,7 @@ sema_compiler_index_definition: fn(symbol: Symbol, registered_module: SemaRegist
         TComptimeField{name: "identity", value: sema_compiler_index_string(symbol.id.key)},
         TComptimeField{name: "name", value: sema_compiler_index_string(symbol.name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(registered_module.module_path)},
-        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, registered_module.source_file)},
         TComptimeField{name: "kind", value: sema_compiler_index_symbol_kind(symbol, registered_module)},
         TComptimeField{name: "view_provenance", value: view_provenance},
     }}
@@ -301,47 +313,47 @@ sema_compiler_index_anchor: fn(symbol: Symbol, registration: SemaRegistrationGra
         TComptimeField{name: "module", value: sema_compiler_index_string(sema_compiler_index_module_path(registration, symbol.module_name))},
         TComptimeField{name: "kind", value: sema_compiler_index_string(sema_compiler_index_definition_kind(symbol, registration))},
         TComptimeField{name: "semantic_identity", value: sema_compiler_index_option_string(Val(symbol.id.key))},
-        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, sema_compiler_index_module_file(registration, symbol.module_name))},
     }}
 }
 
-sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, registration: SemaRegistrationGraph, module_path: String) -> TComptimeValue Never! {
+sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, registration: SemaRegistrationGraph, module_path: String, file: String) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "CompilerReference", fields: [TComptimeField]{
         TComptimeField{name: "name", value: sema_compiler_index_string(reference.symbol.name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
         TComptimeField{name: "scope_identity", value: sema_compiler_index_option_string(None)},
         TComptimeField{name: "target", value: TComptimeValue.Present{value: sema_compiler_index_anchor(reference.symbol, registration)}},
-        TComptimeField{name: "span", value: sema_compiler_index_span(reference.span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(reference.span, file)},
     }}
 }
 
-sema_compiler_index_call: fn(call: SemaCallSiteFact, module_path: String) -> TComptimeValue? {
+sema_compiler_index_call: fn(call: SemaCallSiteFact, module_path: String, file: String) -> TComptimeValue? {
     callee: call.callee ?? return None
     TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
         TComptimeField{name: "caller", value: sema_compiler_index_string(call.caller_key)},
         TComptimeField{name: "callee", value: sema_compiler_index_string(callee.key)},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
-        TComptimeField{name: "span", value: sema_compiler_index_span(call.span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(call.span, file)},
     }}
 }
 
-sema_compiler_index_provenance: fn(function: FnBody, effect_name: String) -> [TComptimeValue] Never! {
+sema_compiler_index_provenance: fn(function: FnBody, effect_name: String, file: String) -> [TComptimeValue] Never! {
     output := [TComptimeValue]{}
     loop source in function.effects.direct_spans {
         if source.name != effect_name -> next
         output.push(TComptimeValue.Struct{type_name: "CompilerEffectProvenance", fields: [TComptimeField]{
             TComptimeField{name: "effect", value: sema_compiler_index_string(effect_name)},
             TComptimeField{name: "call_path", value: sema_compiler_index_strings([String]{function.key})},
-            TComptimeField{name: "spans", value: sema_compiler_index_span_list([Span]{source.span})},
+            TComptimeField{name: "spans", value: sema_compiler_index_span_list([Span]{source.span}, file)},
         }})
     }
     output
 }
 
-sema_compiler_index_effect: fn(function: FnBody) -> TComptimeValue Never! {
+sema_compiler_index_effect: fn(function: FnBody, file: String) -> TComptimeValue Never! {
     provenance := [TComptimeValue]{}
     loop effect_name in function.effects.solved {
-        loop row in sema_compiler_index_provenance(function, effect_name) -> provenance.push(row)
+        loop row in sema_compiler_index_provenance(function, effect_name, file) -> provenance.push(row)
     }
     TComptimeValue.Struct{type_name: "CompilerEffect", fields: [TComptimeField]{
         TComptimeField{name: "function", value: sema_compiler_index_string(function.key)},
@@ -381,14 +393,14 @@ sema_compiler_index_arithmetic_operation: fn(operation: ArithmeticOperation) -> 
     }
 }
 
-sema_compiler_index_arithmetic_fact: fn(fact: ArithmeticPolicyFact, module_path: String) -> TComptimeValue Never! {
+sema_compiler_index_arithmetic_fact: fn(fact: ArithmeticPolicyFact, module_path: String, file: String) -> TComptimeValue Never! {
     operation: fact.operation ?? ArithmeticOperation.Add
     TComptimeValue.Struct{type_name: "CompilerArithmeticOperation", fields: [TComptimeField]{
         TComptimeField{name: "operation", value: sema_compiler_index_string(sema_compiler_index_arithmetic_operation(operation))},
         TComptimeField{name: "policy", value: sema_compiler_index_string(sema_compiler_index_arithmetic_mode(fact.mode))},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
-        TComptimeField{name: "operation_span", value: sema_compiler_index_span(fact.operation_span)},
-        TComptimeField{name: "scope_span", value: sema_compiler_index_span(fact.scope_span)},
+        TComptimeField{name: "operation_span", value: sema_compiler_index_span(fact.operation_span, file)},
+        TComptimeField{name: "scope_span", value: sema_compiler_index_span(fact.scope_span, file)},
     }}
 }
 
@@ -417,13 +429,13 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
         TComptimeField{name: "kind", value: sema_compiler_index_string(sema_compiler_index_output_kind(output.kind))},
         TComptimeField{name: "name", value: sema_compiler_index_string(output.output_name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(registered_module.module_path)},
-        TComptimeField{name: "span", value: sema_compiler_index_span(binding.span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(binding.span, registered_module.source_file)},
         TComptimeField{name: "entry", value: TComptimeValue.Struct{type_name: "CompilerOutputEntry", fields: [TComptimeField]{
             TComptimeField{name: "identity", value: sema_compiler_index_string("{target_module.module_name}::{output.semantic_name}")},
             TComptimeField{name: "name", value: sema_compiler_index_string(output.source_name)},
             TComptimeField{name: "module", value: sema_compiler_index_string(output.source_path)},
-            TComptimeField{name: "definition_span", value: sema_compiler_index_span(output.definition)},
-            TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference)},
+            TComptimeField{name: "definition_span", value: sema_compiler_index_span(output.definition, target_module.source_file)},
+            TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference, registered_module.source_file)},
             TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
             TComptimeField{name: "return_type", value: sema_compiler_index_option_string(output.return_type.map((ty) -> type_name(ty)))},
             TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_shown_type(output.failure_contract)))},
@@ -434,7 +446,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
     }}
 }
 
-sema_compiler_index_state_graph_value: fn(fact: SemaStateGraphFact, definition: StructDef, module_path: String) -> TComptimeValue Never! {
+sema_compiler_index_state_graph_value: fn(fact: SemaStateGraphFact, definition: StructDef, module_path: String, file: String) -> TComptimeValue Never! {
     nodes := [TComptimeValue]{}
     loop node in fact.states {
         state_span := Span{start: 0, end: 0}
@@ -447,7 +459,7 @@ sema_compiler_index_state_graph_value: fn(fact: SemaStateGraphFact, definition: 
             TComptimeField{name: "name", value: sema_compiler_index_string(node.name)},
             TComptimeField{name: "terminal", value: sema_compiler_index_bool(node.terminal)},
             TComptimeField{name: "reachable", value: sema_compiler_index_option_bool(node.reachable)},
-            TComptimeField{name: "span", value: sema_compiler_index_span(state_span)},
+            TComptimeField{name: "span", value: sema_compiler_index_span(state_span, file)},
         }})
     }
     transitions := [TComptimeValue]{}
@@ -615,6 +627,8 @@ SemaCompilerIndexWalkState: struct {
     slot: String
     slot_is_list: Bool
     module_identity: String
+    // The source file of the module being walked.
+    file: String
 }
 
 sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
@@ -627,6 +641,7 @@ sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
         slot: "root",
         slot_is_list: true,
         module_identity: "",
+        file: "",
     }
 }
 
@@ -854,7 +869,7 @@ sema_compiler_index_walk_node: fn(state: &SemaCompilerIndexWalkState, class: Str
         TComptimeField{name: "class", value: sema_compiler_index_string(class)},
         TComptimeField{name: "shape", value: sema_compiler_index_string(shape)},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
-        TComptimeField{name: "span", value: sema_compiler_index_span(span)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(span, state.file)},
     }})
     Val(id)
 }
@@ -1194,7 +1209,7 @@ sema_compiler_index_walk_type_slot: fn(state: &SemaCompilerIndexWalkState, slot:
 }
 
 sema_compiler_index_walk_function: fn(state: &SemaCompilerIndexWalkState, function: Func, module_path: String, body_slot: String) {
-    loop fact in sema_arithmetic_policy_facts(function) -> state.arithmetic.push(sema_compiler_index_arithmetic_fact(fact, module_path))
+    loop fact in sema_arithmetic_policy_facts(function) -> state.arithmetic.push(sema_compiler_index_arithmetic_fact(fact, module_path, state.file))
     loop parameter_index in 0..<function.params.len() -> sema_compiler_index_walk_type_slot(state, "params", function.params[parameter_index].ty_span, module_path, true)
     if function.return_type_span == .Val(span) -> sema_compiler_index_walk_type_slot(state, "return_type", span, module_path, false)
     sema_compiler_index_walk_stmt_slot(state, body_slot, function.body, module_path)
@@ -1639,7 +1654,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
                     break
                 }
             }
-            if definition == .Val(value) -> state_graphs.push(sema_compiler_index_state_graph_value(fact, value, registration.modules[registered_module_index].module_path))
+            if definition == .Val(value) -> state_graphs.push(sema_compiler_index_state_graph_value(fact, value, registration.modules[registered_module_index].module_path, registration.modules[registered_module_index].source_file))
         }
     }
     loop checked_module in graph.modules {
@@ -1649,10 +1664,10 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             target_index := sema_registration_module_index(registration, reference.symbol.module_name) ?? module_index
             target_module: registration.modules[target_index]
             sema_compiler_index_append_definition(reference.symbol, target_module, function_views, definitions, definition_keys)
-            references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path))
+            references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path, registered_module.source_file))
         }
         loop function in checked_module.functions {
-            effects.push(sema_compiler_index_effect(function))
+            effects.push(sema_compiler_index_effect(function, registered_module.source_file))
             loop parameter in function.params {
                 parameter_id: parameter.local.symbol_id ?? next
                 parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
@@ -1661,13 +1676,14 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registered_module, function_views, definitions, definition_keys)
         }
         loop call in checked_module.call_facts {
-            value: sema_compiler_index_call(call, checked_module.module_path) ?? next
+            value: sema_compiler_index_call(call, checked_module.module_path, registered_module.source_file) ?? next
             calls.push(value)
         }
     }
     walk := sema_compiler_index_walk_state()
     loop registered_module_index in 0..<registration.modules.len() {
         walk.module_identity = registration.modules[registered_module_index].module_identity
+        walk.file = registration.modules[registered_module_index].source_file
         sema_compiler_index_walk_items_slot(walk, "root", registration.modules[registered_module_index].program.items, registration.modules[registered_module_index].module_path)
     }
     derivations := sema_compiler_index_derivations(registration, walk.structural, module_sources)

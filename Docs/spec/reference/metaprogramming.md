@@ -379,6 +379,15 @@ run: fn() {
 }
 ```
 
+A `SourceSpan` names a stretch of source text: its `file` is the source file
+of the module whose text holds it, the same path its `SourceLocation` names,
+and `start` and `end` are byte offsets into that module's text. Every span a
+declaration record, a `CommentInfo`, a `FunctionInfo`'s arithmetic or the
+semantic index carries names its file. A span of a text that is no module's
+file reads `file` as `""`: a token or node of a text given to `compiler.lex`
+or `compiler.parse` as a value, the call site of a failed compiler query, and a
+span a build session hands back.
+
 Each declaration record also lists its `documentation`: the `///` lines
 written directly above the declaration, in order, read up past its markers,
 its `pub` or `priv` and any other comment, until a blank line or other code.

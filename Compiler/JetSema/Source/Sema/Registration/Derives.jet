@@ -1973,7 +1973,9 @@ sema_derive_type_text: fn(ty: Type) -> String {
 sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?) -> CtValue {
     default_info := CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "DefaultInfo"}}}
     if default == .Val(source) {
-        span: sema_derive_ct_struct("SourceSpan", [NamedCtValue]{NamedCtValue{name: "start", value: CtValue.Int{value: source.start}}, NamedCtValue{name: "end", value: CtValue.Int{value: source.end}}})
+        // The builtin derive providers read this partial TypeInfo before
+        // the item is placed in a module, so its spans name no file.
+        span: sema_derive_ct_struct("SourceSpan", [NamedCtValue]{sema_derive_ct_str("file", ""), NamedCtValue{name: "start", value: CtValue.Int{value: source.start}}, NamedCtValue{name: "end", value: CtValue.Int{value: source.end}}})
         default_info = CtValue.Present{value: sema_derive_ct_struct("DefaultInfo", [NamedCtValue]{NamedCtValue{name: "source", value: span}})}
     }
     sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("type", sema_derive_type_text(ty)), NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})

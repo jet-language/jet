@@ -149,9 +149,11 @@ vocabulary](vocabulary.md).
   its markers, its `pub` or `priv` and any other comment, until a blank line
   or other code. A ModuleInfo lists every comment written in its file as
   `comments`. Each is a CommentInfo: its `text` without the `//`, `///` or
-  `/* */` and one space after the opening, its `span`, and its `kind`
-  (CommentKind: `Line`, `Block` or `Documentation`). The lexer finds
-  comments, so a `//` inside a string or a marker argument is text
+  `/* */` and one space after the opening, its `span` (a SourceSpan: the
+  module's source `file` and the byte offsets `start` and `end` into its
+  text), and its `kind` (CommentKind: `Line`, `Block` or `Documentation`).
+  The lexer finds comments, so a `//` inside a string or a marker argument
+  is text
   (Examples/Metaprogramming/Reflection/CommentsAndDocs).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn

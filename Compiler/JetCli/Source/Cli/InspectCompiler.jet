@@ -91,6 +91,8 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
     }
     parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
     snapshot: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
+    // copy: the check takes the snapshot; a failed check's records name its file.
+    checked_file: snapshot.entry_path.copy()
     result: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null
@@ -109,8 +111,8 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
                         jet_cli_status_field("name", jet_cli_status_text(function.name)),
                         jet_cli_status_field("module", jet_cli_status_text("core.compiler")),
                         jet_cli_status_field("identity", jet_cli_status_text("core.compiler::{function.name}")),
-                        jet_cli_status_field("signature", jet_cli_compiler_checked_value(sema_comptime_reflection_callable_signature(function, None))),
-                        jet_cli_status_field("span", jet_cli_compiler_span(function.name_span.start, function.name_span.end)),
+                        jet_cli_status_field("signature", jet_cli_compiler_checked_value(sema_comptime_reflection_callable_signature(function, None, checked_file))),
+                        jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(checked_file)), jet_cli_status_field("start", jet_cli_status_int(function.name_span.start)), jet_cli_status_field("end", jet_cli_status_int(function.name_span.end))})),
                         jet_cli_status_field("reaches_panic", jet_cli_status_bool(false)),
                         jet_cli_status_field("arithmetic", jet_cli_status_array([JetCLIStatusValue]{})),
                     },

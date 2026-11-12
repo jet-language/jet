@@ -3,7 +3,8 @@
 // comment until a blank line or other code. A marker's arguments are values,
 // so a `//` inside one is text. TypeInfo, FieldInfo, MethodInfo and
 // FunctionInfo each list their declaration's documentation, and ModuleInfo
-// lists every comment written in its file.
+// lists every comment written in its file. Every span names the source file
+// whose text its offsets index.
 Note: struct {
     text: String
 
@@ -38,10 +39,16 @@ ID: #run joined(Order.reflect().fields[0].documentation)
 TOTAL: #run joined(Order.reflect().fields[1].documentation)
 DOLLARS: #run joined(Order.reflect().methods[0].documentation)
 NOTE: #run { Order.reflect().marker(Note)?.text ?? "none" }
+DOC_FILE: #run Order.reflect().documentation[0].span.file.ends_with("/run.jet")
+ID_FILE: #run Order.reflect().fields[0].span.file.ends_with("/run.jet")
 
 build: fn(b: Build) {
     loop function in b.program.functions() {
-        if function.name == "joined" -> b.contribute("function", joined(function.documentation))
+        if function.name == "joined" {
+            b.contribute("function", joined(function.documentation))
+            in_run: function.span.file.ends_with("/run.jet")
+            b.contribute("function_file", "{in_run}")
+        }
     }
     loop package in b.program.packages() {
         if package.name != "comments_and_docs" -> next
@@ -50,6 +57,7 @@ build: fn(b: Build) {
             blocks := 0
             docs := 0
             argument := false
+            named := true
             loop comment in written.comments {
                 if comment.kind == {
                     .Line -> lines += 1
@@ -57,8 +65,9 @@ build: fn(b: Build) {
                     .Documentation -> docs += 1
                 }
                 if comment.text.contains("a marker argument") -> argument = true
+                if !comment.span.file.ends_with("/run.jet") -> named = false
             }
-            b.contribute("comments", "{written.name}: {lines} line, {blocks} block, {docs} documentation; marker argument read as a comment: {argument}")
+            b.contribute("comments", "{written.name}: {lines} line, {blocks} block, {docs} documentation; marker argument read as a comment: {argument}; every span in run.jet: {named}")
         }
     }
 }
@@ -69,6 +78,9 @@ run: fn() {
     print("Order.total: [{TOTAL}]")
     print("Order.dollars: [{DOLLARS}]")
     print("Order's Note: {NOTE}")
+    print("Order's documentation span in run.jet: {DOC_FILE}")
+    print("Order.id span in run.jet: {ID_FILE}")
     print("joined: [{#build.settings.function}]")
+    print("joined span in run.jet: {#build.settings.function_file}")
     print(#build.settings.comments)
 }

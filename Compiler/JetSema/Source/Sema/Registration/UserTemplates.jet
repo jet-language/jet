@@ -648,7 +648,7 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
     }
     written: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), code_module.markers, registry) ?? return None
     markers: sema_user_template_ct_values(written) ?? return None
-    comments: sema_comptime_reflection_comments(sema_comptime_reflection_source(module_row.source), code_module.span.start, code_module.span.end)
+    comments: sema_comptime_reflection_comments(sema_comptime_reflection_source(module_row.source, module_row.source_file), code_module.span.start, code_module.span.end)
     Val(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
         NamedCtValue{name: "name", value: CtValue.Str{value: code_module.name}},
         NamedCtValue{name: "identity", value: CtValue.Str{value: "{module_row.module_name}::{code_module.name}"}},
@@ -692,7 +692,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
         types.extend(module_types.copy())
         // copy: as above, for the functions.
         functions.extend(module_functions.copy())
-        comments: sema_comptime_reflection_written_comments(sema_comptime_reflection_source(module_row.source), module_row.source_segments)
+        comments: sema_comptime_reflection_written_comments(sema_comptime_reflection_source(module_row.source, module_row.source_file), module_row.source_segments)
         modules.push(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
             NamedCtValue{name: "name", value: CtValue.Str{value: module_row.module_name}},
             NamedCtValue{name: "identity", value: CtValue.Str{value: module_row.module_name}},
