@@ -3,12 +3,15 @@
 // export of Tools/gauntlet/harness/run.mjs, publicationState.
 //
 //   jet driver publication DIR
+//   jet driver manifest DIR
 //
 // DIR holds JSON files, each the object a run hands publicationState (its
 // `fullScope`, `loaded` and `skipped` entries, `matrix`, `manifest`,
 // `sourceMeasurements`, `results`, `scoreboard`, `axes`, `validationIssues`
 // and, for a run of one axis, `axisId`); each is judged in name order and
-// shown as the file name and the publication state as JSON.
+// shown as the file name and the publication state as JSON. `manifest`
+// judges each run against the canonical measurement manifest,
+// Tools/gauntlet/measurement-manifest.json, in place of its own.
 package: {
     name: "run_publication_driver"
     version: "0.0.1"
@@ -22,16 +25,26 @@ use {
     jet_gauntlet_kit.[publication_state, read_json]
     json: core.encoding.json
     process: core.process
+    sys: core.sys
 }
 
-USAGE: "usage: driver publication DIR"
+USAGE: "usage: driver publication|manifest DIR"
 
-print_publications: fn(dir: String) {
+// The canonical measurement manifest, beside this driver's entries.
+canonical_manifest: fn() -> Dyn {
+    path: files.normalize(files.join(files.dirname(sys.executable()), "../../../measurement-manifest.json"))
+    read_json(path) ?? process.fail(1, "{path} is not a JSON file")
+}
+
+// Each run of `dir` judged, against `manifest` in place of its own when
+// there is one.
+print_publications: fn(dir: String, manifest: Dyn?) {
     listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
     names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
     names.sort()
     loop name in names {
-        run: read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        run := read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        if manifest == .Val(canonical) -> run["manifest"] = canonical.copy()
         print("{name}\t{json.stringify(publication_state(run))}")
     }
 }
@@ -39,7 +52,8 @@ print_publications: fn(dir: String) {
 run: fn() {
     args: process.args()
     if {
-        args.get(0) == Val("publication") && args.len() >= 2 -> print_publications(args[1])
+        args.get(0) == Val("publication") && args.len() >= 2 -> print_publications(args[1], None)
+        args.get(0) == Val("manifest") && args.len() >= 2 -> print_publications(args[1], Val(canonical_manifest()))
         else -> process.fail(64, USAGE)
     }
 }

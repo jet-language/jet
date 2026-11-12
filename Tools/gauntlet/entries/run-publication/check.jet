@@ -1,0 +1,34 @@
+// What a run-publication `manifest` case produced (PortBars.jet runs this
+// in the case directory with the file holding the program's output): its
+// publication states are those the original driver,
+// Tools/gauntlet/harness/drivers/run-publication.mjs, gives each run of
+// `inputs` judged against the canonical measurement manifest. The manifest
+// changes as the gauntlet does, so the check compares the two programs
+// rather than either one with a fixed text, and prints how many runs they
+// agree on; a run judged otherwise is shown on stderr and fails the check.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    driver: files.normalize(files.join(files.dirname(sys.executable()), "../../harness/drivers/run-publication.mjs"))
+    original: process.cmd(["node", driver, "manifest", "inputs"]).run() ?? process.fail(1, "{err}")
+    if original.code != 0 -> process.fail(1, "the original exits {original.code}: {original.errors.trim()}")
+    ours: printed.lines()
+    theirs: original.output.lines()
+    if ours.len() == 0 -> process.fail(1, "the program judged no runs")
+    loop index in 0..<theirs.len() {
+        line: ours.get(index) ?? process.fail(1, "the program judged {ours.len()} runs, the original {theirs.len()}")
+        if line != theirs[index] -> process.fail(1, "run {index + 1} is judged otherwise than the original judges it:\n{line}\n{theirs[index]}")
+    }
+    if ours.len() != theirs.len() -> process.fail(1, "the program judged {ours.len()} runs, the original {theirs.len()}")
+    print("{ours.len()} runs judged against Tools/gauntlet/measurement-manifest.json as the original judges them")
+}
