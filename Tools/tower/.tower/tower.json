@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6776,
-    "rev": 100050,
+    "nextNum": 6777,
+    "rev": 100053,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99168,6 +99168,56 @@
       "needsAcceptance": false,
       "created": "2026-11-12T13:29:40.493Z",
       "updated": "2026-11-12T13:29:50.359Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0vj3f8z",
+      "num": 6776,
+      "title": "I9: string interpolation of a Display type prints a struct dump while compiling but its Display text at run time",
+      "body": "A user struct with impl Display interpolated as \"{value}\" prints its Display text at run time (default level and --optimize=none) but the derived dump (Failure { query: query, code: 7 }) when the same interpolation runs under #run. One spelling, two meanings across tiers (I9). Repro: $JET_SCRATCH_ROOT/lanes/G6Meta/r6/diag/d.jet on seed-b13. Found by G6Meta-4 in the G6Meta-36 query program, which now calls .display() explicitly as a stopgap.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named and fixed: interpolation while compiling formats a value through the same Display path as run time, in one shared runtime mechanism, not a second formatter. A case interpolates a Display struct, an enum with Display, a nested field and a value without Display, and prints identical text under #run and at run time on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T16:31:15.108Z"
+        },
+        {
+          "n": 2,
+          "text": "The stopgap explicit .display() calls in the G6Meta-36, 40 and 43 query programs and 43 fixture main.jet are reverted to plain \"{err}\", and inspect_facts_program_store_is_the_build_query still passes on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T16:31:16.294Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T16:31:06.531Z",
+      "updated": "2026-11-12T16:31:16.294Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     }
@@ -200216,6 +200266,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T16:31:16.294Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vj3f8z",
+      "note": "#2 The stopgap explicit .display() calls in the G6Meta-36, 40 a"
+    },
+    {
+      "at": "2026-11-12T16:31:15.108Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vj3f8z",
+      "note": "#1 The root is named and fixed: interpolation while compiling f"
+    },
+    {
+      "at": "2026-11-12T16:31:06.532Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0vj3f8z",
+      "note": "I9: string interpolation of a Display type prints a struct dump while compiling but its Display text at run time"
+    },
     {
       "at": "2026-11-12T16:19:04.815Z",
       "by": "Main",
