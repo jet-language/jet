@@ -1,15 +1,34 @@
-// The loss-owner category of a gauntlet metric: the key of an entry's
+// A gauntlet metric and its loss-owner category: the key of an entry's
 // measurement-manifest `loss_owners` row whose card owns a loss on it.
+LossOwner: struct {
+    metric: String
+    category: String
+}
+
+// Every metric that has a loss-owner category, in the gauntlet's order.
+LOSS_OWNERS: [LossOwner]{
+    {metric: "runtime_wall_seconds", category: "runtime"},
+    {metric: "runtime_first_stdout_seconds", category: "runtime"},
+    {metric: "service_latency_ms_p50", category: "latency"},
+    {metric: "service_latency_ms_p99", category: "latency"},
+    {metric: "service_startup_seconds", category: "runtime"},
+    {metric: "runtime_peak_rss_kb", category: "rss"},
+    {metric: "peak_rss_bytes", category: "rss"},
+    {metric: "cold_build_seconds", category: "build"},
+    {metric: "warm_build_seconds", category: "build"},
+    {metric: "binary_bytes", category: "binary"},
+    {metric: "artifact_bytes", category: "binary"},
+    {metric: "wasm_bytes", category: "binary"},
+    {metric: "loc", category: "source"},
+    {metric: "source_bytes", category: "source"},
+    {metric: "tokens", category: "source"},
+    {metric: "source_tokens", category: "source"},
+}
+
+// The loss-owner category of a gauntlet metric.
 loss_owner_category: fn(metric: String) -> String? {
-    if metric == {
-        "runtime_wall_seconds" | "runtime_first_stdout_seconds" | "service_startup_seconds" -> Val("runtime")
-        "service_latency_ms_p50" | "service_latency_ms_p99" -> Val("latency")
-        "runtime_peak_rss_kb" | "peak_rss_bytes" -> Val("rss")
-        "cold_build_seconds" | "warm_build_seconds" -> Val("build")
-        "binary_bytes" | "artifact_bytes" | "wasm_bytes" -> Val("binary")
-        "loc" | "source_bytes" | "tokens" | "source_tokens" -> Val("source")
-        else -> None
-    }
+    owner: LOSS_OWNERS.find(owner -> owner.metric == metric) ?? return None
+    Val(owner.category.copy())
 }
 
 #Test("each metric names its loss-owner category, and an unknown metric none") {

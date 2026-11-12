@@ -1,0 +1,74 @@
+// The gauntlet driver of the kit's Policy module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-policy.mjs: one command per
+// performance-law export of Tools/gauntlet/harness/run.mjs.
+//
+//   jet driver policy | issues MATRIX | references MATRIX REFERENCES
+//              | peers MATRIX | applicability CASES | ratio VALUES
+//
+// MATRIX is a gauntlet matrix.json and REFERENCES an asm-parity cells.json,
+// whose hand-written references are looked up beside the repository's own
+// cells.json. CASES is a JSON array of {entry, language, metric} and VALUES
+// a JSON array of Jet/peer ratios.
+package: {
+    name: "run_policy_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[LOSS_OWNERS, ceiling_reference_issues, items_at, matrix_peer_languages, member, metric_applicability, number_at, ratio_verdict, read_json, strict_performance_policy, strict_performance_policy_issues, text_at]
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver policy | issues MATRIX | references MATRIX REFERENCES | peers MATRIX | applicability CASES | ratio VALUES"
+
+// This program is Tools/gauntlet/entries/run-policy/driver/run.jet.
+repo_root: fn() -> String {
+    files.absolute(files.join(files.dirname(sys.executable()), "../../../../.."))
+}
+
+// The JSON file named by argument `at`.
+input: fn(args: [String], at: Int) -> Dyn {
+    name: args.get(at) ?? process.fail(64, USAGE)
+    read_json(name) ?? process.fail(1, "{name} is not a JSON file")
+}
+
+print_issues: fn(issues: [String]) {
+    loop issue in issues -> print(issue)
+    print("{issues.len()} issues")
+}
+
+run: fn() {
+    args: process.args()
+    command: args.get(0) ?? ""
+    if command == {
+        "policy" -> {
+            categories := Dyn.object()
+            loop owner in LOSS_OWNERS -> categories[owner.metric] = owner.category
+            print(json.stringify(Dyn{[String: Dyn]{"strict_performance_policy": strict_performance_policy(), "loss_owner_category_by_metric": categories}}, 2))
+        }
+        "issues" -> print_issues(strict_performance_policy_issues(input(args, 1)))
+        "references" -> print_issues(ceiling_reference_issues(input(args, 1), input(args, 2), repo_root()))
+        "peers" -> {
+            matrix: input(args, 1)
+            print("*\t{matrix_peer_languages(matrix, None).join(",")}")
+            loop cell in items_at(matrix, "cells") -> print("{text_at(cell, "id") ?? ""}\t{matrix_peer_languages(matrix, Val(cell)).join(",")}")
+        }
+        "applicability" -> {
+            loop item in items_at(input(args, 1), "") {
+                language: text_at(item, "language") ?? ""
+                metric: text_at(item, "metric") ?? ""
+                print("{language} {metric}\t{json.stringify(metric_applicability(member(item, "entry") ?? Dyn.Null, language, metric))}")
+            }
+        }
+        "ratio" -> {
+            loop value in items_at(input(args, 1), "") -> print("{json.stringify(value)}\t{ratio_verdict(number_at(value, "")) ?? "none"}")
+        }
+        else -> process.fail(64, USAGE)
+    }
+}

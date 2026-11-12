@@ -1,0 +1,343 @@
+// The gauntlet's performance law: the strict performance policy (AGENTS.md,
+// Performance gate) with its machine-ceiling stage, the issues a matrix's
+// copy of the policy and the asm-parity ceiling references raise, the tiers
+// of each entry mode, the peers a matrix cell is judged against, whether a
+// metric applies to an entry's language, and the verdict of a Jet/peer
+// ratio. The twin of those parts of Tools/gauntlet/harness/run.mjs.
+use {
+    combinatorics: core.math.combinatorics
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+}
+
+// The machine-ceiling references: asm-parity cells, each with its
+// hand-written reference beside this file and the matrix cells it bounds in
+// its `gauntlet` field.
+CEILING_REFERENCES: "Tools/perf/asm-parity/cells.json"
+CEILING_REFERENCE_SOURCE: "ref.S"
+// Both peer-floor metrics: every matched peer and Jet must carry a reading.
+PEER_FLOOR_METRICS: ["runtime_wall_seconds", "runtime_peak_rss_kb"]
+// The web rails that build a Wasm binary; the others are script-only.
+WEB_WASM_LANGUAGES: ["jet", "rust"]
+// The AGENTS.md Performance gate paragraphs the gate encodes, word for word.
+POLICY_PARAGRAPHS: [
+    "Jet's performance target has two stages. The first stage is the peer floor, and it is a hard, structural requirement: a Jet program must be faster and use less peak memory than the same program in every other language. Jet/peer must be below `1.00` for every matched peer, for each required cell and for both wall time and peak memory. Rust is judged like every other peer, with no parity band. A loss to any peer on either metric is a codegen, runtime or Core failure. It is fixed generally and structurally, so that any Jet program beats the other languages, never only the measured one. The second and final stage is the machine ceiling: hand-written, maximally optimized machine code for the same workload, which Jet must match or beat in both cycles and bytes (Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can. Closing the remaining ceiling gap is the hill-climbing stage: until the owner opens it, a cell passes the gate on the peer floor, and its ceiling ratio is measured and reported but does not fail the gate.",
+    "Every required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. A cell without a reference is uncovered and fails the gate once hill climbing opens the ceiling stage. A better technique replaces the reference and raises the target.",
+    "Required cells cover the foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it; never claim a niche win without one.",
+    "Apply the comparator separately to each cell and metric. Never average away a loss, substitute an easier workload or tier, drop a peer, or accept wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts stay immutable under the policy they were recorded with and never weaken the current gate.",
+]
+
+// One tier of an entry mode, and whether a cell of that mode needs it.
+TierRule: struct {
+    tier: String
+    required: Bool
+}
+
+// One comparator for every peer, Rust included: Jet/peer below 1 wins,
+// anything else loses.
+ratio_verdicts: fn() -> Dyn { Dyn{[String: Dyn]{"win": "<1", "loss": ">=1"}} }
+
+// The target's two stages. `peer_floor`, the strict win over every matched
+// peer per cell and metric, alone passes or fails a cell. `machine_ceiling`
+// is the final one: Jet against a hand-written, maximally optimized
+// machine-code reference, Jet/ceiling at most 1.00 on every runtime and size
+// metric, measured and reported until the owner opens hill climbing.
+// `metrics` maps a metric's loss-owner category to the asm-parity measure
+// that judges it.
+ceiling_policy: fn() -> Dyn {
+    Dyn{[String: Dyn]{
+        "stages": [
+            ["id": "peer_floor", "role": "initial", "against": "every_matched_peer", "comparators": ratio_verdicts()],
+            ["id": "machine_ceiling", "role": "final", "against": "hand_written_machine_code", "comparators": ["meet": "<=1", "miss": ">1"]],
+        ],
+        "closes_cell": "peer_floor",
+        "peer_win_closes_cell": true,
+        "ceiling_gate": "reported_until_hill_climbing_opens",
+        "required_cells": "every_required_cell",
+        "metrics": ["runtime": "cycles", "latency": "cycles", "binary": "bytes"],
+        "references": CEILING_REFERENCES,
+        "reference_source": CEILING_REFERENCE_SOURCE,
+        "reference_link": "gauntlet",
+        "missing_reference": "uncovered",
+        "reference_technique": "best_known_for_the_workload",
+        "better_technique": "replaces_reference_and_raises_target",
+    }}
+}
+
+// The ratified strict performance policy, which the matrix must carry as
+// written.
+strict_performance_policy: fn() -> Dyn {
+    Dyn{[String: Dyn]{
+        "schema": "jet.strict-performance-policy.v3",
+        "id": "AGENTS.md#strict-performance-gate",
+        "version": 3,
+        "comparison": "per_cell_and_metric",
+        "comparators": ratio_verdicts(),
+        "failure_statuses": ["missing", "wrong", "unavailable", "uncovered", "mismatched", "inconclusive"],
+        "foundations": [
+            ["id": "numerics", "required": true, "cells": ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel"], "metrics": "all"],
+            ["id": "text", "required": true, "cells": ["text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script"], "metrics": "all"],
+            ["id": "files", "required": true, "cells": ["files.script", "files.orchestration"], "metrics": "all"],
+            ["id": "concurrency", "required": true, "cells": ["concurrency.app", "concurrency.service"], "metrics": "all"],
+            ["id": "networking", "required": true, "cells": ["netserv.client", "netserv.service"], "metrics": "all"],
+            ["id": "build_time", "required": true, "cells": "all", "metrics": ["cold_build_seconds", "warm_build_seconds"]],
+            ["id": "run_time", "required": true, "cells": "all", "metrics": "runtime"],
+        ],
+        "critical_areas": [
+            ["id": "web", "required": true, "cells": ["webfront.widget", "webfront.app"], "metrics": "all"],
+            ["id": "games", "required": false, "activation": "first_party_battery", "cells": [String]{}, "metrics": "all"],
+            ["id": "cli_and_scripts", "required": true, "cells": ["cli.app", "cli.hello", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], "metrics": "all"],
+            ["id": "data_analysis", "required": true, "cells": ["formats.csv-cli", "numerics.script", "numerics.notebook"], "metrics": "all"],
+            ["id": "backend_services", "required": true, "cells": ["concurrency.service", "netserv.service"], "metrics": "all"],
+            ["id": "ai_ml_applications", "required": false, "activation": "first_party_battery", "cells": [String]{}, "metrics": "all"],
+            ["id": "gui_applications", "required": false, "activation": "first_party_battery", "cells": [String]{}, "metrics": "all"],
+            ["id": "embedded", "required": true, "cells": ["embedded.kernel", "embedded.data"], "metrics": "all"],
+        ],
+        "first_party_battery_required": true,
+        "historical_receipts": "immutable_recorded_policy",
+        "ceiling": ceiling_policy(),
+        "text": POLICY_PARAGRAPHS.join("\n\n"),
+    }}
+}
+
+// A JSON value as an issue names it: a string as written, another value as
+// JSON.
+shown: fn(value: Dyn) -> String {
+    if value == .Text(text) -> return text
+    json.stringify(value)
+}
+
+// A language without its `-expert` suffix.
+base_language: fn(language: String) -> String { language.removesuffix("-expert") }
+
+// The entry mode of a matrix cell.
+matrix_cell_mode: fn(cell: Dyn) -> String {
+    id: text_at(cell, "id") ?? ""
+    kind: text_at(cell, "kind") ?? ""
+    if {
+        id == "webfront.app" -> "web-app"
+        kind == "service" || id.starts_with("netserv.") || id == "concurrency.service" -> "service"
+        kind == "web" || id == "webfront.widget" -> "web"
+        kind == "cli" || kind == "scripting" -> "batch-steps"
+        else -> "batch"
+    }
+}
+
+// The tiers an entry of `mode` is measured on (none for an unknown mode).
+tier_policy: fn(mode: String) -> [TierRule] {
+    if mode == {
+        "batch" | "batch-steps" | "service" | "web" -> [TierRule]{{tier: "aot", required: true}, {tier: "run", required: true}, {tier: "dev", required: false}}
+        "web-app" -> [TierRule{tier: "aot", required: true}]
+        else -> [TierRule]{}
+    }
+}
+
+// The cells an area of the policy claims: every matrix cell for "all".
+territory_cells: fn(area: Dyn, matrix_ids: [Dyn]) -> [Dyn] {
+    if text_at(area, "cells") == Val("all") -> return matrix_ids.copy()
+    items_at(area, "cells")
+}
+
+// The cells some required area of `policy` claims.
+required_policy_cells: fn(policy: Dyn, matrix_ids: [Dyn]) -> [Dyn] {
+    areas: items_at(policy, "foundations").concat(items_at(policy, "critical_areas"))
+    areas.filter(area -> is_true(area, "required")).flat_map(area -> territory_cells(area, matrix_ids))
+}
+
+// Every way the matrix's strict performance policy departs from the ratified
+// one, or leaves a matrix cell outside every required area; each issue once,
+// in the order found.
+strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
+    ratified: strict_performance_policy()
+    policy: member(matrix, "strict_performance_policy") ?? Dyn.Null
+    if !(policy == .Object(_)) -> return ["matrix is missing the strict performance policy"]
+    cells: items_at(matrix, "cells")
+    matrix_ids: cells.map(cell -> value_at(cell, "id") ?? Dyn.Null)
+    same: fn(name: String) -> Bool { json.stringify(value_at(policy, name) ?? Dyn.Null) == json.stringify(value_at(ratified, name) ?? Dyn.Null) }
+    issues := [String]{}
+    if !same("schema") -> issues.push("matrix strict performance policy schema is {json.stringify(value_at(policy, "schema") ?? Dyn.Null)}")
+    if text_at(policy, "id") != text_at(ratified, "id") || number_at(policy, "version") != number_at(ratified, "version") -> issues.push("matrix strict performance policy identity is not ratified")
+    if !same("comparison") -> issues.push("matrix strict performance policy is not per-cell and per-metric")
+    if !same("comparators") -> issues.push("matrix strict performance policy comparator differs from the ratified law")
+    if !same("failure_statuses") -> issues.push("matrix strict performance policy failure statuses are incomplete")
+    loop category in ["foundations", "critical_areas"] {
+        areas: member(policy, category) ?? Dyn.Null
+        if !(areas == .Array(_)) {
+            issues.push("matrix strict performance policy {category} are missing")
+            next
+        }
+        ids := [String]{}
+        loop area in items_at(areas, "") {
+            id: text_at(area, "id") ?? ""
+            if !(area == .Object(_)) || id == "" {
+                issues.push("matrix strict performance policy has an invalid {category} area")
+                next
+            }
+            if ids.contains(id) -> issues.push("matrix strict performance policy duplicates {category} area {id}")
+            ids.push(id.copy())
+            required: is_true(area, "required")
+            if !required && text_at(area, "activation") != Val("first_party_battery") -> issues.push("{category}.{id}: inactive territory must require a first-party battery activation")
+            claimed: territory_cells(area, matrix_ids)
+            if required && claimed.len() == 0 -> issues.push("{category}.{id}: required territory has no first-party battery cells")
+            if !required && claimed.len() > 0 -> issues.push("{category}.{id}: inactive territory cannot claim battery cells")
+            loop cell in claimed {
+                if !(cell == .Text(_)) || !matrix_ids.contains(cell) -> issues.push("{category}.{id}: unknown or invalid matrix battery cell {shown(cell)}")
+            }
+        }
+    }
+    if !same("foundations") -> issues.push("matrix strict performance policy foundation battery map differs from the ratified law")
+    if !same("critical_areas") -> issues.push("matrix strict performance policy critical-area battery map differs from the ratified law")
+    if !is_true(policy, "first_party_battery_required") -> issues.push("matrix strict performance policy does not require a first-party battery before a niche claim")
+    if !same("historical_receipts") -> issues.push("matrix strict performance policy does not preserve historical receipts")
+    if !same("ceiling") -> issues.push("matrix strict performance policy machine-ceiling stage differs from the ratified law")
+    if text_at(policy, "text") != text_at(ratified, "text") -> issues.push("matrix strict performance policy text differs from AGENTS.md")
+    texts: matrix_ids.filter_map(id -> text_at(id, "")).filter(id -> id != "").collect()
+    if texts.len() != matrix_ids.len() || combinatorics.unique<String>(texts).len() != texts.len() -> issues.push("matrix strict performance policy cannot address an invalid or duplicate matrix cell")
+    covered: required_policy_cells(policy, matrix_ids)
+    loop id in matrix_ids {
+        if !covered.contains(id) -> issues.push("{shown(id)}: matrix cell has no required strict-performance territory battery")
+    }
+    combinatorics.unique<String>(issues)
+}
+
+// What is wrong with the machine-ceiling references (an asm-parity
+// cells.json, read): each needs a unique name, the matrix cells it bounds in
+// `gauntlet` ([] for a microbenchmark that bounds none) and its hand-written
+// reference beside the cells.json in `repo`.
+ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> [String] {
+    if !(references == .Array(_)) -> return ["{CEILING_REFERENCES}: machine-ceiling references are missing"]
+    matrix_ids: items_at(matrix, "cells").map(cell -> value_at(cell, "id") ?? Dyn.Null)
+    reference_dir: files.dirname(files.join(repo, CEILING_REFERENCES))
+    issues := [String]{}
+    names := [String]{}
+    loop reference in items_at(references, "") {
+        name: text_at(reference, "name") ?? ""
+        if name == "" {
+            issues.push("{CEILING_REFERENCES}: a machine-ceiling reference has no name")
+            next
+        }
+        if names.contains(name) -> issues.push("{CEILING_REFERENCES}: duplicate machine-ceiling reference {name}")
+        names.push(name.copy())
+        linked: member(reference, "gauntlet") ?? Dyn.Null
+        if !(linked == .Array(_)) -> issues.push("{name}: machine-ceiling reference does not name its gauntlet cells")
+        loop cell in items_at(linked, "") {
+            if !matrix_ids.contains(cell) -> issues.push("{name}: machine-ceiling reference names unknown matrix cell {shown(cell)}")
+        }
+        if !files.exists(files.join(files.join(reference_dir, name), CEILING_REFERENCE_SOURCE)) -> issues.push("{name}: machine-ceiling reference has no {CEILING_REFERENCE_SOURCE}")
+    }
+    issues
+}
+
+// The peers a matrix cell is judged against (every peer of the matrix for
+// None), sorted, each once: the `always` and `perf` rails and the cell's
+// domain incumbent, else Rust alone, and the `run` rail on a cell with a run
+// tier. Jet is never its own peer.
+matrix_peer_languages: fn(matrix: Dyn, cell: Dyn?) -> [String] {
+    rails: member(matrix, "rails") ?? Dyn.Null
+    incumbents: member(rails, "incumbents") ?? Dyn.Null
+    named := texts_at(rails, "always").concat(texts_at(rails, "perf"))
+    if cell == {
+        .Val(one) -> {
+            domain: text_at(one, "domain") ?? ""
+            if domain != "" && incumbents == .Object(_) && text_at(incumbents, domain) == .Val(incumbent) -> named.push(incumbent)
+        }
+        None -> {
+            if incumbents == .Object(entries) {
+                loop entry in entries {
+                    if entry.value == .Text(language) -> named.push(language.copy())
+                }
+            }
+        }
+    }
+    peers: named.filter(language -> base_language(language) != "jet")
+    run_tier: if cell == {
+        .Val(one) -> tier_policy(matrix_cell_mode(one)).any(rule -> rule.tier == "run")
+        None -> true
+    }
+    run: if run_tier -> texts_at(rails, "run") else -> [String]{}
+    languages := combinatorics.unique<String>((if peers.len() > 0 -> peers else -> ["rust"]).concat(run))
+    languages.sort()
+    languages
+}
+
+// Whether `metric` applies to `language` on `entry`: the entry's own
+// not-applicable fact for the metric, for every metric (`*`) or for the
+// whole language (`non_applicable`), else structurally (a script web rail
+// has no Wasm binary), else required. A fact that is not an object, that
+// names another status, or that opts a matched peer out of one peer-floor
+// metric is invalid.
+metric_applicability: fn(entry: Dyn, language: String, metric: String) -> Dyn {
+    facts: member(entry, "metric_applicability/{language}") ?? Dyn.Null
+    own_metric: facts == .Object(_) && value_at(facts, metric) != None
+    fact: if {
+        own_metric -> value_at(facts, metric)
+        facts == .Object(_) && value_at(facts, "*") != None -> value_at(facts, "*")
+        else -> value_at(entry, "non_applicable/{language}")
+    }
+    if fact == .Val(found) {
+        if !(found == .Object(_)) -> return invalid_applicability("metric applicability must be an object")
+        if value_at(found, "status") == .Val(status) {
+            if status != Dyn.Text("not_applicable") -> return invalid_applicability("metric applicability status must be not_applicable")
+        }
+        if PEER_FLOOR_METRICS.contains(metric) && own_metric -> return invalid_applicability("uncovered: {metric} is a peer-floor metric and is required for Jet and every matched peer")
+        return Dyn{[String: Dyn]{
+            "status": "not_applicable",
+            "basis": member(found, "basis") ?? Dyn.Null,
+            "reason": member(found, "reason") ?? Dyn.Null,
+            "evidence": member(found, "evidence") ?? Dyn.Null,
+        }}
+    }
+    mode: text_at(entry, "mode") ?? ""
+    if (mode == "web" || mode == "web-app") && (metric == "wasm_bytes" || metric == "binary_bytes") && !WEB_WASM_LANGUAGES.contains(base_language(language)) {
+        return Dyn{[String: Dyn]{
+            "status": "not_applicable",
+            "basis": "no_wasm_artifact",
+            "reason": "{language} web rail is script-only and has no Wasm binary artifact.",
+            "evidence": "Only Jet and Rust web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
+        }}
+    }
+    Dyn{[String: Dyn]{"status": "required"}}
+}
+
+invalid_applicability: fn(reason: String) -> Dyn { Dyn{[String: Dyn]{"status": "invalid", "reason": reason}} }
+
+// The verdict of a Jet/peer ratio: below 1 wins, else loses; None for a
+// ratio that is not a positive finite number.
+ratio_verdict: fn(ratio: Float?) -> String? {
+    value: ratio ?? return None
+    if !math.is_finite(value) || value <= 0.0 -> return None
+    Val(if value < 1.0 -> "win" else -> "loss")
+}
+
+#Test("the ratified policy passes, and each departure from it is an issue once") {
+    ids: ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel", "text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script", "files.script", "files.orchestration", "concurrency.app", "concurrency.service", "netserv.client", "netserv.service", "webfront.widget", "webfront.app", "cli.app", "cli.hello", "formats.csv-cli", "numerics.script", "numerics.notebook", "embedded.kernel", "embedded.data"]
+    cells: Dyn.Array(ids.map(id -> Dyn{[String: Dyn]{"id": id}}))
+    matrix := Dyn.object()
+    matrix["cells"] = cells
+    matrix["strict_performance_policy"] = strict_performance_policy()
+    assert_eq(strict_performance_policy_issues(matrix), [String]{})
+    tampered := matrix.copy()
+    policy := strict_performance_policy()
+    policy["version"] = 2
+    policy["text"] = "shorter"
+    tampered["strict_performance_policy"] = policy
+    assert_eq(strict_performance_policy_issues(tampered), ["matrix strict performance policy identity is not ratified", "matrix strict performance policy text differs from AGENTS.md"])
+    assert_eq(strict_performance_policy_issues(Dyn.object()), ["matrix is missing the strict performance policy"])
+}
+
+#Test("a ratio below 1 wins, 1 and above loses, and no positive finite ratio has no verdict") {
+    assert_eq(ratio_verdict(Val(0.5)), Val("win"))
+    assert_eq(ratio_verdict(Val(1.0)), Val("loss"))
+    assert_eq(ratio_verdict(Val(0.0)), None)
+    assert_eq(ratio_verdict(None), None)
+}
+
+#Test("a cell's peers are the rails and its incumbent, and the run rail joins a cell with a run tier") {
+    matrix: json.parse("{{\"rails\": {{\"always\": [\"rust\", \"python\"], \"perf\": [\"c\", \"jet\"], \"run\": [\"lua\", \"python\"], \"incumbents\": {{\"webfront\": \"js\", \"netserv\": \"go\"}}}}}}") ?? panic("matrix")
+    assert_eq(matrix_peer_languages(matrix, None), ["c", "go", "js", "lua", "python", "rust"])
+    web_app: json.parse("{{\"id\": \"webfront.app\", \"domain\": \"webfront\"}}") ?? panic("cell")
+    assert_eq(matrix_peer_languages(matrix, Val(web_app)), ["c", "js", "python", "rust"])
+    bare: json.parse("{{\"rails\": {{}}}}") ?? panic("bare")
+    assert_eq(matrix_peer_languages(bare, Val(web_app)), ["rust"])
+}
