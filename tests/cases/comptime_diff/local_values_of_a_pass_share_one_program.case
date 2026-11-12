@@ -1,0 +1,11 @@
+# Card #6759 c1: the local values one comptime pass stages wait in one batch
+# (jet_driver_comptime_batchable) and are evaluated together on one IR build,
+# each landing its own value; their shared closure is built once.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nsum_squares: fn(values: [Int]) -> Int {\n    total := 0\n    loop value in values -> total += square(value)\n    total\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    out := \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nrun: fn() {\n    four: square(2)\n    total: sum_squares([Int]{1, 2, 3})\n    word: repeat(\"ab\", 3)\n    print(\"{four} {total} {word}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "4 14 ababab\n"
+stderr: ~ "# comptime.programs_built = 1\n" # the three values build one program
+stderr: !~ "# comptime.programs_built = 3\n" # not one per value

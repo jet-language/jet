@@ -1522,13 +1522,19 @@ jet_driver_comptime_any_available: fn(available: SemaComptimeAvailableConstants,
 // Whether a checked item whose check and closure read nothing its batch
 // holds back (jet_driver_comptime_reads_batch) may wait in the batch, to be
 // evaluated together with it: a constant, not checked text, whose key a
-// later check names in its waits when it reads it; or a field default whose
+// later check names in its waits when it reads it; a field default whose
 // struct doesn't bake it, whose value no check of the run reads (it lands
 // only on the field's shape, sema_checked_shape_defaults) and whose failure
-// lands nothing and reports nothing. Any other item is evaluated at its
-// turn, alone.
+// lands nothing and reports nothing; or a local value, which no other item
+// of the run reads (a local naming another local is staged only once that
+// one landed, in a later pass) and whose every outcome lands its own value
+// or its own run-time reason and reports nothing (the flush keeps each
+// entry's outcome, and a batch that doesn't build is evaluated one entry at
+// a time). Any other item is evaluated at its turn, alone: a module value's
+// refusal reports, in the order the run reaches it.
 jet_driver_comptime_batchable: fn(source: SemaComptimeItemSource) -> Bool Never! {
     if source.kind == SemaComptimeItemKind.FieldDefault -> return !source.baked_default
+    if source.local_value -> return source.checked_text == None
     source.kind == SemaComptimeItemKind.Constant && source.checked_text == None
 }
 
