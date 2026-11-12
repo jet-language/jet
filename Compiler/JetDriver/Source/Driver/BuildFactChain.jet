@@ -3,16 +3,20 @@
 // <fact>` resolves and prints the whole chain through the one contribution
 // law (pkg_fact_resolve).
 use {
-    jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE]
+    jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span]
     jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, LockedBuildContribution, SourceScope, pkg_fact_resolve]
     jet_sema.[SemaBuildFacts, SemaBuildSetting, SemaSettingContribution]
 }
 
-// One writer of a declared setting: its contribution and the value's text as
-// it was written, which sema reads (SemaBuildSetting.value).
+// One writer of a declared setting: its contribution, the value's text as
+// it was written, which sema reads (SemaBuildSetting.value), and where it is
+// written: the file and span of its manifest entry. A writer the lock or the
+// command line holds has no site: file "" and an empty span.
 JetDriverSettingWriter: struct {
     contribution: FactContribution
     text: String
+    file: String
+    span: Span
 }
 
 // The writers of `setting`, from least to most explicit layer: its default,
@@ -21,29 +25,31 @@ JetDriverSettingWriter: struct {
 jet_driver_setting_writers: fn(package: JetDriverPackageInfo, setting: JetDriverPackageSetting, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [JetDriverSettingWriter] Never! {
     key: "Build.Settings.{setting.name}"
     manifest: jet_driver_manifest_label(package)
+    manifest_file: package.manifest_path ?? ""
+    no_site: Span{start: 0, end: 0}
     writers := [JetDriverSettingWriter]{}
-    writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{manifest}:settings.{setting.name} (default)", None))
+    writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{manifest}:settings.{setting.name} (default)", None, manifest_file, setting.span))
     loop entry in package.profile_settings {
         if entry.profile != profile || entry.name != setting.name -> next
-        writers.push(jet_driver_setting_writer(key, setting.ty, entry.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{profile}.settings.{setting.name}", None))
+        writers.push(jet_driver_setting_writer(key, setting.ty, entry.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{profile}.settings.{setting.name}", None, manifest_file, entry.span))
     }
     loop contribution in contributions {
         if contribution.package != package.name || contribution.key != key || contribution.layer != "environment" -> next
         text: jet_driver_locked_setting_text(contribution.value) ?? next
         reason: if contribution.reason == "" -> String?{None} else -> Val(contribution.reason)
-        writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason))
+        writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason, "", no_site))
     }
     loop override in overrides {
         if override.name != setting.name -> next
-        writers.push(jet_driver_setting_writer(key, setting.ty, override.value, ContributionLayer.CommandLine, SourceScope.Package, "command line:--set {override.name}={override.value}", None))
+        writers.push(jet_driver_setting_writer(key, setting.ty, override.value, ContributionLayer.CommandLine, SourceScope.Package, "command line:--set {override.name}={override.value}", None, "", no_site))
     }
     writers
 }
 
-jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: ContributionLayer, scope: SourceScope, source: String, reason: String?) -> JetDriverSettingWriter Never! {
+jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: ContributionLayer, scope: SourceScope, source: String, reason: String?, file: String, span: Span) -> JetDriverSettingWriter Never! {
     contribution := FactContribution.new(key, jet_driver_setting_fact_value(ty, text), scope, layer, source)
     contribution.reason = reason
-    JetDriverSettingWriter{contribution: contribution, text: text}
+    JetDriverSettingWriter{contribution: contribution, text: text, file: file, span: span}
 }
 
 // `setting` as the build reads it: the text of the writer the contribution
@@ -69,7 +75,7 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
     }
     rows := [SemaSettingContribution]{}
     loop (index, writer) in writers {
-        rows.push(SemaSettingContribution{value: writer.text, source: writer.contribution.source, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
+        rows.push(SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
     }
     SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
 }

@@ -491,12 +491,13 @@ A PackageInfo's `settings` lists the built package's settings, one
 SettingInfo each: the setting's `name`, its `type` (a TypeId), its `default`,
 the value this build `selected`, and its `contributions`, one ContributionInfo
 per writer from least to most explicit. A ContributionInfo has the writer's
-`value`, its `source`, where the value is written (such as
-`package.jet:build.release.settings.level`), its `kind`
-(`ContributionKind.Declaration`, `.Profile`, `.Build` for the package's
-`build: fn`, or `.CommandLine` for `--set`) and `selected`, true for the
-writer the contribution law chose. Every value is a PreparedValue of the
-setting's type.
+`value`, its `source`, the SourceSpan of the manifest entry that writes it
+(the `settings:` entry for the default, the `build.<profile>.settings`
+entry for a profile's value), its `kind` (`ContributionKind.Declaration`,
+`.Profile`, `.Build` for the package's `build: fn`, or `.CommandLine` for
+`--set`) and `selected`, true for the writer the contribution law chose. A
+`build: fn` or `--set` writer has no source entry: its `source` names no file
+and is empty. Every value is a PreparedValue of the setting's type.
 The build reads settings from the built package alone, so a dependency's
 PackageInfo lists none.
 [`PackageSettings`](../../../Examples/Metaprogramming/Reflection/PackageSettings/run.jet)

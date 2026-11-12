@@ -1502,7 +1502,8 @@ jet_driver_parse_package_settings: fn(source: String, tokens: [Token], tables: T
         if seen {
             diagnostics.push(jet_driver_diagnostic("E0003", name_token.span, "`settings.{name}` is declared more than once", "one declaration gives a setting its type and default", "keep one `{name}` entry"))
         } else {
-            settings.push(JetDriverPackageSetting{name: name, ty: jet_driver_manifest_tokens_text(source, tokens, tables, type_start, equals), default: jet_driver_manifest_tokens_text(source, tokens, tables, equals + 1, value_end)})
+            span: Span{start: name_token.span.start, end: tokens[value_end - 1].span.end}
+            settings.push(JetDriverPackageSetting{name: name, ty: jet_driver_manifest_tokens_text(source, tokens, tables, type_start, equals), default: jet_driver_manifest_tokens_text(source, tokens, tables, equals + 1, value_end), span: span})
         }
         index = jet_driver_manifest_skip_separators(tokens, value_end, close)
     }
@@ -1558,7 +1559,8 @@ jet_driver_parse_profile_values: fn(source: String, tokens: [Token], tables: Tok
         }
         value: jet_driver_manifest_field_value(source, tokens, index + 2)
         value_end: if value.next_index < close -> value.next_index else -> close
-        profile_settings.push(JetDriverProfileSetting{profile: profile, name: token_decoded(tables, name_token), value: jet_driver_manifest_tokens_text(source, tokens, tables, index + 2, value_end)})
+        span: Span{start: name_token.span.start, end: tokens[value_end - 1].span.end}
+        profile_settings.push(JetDriverProfileSetting{profile: profile, name: token_decoded(tables, name_token), value: jet_driver_manifest_tokens_text(source, tokens, tables, index + 2, value_end), span: span})
         index = jet_driver_manifest_skip_separators(tokens, value_end, close)
     }
 }

@@ -744,12 +744,15 @@ SemaBuildSetting: struct {
     contributions: [SemaSettingContribution]
 }
 
-// One writer of a setting: its value's text, where it is written, its layer
-// as a ContributionKind variant (`Declaration`, `Profile`, `Build` or
-// `CommandLine`) and whether the contribution law selected it.
+// One writer of a setting: its value's text, where it is written (the file
+// and span of its manifest entry; "" and an empty span for a writer with no
+// source site), its layer as a ContributionKind variant (`Declaration`,
+// `Profile`, `Build` or `CommandLine`) and whether the contribution law
+// selected it.
 SemaSettingContribution: struct {
     value: String
-    source: String
+    file: String
+    span: Span
     kind: String
     selected: Bool
 }

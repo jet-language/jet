@@ -1231,10 +1231,11 @@ sema_comptime_reflection_param_record: fn(name: String, label: String, zone: Str
 // The built package's settings (SemaBuildFacts.settings) as SettingInfo
 // records: each declared setting's name, its type, its default, the value
 // this build selected, and a ContributionInfo for each writer of its chain:
-// the value it writes, where it is written, its ContributionKind and whether
-// the contribution law selected it. Values are PreparedValues of the
-// setting's type. A setting's enum type is the one the package declares by
-// that name.
+// the value it writes, the SourceSpan of the entry that writes it, its
+// ContributionKind and whether the contribution law selected it. A writer
+// with no source site (a `build: fn` contribution, a `--set`) names no file.
+// Values are PreparedValues of the setting's type. A setting's enum type is
+// the one the package declares by that name.
 sema_comptime_reflection_setting_infos: fn(graph: SemaRegistrationGraph, settings: [SemaBuildSetting]) -> [TComptimeValue] {
     loop setting in settings -> sema_comptime_reflection_struct("SettingInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: setting.name}},
@@ -1243,7 +1244,7 @@ sema_comptime_reflection_setting_infos: fn(graph: SemaRegistrationGraph, setting
         SemaComptimeReflectionField{name: "selected", value: sema_comptime_reflection_setting_value(graph, setting.ty, setting.value)},
         SemaComptimeReflectionField{name: "contributions", value: TComptimeValue.List{values: loop writer in setting.contributions -> sema_comptime_reflection_struct("ContributionInfo", [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_setting_value(graph, setting.ty, writer.value)},
-            SemaComptimeReflectionField{name: "source", value: TComptimeValue.String{value: writer.source}},
+            SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_span(writer.span, writer.file)},
             SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "ContributionKind", variant: writer.kind, args: [TComptimeEnumArg]{}}},
             SemaComptimeReflectionField{name: "selected", value: TComptimeValue.Bool{value: writer.selected}},
         })}},

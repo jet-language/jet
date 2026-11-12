@@ -1,8 +1,8 @@
 // `b.program.packages()` lists the built package's settings: each one's type,
 // its default, the value this build selected, and every writer of the value
-// with its kind and where it is written, the selected one marked `*`. Each
-// value is a PreparedValue, typed as the setting is. Fn build writes `report`
-// itself, so it reads the others.
+// with its kind and the span of the manifest entry that writes it, the
+// selected one marked `*`. Each value is a PreparedValue, typed as the
+// setting is. Fn build writes `report` itself, so it reads the others.
 build: fn(b: Build) {
     report := ""
     loop package in b.program.packages() {
@@ -18,13 +18,21 @@ build: fn(b: Build) {
                     .CommandLine -> "command line"
                 }
                 mark: if contribution.selected -> "*" else -> ""
-                written = "{written} {kind}{mark}={shown(contribution.value)} at {contribution.source}"
+                written = "{written} {kind}{mark}={shown(contribution.value)} at {site(contribution.source)}"
             }
             if report != "" -> report = "{report} | "
             report = "{report}{setting.name}: {setting.type.name} = {shown(setting.selected)}, default {shown(setting.default)};{written}"
         }
     }
     b.contribute("report", report)
+}
+
+// Where a writer is written: its manifest's file name and the entry's byte
+// offsets, or `no entry` for a writer no manifest entry holds.
+site: fn(span: SourceSpan) -> String {
+    if span.file == "" -> return "no entry"
+    if span.file.ends_with("package.jet") -> return "package.jet@{span.start}..{span.end}"
+    "{span.file}@{span.start}..{span.end}"
 }
 
 // A setting value as source spells it.

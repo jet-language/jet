@@ -135,7 +135,9 @@ vocabulary](vocabulary.md).
   names a declared setting, its `type` (a TypeId: the type's module-qualified
   `identity` and its printed `name`), its `default`, the value this build
   `selected`, and its `contributions`: one ContributionInfo per writer, least
-  explicit first, with its `value`, its `source` (where it is written), its
+  explicit first, with its `value`, its `source` (the SourceSpan of the
+  manifest entry that writes it; a `build: fn` or `--set` writer's names no
+  file and is empty), its
   `kind` (ContributionKind: `Declaration`, `Profile`, `Build` or
   `CommandLine`) and whether it is the `selected` writer. Every value is a
   PreparedValue of the setting's type: `.Int`, `.Float`, `.Bool`, `.Char`,
