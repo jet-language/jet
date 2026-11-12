@@ -347,7 +347,9 @@ sema_marker_module_bind_program: fn(program: &Program, bindings: [SemaMarkerModu
 }
 
 // The marker bindings of `input`: each directly used imported marker binds to
-// its declaring module. Every input is read in place.
+// its declaring module, and a bare marker its own module does not declare
+// binds to the member of its package namespace that does, as the members'
+// other names do. Every input is read in place.
 sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], input: SemaRegistrationModuleInput) -> [SemaMarkerModuleBinding] {
     bindings := [SemaMarkerModuleBinding]{}
     loop marker in sema_marker_rules_collect_program(input.program) {
@@ -368,6 +370,16 @@ sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [S
             if resolved.status != "unknown" || target.require_export || scope == "" -> break
             parts: scope.split(".").to_list()
             scope = parts.slice(0, parts.len() - 1).join(".")
+        }
+        if resolved.status == "unknown" && !marker.name.contains(".") && input.namespace != "" {
+            loop source in inputs {
+                if source.namespace != input.namespace || source.module_identity == input.module_identity -> next
+                member: sema_marker_module_resolve_items(source.program.items, SemaMarkerModuleTarget{status: "found", module_identity: source.module_identity, name: marker.name, require_export: false})
+                if member.status != "unknown" {
+                    resolved = member
+                    break
+                }
+            }
         }
         if resolved.status == "found" && resolved.declaration == .Val(declaration) -> bindings.push(SemaMarkerModuleBinding{name: marker.name, application_span: marker.name_span, module_identity: resolved.declaring_module_identity, declaration_span: declaration.name_span})
     }

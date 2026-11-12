@@ -12,16 +12,16 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet build ambient/main.jet
 exit: nonzero
-stderr: ~ "heard print from" # the ambient print call is heard, its callee named `print`
+stderr: ~ "Heard print from" # the ambient print call is heard, its callee named `print`
 stderr: ~ "shout" # its caller is the function that wrote it
-stderr: !~ "heard helper" # a call of another function is not heard
+stderr: !~ "Heard helper" # a call of another function is not heard
 step: jet build helper/main.jet
 exit: nonzero
-stderr: ~ "heard" # the handler's stop message
+stderr: ~ "Heard" # the handler's stop message
 stderr: ~ "helper from" # the callee is helper's definition identity
 stderr: !~ "other from" # a call of another function is not heard
 step: jet build refused/main.jet
 exit: nonzero
 stderr: ~ "E0104" # the call watch's shape refusal
 stderr: ~ "takes the name of a function" # it names what the watch needs
-stderr: !~ "heard" # the handler never runs
+stderr: !~ "Heard" # the handler never runs

@@ -134,7 +134,8 @@ vocabulary](vocabulary.md).
   argument, site and duplicate checks as its written members. Gates, refusals,
   retired markers and other named groups cannot be hidden inside it
   (D-MARKER-GROUP1=A).
-  Markers declared by the current module may be bare; imported markers always
+  Markers declared by the current module, or by another file of its package's
+  namespace, may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
   `#Web.Get(...)` through `use web: core.http.server` (D-MARKER-CASE1=A);
   a lowercase library part is E0087. Group members bind in the declaring
@@ -5853,7 +5854,9 @@ with the statements of a `#code { statements }` block. The function keeps its
 own declaration up to its body and becomes the generated module
 `rewrite_body/f` of its package; its original text is withdrawn from its file,
 whose other code keeps its place. The new body is checked like hand-written
-code, in that module, which sees its package's declarations. `f` is named
+code, in that module, which sees its package's declarations and opens with
+its file's module imports, so `f`'s markers, signature and body name what
+they named there. `f` is named
 directly or through its package's import (`orm.query`); a local value is
 refused, and a function its package doesn't declare with a braced body fails
 the build (E3502). One build rewrites a function's body once. A line

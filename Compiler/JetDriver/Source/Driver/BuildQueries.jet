@@ -386,9 +386,12 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
 // row becomes its function, the declaration's own text up to its body with
 // the new body, which replaces the declaration in its package's own file
 // (the loader blanks it there); the row belongs to that package, the build's
-// own or the dependency the root allowed. A line `#{f.body}` of the new body
-// is the original body, at that line's indentation. None when the package
-// declares no top-level function of that name with a braced body.
+// own or the dependency the root allowed. The module opens with that file's
+// module imports, so the function's markers, signature and body name what
+// they named there; a file import's path and a re-export stay the file's
+// own. A line `#{f.body}` of the new body is the original body, at that
+// line's indentation. None when the package declares no top-level function
+// of that name with a braced body.
 jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: String, modules: [JetDriverSourceQueryModule]) -> JetDriverGeneratedModule? {
     // copy: each row's texts are views of the plan, which stays whole.
     function: row.rewrites ?? return Val(JetDriverGeneratedModule{package_identity: package.copy(), name: row.name.copy(), relative_path: row.path.copy(), source: row.source.copy(), authority: (row.authority ?? "").copy(), consent: (row.consent ?? "").copy()})
@@ -403,7 +406,14 @@ jet_driver_build_generated_row: fn(row: BuildSessionGeneratedModule, package: St
                 lines := row.source.split("\n").to_list()
                 loop lines.len() > 0 && lines[lines.len() - 1].trim() == "" -> _: lines.pop()
                 paste: "#{{{function}.body}}"
-                text := "{head}{{\n"
+                text := ""
+                loop import in module_row.program.imports {
+                    if import.is_pub || import.is_package_pub || import.kind == .File(_, _) -> next
+                    start: (import.comptime_span ?? import.span).start
+                    text = "{text}{String.from_bytes(bytes[start..<import.span.end]) ?? return None}\n"
+                }
+                if text != "" -> text = "{text}\n"
+                text = "{text}{head}{{\n"
                 loop line in lines {
                     if line.trim() == "" {
                         text = "{text}\n"

@@ -535,8 +535,8 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     // `meta.rewrite_body(f, code)` on a `Compiler` value: the code's formatted
     // statements become the body of the function `f` of the package that
     // declares it, carried as the generated module
-    // `.jet/generated/<package>/rewrite_body/<f>.jet`. A function of this
-    // package is a source of the value's target; a dependency's function is
+    // `.jet/generated/<package>/rewrite_body/<f>.jet`, a source of the value's
+    // target, which loads it in place of `f`. A dependency's function is
     // rewritten only when the value allows that package, and only in this
     // build's copy of it. A line `#{w.body}`, where `w` is the name the call
     // wrote `f` with, is `f`'s body before this rewrite. Rewrites of one
@@ -573,7 +573,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
         name: if own -> "{function} body" else -> "{function} body of {package_name}"
         added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
-        if own && added == .Value(_) {
+        if added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
         }

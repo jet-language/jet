@@ -7,11 +7,14 @@ use jet_foundation.[
     type_name,
 ]
 
+// The owner and method of a host method member `Owner.method`. The owner is a
+// type name, which has no dot; the method is the rest, which may hold one: a
+// hidden method that no source can spell, such as `Compiler`'s
+// `events.functions` (JetSema Calls/Build.jet).
 jet_eval_compiler_value_method_owner: fn(member: String) -> [String]? {
-    parts := member.split(".").to_list()
-    if parts.len() != 2 -> return None
-    if parts[0] == "" || parts[1] == "" -> return None
-    Val(parts)
+    parts: member.partition(".")
+    if parts.head == "" || parts.tail == "" -> return None
+    Val([String]{parts.head, parts.tail})
 }
 
 jet_eval_compiler_value_method_record: fn(owner: String, method: String) -> Bool Never! {
