@@ -26,16 +26,6 @@ fail: fn(message: String) -> Never {
     process.exit(1)
 }
 
-// The files under `tree` (below `rel`) that git does not track, build output aside.
-tree_only: fn(tree: String, rel: String, tracked: [String], out: &[String]) {
-    loop entry in files.list_dir_or("{tree}/{rel}", []) {
-        path: files.join(rel, entry.name)
-        dir: entry.is_dir && !files.is_symlink(entry.path)
-        if dir && !SKIPPED_DIRS.contains(entry.name) -> tree_only(tree, path, tracked, out)
-        if !dir && !tracked.contains(path) -> out.push(path)
-    }
-}
-
 // Fails unless the dev worktree holds exactly the tested composed tree
 // `tested_root`: every tracked path's bytes, and no path only it has.
 same_tree: fn(tested_root: String) {
@@ -49,9 +39,10 @@ same_tree: fn(tested_root: String) {
             (files.read_bytes(path) ?? []) != (files.read_bytes(tested) ?? []) -> drift.push("DIFF {path}")
         }
     }
-    only := [String]{}
-    tree_only(tested_root, "", tracked, only)
-    loop path in only -> drift.push("ONLYINTREE {path}")
+    loop entry in files.walk(tested_root, skip: SKIPPED_DIRS) {
+        found: entry ?? next
+        if !found.is_dir && !tracked.contains(found.relative) -> drift.push("ONLYINTREE {found.relative}")
+    }
     if drift.len() > 0 -> fail("integ-land: landed tree differs from {tested_root}: {drift.slice(0, 8).join(" ")}")
 }
 
