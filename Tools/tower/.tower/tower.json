@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6759,
-    "rev": 99759,
+    "nextNum": 6760,
+    "rev": 99764,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98835,6 +98835,72 @@
       "updated": "2026-11-12T03:48:33.892Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0ssy5wy",
+      "num": 6759,
+      "title": "Cold compile of a small script is about 1-4 s, and comptime.bodies is its largest phase",
+      "body": "Measured by G4Ports-1, 2026-11-11, on seed-b9, from the #5072 port twins (PortBars runs each twin from source, so every case pays a cold compile). jetc-trace, a 148-line file: jet run 1063 ms, against a 3 ms run of the built binary and node's 24 ms. Its phases: comptime.bodies 0.29 s (4 comptime programs built and run), load 0.26, sema.finalize 0.19, register 0.07, ir.build+opt+x64 0.07, link about 0.01. run-cold-context: jet run -- --help takes 4108 ms against node's 40 ms. Its phases: comptime.bodies 1.26 s (31 programs, 381 functions), sema.finalize 0.80, load 0.60, ir.opt 0.40, register 0.23, ir.build 0.08, x64 0.08. The port bar measures exactly what the 30M lines/s cold-compile target is about: the cost is general compile cost, not twin code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Assigned to G4Ports-1 (it measured the root and it is G4's last speed blocker); G11Speed-3 reviews the comptime batching design. Main, 2026-11-11."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "comptime.bodies costs one compile-and-run for the whole compilation, not one per comptime program: every comptime body of a compilation is built into one image at O0 and run in one child, keeping each body's own failure report (collect-all) and its I9 meaning. Proof: the phase trace of jet run for the jetc-trace and run-cold-context twins shows a single comptime child, and comptime.bodies falls at least 4x from 0.29 s and 1.26 s on seed-b9, with every comptime case and golden unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T04:08:30.923Z"
+        },
+        {
+          "n": 2,
+          "text": "Core load and sema.finalize for a script that imports a few Core modules cost time in proportion to the Core code the script reaches, not to all of Core. Proof: the phase trace of run-cold-context shows load plus sema.finalize under 0.3 s (1.40 s on seed-b9), with a second program that imports a different Core subset showing the same scaling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T04:08:31.752Z"
+        },
+        {
+          "n": 3,
+          "text": "The jetc-trace and run-cold-context PortBars speed rows (wall time and peak memory, each case compiling from cold) pass against the node originals.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T04:08:32.570Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11",
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T04:08:18.925Z",
+      "updated": "2026-11-12T04:08:33.414Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -199298,6 +199364,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T04:08:33.414Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T04:08:32.570Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#3 The jetc-trace and run-cold-context PortBars speed rows (wal"
+    },
+    {
+      "at": "2026-11-12T04:08:31.752Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#2 Core load and sema.finalize for a script that imports a few "
+    },
+    {
+      "at": "2026-11-12T04:08:30.923Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#1 comptime.bodies costs one compile-and-run for the whole comp"
+    },
+    {
+      "at": "2026-11-12T04:08:18.925Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ssy5wy",
+      "note": "Cold compile of a small script is about 1-4 s, and comptime.bodies is its largest phase"
+    },
     {
       "at": "2026-11-12T04:06:55.473Z",
       "by": "Main",
