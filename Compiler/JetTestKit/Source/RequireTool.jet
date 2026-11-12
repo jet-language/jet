@@ -6,10 +6,27 @@ use {
     testing: core.testing
 }
 
+// A host tool looked up on PATH: its path, or why a claim that needs it skips.
+KitTool: enum {
+    Found(path: String)
+    Missing(reason: String)
+}
+
+// Host tool `name` on PATH, without touching the running claim.
+kit_find_tool: fn(name: String) -[FS, Env]> KitTool {
+    found: process.which(name) ?? return KitTool.Missing{reason: "host tool `{name}` is not on PATH"}
+    KitTool.Found{path: found}
+}
+
 // The tool's path on PATH, or None once the running claim reports skip
-// (testing.skip), so the test ends there: `node: kit_require_tool("node") ?? return`.
+// (testing.skip) with kit_find_tool's reason, so the test ends there:
+// `node: kit_require_tool("node") ?? return`.
 kit_require_tool: fn(name: String) -[FS, Env]> String? {
-    found: process.which(name)
-    if found == None -> testing.skip("host tool `{name}` is not on PATH")
-    found
+    if kit_find_tool(name) == {
+        .Found(path) -> Val(path)
+        .Missing(reason) -> {
+            testing.skip(reason)
+            None
+        }
+    }
 }

@@ -1,9 +1,13 @@
 # Card #6692: a #Test claim that asks jet_testkit's kit_require_tool for a host
 # tool missing from PATH reports skipped with the tool named (testing.skip),
-# and one on PATH resolves to its absolute path and passes.
+# and one on PATH resolves to its absolute path and passes. The claims run
+# against the kit's own RequireTool.jet, outside the JetTestKit suite, whose
+# tests check the lookup without skipping.
+fixture: a_missing_host_tool_skips_the_claim_that_needs_it.fixture
+copy: {root}/Compiler/JetTestKit/Source/RequireTool.jet RequireTool.jet
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet test {root}/Compiler/JetTestKit/Tests/RequireTool.jet --filter "host tool" --capture=all
+step: jet test claims.jet --filter "host tool" --capture=all
 exit: 0
 stdout: ~ "skipped: host tool `jet-testkit-absent-host-tool` is not on PATH" # the reason names the tool
 stdout: ~ "a host tool that is not on PATH skips the claim that needs it: skip" # skipped, never failed
