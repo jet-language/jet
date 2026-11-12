@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6752,
-    "rev": 99668,
+    "nextNum": 6753,
+    "rev": 99673,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98409,6 +98409,77 @@
       "updated": "2026-11-09T20:16:11.971Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0pmy5fy",
+      "num": 6752,
+      "title": "Every registered diagnostic code has a UI snapshot (397 uncovered)",
+      "body": "I4 says every diagnostic has a registered code, what/why/fix text and a UI snapshot; without the snapshot it isn't done.\n\nA sweep on 2026-11-11 (G8Scope-3, seed-b8, dev fe4c65249b) found 977 codes registered in Compiler/Prelude/Diagnostics.jet. 582 are carried by a tests/ui or tests/ui_lint snapshot ([Exxxx] or /e/Exxxx). 397 are carried by none.\n\nThe list is $JET_SCRATCH_ROOT/lanes/G8Scope/ecodes/missing.txt and the sweep script is lanes/G8Scope/ecodes.sh.\n\nBy range: E00 60, E01 8, E02 4, E03 28, E04 17, E06 4, E07 3, E08 1, E09 37, E11 5, E12 81, E13 32, E14 4, E18 4, E20 2, E21 13, E22 6, E23 9, E24 8, E26 11, E27 5, E28 4, E29 14, E30 3, E31 3, E32 4, E33 7, E34 3, E35 2, E36 12, E42 3.\n\nGreenfield: a registered code that no compiler, runtime or tool path emits is removed from the registry in one cutover, not given a snapshot.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Classify each of the 397 uncovered codes as emitted (a compiler, runtime or tool path reports it) or dead (no path does). The classification is checked in as a generated report from a Jet tool, never by hand, and it lists each emitting site as file:line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:02:08.407Z"
+        },
+        {
+          "n": 2,
+          "text": "Every dead code is removed from Compiler/Prelude/Diagnostics.jet and from every in-repository reference, in one cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:02:09.424Z"
+        },
+        {
+          "n": 3,
+          "text": "Every emitted code has a tests/ui (or tests/ui_lint) snapshot that triggers it from user source and shows its what, why and fix text. A code that only a tool or the runtime emits gets a tests/cases case that asserts the code and its text instead.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:02:10.567Z"
+        },
+        {
+          "n": 4,
+          "text": "A checked gate makes the rule permanent: a Jet tool run by LaneCheck fails when a registered code has no snapshot or case carrying it, and names the code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:02:11.642Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "I4"
+      ],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:02:07.487Z",
+      "updated": "2026-11-12T01:02:11.642Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -198820,6 +198891,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T01:02:11.642Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pmy5fy",
+      "note": "#4 A checked gate makes the rule permanent: a Jet tool run by L"
+    },
+    {
+      "at": "2026-11-12T01:02:10.567Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pmy5fy",
+      "note": "#3 Every emitted code has a tests/ui (or tests/ui_lint) snapsho"
+    },
+    {
+      "at": "2026-11-12T01:02:09.424Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pmy5fy",
+      "note": "#2 Every dead code is removed from Compiler/Prelude/Diagnostics"
+    },
+    {
+      "at": "2026-11-12T01:02:08.408Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pmy5fy",
+      "note": "#1 Classify each of the 397 uncovered codes as emitted (a compi"
+    },
+    {
+      "at": "2026-11-12T01:02:07.487Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pmy5fy",
+      "note": "Every registered diagnostic code has a UI snapshot (397 uncovered)"
+    },
     {
       "at": "2026-11-12T00:57:01.902Z",
       "by": "Main",
