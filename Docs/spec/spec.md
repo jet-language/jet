@@ -104,8 +104,16 @@ vocabulary](vocabulary.md).
   does. `Hole` without `build` is E0907 (D-TEXTHEAD-HOLES1=A;
   Examples/Text/CheckedText/CheckedTextBoundHoles.jet).
 - A marker is a struct whose fields are its arguments, with one
-  `impl Marker { … }` block in its body. The block's settings are written
-  `name: value` (`sites: [...]`, `repeatable: true`, …) and its template
+  `impl Marker { … }` block in its body. `Marker` is a Core trait
+  (core.prelude) whose constants are the settings: `sites: [Site]`,
+  `repeatable: Bool{false}`, `owns_menu: Bool{false}`,
+  `inherits: Bool{false}`, `resolution: MarkerResolution{.SiteBound}` and
+  `scopes: [MarkerScope]{[]}`. The block gives them as `name: value`
+  (`sites: [...]`, `repeatable: true`, …), checked like any trait
+  constants (E0933-E0937), and code reads them as `T.sites`
+  (Examples/Metaprogramming/Attributes/MarkerSettings.jet). `group` and
+  `companion` are declaration syntax, not constants, and a group implements
+  no `Marker`. The template
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.

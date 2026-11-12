@@ -233,6 +233,70 @@ CheckedItem: enum {
     Call(CompilerCall)
 }
 
+// A marker is a struct that implements Marker: its fields are what a use
+// site passes (`#Label("x")`), and the constants are the rule's settings,
+// each a value known while compiling. The same `impl Marker` block may name a
+// fixed marker stack (`group: #[…]`, which takes no settings), a companion
+// rule (`companion: [Rule, .Site]`) and the `expand: fn(self, target: Target)`
+// template. A package marker can't set `inherits`, `resolution` or `scopes`:
+// only Jet's own markers change how the compiler checks code.
+Marker: trait {
+    // Where the marker may be written.
+    sites: [Site]
+    // Whether one target may carry the marker more than once.
+    repeatable: Bool{false}
+    // Whether the marker teaches its own argument menu in its errors.
+    owns_menu: Bool{false}
+    // Whether a setting on an outer scope reaches the scopes inside it.
+    inherits: Bool{false}
+    // How an inner setting meets an inherited one.
+    resolution: MarkerResolution{.SiteBound}
+    // The scopes an inheriting setting may be written on.
+    scopes: [MarkerScope]{[]}
+}
+
+// A place a marker is written.
+Site: enum {
+    Package
+    File
+    Module
+    Function
+    Method
+    Block
+    Statement
+    Expression
+    Type
+    Impl
+    Trait
+    Declaration
+    Constant
+    Field
+    Variant
+    Parameter
+    Test
+    Operation
+    Text
+    // A match arm, after its body (`1 -> { a() } #Through`).
+    Arm
+}
+
+// How an inner marker setting meets the one it inherits: it applies only
+// where written, replaces the outer one, merges with it, or may only tighten it.
+MarkerResolution: enum {
+    SiteBound
+    Override
+    Merge
+    Tighten
+}
+
+// A scope an inheriting marker setting is written on.
+MarkerScope: enum {
+    Organization
+    Package
+    Module
+    Function
+    Block
+}
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.

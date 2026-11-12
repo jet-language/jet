@@ -36,60 +36,33 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the constant, or declare `name: Type` in the trait</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0936</code>: <code>tests/ui/marker_impl_rejected_members.stderr</code>.</p>
-<pre class="diag">Error [jet.AmbiguousTraitConstant]: The `impl Marker` block gives `sites` twice
-  --&gt; tests/ui/marker_impl_rejected_members.jet:9:9
+<p>First UI snapshot mentioning <code>E0936</code>: <code>tests/ui/marker_settings_are_marker_constants.stderr</code>.</p>
+<pre class="diag">Error [jet.AmbiguousTraitConstant]: The impl gives the constant `sites` twice
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:8:9
     |
-  9 |         sites: [.Method]
+  8 |         sites: [.Method]
     |         ^^^^^
- Why: A marker has one value for each setting
+ Why: An implementation has one value for each trait constant
  Fix: Remove one `sites: …`
 More: jet-lang.dev/e/E0937
 
-Error [jet.UnknownTraitConstant]: `colour` is not a setting of `Marker`
-  --&gt; tests/ui/marker_impl_rejected_members.jet:10:9
+Error [jet.UnknownTraitConstant]: `colour` is not a constant of `Marker`
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:9:9
     |
- 10 |         colour: .Red
+  9 |         colour: .Red
     |         ^^^^^^
- Why: An `impl Marker` block gives only the settings a marker has: sites, repeatable, owns_menu, inherits, resolution, scopes, companion
- Fix: Remove `colour`, or write one of the marker settings
+ Why: An implementation gives only the constants its trait declares
+ Fix: Remove `colour`, or declare `colour: Type` in `Marker`
 More: jet-lang.dev/e/E0936
 
-Error [jet.DuplicateDefinition]: `expand: fn` is defined twice in `impl Marker`
-  --&gt; tests/ui/marker_impl_rejected_members.jet:15:9
+Error [jet.TraitConstantTypeMismatch]: The value of trait constant `repeatable` is not of type `Bool`
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:10:21
     |
- 15 |         expand: fn(self, target: Target) {}
-    |         ^^^^^^
- Why: A marker has one template
- Fix: Remove one of the definitions
-More: jet-lang.dev/e/E0105
-
-Error [jet.TraitMethodMismatch]: `render` is not a method of `Marker`
-  --&gt; tests/ui/marker_impl_rejected_members.jet:17:9
-    |
- 17 |         render: fn(self) {}
-    |         ^^^^^^^^^^^^^^^^
- Why: `impl Marker` has one method, the template the compiler expands with the marked item bound to `target`
- Fix: Write `expand: fn(self, target: Target) { … }`
-More: jet-lang.dev/e/E0907
-
-Error [jet.DuplicateTraitImpl]: `Traced` has a second `impl Marker` block
-  --&gt; tests/ui/marker_impl_rejected_members.jet:20:5
-    |
- 20 |     impl Marker {
-    |     ^^^^
- Why: A struct declares one marker, so its settings, group and template share one block
- Fix: Move these members into the first `impl Marker` block
-More: jet-lang.dev/e/E0908
-
-Error [jet.StackedRuleLines]: The marker group `Traced` has fields, settings or a template
-  --&gt; tests/ui/marker_impl_rejected_members.jet:4:1
-    |
-  4 | Traced: struct {
-    | ^^^^^^
- Why: A group names a fixed marker stack, so a use site passes nothing into it and it expands to its members
- Fix: Remove everything but `group: #[…]`, or declare a marker without a group
-More: jet-lang.dev/e/E0999
+ 10 |         repeatable: 3
+    |                     ^
+ Why: `Marker` declares `repeatable: Bool`, and each value has that type
+ Fix: Write a value of type `Bool`
+More: jet-lang.dev/e/E0934
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

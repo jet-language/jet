@@ -2250,7 +2250,11 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
     if s.state == .Val(state) -> members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     loop index in 0..<s.fields.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_FIELD, index: index, start: s.fields[index].name_span.start})
     loop index in 0..<s.cli_bindings.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_CLI_BINDING, index: index, start: s.cli_bindings[index].name_span.start})
-    loop index in 0..<s.trait_impls.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_TRAIT_IMPL, index: index, start: s.trait_impls[index].trait_span.start})
+    // A marker's `impl Marker` prints as the marker member below, not again.
+    loop index in 0..<s.trait_impls.len() {
+        if s.trait_impls[index].compiler_generated -> next
+        members.push(JetFmtMember{kind: JFMT_MEMBER_TRAIT_IMPL, index: index, start: s.trait_impls[index].trait_span.start})
+    }
     loop index in 0..<s.methods.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: s.methods[index].span.start})
     // (card #506): `validate { … }` is one more body member,
     // printed where it was authored like every other one.

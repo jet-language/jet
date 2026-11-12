@@ -1,0 +1,26 @@
+Error [jet.AmbiguousTraitConstant]: The impl gives the constant `sites` twice
+  --> tests/ui/marker_settings_are_marker_constants.jet:8:9
+    |
+  8 |         sites: [.Method]
+    |         ^^^^^
+ Why: An implementation has one value for each trait constant
+ Fix: Remove one `sites: …`
+More: jet-lang.dev/e/E0937
+
+Error [jet.UnknownTraitConstant]: `colour` is not a constant of `Marker`
+  --> tests/ui/marker_settings_are_marker_constants.jet:9:9
+    |
+  9 |         colour: .Red
+    |         ^^^^^^
+ Why: An implementation gives only the constants its trait declares
+ Fix: Remove `colour`, or declare `colour: Type` in `Marker`
+More: jet-lang.dev/e/E0936
+
+Error [jet.TraitConstantTypeMismatch]: The value of trait constant `repeatable` is not of type `Bool`
+  --> tests/ui/marker_settings_are_marker_constants.jet:10:21
+    |
+ 10 |         repeatable: 3
+    |                     ^
+ Why: `Marker` declares `repeatable: Bool`, and each value has that type
+ Fix: Write a value of type `Bool`
+More: jet-lang.dev/e/E0934

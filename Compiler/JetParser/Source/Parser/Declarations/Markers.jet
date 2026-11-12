@@ -1,6 +1,8 @@
 // Marker types (a struct's `impl Marker { … }` block), fact declarations and
 // bracketed marker groups. Fact parameters read typed arguments and fixed `$`
-// facts in one list.
+// facts in one list. A marker's settings are the constants of the Core
+// `Marker` trait (Core/Prelude/Prelude.jet): the block is also the struct's
+// `impl Marker`, whose constants sema checks against the trait.
 use {
     jet_foundation.[
         AccessConvention,
@@ -9,6 +11,8 @@ use {
         EffectRowEntry,
         Expr,
         FactDecl,
+        Func,
+        ImplConstValue,
         Item,
         ItemTemplateLoop,
         Marker,
@@ -16,10 +20,12 @@ use {
         MarkerDecl,
         MarkerDeclParam,
         MarkerHook,
+        NamedType,
         STATE_ARROW_LABEL,
         Span,
         StructDef,
         TextEdit,
+        TraitImplBlock,
         Type,
         diagnostic_from_registry,
         diagnostic_with_structured_edit,
@@ -91,27 +97,27 @@ parser_fact_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "fact" && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_LPAREN
 }
 
-// The settings an `impl Marker` block may give.
-PARSER_MARKER_SETTINGS: [String]{"sites", "repeatable", "owns_menu", "inherits", "resolution", "scopes", "companion"}
-
 // `impl Marker { … }` in a struct body: the marker's settings as
 // `name: value`, a fixed `group: #[…]`, and the
 // `expand: fn(self, target: Target)` template. The struct's fields join as
 // the marker's parameters when the struct closes (parser_finish_marker_struct).
+// A marker that is not a group implements `Marker`: its settings are the
+// constants of that impl, which sema checks against the trait (E0933-E0937).
 parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
     start: parser_bump(state)
     repeated: value.marker != None
     if repeated -> parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Marker` block", "a struct declares one marker, so its settings, group and template share one block", "move these members into the first `impl Marker` block")
-    parser_bump(state)
+    trait_token: parser_bump(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Marker` body")
     declaration := MarkerDecl{name: value.name, name_span: value.name_span, is_pub: value.is_pub, is_package_pub: value.is_package_pub, params: [MarkerDeclParam]{}, body: None, span: value.name_span}
+    constants := [ImplConstValue]{}
     expand_span := Span?{None}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
         token: parser_current(state)
         if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
-            parser_parse_marker_setting(state, declaration)
+            parser_parse_marker_setting(state, declaration, constants)
             next
         }
         if token.kind == TOKEN_KW_FN {
@@ -128,11 +134,15 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
     value.marker = Val(declaration)
     value.marker_span = Val(start.span)
     value.marker_expand_span = expand_span
+    if declaration.group != None -> return
+    // The block itself prints as the marker member, so the impl is generated.
+    value.trait_impls.push(TraitImplBlock{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, operator_rhs: None, operator_marker: None, methods: [Func]{}, compiler_generated: true, assoc_type_impls: [NamedType]{}, constants: constants})
 }
 
-// `name: value` in `impl Marker`: a setting, kept as the `$name` fact the
-// marker rules read, or the marker's `group: #[…]`.
-parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl) {
+// `name: value` in `impl Marker`: a `Marker` constant, also kept as the
+// `$name` fact the marker rules read; the marker's `group: #[…]`; or its
+// `companion: [Rule, .Site]`, which names a rule and so is no constant value.
+parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl, constants: &[ImplConstValue]) {
     name_token: parser_bump(state)
     parser_bump(state)
     key: parser_value(state, name_token)
@@ -146,18 +156,13 @@ parser_parse_marker_setting: fn(state: &JetParserState, declaration: &MarkerDecl
         return
     }
     parsed: parser_parse_expression(state, 1, 0)
+    span: parser_cover(name_token.span, parser_lookahead(state, -1).span)
     parser_finish_statement(state)
-    if !PARSER_MARKER_SETTINGS.contains(key) {
-        known: PARSER_MARKER_SETTINGS.join(", ")
-        parser_add_error_code(state, "E0936", name_token.span, "`{key}` is not a setting of `Marker`", "an `impl Marker` block gives only the settings a marker has: {known}", "remove `{key}`, or write one of the marker settings")
-        return
-    }
     fact: "${key}"
+    if key != "companion" -> constants.push(ImplConstValue{name: key, name_span: name_token.span, value: parsed.expr, span: span})
+    // A setting given twice is reported on the constant (E0937).
     loop earlier in declaration.params {
-        if earlier.name == fact {
-            parser_add_error_code(state, "E0937", name_token.span, "the `impl Marker` block gives `{key}` twice", "a marker has one value for each setting", "remove one `{key}: …`")
-            return
-        }
+        if earlier.name == fact -> return
     }
     declaration.params.push(MarkerDeclParam{name: fact, name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
 }

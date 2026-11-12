@@ -36,14 +36,32 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write a value of the declared type</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0934</code>: <code>tests/ui/trait_constant_wrong_type_e0934.stderr</code>.</p>
-<pre class="diag">Error [jet.TraitConstantTypeMismatch]: The value of trait constant `sides` is not of type `Int`
-  --&gt; tests/ui/trait_constant_wrong_type_e0934.jet:10:16
+<p>First UI snapshot mentioning <code>E0934</code>: <code>tests/ui/marker_settings_are_marker_constants.stderr</code>.</p>
+<pre class="diag">Error [jet.AmbiguousTraitConstant]: The impl gives the constant `sites` twice
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:8:9
     |
- 10 |         sides: &quot;four&quot;
-    |                ^^^^^^
- Why: `Shape` declares `sides: Int`, and each value has that type
- Fix: Write a value of type `Int`
+  8 |         sites: [.Method]
+    |         ^^^^^
+ Why: An implementation has one value for each trait constant
+ Fix: Remove one `sites: …`
+More: jet-lang.dev/e/E0937
+
+Error [jet.UnknownTraitConstant]: `colour` is not a constant of `Marker`
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:9:9
+    |
+  9 |         colour: .Red
+    |         ^^^^^^
+ Why: An implementation gives only the constants its trait declares
+ Fix: Remove `colour`, or declare `colour: Type` in `Marker`
+More: jet-lang.dev/e/E0936
+
+Error [jet.TraitConstantTypeMismatch]: The value of trait constant `repeatable` is not of type `Bool`
+  --&gt; tests/ui/marker_settings_are_marker_constants.jet:10:21
+    |
+ 10 |         repeatable: 3
+    |                     ^
+ Why: `Marker` declares `repeatable: Bool`, and each value has that type
+ Fix: Write a value of type `Bool`
 More: jet-lang.dev/e/E0934
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

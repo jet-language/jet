@@ -144,12 +144,10 @@ run: fn() {}
     assert(template.body != None)
 }
 
-#Test("impl_marker_rejects_what_a_marker_does_not_have") {
+#Test("impl_marker_rejects_a_method_a_marker_does_not_have") {
     diagnostics: parser_test_errors(`Bad: struct {
     impl Marker {
         sites: [.Function]
-        sites: [.Method]
-        colour: .Red
         render: fn(self) {}
     }
 }
@@ -157,7 +155,42 @@ run: fn() {}
 `)
     codes := [String]{}
     loop diagnostic in diagnostics -> codes.push(diagnostic.code)
-    assert_eq(codes, [String]{"E0937", "E0936", "E0907"})
+    assert_eq(codes, [String]{"E0907"})
+}
+
+// The settings are the constants of a generated `impl Marker`, which sema
+// checks against the Core trait (an unknown or repeated one is E0936/E0937
+// there), so the parser keeps each one as written.
+#Test("impl_marker_settings_become_marker_constants") {
+    program: parser_test_program(`Traced: struct {
+    impl Marker {
+        sites: [.Function]
+        sites: [.Method]
+        colour: .Red
+    }
+}
+run: fn() {}
+`)
+    program.items[0] == .Struct(definition) ?? panic("struct")
+    assert_eq(definition.trait_impls.len(), 1)
+    block: definition.trait_impls[0]
+    assert_eq(block.trait_name, "Marker")
+    assert(block.compiler_generated)
+    names := [String]{}
+    loop constant in block.constants -> names.push(constant.name)
+    assert_eq(names, [String]{"sites", "sites", "colour"})
+}
+
+#Test("impl_marker_group_implements_no_marker") {
+    program: parser_test_program(`Pair: struct {
+    impl Marker {
+        group: #[Inline, Scalar]
+    }
+}
+run: fn() {}
+`)
+    program.items[0] == .Struct(definition) ?? panic("struct")
+    assert_eq(definition.trait_impls.len(), 0)
 }
 
 #Test("nested_state_section_is_stored_on_struct_not_as_an_item") {
