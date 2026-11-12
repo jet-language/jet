@@ -8,7 +8,7 @@ use {
 }
 
 test_debug_request: fn(src: String, graph_json: String, transcript: String, snapshot: DebugSnapshot?, status: SessionStatus, watches: [String]) -> DebugOkRequest Never! {
-    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .NativeLldb, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
+    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .NativeLLDB, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
 }
 
 #Test("running_state_ignores_spoofed_completion_output") {
@@ -47,9 +47,9 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
 
 #Test("only_the_native_tier_is_served") {
     defaulted: DebugTier.parse(None) ?? panic("default tier")
-    assert(defaulted == DebugTier.NativeLldb)
+    assert(defaulted == DebugTier.NativeLLDB)
     named: DebugTier.parse(Val("native-lldb")) ?? panic("native tier")
-    assert(named == DebugTier.NativeLldb)
+    assert(named == DebugTier.NativeLLDB)
     if DebugTier.parse(Val("jet-dev-replay")) == {
         .Err(failure) -> assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body)
         else -> panic("the replay tier was accepted")
@@ -73,18 +73,18 @@ debug_test_local: fn(snapshot: DebugSnapshot, name: String) -> String Never! {
     debug_test_files.write(source, src) ?? panic("source: {err}")
     revision: source_revision(src)
     sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
-    first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .NativeLldb) ?? panic("execute: {err.body}")
+    first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .NativeLLDB) ?? panic("execute: {err.body}")
     assert(first.status == SessionStatus.Running)
     paused: first.snapshot ?? panic("first stop has no snapshot: {first.transcript}")
     assert_eq(paused.function, "double")
     assert_eq(paused.line, 2)
     assert_eq(debug_test_local(paused, "x"), "0")
-    second: sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .NativeLldb) ?? panic("resume: {err.body}")
+    second: sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .NativeLLDB) ?? panic("resume: {err.body}")
     resumed: second.snapshot ?? panic("second stop has no snapshot: {second.transcript}")
     assert_eq(resumed.line, 2)
     assert_eq(debug_test_local(resumed, "x"), "1")
-    tier: sessions.stop(source, revision, revision, first.id, .NativeLldb) ?? panic("stop: {err.body}")
-    assert(tier == DebugTier.NativeLldb)
+    tier: sessions.stop(source, revision, revision, first.id, .NativeLLDB) ?? panic("stop: {err.body}")
+    assert(tier == DebugTier.NativeLLDB)
     assert(sessions.sessions.len() == 0)
     debug_test_files.remove_all(scratch.path) ?? panic("scratch cleanup: {err}")
 }

@@ -36,18 +36,18 @@ canvas_debug_error: fn(kind: String, message: String) -> CanvasDebugError Never!
 
 // Canvas debugs on the native tier only.
 DebugTier: enum {
-    NativeLldb
+    NativeLLDB
 
     parse: fn(value: String?) -> DebugTier CanvasDebugError! {
         if value == {
             .Val(name) -> {
                 if {
-                    name == "native-lldb" -> Ok(DebugTier.NativeLldb)
+                    name == "native-lldb" -> Ok(DebugTier.NativeLLDB)
                     name == "jet-dev-replay" -> Err(canvas_debug_error("unsupported", "the jet-dev-replay Canvas debug tier is unavailable; use native-lldb"))
                     else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native-lldb"))
                 }
             }
-            else -> Ok(DebugTier.NativeLldb)
+            else -> Ok(DebugTier.NativeLLDB)
         }
     }
 
