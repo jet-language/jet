@@ -12,10 +12,19 @@
 // - pushes and pops: saves and restores of callee-saved registers;
 // - frame_slots: instructions that address a frame slot below rbp (spills,
 //   reloads, frame storage);
-// - loops: innermost loops (a loop is a backward jump and its target; an
-//   innermost one holds no other), so a kernel the backend versions into
-//   several copies counts each copy;
-// - loop_insns: instructions in those loops.
+// - loops: innermost loops. A loop is a back edge (a jump to its own address
+//   or an earlier one) whose target dominates its source in the code's flow
+//   (Flow: every path from the function's entry to the jump runs the target
+//   first, so the target also reaches the jump); an innermost one holds no
+//   other. So a kernel the backend versions into several copies counts each
+//   copy. A jump back from code laid out after `ret` is no loop: neither the
+//   stop exit's `jmp` back into the epilogue nor a slow path's `jmp` back
+//   into its loop, whose loop counts once, by its own back edge. A cycle
+//   with no back edge (one entered at two instructions) is a loop too;
+// - loop_insns: instructions in those loops: those from a loop's target to
+//   its back edge, and the blocks of its body laid out elsewhere (a slow
+//   path or a drop that returns into the loop). A cycle with no back edge
+//   counts the instructions from its first to its last.
 // A count above its golden value is a regression and fails the gate. A
 // count below it is a gain: `--update` lowers golden.tsv to the new counts,
 // and only when nothing regressed. loop_insns against the ceiling (the
@@ -112,6 +121,262 @@ parse_golden: fn(text: String) -> [Row] Err! {
     Ok(rows)
 }
 
+// How each instruction of a listing leaves it: whether it falls through to
+// the next one, the index its direct jump goes to (-1 for none, or for a
+// target outside the function: a tail call), and whether it jumps
+// indirectly. `ret`, `ud2` and `hlt` end the path; a call that never
+// returns is followed by `ud2`, so its path ends there. Any other call
+// returns to the next instruction.
+Flow: struct {
+    falls: [Bool]
+    jumps: [Int]
+    indirect: [Bool]
+}
+
+// The words of an instruction's text.
+words_of: fn(text: String) -> [String] Never! {
+    words := [String]{}
+    loop word in text.split(" ") {
+        if word != "" -> words.push(word.copy())
+    }
+    words
+}
+
+flow_of: fn(addresses: [Int], texts: [String]) -> Flow Never! {
+    falls := [Bool]{}
+    jumps := [Int]{}
+    indirect := [Bool]{}
+    loop text in texts {
+        ends: text.starts_with("ret") || text.starts_with("ud2") || text.starts_with("hlt")
+        falls.push(!ends && !text.starts_with("jmp"))
+        target := -1
+        far := false
+        if text.starts_with("j") {
+            // `jne    401040 <main_list_sum+0x10>`: the target is the word
+            // before the symbolic name; `jmp    *%rax` jumps indirectly.
+            words: words_of(text)
+            direct: words.len() >= 3 && words[2].starts_with("<")
+            if direct {
+                address: hex(words[1])
+                loop (at, other) in addresses {
+                    if other == address -> target = at
+                }
+            }
+            far = !direct && words.len() >= 2 && words[1].starts_with("*")
+        }
+        jumps.push(target)
+        indirect.push(far)
+    }
+    Flow{falls, jumps, indirect}
+}
+
+// The instructions that may run right after instruction `at`: the next one
+// when it falls through and its direct jump's target. An indirect jump may
+// go to any instruction.
+successors: fn(flow: Flow, at: Int) -> [Int] Never! {
+    count: flow.falls.len()
+    found := [Int]{}
+    if flow.indirect[at] {
+        loop other in 0..<count -> found.push(other)
+        return found
+    }
+    if flow.falls[at] && at + 1 < count -> found.push(at + 1)
+    if flow.jumps[at] >= 0 -> found.push(flow.jumps[at])
+    found
+}
+
+// The instructions that may run right before each instruction.
+predecessors: fn(flow: Flow) -> [[Int]] Never! {
+    count: flow.falls.len()
+    preceding := [[Int]]{}
+    loop _ in 0..<count -> preceding.push([Int]{})
+    loop at in 0..<count {
+        loop other in successors(flow, at) -> preceding[other].push(at)
+    }
+    preceding
+}
+
+// Each instruction's immediate dominator: the closest instruction that
+// every path from the function's entry to it runs first. The entry is its
+// own, and an instruction no path runs has -1. The iterative algorithm of
+// Cooper, Harvey and Kennedy, over the instructions in reverse postorder.
+dominators: fn(flow: Flow, preceding: [[Int]]) -> [Int] Never! {
+    count: flow.falls.len()
+    idom := [Int]{}
+    loop _ in 0..<count -> idom.push(-1)
+    if count == 0 -> return idom
+    following := [[Int]]{}
+    loop at in 0..<count -> following.push(successors(flow, at))
+    // Postorder numbers, from a depth-first walk from the entry.
+    number := [Int]{}
+    visited := [Bool]{}
+    taken := [Int]{}
+    loop _ in 0..<count {
+        number.push(-1)
+        visited.push(false)
+        taken.push(0)
+    }
+    postorder := [Int]{}
+    stack := [Int]{0}
+    visited[0] = true
+    loop stack.len() > 0 {
+        top: stack[stack.len() - 1]
+        if taken[top] < following[top].len() {
+            child: following[top][taken[top]]
+            taken[top] = taken[top] + 1
+            if !visited[child] {
+                visited[child] = true
+                stack.push(child)
+            }
+            next
+        }
+        _ := stack.pop()
+        number[top] = postorder.len()
+        postorder.push(top)
+    }
+    idom[0] = 0
+    changed := true
+    loop changed {
+        changed = false
+        index := postorder.len() - 1
+        loop index >= 0 {
+            node: postorder[index]
+            index -= 1
+            if node == 0 -> next
+            chosen := -1
+            loop other in preceding[node] {
+                if idom[other] < 0 -> next
+                if chosen < 0 {
+                    chosen = other
+                    next
+                }
+                // The closest common dominator of the two.
+                left := other
+                right := chosen
+                loop left != right {
+                    loop number[left] < number[right] -> left = idom[left]
+                    loop number[right] < number[left] -> right = idom[right]
+                }
+                chosen = left
+            }
+            if chosen >= 0 && idom[node] != chosen {
+                idom[node] = chosen
+                changed = true
+            }
+        }
+    }
+    idom
+}
+
+// Whether every path from the function's entry to instruction `at` runs
+// instruction `above` first (`idom` from dominators).
+dominates: fn(idom: [Int], above: Int, at: Int) -> Bool Never! {
+    if idom[at] < 0 -> return false
+    node := at
+    loop node != above && node != 0 -> node = idom[node]
+    node == above
+}
+
+// The body of the natural loop of the back edge from `tail` to `head`:
+// the head and every instruction that reaches the tail without passing
+// the head. It holds the blocks laid out away from the loop's range, such
+// as a slow path that returns into the loop.
+natural_body: fn(preceding: [[Int]], idom: [Int], head: Int, tail: Int) -> [Int] Never! {
+    seen := [Bool]{}
+    loop _ in idom -> seen.push(false)
+    seen[head] = true
+    body := [Int]{head}
+    work := [Int]{}
+    if !seen[tail] {
+        seen[tail] = true
+        body.push(tail)
+        work.push(tail)
+    }
+    loop work.len() > 0 {
+        node: work.pop() ?? head
+        loop other in preceding[node] {
+            if seen[other] || idom[other] < 0 -> next
+            seen[other] = true
+            body.push(other)
+            work.push(other)
+        }
+    }
+    body
+}
+
+// The cycles that have no back edge: with every back edge (an edge whose
+// target dominates its source) removed, the code's flow keeps a cycle only
+// where it can be entered at more than one instruction (an irreducible
+// loop). Each such cycle, a strongly connected set of at least two
+// instructions, comes back as its instructions. Tarjan's algorithm, with
+// an explicit stack.
+irreducible_cycles: fn(flow: Flow, idom: [Int]) -> [[Int]] Never! {
+    count: flow.falls.len()
+    forward := [[Int]]{}
+    number := [Int]{}
+    low := [Int]{}
+    held := [Bool]{}
+    taken := [Int]{}
+    loop at in 0..<count {
+        kept := [Int]{}
+        if idom[at] >= 0 {
+            loop other in successors(flow, at) {
+                if !dominates(idom, other, at) -> kept.push(other)
+            }
+        }
+        forward.push(kept)
+        number.push(-1)
+        low.push(-1)
+        held.push(false)
+        taken.push(0)
+    }
+    cycles := [[Int]]{}
+    held_stack := [Int]{}
+    order := 0
+    loop root in 0..<count {
+        if idom[root] < 0 || number[root] >= 0 -> next
+        number[root] = order
+        low[root] = order
+        order += 1
+        held_stack.push(root)
+        held[root] = true
+        calls := [Int]{root}
+        loop calls.len() > 0 {
+            node: calls[calls.len() - 1]
+            if taken[node] < forward[node].len() {
+                child: forward[node][taken[node]]
+                taken[node] = taken[node] + 1
+                if number[child] < 0 {
+                    number[child] = order
+                    low[child] = order
+                    order += 1
+                    held_stack.push(child)
+                    held[child] = true
+                    calls.push(child)
+                } else if held[child] && number[child] < low[node] {
+                    low[node] = number[child]
+                }
+                next
+            }
+            _ := calls.pop()
+            if calls.len() > 0 {
+                parent: calls[calls.len() - 1]
+                if low[node] < low[parent] -> low[parent] = low[node]
+            }
+            if low[node] != number[node] -> next
+            members := [Int]{}
+            loop {
+                member: held_stack.pop() ?? node
+                held[member] = false
+                members.push(member)
+                if member == node -> break
+            }
+            if members.len() > 1 -> cycles.push(members)
+        }
+    }
+    cycles
+}
+
 // The counts of one function's `objdump -d --no-show-raw-insn` listing.
 count_listing: fn(listing: String) -> Counts Never! {
     addresses := [Int]{}
@@ -127,29 +392,39 @@ count_listing: fn(listing: String) -> Counts Never! {
         addresses.push(address)
         texts.push(parts[1].trim())
     }
+    flow: flow_of(addresses, texts)
+    preceding: predecessors(flow)
+    idom: dominators(flow, preceding)
     pushes := 0
     pops := 0
     frame_slots := 0
     starts := [Int]{}
     ends := [Int]{}
+    bodies := [[Int]]{}
     loop index in 0..<texts.len() {
         text: texts[index]
         if text.starts_with("push") -> pushes += 1
         if text.starts_with("pop") -> pops += 1
         if text.contains("(%rbp)") && text.contains("-0x") -> frame_slots += 1
-        if !text.starts_with("j") -> next
-        // `jne    401040 <main_list_sum+0x10>`: the target is the word
-        // before the symbolic name.
-        words := [String]{}
-        loop word in text.split(" ") {
-            if word != "" -> words.push(word.copy())
-        }
-        if words.len() < 3 || !words[2].starts_with("<") -> next
-        target: hex(words[1])
-        if target >= 0 && target <= addresses[index] {
-            starts.push(target)
+        target: flow.jumps[index]
+        if target >= 0 && addresses[target] <= addresses[index] && dominates(idom, target, index) {
+            starts.push(addresses[target])
             ends.push(addresses[index])
+            bodies.push(natural_body(preceding, idom, target, index))
         }
+    }
+    // An irreducible loop has no back edge; it counts as the instructions
+    // from its first to its last.
+    loop cycle in irreducible_cycles(flow, idom) {
+        first := cycle[0]
+        last := cycle[0]
+        loop member in cycle {
+            if member < first -> first = member
+            if member > last -> last = member
+        }
+        starts.push(addresses[first])
+        ends.push(addresses[last])
+        bodies.push(cycle)
     }
     loops := 0
     // An instruction in two overlapping innermost loops counts once.
@@ -165,9 +440,11 @@ count_listing: fn(listing: String) -> Counts Never! {
         }
         if !inner -> next
         loops += 1
+        // The loop's range, and the blocks of its body laid out outside it.
         loop index in 0..<addresses.len() {
             if addresses[index] >= starts[loop_index] && addresses[index] <= ends[loop_index] -> inside[index] = true
         }
+        loop member in bodies[loop_index] -> inside[member] = true
     }
     loop_insns := 0
     loop flag in inside {
@@ -328,6 +605,48 @@ run: fn() {
     counts: count_listing(listing)
     assert_eq(counts.loops, 2)
     assert_eq(counts.loop_insns, 4)
+}
+
+#Test("a loop with an early return inside it counts every instruction from its head to its back edge") {
+    listing: "  10:\tcmp    %rdx,%rax\n  13:\tjne    17 <k+0x7>\n  15:\tpop    %rbp\n  16:\tret\n  17:\tadd    $0x8,%rax\n  1b:\tjne    10 <k>\n  1d:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 6)
+}
+
+#Test("the stop exit's jump back into the epilogue after `ret` is no loop") {
+    listing: "  10:\tadd    (%rax),%rcx\n  13:\tjne    10 <k>\n  15:\ttest   %edx,%edx\n  17:\tjne    1d <k+0xd>\n  19:\txor    %edx,%edx\n  1b:\tpop    %rbp\n  1c:\tret\n  1d:\tmov    $0x1,%edx\n  22:\tjmp    1b <k+0xb>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 2)
+    // A path that ends in `ud2` reaches no back edge after it either.
+    trapped: count_listing("  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tnop\n  15:\tud2\n  19:\tjmp    14 <k+0x4>\n")
+    assert_eq(trapped.loops, 0)
+}
+
+#Test("a cycle entered at two instructions has no back edge and still counts") {
+    // 10 enters the cycle at 14 by falling through and at 19 by its jump,
+    // so neither entry dominates the other and 20's jump is no back edge.
+    listing: "  10:\ttest   %eax,%eax\n  12:\tjne    19 <k+0x9>\n  14:\tadd    $0x1,%rcx\n  18:\tnop\n  19:\tadd    $0x2,%rcx\n  1d:\tcmp    %rdx,%rcx\n  20:\tjne    14 <k+0x4>\n  22:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 5)
+}
+
+#Test("a slow path laid out after `ret` that jumps back into its loop is no loop of its own, and counts in its loop") {
+    listing: "  10:\tadd    %rcx,%rax\n  13:\tjo     30 <k+0x20>\n  15:\tcmp    %rdx,%rax\n  18:\tjne    10 <k>\n  1a:\tret\n  30:\tcall   401000 <jet_int_add>\n  35:\tjmp    15 <k+0x5>\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    // The loop's four instructions and the slow path's two; not the `ret`
+    // between them.
+    assert_eq(counts.loop_insns, 6)
+}
+
+#Test("a loop whose body calls a function that can stop still counts") {
+    listing: "  10:\tcall   401000 <main_step>\n  15:\ttest   %edx,%edx\n  17:\tjne    20 <k+0x10>\n  19:\tadd    $0x1,%rbx\n  1d:\tjmp    10 <k>\n  20:\tmov    $0x1,%edx\n  25:\tret\n"
+    counts: count_listing(listing)
+    assert_eq(counts.loops, 1)
+    assert_eq(counts.loop_insns, 5)
 }
 
 #Test("a count above golden is a regression, below it a gain") {
