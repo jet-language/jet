@@ -22,7 +22,108 @@ const LIVE_RELOAD_LIFECYCLE_SCENARIO = Object.freeze({
 });
 const FAILED_EDIT_SOURCE = "__gauntlet_live_reload_failed_edit__ = ;";
 
+// A harness command's whole process tree, read from /proc; run.mjs stops its
+// commands with these too. Every command runs through JetEnv.jet, which starts
+// its command in a process group of its own and doesn't forward signals: a
+// signal to the launcher's group ends the launcher and orphans the command, so
+// stopping a command signals every process of its tree.
 
+// Every process /proc shows: its parent and, when it has one, its resident set.
+async function processRows() {
+  let entries;
+  try {
+    entries = await fs.readdir("/proc", { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const rows = new Map();
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .map(async (entry) => {
+      try {
+        const status = await fs.readFile(`/proc/${entry.name}/status`, "utf8");
+        const parent = status.match(/^PPid:\s+(\d+)$/m);
+        const rss = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
+        if (parent) rows.set(Number(entry.name), { parent: Number(parent[1]), rss: rss ? Number(rss[1]) : null });
+      } catch {}
+    }));
+  return rows;
+}
+
+// rootPid and every process below it in `rows`.
+function processTree(rows, rootPid) {
+  const tree = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [pid, row] of rows) {
+      if (tree.has(row.parent) && !tree.has(pid)) {
+        tree.add(pid);
+        changed = true;
+      }
+    }
+  }
+  return tree;
+}
+
+export async function processTreeRssKb(rootPid) {
+  if (!Number.isInteger(rootPid)) return null;
+  const rows = await processRows();
+  if (!rows) return null;
+  let total = 0;
+  let found = false;
+  for (const pid of processTree(rows, rootPid)) {
+    const rss = rows.get(pid)?.rss;
+    if (Number.isFinite(rss)) {
+      total += rss;
+      found = true;
+    }
+  }
+  return found ? total : null;
+}
+
+// The pids of rootPid's process tree, rootPid first. Read them before any
+// signal: a process whose parent dies is reparented and leaves the tree.
+export async function processTreePids(rootPid) {
+  const rows = await processRows();
+  return rows ? [...processTree(rows, rootPid)] : [rootPid];
+}
+
+// Sends `signal` to every pid of `pids` and to the process group each leads,
+// which also reaches a group member started after `pids` was read.
+export function signalProcessTree(pids, signal) {
+  for (const pid of pids) {
+    try { process.kill(-pid, signal); } catch {}
+    try { process.kill(pid, signal); } catch {}
+  }
+}
+
+// Whether `pid` has ended: gone from /proc, or a zombie that only its reap remains.
+async function processEnded(pid) {
+  try {
+    const stat = await fs.readFile(`/proc/${pid}/stat`, "utf8");
+    return /^[ZX]/.test(stat.slice(stat.lastIndexOf(")") + 2));
+  } catch {
+    return true;
+  }
+}
+
+// Whether every pid of `pids` ends within timeoutMs.
+export async function processesEnded(pids, timeoutMs) {
+  const started = Date.now();
+  for (;;) {
+    const ended = await Promise.all(pids.map(processEnded));
+    if (ended.every(Boolean)) return true;
+    if (Date.now() - started >= timeoutMs) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+// SIGKILLs the process tree of `child` without waiting for it.
+export function killProcessTree(child) {
+  if (!Number.isInteger(child.pid)) return;
+  processTreePids(child.pid).then((pids) => signalProcessTree(pids, "SIGKILL"));
+}
 
 function monotonicNow() {
   return performance.now();
@@ -133,8 +234,7 @@ async function runProcess(envRunner, cwd, args, { timeoutMs = 10_000, envRunnerA
     };
     const deadline = setTimeout(() => {
       timedOut = true;
-      try { process.kill(-child.pid, "SIGKILL"); } catch {}
-      try { child.kill("SIGKILL"); } catch {}
+      killProcessTree(child);
     }, timeoutMs);
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
@@ -575,19 +675,28 @@ async function waitForProcessGroupGone(pid, timeoutMs = PROCESS_KILL_TIMEOUT_MS)
   return !processGroupAlive(pid);
 }
 
+// Stops the axis command `child` and every process of its tree (process-tree.mjs:
+// the launcher's group alone would orphan the command). group_gone is true once
+// the launcher's group and every process of the tree have ended.
 async function cleanupProcessGroup(child) {
   if (!child) return { attempted: false, group_gone: true };
   const pid = child.pid ?? null;
+  const pids = pid === null ? [] : await processTreePids(pid);
   const term_sent = signalProcessGroup(child, "SIGTERM");
+  signalProcessTree(pids, "SIGTERM");
   let exit = await waitForExit(child, PROCESS_TERM_TIMEOUT_MS);
+  const treeEnded = await processesEnded(pids, PROCESS_TERM_TIMEOUT_MS);
   let forced = false;
   let kill_sent = false;
-  if (pid !== null && processGroupAlive(pid)) {
+  if (pid !== null && (processGroupAlive(pid) || !treeEnded)) {
     forced = true;
     kill_sent = signalProcessGroup(child, "SIGKILL");
+    signalProcessTree(pids, "SIGKILL");
     exit = await waitForExit(child, PROCESS_KILL_TIMEOUT_MS);
   }
-  const group_gone = pid === null ? child.exitCode !== null : await waitForProcessGroupGone(pid);
+  const group_gone = pid === null
+    ? child.exitCode !== null
+    : await waitForProcessGroupGone(pid) && await processesEnded(pids, PROCESS_KILL_TIMEOUT_MS);
   return { attempted: true, pid, term_sent, kill_sent, forced, exit, group_gone };
 }
 

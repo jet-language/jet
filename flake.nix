@@ -174,6 +174,10 @@
             # Zig on perf entries, Go as the services incumbent.
             pkgs.zig
             pkgs.go
+            # The run tier's interpreter peers next to python3 and node. luajit
+            # also installs a `lua`; lua5_4 comes first, so `lua` is Lua 5.4.
+            pkgs.lua5_4
+            pkgs.luajit
             pkgs.nixfmt
             pkgs.ripgrep
             pkgs.jq
@@ -240,6 +244,9 @@
             pkgs.tcl
             # D-FFI-LUA1=A: provision Lua's in-process VM, headers, and compiler.
             pkgs.lua5_4
+            # The run tier's LuaJIT peer, as in the default shell; after
+            # lua5_4, so `lua` is Lua 5.4.
+            pkgs.luajit
             pkgs.lld
             # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
             pkgs.ruby

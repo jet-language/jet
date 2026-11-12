@@ -6,7 +6,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runLiveReloadAxis as runLiveReloadAxisAdapter } from "./live-reload.mjs";
+import { killProcessTree, processesEnded, processTreePids, processTreeRssKb, runLiveReloadAxis as runLiveReloadAxisAdapter, signalProcessTree } from "./live-reload.mjs";
 import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./memory-safety-fuzz.mjs";
 import { compileThroughputContractIssues, runCompileThroughputAxisAdapter } from "./compile-throughput.mjs";
 import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-system.mjs";
@@ -330,48 +330,6 @@ function timeoutFromEnv(name, fallback) {
 
 const DEFAULT_TIMEOUT_MS = timeoutFromEnv("JET_GAUNTLET_TIMEOUT_MS", 300_000);
 
-async function processTreeRssKb(rootPid) {
-  if (!Number.isInteger(rootPid)) return null;
-  let entries;
-  try {
-    entries = await fs.readdir("/proc", { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  const rows = new Map();
-  await Promise.all(entries
-    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
-    .map(async (entry) => {
-      try {
-        const status = await fs.readFile(`/proc/${entry.name}/status`, "utf8");
-        const parent = status.match(/^PPid:\s+(\d+)$/m);
-        const rss = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
-        if (parent && rss) rows.set(Number(entry.name), { parent: Number(parent[1]), rss: Number(rss[1]) });
-      } catch {}
-    }));
-  const tree = new Set([rootPid]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [pid, row] of rows) {
-      if (tree.has(row.parent) && !tree.has(pid)) {
-        tree.add(pid);
-        changed = true;
-      }
-    }
-  }
-  let total = 0;
-  let found = false;
-  for (const pid of tree) {
-    const row = rows.get(pid);
-    if (row) {
-      total += row.rss;
-      found = true;
-    }
-  }
-  return found ? total : null;
-}
-
 async function runProcess(cwd, args, {
   input = undefined,
   full = false,
@@ -401,8 +359,7 @@ async function runProcess(cwd, args, {
         resourceExceeded = reason;
       }
       timedOut = true;
-      try { process.kill(-child.pid, "SIGKILL"); } catch {}
-      try { child.kill("SIGKILL"); } catch {}
+      killProcessTree(child);
     };
     const deadline = timeoutMs > 0 ? setTimeout(killTree, timeoutMs) : null;
     const resourceTimer = resourceBudget?.memory_mb > 0 ? setInterval(() => {
@@ -489,9 +446,20 @@ function startProcess(cwd, args, { full = false, env = undefined } = {}) {
   return child;
 }
 
-function stopProcess(child) {
-  if (!child || child.exitCode !== null) return;
-  try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
+// Stops `child` and every process of its tree: SIGTERM to each, then SIGKILL to
+// the ones still running after graceMs. Resolves to the child's exit and
+// whether the kill was forced.
+async function stopProcess(child, graceMs = 5000) {
+  if (child.exitCode !== null || child.signalCode !== null) return { exit: { code: child.exitCode, signal: child.signalCode }, forced: false };
+  const pids = await processTreePids(child.pid);
+  signalProcessTree(pids, "SIGTERM");
+  let forced = false;
+  if (!(await processesEnded(pids, graceMs))) {
+    forced = true;
+    signalProcessTree(pids, "SIGKILL");
+    await processesEnded(pids, 1000);
+  }
+  return { exit: await waitForExit(child, 1000), forced };
 }
 
 function waitForExit(child, timeoutMs = 5000) {
@@ -1751,12 +1719,11 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     if (firstExit.code !== 0 && !failure) failure = `verification service exit ${firstExit.code ?? firstExit.signal}`;
     if (firstExit.code === null) {
       if (!failure) failure = "verification shutdown did not produce a clean exit";
-      stopProcess(child);
-      await waitForExit(child);
+      await stopProcess(child);
     }
   } catch (error) {
     failure = error.message;
-    if (child) { stopProcess(child); await waitForExit(child); }
+    if (child) await stopProcess(child);
   }
   if (failure) return { failure, startupSeconds };
 
@@ -1766,8 +1733,7 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   try {
     ready = await waitForReady(child, port, service);
   } catch (error) {
-    stopProcess(child);
-    await waitForExit(child);
+    await stopProcess(child);
     return { failure: error.message, startupSeconds };
   }
   let rssKb = await processTreeRssKb(child.pid);
@@ -1807,7 +1773,7 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   const finalRssKb = await processTreeRssKb(child.pid);
   if (Number.isFinite(finalRssKb)) rssKb = Math.max(rssKb ?? 0, finalRssKb);
   const exit = await waitForExit(child, 5000);
-  if (exit.code === null) { stopProcess(child); await waitForExit(child); }
+  if (exit.code === null) await stopProcess(child);
   const measurementInvalid = !positiveMetricValue("service_startup_seconds", startupSeconds) ||
     !positiveMetricValue("service_peak_rss_kb", rssKb) ||
     latencies.length === 0 ||
@@ -1859,8 +1825,7 @@ async function startPeer(sourceDir, peer) {
     await waitForTcp(port);
     return child;
   } catch (error) {
-    stopProcess(child);
-    await waitForExit(child);
+    await stopProcess(child);
     throw error;
   }
 }
@@ -2454,8 +2419,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     let peerChild = null;
     const stopPeer = async () => {
       if (peerChild) {
-        stopProcess(peerChild);
-        await waitForExit(peerChild);
+        await stopProcess(peerChild);
         peerChild = null;
       }
     };
@@ -2511,8 +2475,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   let jetPeerFailure = null;
   const stopJetPeer = async () => {
     if (jetPeerChild) {
-      stopProcess(jetPeerChild);
-      await waitForExit(jetPeerChild);
+      await stopProcess(jetPeerChild);
       jetPeerChild = null;
     }
   };
@@ -3678,14 +3641,9 @@ async function runLiveReloadSample({ runner, stageDir, editPath, phase, index, j
     if (child?.stderrText) sample.stderr = child.stderrText();
   } finally {
     if (child) {
-      stopProcess(child);
-      sample.process_exit = await waitForExit(child, 5_000);
-      if (sample.process_exit.signal === "TIMEOUT") {
-        try { process.kill(-child.pid, "SIGKILL"); } catch {}
-        try { child.kill("SIGKILL"); } catch {}
-        sample.process_exit = await waitForExit(child, 1_000);
-        sample.cleanup_forced = true;
-      }
+      const stopped = await stopProcess(child);
+      sample.process_exit = stopped.exit;
+      if (stopped.forced) sample.cleanup_forced = true;
       if (!sample.stderr && child.stderrText) sample.stderr = child.stderrText();
     }
     try {
@@ -4443,7 +4401,6 @@ export {
   validateResultShape,
   buildScoreboard,
   publicationState,
-  processTreeRssKb,
   httpProbe,
   probeMatches,
   probeAxisTools,
