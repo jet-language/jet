@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1423,
+  "total": 1422,
   "counts": {
-    "Compiler": 751,
+    "Compiler": 750,
     "Core": 170,
     "Docs": 8,
     "Examples": 41,
@@ -3305,14 +3305,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 453,
-      "column": 5,
-      "reason": "key_data lends key_length bytes"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 461,
+      "line": 458,
       "column": 5,
       "reason": "envp is a live null-terminated pointer array of NUL-terminated rows"
     },
@@ -10191,14 +10184,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 751 |
+| Compiler | 750 |
 | Core | 170 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 438 |
-| **total** | **1423** |
+| **total** | **1422** |
 
 ### Regions
 
@@ -10644,8 +10637,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 339:9 | "argv[1] is an immutable startup string of `length` bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 385:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 403:5 | "the startup index and key bytes are immutable borrowed data" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 453:5 | "key_data lends key_length bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 461:5 | "envp is a live null-terminated pointer array of NUL-terminated rows" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 458:5 | "envp is a live null-terminated pointer array of NUL-terminated rows" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 21:5 | "value borrows a complete immutable startup NUL string; output lends one writable U64 word" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 48:5 | "value borrows length immutable captured startup bytes; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 82:5 | "the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer" |

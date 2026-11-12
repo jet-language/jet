@@ -449,14 +449,11 @@ host_startup_environment_value: fn(key: I64) -> I64 {
 host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
     if (envp == I64{0} || key_length == I64{0}) -> return I64{0}
     at := I64{1}
-    first := I64{0}
-    #Unsafe("key_data lends key_length bytes") {
-        loop at < key_length {
-            if (os_load_u8(wrapping(key_data + at)) == I64{61}) -> return I64{0}
-            at = wrapping(at + I64{1})
-        }
-        first = os_load_u8(key_data)
+    loop at < key_length {
+        if (rt_text_byte(wrapping(key_data + at)) == I64{61}) -> return I64{0}
+        at = wrapping(at + I64{1})
     }
+    first: rt_text_byte(key_data)
     cursor := envp
     #Unsafe("envp is a live null-terminated pointer array of NUL-terminated rows") {
         loop {
@@ -464,7 +461,7 @@ host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
             if (entry == I64{0}) -> return I64{0}
             if (os_load_u8(entry) == first) {
                 at = I64{1}
-                loop at < key_length && os_load_u8(wrapping(entry + at)) == os_load_u8(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
+                loop at < key_length && os_load_u8(wrapping(entry + at)) == rt_text_byte(wrapping(key_data + at)) -> at = wrapping(at + I64{1})
                 if (at == key_length && os_load_u8(wrapping(entry + key_length)) == I64{61}) -> return wrapping(entry + key_length + I64{1})
             }
             cursor = wrapping(cursor + I64{8})
