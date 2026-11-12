@@ -18,7 +18,7 @@ envmodel_test_shell_parity: fn(root: String) {
         "nodejs_22@default", "python3@default", "nixfmt@default", "ripgrep@default",
         "jq@default", "gh@default", "fd@default", "bashInteractive@default",
         "zsh@default", "fish@default", "util-linux@default", "wasm-tools@default",
-        "tree-sitter@default", "pkg-config@default", "tzdata@default",
+        "tree-sitter@default", "pkg-config@default", "lldb@default", "tzdata@default",
         "vulkan-loader@default", "ruby@default", "php@default", "rWrapper@default",
         "rPackages.jsonlite@default"
     }
@@ -30,6 +30,11 @@ envmodel_test_shell_parity: fn(root: String) {
     }
     assert_eq(unique.len(), expected_default.len())
     loop reference in expected_default -> assert(unique.contains(reference))
+    // The flake's default shell and env.dev agree on whether `jet debug`'s
+    // LLDB ships.
+    flake: files.read(files.join(root, "flake.nix")) ?? panic("root flake.nix")
+    default_shell: flake.after("devShells.default").before("devShells.full")
+    assert_eq(unique.contains("lldb@default"), default_shell.contains("pkgs.lldb"))
 
     full: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("full environment evaluates")
     assert_eq(full.package_refs.len(), 46)
