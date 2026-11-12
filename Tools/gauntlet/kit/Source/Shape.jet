@@ -1,0 +1,332 @@
+// The gauntlet's corpus entries: loading them from their directories and
+// the shape each must have (its name, mode, languages, not-applicable facts,
+// matrix cells, provenance and HTTP probes). The twin of loadEntries and
+// validateEntryShape in Tools/gauntlet/harness/run.mjs.
+use {
+    combinatorics: core.math.combinatorics
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+}
+
+// The modes of a measured corpus entry.
+ENTRY_MODES: ["batch", "batch-steps", "service", "web", "web-app"]
+// The mode of a tool entry: a repository script and its Jet twin.
+TOOL_MODE: "tool"
+// The languages a rail can be written in (their source files are in
+// run.mjs's LANGUAGE_FILES).
+RAIL_LANGUAGES: ["jet", "rust", "python", "c", "zig", "go", "js", "node", "lua", "luajit"]
+// The bases a not-applicable fact can rest on.
+STRUCTURAL_NOT_APPLICABLE_BASES: ["no_compile_phase", "no_wasm_artifact"]
+// The metrics a batch or batch-steps entry compares.
+COMPARISON_METRICS: ["runtime_wall_seconds", "runtime_peak_rss_kb", "runtime_first_stdout_seconds", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"]
+SERVICE_COMPARISON_METRICS: ["service_latency_ms_p50", "service_latency_ms_p99", "service_startup_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"]
+WEB_COMPARISON_METRICS: ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes", "loc", "source_bytes", "tokens", "source_tokens"]
+
+// A measured entry as loaded: its directory, its entry.json (with `name`
+// filled from the directory when it has none) and whether it declared a name.
+LoadedEntry: struct {
+    dir: String
+    entry: Dyn
+    directory_name: String
+    name_declared: Bool
+}
+
+// A tool entry as loaded.
+ToolEntry: struct {
+    dir: String
+    entry: Dyn
+    directory_name: String
+}
+
+// An entry left out, with why.
+SkippedEntry: struct {
+    name: String
+    reason: String
+}
+
+// The entries of a directory: the measured ones, the tool ones and those left
+// out, each in directory-name order.
+EntryCatalog: struct {
+    loaded: [LoadedEntry]
+    tools: [ToolEntry]
+    skipped: [SkippedEntry]
+}
+
+// The entries under `entries_dir` (only `selected`'s when it names one): each
+// subdirectory's entry.json, its `name` filled from the directory when it
+// has none. An entry whose mode is neither a measured mode nor the tool
+// mode, and one whose entry.json cannot be read or is not a JSON object or
+// array, is skipped with a warning on stderr.
+load_entries: fn(entries_dir: String, selected: String?) -[FS, IO]> EntryCatalog {
+    catalog := EntryCatalog{loaded: [LoadedEntry]{}, tools: [ToolEntry]{}, skipped: [SkippedEntry]{}}
+    if !files.exists(entries_dir) -> return catalog
+    listed: files.list_dir(entries_dir) ?? return catalog
+    names := listed.filter(item -> item.is_dir).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        if selected == .Val(only) {
+            if name != only -> next
+        }
+        dir: files.join(entries_dir, name)
+        text: files.read(files.join(dir, "entry.json")) ?? {
+            skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            next
+        }
+        entry := json.parse(text) ?? {
+            skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            next
+        }
+        if entry == .Array(_) {
+            skip_entry(catalog, name, "mode missing", "mode missing is not batch")
+            next
+        }
+        if !(entry == .Object(_)) {
+            skip_entry(catalog, name, "invalid entry.json: it is not an object", "invalid entry.json: it is not an object")
+            next
+        }
+        name_declared: value_at(entry, "name") != None
+        if member(entry, "name") == None -> entry["name"] = Dyn.Text(name.copy())
+        mode: member(entry, "mode")
+        if {
+            text_at(entry, "mode") == Val(TOOL_MODE) -> catalog.tools.push(ToolEntry{dir: dir, entry: entry, directory_name: name.copy()})
+            !is_entry_mode(mode) -> {
+                shown_mode: if mode == .Val(found) -> js_text(found) else -> "missing"
+                skip_entry(catalog, js_text(entry_name(entry)), "mode {shown_mode}", "mode {shown_mode} is not batch")
+            }
+            else -> catalog.loaded.push(LoadedEntry{dir: dir, entry: entry, directory_name: name.copy(), name_declared: name_declared})
+        }
+    }
+    catalog
+}
+
+// Leaves the entry `name` out for `reason`, warning that it skipped `what`.
+skip_entry: fn(catalog: &EntryCatalog, name: String, what: String, reason: String) {
+    eprint("WARN {name}: skipped {what}")
+    catalog.skipped.push(SkippedEntry{name: name.copy(), reason: reason})
+}
+
+// What is wrong with the shape of a loaded entry against `matrix`, in the
+// order found: its HTTP probes, its name and mode, its languages, its
+// not-applicable and metric-applicability facts, its matrix cells, and each
+// applicable language's authoring or sourced provenance.
+entry_shape_issues: fn(item: LoadedEntry, matrix: Dyn) -> [String] {
+    entry: item.entry
+    name: js_text(entry_name(entry))
+    issues := http_service_probe_issues(entry)
+    if !item.name_declared -> issues.push("{item.directory_name}: entry.json must declare name")
+    if text_at(entry, "name") != Val(item.directory_name) -> issues.push("{item.directory_name}: entry.name is {json.stringify(entry_name(entry))}")
+    mode: member(entry, "mode")
+    if !is_entry_mode(mode) -> issues.push("{name}: unsupported mode {if mode == .Val(found) -> js_text(found) else -> "missing"}")
+    declared: items_at(entry, "languages")
+    issues.extend(language_issues(name, member(entry, "languages") ?? Dyn.Null))
+    non_applicable: value_at(entry, "non_applicable")
+    if non_applicable == .Val(facts) {
+        if facts == {
+            .Object(rows) -> loop row in rows {
+                if !declared.contains(Dyn.Text(row.key)) -> issues.push("{name}/{row.key}: non_applicable language is not declared")
+                issues.extend(applicability_fact_issues(name, row.key, "", row.value))
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> issues.push("{name}: non_applicable must be an object")
+        }
+    }
+    if value_at(entry, "metric_applicability") == .Val(applicability) {
+        if applicability == {
+            .Object(rows) -> loop row in rows {
+                if !declared.contains(Dyn.Text(row.key)) -> issues.push("{name}/{row.key}: metric_applicability language is not declared")
+                issues.extend(metric_fact_issues(name, text_at(entry, "mode") ?? "", row.key, row.value))
+            }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> issues.push("{name}: metric_applicability must be an object")
+        }
+    }
+    cells: items_at(entry, "cells")
+    if {
+        cells.len() == 0 -> issues.push("{name}: cells must be a non-empty array")
+        else -> {
+            known_cells: items_at(matrix, "cells").filter_map(cell -> value_at(cell, "id")).collect()
+            loop cell in cells {
+                if !known_cells.contains(cell) -> issues.push("{name}: unknown matrix cell {js_text(cell)}")
+            }
+        }
+    }
+    authoring: member(entry, "authoring") ?? Dyn.object()
+    expert: member(entry, "expert") ?? Dyn.object()
+    loop language in declared {
+        key: js_text(language)
+        if truthy(member(non_applicable ?? Dyn.Null, key)) -> next
+        record: member(authoring, key) ?? member(expert, key) ?? Dyn.Null
+        issues.extend(provenance_issues("{name}/{key}", record))
+    }
+    issues
+}
+
+// What is wrong with an entry's `languages`: a non-empty array of distinct
+// rail languages, Jet among them.
+language_issues: fn(name: String, languages: Dyn) -> [String] {
+    declared: items_at(languages, "")
+    if declared.len() == 0 -> return ["{name}: languages must be a non-empty array"]
+    issues := [String]{}
+    if combinatorics.unique<String>(declared.map(language -> json.stringify(language))).len() != declared.len() -> issues.push("{name}: duplicate language declaration")
+    if !declared.contains(Dyn.Text("jet")) -> issues.push("{name}: missing default Jet rail")
+    loop language in declared {
+        known: if language == .Text(text) -> RAIL_LANGUAGES.contains(base_language(text)) else -> false
+        if !known -> issues.push("{name}: unsupported language {js_text(language)}")
+    }
+    issues
+}
+
+// What is wrong with the metric-applicability facts of `language` on the
+// entry `name` of `mode`: an object of facts, each for a metric the mode
+// compares or for every metric (`*`).
+metric_fact_issues: fn(name: String, mode: String, language: String, facts: Dyn) -> [String] {
+    if facts == {
+        .Object(rows) -> {
+            metrics: comparison_metrics(mode)
+            issues := [String]{}
+            loop fact in rows {
+                if fact.key != "*" && !metrics.contains(fact.key) -> issues.push("{name}/{language}/{fact.key}: unknown comparable metric")
+                issues.extend(applicability_fact_issues(name, language, fact.key, fact.value))
+            }
+            issues
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> ["{name}/{language}: metric_applicability must map metrics to facts"]
+    }
+}
+
+// What is wrong with one language's provenance `record` (`prefix` names the
+// entry and language): a sourced record names its author, source and
+// license; an authored one its author, notes, whole turns and retries, and
+// the diagnostics it hit.
+provenance_issues: fn(prefix: String, record: Dyn) -> [String] {
+    if !(record == .Object(_)) && !(record == .Array(_)) -> return ["{prefix}: missing authoring or sourced provenance"]
+    issues := [String]{}
+    if {
+        is_true(record, "sourced") -> loop required in ["author", "source", "license"] {
+            if (text_at(record, required) ?? "") == "" -> issues.push("{prefix}: sourced provenance missing {required}")
+        }
+        else -> {
+            loop required in ["author", "notes"] {
+                if text_at(record, required) == None -> issues.push("{prefix}: authoring provenance missing {required}")
+            }
+            loop count in ["turns", "retries"] {
+                value: number_at(record, count) ?? -1.0
+                if value < 0.0 || math.floor(value) < value -> issues.push("{prefix}: authoring provenance missing valid {count}")
+            }
+            if !(member(record, "diagnosticsHit") == .Val(.Array(_))) -> issues.push("{prefix}: authoring provenance missing diagnosticsHit")
+        }
+    }
+    issues
+}
+
+// What is wrong with the HTTP probes of a service entry: each must be an
+// object whose `expectHeaders` maps at least one trimmed, non-empty header
+// name to a string.
+http_service_probe_issues: fn(entry: Dyn) -> [String] {
+    issues := [String]{}
+    if text_at(entry, "mode") != Val("service") -> return issues
+    service: member(entry, "spec/service") ?? member(entry, "service") ?? Dyn.Null
+    protocol: member(service, "protocol") ?? Dyn.Text("http")
+    if protocol != Dyn.Text("http") || !(member(service, "probe") == .Val(.Array(_))) -> return issues
+    loop (index, probe) in items_at(service, "probe") {
+        prefix: "{js_text(entry_name(entry))}/service/probe[{index}]"
+        if !(probe == .Object(_)) {
+            issues.push("{prefix}: HTTP probe must be an object")
+            next
+        }
+        if !is_header_map(member(probe, "expectHeaders") ?? Dyn.Null) -> issues.push("{prefix}: expectHeaders must be a non-empty string map")
+    }
+    issues
+}
+
+// Whether `value` maps at least one header name, trimmed and non-empty, each
+// to a string.
+is_header_map: fn(value: Dyn) -> Bool {
+    if value == .Object(rows) {
+        return rows.len() > 0 && rows.all(row -> row.key != "" && row.key == row.key.trim() && row.value == .Text(_))
+    }
+    false
+}
+
+// What is wrong with a not-applicable fact of `language` on the entry `name`,
+// for one metric (`scope`) or the whole language (""): Jet is never
+// not-applicable, and a fact is an object with that status, a structural
+// basis, a reason and evidence.
+applicability_fact_issues: fn(name: String, language: String, scope: String, fact: Dyn) -> [String] {
+    prefix: if scope == "" -> "{name}/{language}" else -> "{name}/{language}/{scope}"
+    issues := [String]{}
+    if base_language(language) == "jet" -> issues.push("{prefix}: Jet cannot be not_applicable")
+    if !(fact == .Object(_)) {
+        issues.push("{prefix}: not_applicable fact must be an object")
+        return issues
+    }
+    if value_at(fact, "status") == .Val(status) {
+        if status != Dyn.Text("not_applicable") -> issues.push("{prefix}: not_applicable fact status must be not_applicable")
+    }
+    if !STRUCTURAL_NOT_APPLICABLE_BASES.contains(text_at(fact, "basis") ?? "") -> issues.push("{prefix}: not_applicable fact requires a structural basis")
+    loop required in ["reason", "evidence"] {
+        if (text_at(fact, required) ?? "").trim() == "" -> issues.push("{prefix}: not_applicable fact missing {required}")
+    }
+    issues
+}
+
+// The metrics an entry of `mode` compares.
+comparison_metrics: fn(mode: String) -> [String] {
+    if mode == {
+        "service" -> SERVICE_COMPARISON_METRICS
+        "web" | "web-app" -> WEB_COMPARISON_METRICS
+        else -> COMPARISON_METRICS
+    }
+}
+
+is_entry_mode: fn(mode: Dyn?) -> Bool {
+    if mode == .Val(.Text(text)) -> return ENTRY_MODES.contains(text)
+    false
+}
+
+// The entry's `name` (null when it has none).
+entry_name: fn(entry: Dyn) -> Dyn { value_at(entry, "name") ?? Dyn.Null }
+
+// Whether a value is present and not null, false, 0 or "".
+truthy: fn(value: Dyn?) -> Bool {
+    found: value ?? return false
+    truthy_at(found, "")
+}
+
+// A value as a JavaScript template literal shows it: a string as itself, an
+// array as its elements joined by commas, an object as `[object Object]`.
+js_text: fn(value: Dyn) -> String {
+    if value == {
+        .Text(text) -> text
+        .Null -> "null"
+        .Array(list) -> list.map(item -> if item == .Null -> "" else -> js_text(item)).join(",")
+        .Object(_) -> "[object Object]"
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> json.stringify(value)
+    }
+}
+
+#Test("a well-formed entry has no shape issues, and each departure is an issue in the order found") {
+    matrix: json.parse("{{\"cells\": [{{\"id\": \"text.kernel\"}}]}}")
+    authored: "{{\"author\": \"a\", \"notes\": \"\", \"turns\": 1, \"retries\": 0, \"diagnosticsHit\": []}}"
+    good: json.parse("{{\"name\": \"wc\", \"mode\": \"batch\", \"languages\": [\"jet\", \"rust\"], \"cells\": [\"text.kernel\"], \"authoring\": {{\"jet\": {authored}, \"rust\": {authored}}}}}")
+    assert_eq(entry_shape_issues(LoadedEntry{dir: "wc", entry: good, directory_name: "wc", name_declared: true}, matrix), [String]{})
+    bad: json.parse("{{\"name\": \"wc\", \"mode\": \"batch\", \"languages\": [\"rust\", \"rust\"], \"cells\": [\"text.other\"], \"non_applicable\": {{\"jet\": {{\"basis\": \"taste\"}}}}}}")
+    assert_eq(entry_shape_issues(LoadedEntry{dir: "wc2", entry: bad, directory_name: "wc2", name_declared: true}, matrix), [
+        "wc2: entry.name is \"wc\"",
+        "wc: duplicate language declaration",
+        "wc: missing default Jet rail",
+        "wc/jet: non_applicable language is not declared",
+        "wc/jet: Jet cannot be not_applicable",
+        "wc/jet: not_applicable fact requires a structural basis",
+        "wc/jet: not_applicable fact missing reason",
+        "wc/jet: not_applicable fact missing evidence",
+        "wc: unknown matrix cell text.other",
+        "wc/rust: missing authoring or sourced provenance",
+        "wc/rust: missing authoring or sourced provenance",
+    ])
+}
+
+#Test("a service probe needs an object with a non-empty map of trimmed header names to strings") {
+    entry: json.parse("{{\"name\": \"svc\", \"mode\": \"service\", \"service\": {{\"probe\": [{{\"expectHeaders\": {{\"a\": \"b\"}}}}, 3, {{\"expectHeaders\": {{}}}}, {{\"expectHeaders\": {{\" a\": \"b\"}}}}]}}}}")
+    assert_eq(http_service_probe_issues(entry), ["svc/service/probe[1]: HTTP probe must be an object", "svc/service/probe[2]: expectHeaders must be a non-empty string map", "svc/service/probe[3]: expectHeaders must be a non-empty string map"])
+    assert_eq(js_text(json.parse("[1, null, \"x\"]")), "1,,x")
+}

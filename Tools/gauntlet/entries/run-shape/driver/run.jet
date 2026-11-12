@@ -1,0 +1,63 @@
+// The gauntlet driver of the kit's Shape module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-shape.mjs: the corpus-entry exports of
+// Tools/gauntlet/harness/run.mjs, loadEntries and validateEntryShape.
+//
+//   jet driver entries DIR | shapes MATRIX DIR | corpus
+//
+// DIR holds one directory per entry, MATRIX is a gauntlet matrix.json, and
+// corpus checks the repository's own entries against its matrix. A skipped
+// entry's reason is shown up to its first ": ", since what follows is the
+// engine's own wording of a read or parse failure.
+package: {
+    name: "run_shape_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[entry_shape_issues, load_entries, read_json, value_at]
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver entries DIR | shapes MATRIX DIR | corpus"
+
+// This program is Tools/gauntlet/entries/run-shape/driver/run.jet.
+repo_root: fn() -> String {
+    files.absolute(files.join(files.dirname(sys.executable()), "../../../../.."))
+}
+
+// The JSON file `name`.
+input: fn(name: String) -> Dyn {
+    read_json(name) ?? process.fail(1, "{name} is not a JSON file")
+}
+
+print_shapes: fn(matrix: Dyn, dir: String) {
+    issues := [String]{}
+    loop item in load_entries(dir, None).loaded -> issues.extend(entry_shape_issues(item, matrix))
+    loop issue in issues -> print(issue)
+    print("{issues.len()} issues")
+}
+
+run: fn() {
+    args: process.args()
+    command: args.get(0) ?? ""
+    if {
+        command == "entries" && args.len() >= 2 -> {
+            catalog: load_entries(args[1], None)
+            loop item in catalog.loaded -> print("loaded\t{item.directory_name}\t{json.stringify(value_at(item.entry, "name") ?? Dyn.Null)}\t{item.name_declared}")
+            loop item in catalog.tools -> print("tool\t{item.directory_name}")
+            loop item in catalog.skipped -> print("skipped\t{item.name}\t{item.reason.split(": ").collect()[0]}")
+        }
+        command == "shapes" && args.len() >= 3 -> print_shapes(input(args[1]), args[2])
+        command == "corpus" -> {
+            repo: repo_root()
+            print_shapes(input(files.join(repo, "Tools/gauntlet/matrix.json")), files.join(repo, "Tools/gauntlet/entries"))
+        }
+        else -> process.fail(64, USAGE)
+    }
+}
