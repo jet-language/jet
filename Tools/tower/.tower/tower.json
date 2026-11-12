@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100070,
+    "rev": 100071,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95387,12 +95387,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Comparing a resource optional with None (`lock != None` where lock is FileLock?) checks and runs on O0, O1 and O2 instead of an ICE in ir.build (unlowered); a case pins it.",
+          "text": "Comparing a value with None checks in sema on every type: a FileLock? (from files.try_lock) compared with None runs true or false on O0, O1 and O2, and a value whose type can never be None (for example the plain FileLock that `try_lock(p) ?? panic(..)` yields) is E0109 in sema, never an ir.build ICE. A case pins both sides.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-10T01:07:51.145Z"
+          "at": "2026-11-12T19:50:09.409Z"
         }
       ],
       "refs": [],
@@ -95401,7 +95401,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T22:39:37.102Z",
-      "updated": "2026-11-10T01:07:51.145Z",
+      "updated": "2026-11-12T19:50:09.409Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -199958,6 +199958,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T19:50:09.409Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0e4cn5v",
+      "note": "#1: G5DevX-1 reproduced the root on seed-b13: the ICE came from E0109 leaving declared struct types open, so a never-None FileLock passed check, not from FileLock? itself, which already runs.; was: Comparing a resource optional with None (`lock != None` where lock is FileLock?) checks and runs on O0, O1 and O2 instead of an ICE in ir.build (unlowered); a case pins it."
+    },
     {
       "at": "2026-11-12T19:45:36.569Z",
       "by": "Main",
