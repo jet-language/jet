@@ -1,0 +1,74 @@
+// Comments, documentation and marker arguments stay apart. The `///` lines
+// above a declaration document it, read up past its markers and any other
+// comment until a blank line or other code. A marker's arguments are values,
+// so a `//` inside one is text. TypeInfo, FieldInfo, MethodInfo and
+// FunctionInfo each list their declaration's documentation, and ModuleInfo
+// lists every comment written in its file.
+Note: struct {
+    text: String
+
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
+/// A customer's order.
+// Checked at checkout.
+/// Totals are in cents.
+#Note("// a marker argument, /* as written */")
+Order: struct {
+    /// The order's number.
+    id: Int
+    // Not documentation.
+    total: Int /* in cents */
+
+    /// The total in whole dollars.
+    dollars: fn(self) -> Int { self.total / 100 }
+}
+
+/// Joins comment texts with " / ".
+joined: fn(comments: [CommentInfo]) -> String {
+    texts := [String]{}
+    loop comment in comments -> texts.push(comment.text)
+    texts.join(" / ")
+}
+
+ORDER: #run joined(Order.reflect().documentation)
+ID: #run joined(Order.reflect().fields[0].documentation)
+TOTAL: #run joined(Order.reflect().fields[1].documentation)
+DOLLARS: #run joined(Order.reflect().methods[0].documentation)
+NOTE: #run { Order.reflect().marker(Note)?.text ?? "none" }
+
+build: fn(b: Build) {
+    loop function in b.program.functions() {
+        if function.name == "joined" -> b.contribute("function", joined(function.documentation))
+    }
+    loop package in b.program.packages() {
+        if package.name != "comments_and_docs" -> next
+        loop written in package.modules {
+            lines := 0
+            blocks := 0
+            docs := 0
+            argument := false
+            loop comment in written.comments {
+                if comment.kind == {
+                    .Line -> lines += 1
+                    .Block -> blocks += 1
+                    .Documentation -> docs += 1
+                }
+                if comment.text.contains("a marker argument") -> argument = true
+            }
+            b.contribute("comments", "{written.name}: {lines} line, {blocks} block, {docs} documentation; marker argument read as a comment: {argument}")
+        }
+    }
+}
+
+run: fn() {
+    print("Order: [{ORDER}]")
+    print("Order.id: [{ID}]")
+    print("Order.total: [{TOTAL}]")
+    print("Order.dollars: [{DOLLARS}]")
+    print("Order's Note: {NOTE}")
+    print("joined: [{#build.settings.function}]")
+    print(#build.settings.comments)
+}

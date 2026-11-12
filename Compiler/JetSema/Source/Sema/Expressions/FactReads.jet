@@ -114,6 +114,7 @@ sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
         enum_name == "ParamAccess" -> Val([String]{"Read", "Write", "Move"})
         enum_name == "CallingConvention" -> Val([String]{"Jet", "Kernel", "Foreign"})
         enum_name == "ContributionKind" -> Val([String]{"Declaration", "Profile", "Build", "CommandLine"})
+        enum_name == "CommentKind" -> Val([String]{"Line", "Block", "Documentation"})
         enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
         else -> None
     }
@@ -274,6 +275,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
             else -> None
         }
     }
@@ -432,6 +434,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "signature" -> Val(sema_fact_named("CallableSignature"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
             field == "reaches_panic" -> Val(Type.Bool)
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -462,6 +465,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "types" -> Val(sema_fact_list_of("TypeInfo"))
             field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            field == "comments" -> Val(sema_fact_list_of("CommentInfo"))
             else -> None
         }
     }
@@ -477,6 +481,14 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "value" || field == "source" -> Val(string)
             field == "kind" -> Val(sema_fact_named("ContributionKind"))
             field == "selected" -> Val(Type.Bool)
+            else -> None
+        }
+    }
+    if type_name == "CommentInfo" {
+        return if {
+            field == "text" -> Val(string)
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "kind" -> Val(sema_fact_named("CommentKind"))
             else -> None
         }
     }
@@ -508,6 +520,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "is_pub" -> Val(Type.Bool)
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
             else -> None
         }
     }
@@ -524,6 +537,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "default" -> Val(Type.Option{inner: sema_fact_named("DefaultInfo")})
             field == "offset" -> Val(Type.Option{inner: Type.Int})
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "documentation" -> Val(sema_fact_list_of("CommentInfo"))
             else -> None
         }
     }

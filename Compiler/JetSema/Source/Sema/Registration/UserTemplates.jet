@@ -607,8 +607,8 @@ sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: In
 
 // A code module's rules see its ModuleInfo, the record a PackageInfo lists
 // for each of its modules: its name and identity, the TypeInfo of each struct
-// and enum, the FunctionInfo of each function written in its body and the
-// module's own written markers.
+// and enum, the FunctionInfo of each function written in its body, the
+// module's own written markers and the comments written in it.
 sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_index: Int, code_module: CodeModule, generated: &[Item], diagnostics: &[Diagnostic]) {
     items: graph.modules[module_index].program.items
     module_info := CtValue?{None}
@@ -643,12 +643,14 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
     }
     written: sema_comptime_reflection_written_markers(graph, module_row.module_identity, module_row.program, sema_user_template_catalog(), code_module.markers, registry) ?? return None
     markers: sema_user_template_ct_values(written) ?? return None
+    comments: sema_comptime_reflection_comments(sema_comptime_reflection_source(module_row.source), code_module.span.start, code_module.span.end)
     Val(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
         NamedCtValue{name: "name", value: CtValue.Str{value: code_module.name}},
         NamedCtValue{name: "identity", value: CtValue.Str{value: "{module_row.module_name}::{code_module.name}"}},
         NamedCtValue{name: "types", value: CtValue.List{values: types}},
         NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
         NamedCtValue{name: "markers", value: CtValue.List{values: markers}},
+        NamedCtValue{name: "comments", value: CtValue.List{values: sema_user_template_ct_values(comments) ?? return None}},
     }})
 }
 
@@ -656,7 +658,8 @@ sema_user_template_module_info: fn(graph: SemaRegistrationGraph, module_index: I
 // name, identity and version, a ModuleInfo for each of its modules in load
 // order, the TypeInfo of each struct, enum and distinct type and the
 // FunctionInfo of each function its modules write, and its effective
-// settings with their origins. A file module carries no written markers.
+// settings with their origins. A file module carries no written markers;
+// its ModuleInfo lists every comment of its file.
 sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
     modules := [CtValue]{}
     types := [CtValue]{}
@@ -684,12 +687,14 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
         types.extend(module_types.copy())
         // copy: as above, for the functions.
         functions.extend(module_functions.copy())
+        comments: sema_comptime_reflection_written_comments(sema_comptime_reflection_source(module_row.source), module_row.source_segments)
         modules.push(CtValue.Struct{type_name: "ModuleInfo", fields: [NamedCtValue]{
             NamedCtValue{name: "name", value: CtValue.Str{value: module_row.module_name}},
             NamedCtValue{name: "identity", value: CtValue.Str{value: module_row.module_name}},
             NamedCtValue{name: "types", value: CtValue.List{values: module_types}},
             NamedCtValue{name: "functions", value: CtValue.List{values: module_functions}},
             NamedCtValue{name: "markers", value: CtValue.List{values: [CtValue]{}}},
+            NamedCtValue{name: "comments", value: CtValue.List{values: sema_user_template_ct_values(comments) ?? return None}},
         }})
     }
     Val(CtValue.Struct{type_name: "PackageInfo", fields: [NamedCtValue]{

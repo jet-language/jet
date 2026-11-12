@@ -354,6 +354,29 @@ run: fn() {
 }
 ```
 
+Each declaration record also lists its `documentation`: the `///` lines
+written directly above the declaration, in order, read up past its markers,
+its `pub` or `priv` and any other comment, until a blank line or other code.
+A `ModuleInfo` lists every comment written in its file as `comments`. Both
+hold `CommentInfo` records: the comment's `text` without its `//`, `///` or
+`/* */` and one space after the opening, its `span`, and its `kind`
+(`CommentKind.Line`, `.Block` or `.Documentation`). The lexer finds the
+comments, so a `//` inside a string or a marker's argument stays text: a
+marker's arguments are read only through `marker(M)`.
+
+```jet
+/// A customer's order.
+// Checked at checkout.
+#Codable
+Order: struct { id: Int }
+
+run: fn() {
+    docs: Order.reflect().documentation
+    print(docs.len())     // 1
+    print(docs[0].text)   // A customer's order.
+}
+```
+
 A `TypeInfo` lists what the type implements and binds, and the form of a number:
 
 - `traits` has one `TraitInfo` per trait the type implements, with its `name`,

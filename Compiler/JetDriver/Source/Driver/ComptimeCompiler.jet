@@ -53,7 +53,7 @@ use {
         jet_eval_compiler_services_string,
     ]
     jet_pkg_model.[AuthorityError, AuthorityResolver]
-    jet_sema.[sema_comptime_reflection_callable_signature]
+    jet_sema.[sema_comptime_reflection_callable_signature, sema_comptime_reflection_doc_source, sema_comptime_reflection_documentation]
 }
 
 JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
@@ -284,6 +284,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
         .RetainedCheckedProjection(_) -> JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` returned a retained projection", "a compile-time check query asks for its compiler value", "report this compiler bug")}
         .Failed -> {
             functions := [TComptimeValue]{}
+            module_text: sema_comptime_reflection_doc_source(text)
             loop item in parsed.parsed.program.items {
                 if item == .Func(function) && function.name != "build" {
                     functions.push(TComptimeValue.Struct{type_name: "FunctionInfo", fields: [TComptimeField]{
@@ -299,6 +300,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
                         TComptimeField{name: "markers", value: TComptimeValue.List{values: []}},
                         // The failed check registered no module, so no source places the function.
                         TComptimeField{name: "location", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceLocation"}}}},
+                        TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(module_text, Val(function.name_span))}},
                     }})
                 }
             }

@@ -73,6 +73,20 @@ use jet_foundation.[
     ast_comptime_value_show,
     type_name,
 ]
+use jet_lexer.[
+    TOKEN_BLOCK_COMMENT,
+    TOKEN_DOT,
+    TOKEN_HASH,
+    TOKEN_IDENT,
+    TOKEN_KW_PRIV,
+    TOKEN_KW_PUB,
+    TOKEN_LINE_COMMENT,
+    TOKEN_LPAREN,
+    TOKEN_RPAREN,
+    TOKEN_SEMI,
+    Token,
+    lex,
+]
 
 SemaComptimeReflectionField: struct {
     name: String
@@ -144,31 +158,197 @@ sema_comptime_reflection_location: fn(segments: [SemaSourceSegment], module_path
     absent
 }
 
-// `value` with a `location` on each declaration record in it (TypeInfo,
-// FieldInfo, MethodInfo, FunctionInfo), read from the record's `span` in
-// `segments`. A record that already has one keeps it. A generic instance
-// bound later keeps its definition's location.
-sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourceSegment], module_path: String) -> TComptimeValue Never! {
+// `value` with a `location` and a `documentation` on each declaration record
+// in it (TypeInfo, FieldInfo, MethodInfo, FunctionInfo), read from the
+// record's `span` in `segments` and in `source`. A record that already has
+// one keeps it. A generic instance bound later keeps its definition's.
+sema_comptime_reflection_located: fn(value: TComptimeValue, segments: [SemaSourceSegment], module_path: String, source: SemaComptimeReflectionSource) -> TComptimeValue Never! {
     if value == {
         .Struct(record, fields) -> {
-            located := loop field in fields -> TComptimeField{name: field.name, value: sema_comptime_reflection_located(field.value, segments, module_path)}
+            located := loop field in fields -> TComptimeField{name: field.name, value: sema_comptime_reflection_located(field.value, segments, module_path, source)}
             declaration: record == "TypeInfo" || record == "FieldInfo" || record == "MethodInfo" || record == "FunctionInfo"
             if declaration {
                 span := Span?{None}
                 has_location := false
+                has_documentation := false
                 loop field in fields {
                     if field.name == "span" -> span = sema_comptime_reflection_span_of(field.value)
                     if field.name == "location" -> has_location = true
+                    if field.name == "documentation" -> has_documentation = true
                 }
                 if !has_location -> located.push(TComptimeField{name: "location", value: sema_comptime_reflection_location(segments, module_path, span)})
+                if !has_documentation -> located.push(TComptimeField{name: "documentation", value: TComptimeValue.List{values: sema_comptime_reflection_documentation(source, span)}})
             }
             TComptimeValue.Struct{type_name: record, fields: located}
         }
-        .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_located(item, segments, module_path)}
-        .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_located(inner, segments, module_path)}
+        .List(values) -> TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_located(item, segments, module_path, source)}
+        .Present(inner) -> TComptimeValue.Present{value: sema_comptime_reflection_located(inner, segments, module_path, source)}
         // copy: a scalar leaf of the producer's value; the caller keeps the original
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Failed(_) | .Unit -> value.copy()
     }
+}
+
+// A module's text as reflection reads its comments: the bytes its spans
+// index and their tokens, comments included. The lexer finds the comments,
+// so a `//` inside a string or a marker argument stays text.
+SemaComptimeReflectionSource: struct {
+    bytes: [U8]
+    tokens: [Token]
+}
+
+// The source of a declaration made by no file: no comments.
+sema_comptime_reflection_no_source: fn() -> SemaComptimeReflectionSource Never! {
+    SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}}
+}
+
+// `source` with its tokens.
+sema_comptime_reflection_source: fn(source: String) -> SemaComptimeReflectionSource {
+    bytes: source.bytes()
+    lexed: lex(bytes)
+    SemaComptimeReflectionSource{bytes: bytes, tokens: lexed.tokens}
+}
+
+// `source` read for its declarations' documentation: a text with no `///`
+// documents nothing, so it isn't lexed.
+sema_comptime_reflection_doc_source: fn(source: String) -> SemaComptimeReflectionSource {
+    if !source.contains("///") -> return sema_comptime_reflection_no_source()
+    sema_comptime_reflection_source(source)
+}
+
+// `token`'s CommentKind: `Documentation` for a `///` line, `Line` for any
+// other `//` line, `Block` for `/* … */`; None for a token that isn't a
+// comment.
+sema_comptime_reflection_comment_kind: fn(source: SemaComptimeReflectionSource, token: Token) -> String? Never! {
+    if token.kind == TOKEN_BLOCK_COMMENT -> return Val("Block")
+    if token.kind != TOKEN_LINE_COMMENT -> return None
+    at: token.span.start
+    slashes := 0
+    loop at + slashes < token.span.end && at + slashes < source.bytes.len() && source.bytes[at + slashes] == (U8{47}) -> slashes += 1
+    Val(if slashes == 3 -> "Documentation" else -> "Line")
+}
+
+// A comment token as a CommentInfo: its text without the `//`, `///` or
+// `/* */` and one space after the opening, where it is written, and its kind.
+sema_comptime_reflection_comment_info: fn(source: SemaComptimeReflectionSource, token: Token) -> TComptimeValue? Never! {
+    kind: sema_comptime_reflection_comment_kind(source, token) ?? return None
+    if token.span.start < 0 || token.span.end > source.bytes.len() -> return None
+    start := token.span.start + 2
+    if kind == "Documentation" -> start += 1
+    end := token.span.end
+    if kind == "Block" && end - start >= 2 -> end -= 2
+    if end > start && source.bytes[end - 1] == (U8{13}) -> end -= 1
+    if start < end && source.bytes[start] == (U8{32}) -> start += 1
+    text := ""
+    if start < end -> text = String.from_bytes(source.bytes[start..<end]) ?? return None
+    Val(sema_comptime_reflection_struct("CommentInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "text", value: TComptimeValue.String{value: text}},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(token.span)},
+        SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "CommentKind", variant: kind, args: [TComptimeEnumArg]{}}},
+    }))
+}
+
+// Every comment of `source` between byte `start` and byte `end`, in order.
+sema_comptime_reflection_comments: fn(source: SemaComptimeReflectionSource, start: Int, end: Int) -> [TComptimeValue] Never! {
+    comments := [TComptimeValue]{}
+    loop token in source.tokens {
+        if token.span.start < start || token.span.end > end -> next
+        comment: sema_comptime_reflection_comment_info(source, token) ?? next
+        comments.push(comment)
+    }
+    comments
+}
+
+// A ModuleInfo's `comments`: every comment written in the module's source
+// files, in order. Code the compiler generated into the module writes none.
+sema_comptime_reflection_written_comments: fn(source: SemaComptimeReflectionSource, segments: [SemaSourceSegment]) -> [TComptimeValue] Never! {
+    if segments.len() == 0 -> return sema_comptime_reflection_comments(source, 0, source.bytes.len())
+    comments := [TComptimeValue]{}
+    loop segment in segments {
+        if segment.origin == SemaSourceOrigin.CompilerGenerated -> next
+        comments.extend(sema_comptime_reflection_comments(source, segment.generated.start, segment.generated.end))
+    }
+    comments
+}
+
+// The newlines in `bytes` from `start` up to `end`.
+sema_comptime_reflection_newlines: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    count := 0
+    loop index in start..<end {
+        if index >= 0 && index < bytes.len() && bytes[index] == (U8{10}) -> count += 1
+    }
+    count
+}
+
+// The `///` comments that document the declaration whose name is written at
+// `name`, in source order: reading up from the name past its markers
+// (`#M`, `#M(…)`), its `pub` or `priv` and any other comment, each `///`
+// line counts until a blank line or any other code. Marker arguments are
+// tokens, never comments, so a `///` inside one is text.
+sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource, name: Span?) -> [TComptimeValue] Never! {
+    site: name ?? return [TComptimeValue]{}
+    tokens: source.tokens
+    if tokens.len() == 0 || site.end <= site.start -> return [TComptimeValue]{}
+    cursor := tokens.len() - 1
+    loop (index, token) in tokens {
+        if token.span.start >= site.start {
+            cursor = index - 1
+            break
+        }
+    }
+    below := site.start
+    // The `///` tokens, bottom up.
+    found := [Int]{}
+    loop cursor >= 0 {
+        kind: tokens[cursor].kind
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
+            if sema_comptime_reflection_comment_kind(source, tokens[cursor]) == (Val("Documentation")) {
+                if sema_comptime_reflection_newlines(source.bytes, tokens[cursor].span.end, below) > 1 -> break
+                found.push(cursor)
+            }
+            below = tokens[cursor].span.start
+            cursor -= 1
+            next
+        }
+        if kind == TOKEN_SEMI || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
+            below = tokens[cursor].span.start
+            cursor -= 1
+            next
+        }
+        // A marker: `#`, its dotted name, then any arguments in parentheses.
+        start := cursor
+        if kind == TOKEN_RPAREN {
+            depth := 0
+            loop start >= 0 {
+                if tokens[start].kind == TOKEN_RPAREN -> depth += 1
+                if tokens[start].kind == TOKEN_LPAREN {
+                    depth -= 1
+                    if depth == 0 -> break
+                }
+                start -= 1
+            }
+            start -= 1
+            if start < 0 -> break
+            // `priv(package)`.
+            if tokens[start].kind == TOKEN_KW_PRIV {
+                below = tokens[start].span.start
+                cursor = start - 1
+                next
+            }
+        }
+        named := start
+        loop start >= 0 && (tokens[start].kind == TOKEN_IDENT || tokens[start].kind == TOKEN_DOT) -> start -= 1
+        if start == named || start < 0 || tokens[start].kind != TOKEN_HASH -> break
+        below = tokens[start].span.start
+        cursor = start - 1
+    }
+    documentation := [TComptimeValue]{}
+    index := found.len() - 1
+    loop index >= 0 {
+        comment: sema_comptime_reflection_comment_info(source, tokens[found[index]]) ?? break
+        documentation.push(comment)
+        index -= 1
+    }
+    documentation
 }
 
 sema_comptime_reflection_state_path: fn(owner: String, state: String) -> String Never! {
@@ -1420,7 +1600,7 @@ sema_comptime_reflection_function_info: fn(function: Func, module_name: String, 
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: markers}},
     })
-    sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module))
+    sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source))
 }
 
 sema_comptime_reflection_append_methods: fn(methods: [Func], module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, values: &[TComptimeValue]) {
@@ -1596,7 +1776,7 @@ sema_comptime_reflection_builtin_type_info: fn(graph: SemaRegistrationGraph, nam
         sema_comptime_reflection_numeric_info(Val(number)),
         None,
     )
-    Val(sema_comptime_reflection_located(info, [SemaSourceSegment]{}, ""))
+    Val(sema_comptime_reflection_located(info, [SemaSourceSegment]{}, "", sema_comptime_reflection_no_source()))
 }
 
 sema_comptime_reflection_append_trait_contract: fn(
@@ -1987,8 +2167,9 @@ sema_comptime_reflection_type_info: fn(
     // The public identity qualifies by module name, as FunctionInfo does; the internal module key is not user surface.
     identity := "{registered_module.module_name}::{type_name}"
     constants: sema_comptime_reflection_constants(graph, SemaRegistrationRowRef{module_index: index, row: nominal_row})
-    // Each record names where its declaration is written.
+    // Each record names where its declaration is written and its documentation.
     module_path: sema_comptime_reflection_module_of(registered_module)
+    source: sema_comptime_reflection_doc_source(registered_module.source)
     if declaration == {
         .Struct(definition) -> {
             state_graph := SemaStateGraphFact?{None}
@@ -1998,10 +2179,10 @@ sema_comptime_reflection_type_info: fn(
                     break
                 }
             }
-            Val(sema_comptime_reflection_located(sema_comptime_reflection_struct_type_info(definition, registered_module, identity, engine, registry, state_graph, constants), registered_module.source_segments, module_path))
+            Val(sema_comptime_reflection_located(sema_comptime_reflection_struct_type_info(definition, registered_module, identity, engine, registry, state_graph, constants), registered_module.source_segments, module_path, source))
         }
-        .Enum(definition) -> Val(sema_comptime_reflection_located(sema_comptime_reflection_enum_type_info(definition, registered_module, identity, engine, registry, constants), registered_module.source_segments, module_path))
-        .Distinct(definition) -> Val(sema_comptime_reflection_located(sema_comptime_reflection_distinct_type_info(definition, registered_module, identity, engine, registry, constants), registered_module.source_segments, module_path))
+        .Enum(definition) -> Val(sema_comptime_reflection_located(sema_comptime_reflection_enum_type_info(definition, registered_module, identity, engine, registry, constants), registered_module.source_segments, module_path, source))
+        .Distinct(definition) -> Val(sema_comptime_reflection_located(sema_comptime_reflection_distinct_type_info(definition, registered_module, identity, engine, registry, constants), registered_module.source_segments, module_path, source))
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }

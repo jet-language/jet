@@ -121,7 +121,8 @@ vocabulary](vocabulary.md).
   derive reads there: a struct's or enum's TypeInfo, a field's or variant's
   FieldInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
   TypeInfo, a code module's ModuleInfo (`name`, `identity`, `types`,
-  `functions` and its written `markers`), the package's PackageInfo for a
+  `functions`, its written `markers` and its `comments`), the package's
+  PackageInfo for a
   `.Package` marker, and a `.Block`'s text
   (Examples/Metaprogramming/Reflection/MarkerSites.jet). A marker on the
   package record is a header line above `package.jet`'s first field
@@ -138,6 +139,16 @@ vocabulary](vocabulary.md).
   or `CommandLine`) and whether it is the `selected` writer. The build takes
   its settings from the built package alone, so any other package lists none
   (Examples/Metaprogramming/Reflection/PackageSettings).
+  Comments, documentation and marker arguments stay distinct. A TypeInfo,
+  FieldInfo, MethodInfo or FunctionInfo lists its declaration's
+  `documentation`: the `///` lines written directly above it, read up past
+  its markers, its `pub` or `priv` and any other comment, until a blank line
+  or other code. A ModuleInfo lists every comment written in its file as
+  `comments`. Each is a CommentInfo: its `text` without the `//`, `///` or
+  `/* */` and one space after the opening, its `span`, and its `kind`
+  (CommentKind: `Line`, `Block` or `Documentation`). The lexer finds
+  comments, so a `//` inside a string or a marker argument is text
+  (Examples/Metaprogramming/Reflection/CommentsAndDocs).
   The template's row is `Meta.Generate`, which `expand` may write as
   `-[Meta.Generate]>`; a read-only lint writes `-[]>` and may reject or warn
   but writes no declaration (E0775). Reading the program needs no effect,
