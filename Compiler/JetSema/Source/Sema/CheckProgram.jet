@@ -2487,6 +2487,17 @@ sema_comptime_find_checked_function: fn(functions: [SemaComptimeFunctionResult],
     Val(functions[row])
 }
 
+// The functions of `functions` but those whose keys `keys` holds.
+sema_comptime_functions_without: fn(functions: [SemaComptimeFunctionResult], keys: [String]) -> [SemaComptimeFunctionResult] Never! {
+    dropped := [String:Bool]{}
+    loop key in keys -> dropped[key] = true
+    kept := [SemaComptimeFunctionResult]{}
+    loop function in functions {
+        if dropped.get(function.function_key) == None -> kept.push(function.copy())
+    }
+    kept
+}
+
 // `module\nkey` -> the first row of that function in `functions`, built once
 // per check pass rather than rescanning the list for every checked function.
 sema_comptime_checked_function_rows: fn(functions: [SemaComptimeFunctionResult]) -> [String:Int] Never! {
@@ -9737,7 +9748,12 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
             rechecked := [SemaGraphModuleResult]{}
             // The projected contracts change the rows the pass facts read.
             recheck_facts := [SemaPassFacts]{}
-            after_recheck_graph := sema_finalize_check_modules(after_body_graph, values, comptime_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, recheck_facts, rechecked)
+            // A body checked for compile-time execution was checked against
+            // the contract its function had before the solve: one whose
+            // contract a union projection changed is checked again with its
+            // callers, which read the projected one.
+            recheck_functions: if unions.keys.len() == 0 -> comptime_functions else -> sema_comptime_functions_without(comptime_functions, unions.keys)
+            after_recheck_graph := sema_finalize_check_modules(after_body_graph, values, recheck_functions, checked_types, recheck, false, hook_access, threads, None, "sema.recheck", trace_sink, recheck_facts, rechecked)
             // One rechecked result per `recheck` row, in order: each moves
             // into its module's slot, last row first.
             loop rechecked.len() > 0 {

@@ -7384,10 +7384,21 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
                 ir_store_at(m, p, b, boxed, 0, payload)
                 return boxed
             }
+            // A Result's success is an Ok box holding it.
+            if ir_untag(ty) == .Result(ok_ty, _) {
+                payload: ir_comptime(m, p, b, ok_ty, inner, span)
+                if ir_failed(b) -> return -1
+                return ir_result_box(m, p, b, ty, true, payload)
+            }
             return ir_fail_slot(b, span, "present constant of {ir_type_name(ty)}")
         }
         .List(values) -> {
-            if ir_sequence_element(ty) == .Val(element) {
+            // A Pool is laid out as the List of its entries.
+            element_ty := ir_sequence_element(ty)
+            if element_ty == None {
+                if ir_pool_inner(ty) == .Val(inner) -> element_ty = Val(ir_pool_entry_type(inner))
+            }
+            if element_ty == .Val(element) {
                 element_row: ir_value_type(m, p, element) ?? return ir_type_fail(b, span, element)
                 elements := [Int]{}
                 loop item in values {
@@ -7646,9 +7657,12 @@ ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
 
 // An enum constant: a payload-free enum's variant index, else a new box
 // with the discriminant and each payload member's compile-time value
-// (positional, or by member name).
+// (positional, or by member name). A union's constant is a case of its
+// structural enum, the variant its member's tag names.
 ir_comptime_enum: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg], span: Span) -> Int Never! {
-    nominal: ir_nominal_name(ir_untag(ty)) ?? return ir_fail_slot(b, span, "enum constant of {ir_type_name(ty)}")
+    written: ir_untag(ty)
+    union_key: if written == .Union(_) -> Val(ir_union_key(written)) else -> String?{None}
+    nominal: union_key ?? ir_nominal_name(written) ?? return ir_fail_slot(b, span, "enum constant of {ir_type_name(ty)}")
     row: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return ir_fail_slot(b, span, "enum constant of {ir_type_name(ty)}")
     index: ir_variant_index(p, row, variant) ?? return ir_fail_slot(b, span, "variant {variant} not in {nominal}")
     if m.types[slot_type].kind != .Pointer {
