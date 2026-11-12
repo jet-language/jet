@@ -9,7 +9,7 @@
 // turns both off. Replay and invalidation notices show only under `--verbose`
 // (#3721: a clean check prints one line).
 use {
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverVerbOutput]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverVerbOutput, JET_DRIVER_RUN_RECEIPT_MAX_BYTES, JetDriverRecordLink, JetDriverRunReceipt, JetDriverRunReceiptInput, JetDriverRunReceiptSection, jet_driver_run_receipt_decode, jet_driver_run_receipt_digest, jet_driver_run_receipt_encode, jet_driver_run_receipt_frame, jet_driver_run_receipt_is_digest]
     jet_foundation.[BUILD_REUSE_SAVED_WORK]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
     cli_files: core.files
@@ -24,7 +24,7 @@ JetCLICheckRecording: struct {
     project_root: String
     context_key: String
     identity: [U8]
-    inputs: [JetCLIReceiptInput]
+    inputs: [JetDriverRunReceiptInput]
     argv: [String]
     target: String
 }
@@ -114,24 +114,24 @@ jet_cli_check_receipt_paths: fn(cache: &WorkspaceDeclarationCache, cwd: String, 
 // Rust `append_context_path`: a label, the canonical path and what is there
 // now (a file by its digest).
 jet_cli_check_context_path: fn(identity: &[U8], label: String, path: String) Never! -[FS]> {
-    jet_cli_receipt_frame(identity, label.bytes())
-    jet_cli_receipt_frame(identity, (cli_files.realpath(path) ?? path).bytes())
+    jet_driver_run_receipt_frame(identity, label.bytes())
+    jet_driver_run_receipt_frame(identity, (cli_files.realpath(path) ?? path).bytes())
     info: cli_files.stat(path) ?? {
-        jet_cli_receipt_frame(identity, (if jet_cli_rooted_missing(err) -> "missing" else -> "unreadable").bytes())
+        jet_driver_run_receipt_frame(identity, (if jet_cli_rooted_missing(err) -> "missing" else -> "unreadable").bytes())
         return
     }
     if {
-        info.is_symlink -> jet_cli_receipt_frame(identity, "symlink".bytes())
+        info.is_symlink -> jet_driver_run_receipt_frame(identity, "symlink".bytes())
         info.is_file -> {
-            jet_cli_receipt_frame(identity, "file".bytes())
+            jet_driver_run_receipt_frame(identity, "file".bytes())
             digest: if cli_files.read_bytes(path) == {
                 .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
                 .Err(_) -> "unreadable"
             }
-            jet_cli_receipt_frame(identity, digest.bytes())
+            jet_driver_run_receipt_frame(identity, digest.bytes())
         }
-        info.is_dir -> jet_cli_receipt_frame(identity, "directory".bytes())
-        else -> jet_cli_receipt_frame(identity, "other".bytes())
+        info.is_dir -> jet_driver_run_receipt_frame(identity, "directory".bytes())
+        else -> jet_driver_run_receipt_frame(identity, "other".bytes())
     }
 }
 
@@ -139,20 +139,20 @@ jet_cli_check_context_path: fn(identity: &[U8], label: String, path: String) Nev
 // and entry-selection state, so a newly created higher-priority entry
 // candidate or authority changes the claim even before it is an input.
 jet_cli_check_context_identity: fn(cache: &WorkspaceDeclarationCache, cwd: String, identity: &[U8]) Never! -[FS, Env]> {
-    jet_cli_receipt_frame(identity, "check-context-v2".bytes())
+    jet_driver_run_receipt_frame(identity, "check-context-v2".bytes())
     jet_cli_check_context_path(identity, "working-directory", cwd)
     loop root in jet_cli_receipt_authority_roots(cache, cwd) {
         jet_cli_check_context_path(identity, "package-root", root)
         loop (priority, relative) in JET_CLI_STOCK_ENTRIES {
-            jet_cli_receipt_frame(identity, "entry-candidate".bytes())
-            jet_cli_receipt_frame(identity, "{priority}".bytes())
+            jet_driver_run_receipt_frame(identity, "entry-candidate".bytes())
+            jet_driver_run_receipt_frame(identity, "{priority}".bytes())
             jet_cli_check_context_path(identity, "path", jet_cli_rooted_join(root, relative))
         }
         loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}) {
             jet_cli_check_context_path(identity, name, jet_cli_rooted_join(root, name))
         }
         generated: jet_cli_rooted_join(root, ".jet/generated")
-        jet_cli_receipt_frame(identity, "generated-inputs".bytes())
+        jet_driver_run_receipt_frame(identity, "generated-inputs".bytes())
         jet_cli_check_context_path(identity, "root", generated)
         files := [String]{}
         jet_cli_check_tree_inputs(generated, files)
@@ -161,18 +161,18 @@ jet_cli_check_context_identity: fn(cache: &WorkspaceDeclarationCache, cwd: Strin
 }
 
 // The canonical, observed inputs at `paths`.
-jet_cli_check_receipt_inputs: fn(paths: [String]) -[FS, Time.Wait]> [JetCLIReceiptInput] JetCLIReadError! {
-    inputs := [JetCLIReceiptInput]{}
+jet_cli_check_receipt_inputs: fn(paths: [String]) -[FS, Time.Wait]> [JetDriverRunReceiptInput] JetCLIReadError! {
+    inputs := [JetDriverRunReceiptInput]{}
     loop path in paths {
         canonical: cli_files.realpath(path) ?? return Err(jet_cli_read_error("could not canonicalize input {path}: {jet_cli_io_error_text(err)}"))
-        inputs.push(jet_cli_receipt_observe_input(JetCLIReceiptInput{path: canonical, digest: ""}))
+        inputs.push(jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: canonical, digest: ""}))
     }
     Ok(inputs)
 }
 
 // The receipt the context pointer names, when it is a well-formed check
 // receipt stored under its own claim key.
-jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS, Time.Wait]> JetCLIReceipt? JetCLIReadError! {
+jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS, Time.Wait]> JetDriverRunReceipt? JetCLIReadError! {
     contexts: [String]{".jet", "receipts", "contexts"}
     if !JetCLIRootedDirectory.present(project_root, contexts) -> return Ok(None)
     pointers: JetCLIRootedDirectory.open(project_root, contexts, false)
@@ -182,23 +182,23 @@ jet_cli_check_receipt_stored: fn(project_root: String, context_key: String) -[FS
         .Err(error) -> { return Err(error) }
     }
     key: String.from_bytes(pointer) ?? return Ok(None)
-    if !jet_cli_receipt_is_digest(key) -> return Ok(None)
+    if !jet_driver_run_receipt_is_digest(key) -> return Ok(None)
     objects: [String]{".jet", "receipts", "objects"}
     if !JetCLIRootedDirectory.present(project_root, objects) -> return Ok(None)
     held: JetCLIRootedDirectory.open(project_root, objects, false)
-    raw: if held.read(key, JET_CLI_RECEIPT_MAX_BYTES) == {
+    raw: if held.read(key, JET_DRIVER_RUN_RECEIPT_MAX_BYTES) == {
         .Val(bytes) -> bytes
         .None -> { return Ok(None) }
         .Err(error) -> { return Err(error) }
     }
-    receipt: jet_cli_receipt_decode(raw) ?? return Ok(None)
+    receipt: jet_driver_run_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim.key != key || receipt.claim.verb != "check" -> return Ok(None)
     Ok(Val(receipt))
 }
 
 // Rust `changed_receipt_inputs`: paths whose digest changed, vanished or
 // newly appeared, sorted and unique.
-jet_cli_check_receipt_changes: fn(old: [JetCLIReceiptInput], new: [JetCLIReceiptInput]) -> [String] Never! {
+jet_cli_check_receipt_changes: fn(old: [JetDriverRunReceiptInput], new: [JetDriverRunReceiptInput]) -> [String] Never! {
     changed := [String]{}
     loop input in old {
         same := false
@@ -225,7 +225,7 @@ jet_cli_check_receipt_changes: fn(old: [JetCLIReceiptInput], new: [JetCLIReceipt
 
 // Rust `replay_receipt`: the stored output under the current secret values,
 // then (verbose) the replay notice.
-jet_cli_check_receipt_replay: fn(receipt: JetCLIReceipt, argv: [String], notice: String, verbose: Bool) -[Env]> JetDriverVerbOutput? Never! {
+jet_cli_check_receipt_replay: fn(receipt: JetDriverRunReceipt, argv: [String], notice: String, verbose: Bool) -[Env]> JetDriverVerbOutput? Never! {
     secrets: jet_cli_receipt_secret_values(argv)
     stdout_bytes: jet_cli_receipt_redact_bytes(receipt.stdout, secrets) ?? return None
     stderr_bytes: jet_cli_receipt_redact_bytes(receipt.stderr, secrets) ?? return None
@@ -238,7 +238,7 @@ jet_cli_check_receipt_replay: fn(receipt: JetCLIReceipt, argv: [String], notice:
 // Rust `lookup_context` after the pointer: the stored closure is checked as
 // it stands now, with the authority paths rediscovered so a new entry
 // candidate cannot hide behind it. A mismatch says why under `--verbose`.
-jet_cli_check_receipt_current: fn(receipt: JetCLIReceipt, identity: [U8], paths: [String], args: [String], notice: String, verbose: Bool) -> JetDriverVerbOutput? {
+jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], paths: [String], args: [String], notice: String, verbose: Bool) -> JetDriverVerbOutput? {
     current_paths := paths
     loop input in receipt.claim.inputs {
         if jet_cli_receipt_regular(input.path) -> current_paths.push(input.path)
@@ -253,7 +253,7 @@ jet_cli_check_receipt_current: fn(receipt: JetCLIReceipt, identity: [U8], paths:
         }
         return None
     }
-    if receipt.digest != jet_cli_receipt_digest(receipt) {
+    if receipt.digest != jet_driver_run_receipt_digest(receipt) {
         if verbose -> jet_cli_write_notice("receipt: check invalidated (receipt authentication changed)\n")
         return None
     }
@@ -314,12 +314,12 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
 
 // Each source a compile read, at the digest of the bytes it read; None when
 // one of them is gone, so the outcome is not recorded.
-jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> [JetCLIReceiptInput]? Never! {
-    inputs := [JetCLIReceiptInput]{}
+jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> [JetDriverRunReceiptInput]? Never! {
+    inputs := [JetDriverRunReceiptInput]{}
     loop root in snapshot.roots {
         loop file in root.files {
             path: cli_files.realpath(file.path) ?? return None
-            inputs.push(JetCLIReceiptInput{path: path, digest: receipt_crypto.sha256(file.source.bytes()).hex()})
+            inputs.push(JetDriverRunReceiptInput{path: path, digest: receipt_crypto.sha256(file.source.bytes()).hex()})
         }
     }
     Val(inputs)
@@ -328,7 +328,7 @@ jet_cli_check_snapshot_inputs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -
 // Rust `persist_published_receipt` and `index_published_receipt`. The claim
 // is the pre-compile inputs plus each `compiled` source outside them;
 // publication refuses a closure that changed meanwhile.
-jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetCLIReceiptInput]) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetDriverRunReceiptInput]) JetCLIReadError! -[FS, Env, Time]> {
     inputs := recording.inputs
     known := [String]{}
     loop input in inputs -> known.push(input.path)
@@ -338,7 +338,7 @@ jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriv
         inputs.push(input.copy())
     }
     claim: jet_cli_receipt_claim_of("check", recording.identity, inputs)
-    receipt: jet_cli_receipt_prepare(claim, output.exit_code, output.stdout.bytes(), output.stderr.bytes(), [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, jet_cli_receipt_secret_values(recording.argv))
+    receipt: jet_cli_receipt_prepare(claim, output.exit_code, output.stdout.bytes(), output.stderr.bytes(), [JetDriverRunReceiptSection]{}, [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, jet_cli_receipt_secret_values(recording.argv))
     _: jet_cli_receipt_publish(recording.project_root, receipt)
     current: jet_cli_receipt_lookup(recording.project_root, claim) ?? return
     pointers: JetCLIRootedDirectory.open(recording.project_root, [String]{".jet", "receipts", "contexts"}, true)
@@ -347,12 +347,12 @@ jet_cli_check_receipt_store: fn(recording: JetCLICheckRecording, output: JetDriv
     target: jet_cli_receipt_target_identity(cache, recording.target, claim.inputs)
     index := jet_cli_record_index_load(recording.project_root)
     identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
-    entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", jet_cli_receipt_encode(current).len(), current.consumed, current.produced, false)
+    entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", jet_driver_run_receipt_encode(current).len(), current.consumed, current.produced, false)
     jet_cli_record_index_upsert_many_and_store(index, recording.project_root, [JetCLIRecordIndexEntry]{entry})
 }
 
 // A Jet defect (status 101) is never a receipt.
-jet_cli_check_receipt_publish: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetCLIReceiptInput]) {
+jet_cli_check_receipt_publish: fn(recording: JetCLICheckRecording, output: JetDriverVerbOutput, compiled: [JetDriverRunReceiptInput]) {
     if output.exit_code == JET_CLI_EXIT_ICE -> return
     if jet_cli_check_receipt_store(recording, output, compiled) == .Err(error) {
         jet_cli_write_notice(jet_cli_history_notice("staging optional receipt job", error.message))

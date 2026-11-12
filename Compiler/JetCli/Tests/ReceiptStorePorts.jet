@@ -4,10 +4,9 @@
 // and jet_cli_receipt_list. A Rust store directory is a Jet project root: its
 // objects live under.jet/receipts/objects.
 use {
+    jet_driver.[JetDriverRecordLink, JetDriverRunReceipt, JetDriverRunReceiptClaim, JetDriverRunReceiptSection]
     jet_cli.[
-        JetCLIReceipt, JetCLIReceiptClaim, JetCLIReceiptSection, JetCLIRecordLink, jet_cli_comparison_input_paths,
-        jet_cli_receipt_claim, jet_cli_receipt_list, jet_cli_receipt_lookup, jet_cli_receipt_prepare,
-        jet_cli_receipt_publish,
+        jet_cli_comparison_input_paths, jet_cli_receipt_claim, jet_cli_receipt_list, jet_cli_receipt_lookup, jet_cli_receipt_prepare, jet_cli_receipt_publish,
     ]
     jet_pkg_model.[WorkspaceDeclarationCache]
     rsp_files: core.files
@@ -38,21 +37,21 @@ rsp_write: fn(path: String, text: String) -[FS]> {
     rsp_files.write(path, text) ?? panic("write {path}")
 }
 
-rsp_claim: fn(verb: String, args: [String], paths: [String]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim {
+rsp_claim: fn(verb: String, args: [String], paths: [String]) -[FS, Env, Time.Wait]> JetDriverRunReceiptClaim {
     jet_cli_receipt_claim(verb, paths, args, RSP_TERMINAL) ?? panic("claim {verb}: {err.message}")
 }
 
 // The Rust store.write(&claim, &args, status, stdout, stderr). Like the Rust
 // ReceiptStore::new, the store root is created first; the Jet store opens it.
-rsp_publish: fn(store: String, claim: JetCLIReceiptClaim, stdout: String) -[FS, Env, Time.Wait]> {
+rsp_publish: fn(store: String, claim: JetDriverRunReceiptClaim, stdout: String) -[FS, Env, Time.Wait]> {
     rsp_files.create_dir_all(store) ?? panic("create store root {store}")
-    receipt: jet_cli_receipt_prepare(claim, 0, stdout.bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, [String]{}) ?? panic("prepare: {err.message}")
+    receipt: jet_cli_receipt_prepare(claim, 0, stdout.bytes(), [U8]{}, [JetDriverRunReceiptSection]{}, [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, [String]{}) ?? panic("prepare: {err.message}")
     published: jet_cli_receipt_publish(store, receipt) ?? panic("publish: {err.message}")
     assert(published, "a new receipt is published as a new immutable object")
 }
 
 // The Rust store.lookup(&claim).unwrap().is_some().
-rsp_current: fn(store: String, claim: JetCLIReceiptClaim) -[FS, Time.Wait]> Bool {
+rsp_current: fn(store: String, claim: JetDriverRunReceiptClaim) -[FS, Time.Wait]> Bool {
     if jet_cli_receipt_lookup(store, claim) == {
         .Val(_) -> return true
         .None -> return false
@@ -61,7 +60,7 @@ rsp_current: fn(store: String, claim: JetCLIReceiptClaim) -[FS, Time.Wait]> Bool
 }
 
 // The Rust store.list().
-rsp_list: fn(store: String) -[FS, Time.Wait]> [JetCLIReceipt] {
+rsp_list: fn(store: String) -[FS, Time.Wait]> [JetDriverRunReceipt] {
     jet_cli_receipt_list(store) ?? panic("list: {err.message}")
 }
 
@@ -160,7 +159,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     store: "{root}/store"
     args: [String]{"act"}
     kinds: [String]{"test", "golden", "budget", "api"}
-    claims := [JetCLIReceiptClaim]{}
+    claims := [JetDriverRunReceiptClaim]{}
     magic := "jet-receipt-v2".bytes()
     magic.push(U8{0})
 

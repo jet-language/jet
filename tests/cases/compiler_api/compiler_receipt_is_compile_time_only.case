@@ -1,0 +1,8 @@
+# `core.compiler.receipt` reads a run's receipt for build and comptime code
+# only: a runtime call is refused while checking (#4276 c97).
+fixture: compiler_receipt_is_compile_time_only.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1

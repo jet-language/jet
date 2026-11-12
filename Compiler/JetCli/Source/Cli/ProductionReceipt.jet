@@ -5,6 +5,7 @@
 // entry, and digests of its source, closure, arguments and target, never a
 // source, argument or environment value.
 use {
+    jet_driver.[jet_driver_run_receipt_frame]
     cli_files: core.files
     cli_sys: core.sys
     production_crypto: core.crypto
@@ -40,8 +41,8 @@ jet_cli_production_receipt_env: fn(file: String, program_args: [String]) -> [Jet
 
     closure := "jet-production-closure-v1".bytes()
     closure.push(U8{0})
-    jet_cli_receipt_frame(closure, entry.bytes())
-    jet_cli_receipt_frame(closure, source_digest.bytes())
+    jet_driver_run_receipt_frame(closure, entry.bytes())
+    jet_driver_run_receipt_frame(closure, source_digest.bytes())
     package: jet_cli_manifest_root(jet_cli_parent(source_file) ?? ".")
     jet_cli_production_project_input(closure, package, root, "manifest")
     jet_cli_production_project_input(closure, package, root, "lock")
@@ -49,7 +50,7 @@ jet_cli_production_receipt_env: fn(file: String, program_args: [String]) -> [Jet
 
     inputs := "jet-production-inputs-v1".bytes()
     inputs.push(U8{0})
-    loop argument in program_args -> jet_cli_receipt_frame(inputs, argument.bytes())
+    loop argument in program_args -> jet_driver_run_receipt_frame(inputs, argument.bytes())
     input_digest: jet_cli_source_hash(inputs)
     count: "{program_args.len()}"
     count_digest: jet_cli_source_hash(count.bytes())
@@ -57,11 +58,11 @@ jet_cli_production_receipt_env: fn(file: String, program_args: [String]) -> [Jet
 
     identity := "jet-production-failure-v1".bytes()
     identity.push(U8{0})
-    jet_cli_receipt_frame(identity, entry.bytes())
-    jet_cli_receipt_frame(identity, source_digest.bytes())
-    jet_cli_receipt_frame(identity, closure_digest.bytes())
-    jet_cli_receipt_frame(identity, input_digest.bytes())
-    jet_cli_receipt_frame(identity, JET_CLI_PRODUCTION_TARGET.bytes())
+    jet_driver_run_receipt_frame(identity, entry.bytes())
+    jet_driver_run_receipt_frame(identity, source_digest.bytes())
+    jet_driver_run_receipt_frame(identity, closure_digest.bytes())
+    jet_driver_run_receipt_frame(identity, input_digest.bytes())
+    jet_driver_run_receipt_frame(identity, JET_CLI_PRODUCTION_TARGET.bytes())
     id: production_crypto.sha256(identity).hex()
     short: String.from_bytes(id.bytes().slice(0, 16)) ?? ""
     base: if root.ends_with("/") -> root.copy() else -> "{root}/"
@@ -105,10 +106,10 @@ jet_cli_production_project_input: fn(closure: &[U8], package: String?, root: Str
     found: package ?? return
     path: if kind == "manifest" -> "{found}/{PACKAGE_FILE}" else -> "{found}/{UNIFIED_LOCK_FILE}"
     bytes: cli_files.read_bytes(path) ?? return
-    jet_cli_receipt_frame(closure, kind.bytes())
+    jet_driver_run_receipt_frame(closure, kind.bytes())
     relative: jet_cli_production_relative(path, root) ?? kind.copy()
-    jet_cli_receipt_frame(closure, relative.bytes())
-    jet_cli_receipt_frame(closure, jet_cli_source_hash(bytes).bytes())
+    jet_driver_run_receipt_frame(closure, relative.bytes())
+    jet_driver_run_receipt_frame(closure, jet_cli_source_hash(bytes).bytes())
 }
 
 // jet's environment rows with `vars` set over them.

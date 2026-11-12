@@ -2,10 +2,9 @@
 // record is pinned byte for byte by COMPARISON_RECORD_ORACLE and by its
 // SHA-256, and the evidence report by its length and SHA-256.
 use {
+    jet_driver.[JetDriverRunReceiptInput, jet_driver_run_receipt_frame]
     jet_cli.[
-        JetCLIReceiptInput, jet_cli_comparison_evidence, jet_cli_comparison_parse,
-        jet_cli_receipt_argv_identity, jet_cli_receipt_canonical_member, jet_cli_receipt_frame,
-        jet_cli_receipt_secret_name,
+        jet_cli_comparison_evidence, jet_cli_comparison_parse, jet_cli_receipt_argv_identity, jet_cli_receipt_canonical_member, jet_cli_receipt_secret_name,
     ]
     jet_foundation.[canonical_json_bytes, comparison_record_to_json, evidence_report_encode]
     receipt_crypto: core.crypto
@@ -31,11 +30,11 @@ COMPARISON_RECORD_ORACLE: ```{"contamination":null,"discarded_cases":0,"first_di
     if !jet_cli_receipt_secret_name("--apiToken2") || !jet_cli_receipt_secret_name("--HTTPPassword") || jet_cli_receipt_secret_name("--monkey") -> panic("secret name components")
     argv: jet_cli_receipt_argv_identity([String]{"test-compare", "--apiToken2=hidden", "--password", "hidden", "corpus.json"})
     expected := [U8]{}
-    loop arg in ([String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"}) -> jet_cli_receipt_frame(expected, arg.bytes())
+    loop arg in ([String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"}) -> jet_driver_run_receipt_frame(expected, arg.bytes())
     if argv != expected -> panic("receipt argv redaction framing")
-    members := [JetCLIReceiptInput]{}
-    jet_cli_receipt_canonical_member(JetCLIReceiptInput{path: "/project/.jet/generated/cache.bin", digest: id}, "/project", members) ?? panic("generated exclusion")
+    members := [JetDriverRunReceiptInput]{}
+    jet_cli_receipt_canonical_member(JetDriverRunReceiptInput{path: "/project/.jet/generated/cache.bin", digest: id}, "/project", members) ?? panic("generated exclusion")
     if members.len() != 0 -> panic("generated inputs excluded from canonical target identity")
-    jet_cli_receipt_canonical_member(JetCLIReceiptInput{path: "/project/corpus.json", digest: id}, "/project", members) ?? panic("relative member")
+    jet_cli_receipt_canonical_member(JetDriverRunReceiptInput{path: "/project/corpus.json", digest: id}, "/project", members) ?? panic("relative member")
     if members.len() != 1 || members[0].path != "corpus.json" -> panic("canonical relative target path")
 }

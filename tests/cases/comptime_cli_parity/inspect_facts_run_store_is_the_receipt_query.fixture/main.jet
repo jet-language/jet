@@ -1,0 +1,32 @@
+use compiler: core.compiler
+
+Probe: struct {
+    id: Int
+}
+
+// The build reads the receipt `jet inspect facts --store=run` reads, with the
+// same `compiler.receipt`, makes the same query for each kind a run holds, and
+// reports the rows it read, the run's status, and the store's refusal of a
+// kind a run doesn't hold.
+build: fn(b: Build) {
+    receipt: compiler.receipt("run.receipt") ?? panic("the run store refused: {err}")
+    text := ""
+    count := 0
+    kinds: [compiler.FactKind]{compiler.FactKind.Claim, compiler.FactKind.Section, compiler.FactKind.Consumed, compiler.FactKind.Produced}
+    loop kind in kinds {
+        rows: compiler.query(compiler.FactSource.Run{receipt: receipt.copy()}, kind) ?? panic("the run store refused: {err}")
+        loop row in rows {
+            if row == .Run(fact) {
+                text = "{text}[{fact.name}  {fact.detail}  {fact.identity}]"
+                count += 1
+            }
+        }
+    }
+    marker: if compiler.query(compiler.FactSource.Run{receipt: receipt.copy()}, compiler.FactKind.Marker) == {
+        .Ok(_) -> "answered"
+        .Err(error) -> error.display()
+    }
+    b.error(b.program.types()[0].span, "FACTS", "{count} facts: {text} status={receipt.status} marker={marker}", "the build read the run store", "none: the report is the evidence")
+}
+
+run: fn() { print("ok") }

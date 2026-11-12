@@ -8,7 +8,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     prove_crypto: core.crypto
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_is_a11y_lint, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_is_a11y_lint, jet_driver_present_diagnostics, JetDriverRecordLink, JetDriverRunReceiptInput, jet_driver_run_receipt_frame]
     jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
         CanonicalJSONParser, ContractClause, DerivationDisposition, DerivationMethod, Diagnostic, DiagnosticMoment, Func, Item, Span,
@@ -74,7 +74,7 @@ JetCLIProveIdentity: struct {
     root: String
     authority_root: String
     input_sha256: String
-    members: [JetCLIReceiptInput]
+    members: [JetDriverRunReceiptInput]
     source_digest: String
     lock_digest: String
     build_digest: String
@@ -164,7 +164,7 @@ JetCLIProveProperty: struct {
 JetCLIProveTests: struct {
     items: [JetCLIProveTestItem]
     contracts: [JetCLIProveContract]
-    consumed: [JetCLIRecordLink]
+    consumed: [JetDriverRecordLink]
     exit_code: Int
     errors: String
 }
@@ -231,7 +231,7 @@ jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetC
             _journal_folder = Val(scratch.move())
         }
     }
-    tests := JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetCLIRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
+    tests := JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetDriverRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
     if failed == 0 {
         ran: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts, time_ms, journal) ?? return jet_cli_prove_refused(err, color, json)
         tests = ran
@@ -408,11 +408,11 @@ jet_cli_prove_collect_tests: fn(member: JetCLIProveMember, items: [Item], sites:
 // `resolve_target`'s digests. The hashed inputs are the members, every file
 // a front-end compile authorized, and the project authority files.
 jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMember], groups: [JetCLIProveGroup]) -[FS, Env, Time.Wait]> JetCLIProveIdentity JetCLIProveRefusal! {
-    inputs := [JetCLIReceiptInput]{}
-    loop member in members -> inputs.push(JetCLIReceiptInput{path: member.absolute, digest: member.sha256})
+    inputs := [JetDriverRunReceiptInput]{}
+    loop member in members -> inputs.push(JetDriverRunReceiptInput{path: member.absolute, digest: member.sha256})
     loop group in groups {
         loop file in group.files {
-            observed: jet_cli_receipt_observe_input(JetCLIReceiptInput{path: file, digest: ""}) ?? return Err(jet_cli_prove_target_refusal("couldn't read proof input `{file}`: {err.message}"))
+            observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: file, digest: ""}) ?? return Err(jet_cli_prove_target_refusal("couldn't read proof input `{file}`: {err.message}"))
             inputs.push(observed)
         }
     }
@@ -473,11 +473,11 @@ jet_cli_prove_field: fn(label: String, value: String) -> JetCLIProveField Never!
 // `proof_digest`: length-framed (label, value) pairs after ("schema", schema).
 jet_cli_prove_digest: fn(schema: String, fields: [JetCLIProveField]) -> String Never! {
     out := [U8]{}
-    jet_cli_receipt_frame(out, "schema".bytes())
-    jet_cli_receipt_frame(out, schema.bytes())
+    jet_driver_run_receipt_frame(out, "schema".bytes())
+    jet_driver_run_receipt_frame(out, schema.bytes())
     loop field in fields {
-        jet_cli_receipt_frame(out, field.label.bytes())
-        jet_cli_receipt_frame(out, field.value.bytes())
+        jet_driver_run_receipt_frame(out, field.label.bytes())
+        jet_driver_run_receipt_frame(out, field.value.bytes())
     }
     prove_crypto.sha256(out).hex()
 }
@@ -511,7 +511,7 @@ jet_cli_prove_mir_json: fn(digest: String, members: [JetCLIProveMember]) -> Stri
 // claim hash.
 jet_cli_prove_evidence_id: fn(identity: JetCLIProveIdentity, kind: String, origin: String, span: String, claim: String) -> String Never! {
     out := [U8]{}
-    loop field in ([String]{identity.input_sha256, kind, origin, span, prove_crypto.sha256(claim.bytes()).hex()}) -> jet_cli_receipt_frame(out, field.bytes())
+    loop field in ([String]{identity.input_sha256, kind, origin, span, prove_crypto.sha256(claim.bytes()).hex()}) -> jet_driver_run_receipt_frame(out, field.bytes())
     prove_crypto.sha256(out).hex()
 }
 
@@ -534,7 +534,7 @@ jet_cli_prove_front: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             origin_path: if diagnostic.origin == .Val(origin) -> origin.path.copy() else -> ""
             span_key: if diagnostic.span == .Val(span) -> "{span.start}:{span.end}" else -> "-"
             framed := [U8]{}
-            loop part in ([String]{diagnostic.code, origin_path, span_key, diagnostic.what}) -> jet_cli_receipt_frame(framed, part.bytes())
+            loop part in ([String]{diagnostic.code, origin_path, span_key, diagnostic.what}) -> jet_driver_run_receipt_frame(framed, part.bytes())
             key: prove_crypto.sha256(framed).hex()
             if seen.contains(key) -> next
             seen.push(key)
@@ -695,7 +695,7 @@ jet_cli_prove_fact: fn(identity: JetCLIProveIdentity, member: JetCLIProveMember,
 jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, declared: [JetCLIProveContract], time_ms: Int?, journal: JetCLIReplayJournal) -> JetCLIProveTests JetCLIProveRefusal! {
     items := [JetCLIProveTestItem]{}
     observed := [JetCLIProveObserved]{}
-    consumed := [JetCLIRecordLink]{}
+    consumed := [JetDriverRecordLink]{}
     exit_code := JET_DRIVER_EXIT_OK
     errors := ""
     requested: cli_sys.get("JET_PROP_SEED")
@@ -755,7 +755,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         bytes: evidence_report_encode(report) ?? return Err(jet_cli_prove_evidence_refusal("couldn't encode the test evidence of `{entry.path}`: {err.message}"))
         artifact: prove_crypto.sha256(bytes).hex()
         jet_cli_evidence_persist_at(identity.authority_root, report, bytes, artifact, report.revision.source, true) ?? return Err(jet_cli_prove_evidence_refusal("couldn't record the test evidence of `{entry.path}`: {err.message}"))
-        consumed.push(JetCLIRecordLink{kind: "evidence", artifact_id: artifact})
+        consumed.push(JetDriverRecordLink{kind: "evidence", artifact_id: artifact})
         stopped: jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, seed, items, observed)
         if stopped && jet_cli_prove_exit_rank(JET_CLI_EXIT_RUNTIME_STOP) > jet_cli_prove_exit_rank(exit_code) -> exit_code = JET_CLI_EXIT_RUNTIME_STOP
     }
@@ -1571,10 +1571,10 @@ jet_cli_prove_stop_text: fn(item: JetCLIProveTestItem) -[FS]> String Never! {
 // `.jet/proofs/<kind>/<name>/<artifact-id[0..16]>.jetproof` below the
 // authority root, published without replacement under the directory's lock,
 // then indexed as a protected proof record.
-jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetCLIRecordLink]) JetCLIProveRefusal! -[FS, Env, Time]> {
+jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetDriverRecordLink]) JetCLIProveRefusal! -[FS, Env, Time]> {
     report_id: prove_crypto.sha256("{report}\n".bytes()).hex()
     links := consumed.copy()
-    links.sort_by((left: JetCLIRecordLink, right: JetCLIRecordLink) -> if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind)
+    links.sort_by((left: JetDriverRecordLink, right: JetDriverRecordLink) -> if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind)
     consumed_json: "[{(loop link in links -> "{{\"artifact_id\":{foundation_json_quote(link.artifact_id)},\"kind\":{foundation_json_quote(link.kind)}}}").join(",")}]"
     produced_json: "[]"
     artifact_id: prove_crypto.sha256("{{\"consumed\":{consumed_json},\"produced\":{produced_json},\"report_id\":\"{report_id}\"}}\n".bytes()).hex()
@@ -1612,7 +1612,7 @@ jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed:
     }
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
     record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
-    entry: jet_cli_comparison_index_entry(index, record, "proof", artifact_id, relative, bytes.len(), links, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
+    entry: jet_cli_comparison_index_entry(index, record, "proof", artifact_id, relative, bytes.len(), links, [JetDriverRecordLink]{}, true) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
     jet_cli_record_index_publish_and_store(index, root, entry) ?? return Err(jet_cli_prove_artifact_refusal(err.message))
 }
 

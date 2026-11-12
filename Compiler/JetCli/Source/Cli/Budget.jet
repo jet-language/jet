@@ -15,7 +15,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     cli_time: core.time
-    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics, jet_driver_run_receipt_frame]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
     jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_identity, sema_budget_provider_kind, sema_budget_safe_relative_path]
     jet_pkg_model.[JET_VERSION]
@@ -423,8 +423,8 @@ jet_cli_budget_stdlib_id: fn(entry: String) -> String? {
     framed := [U8]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         bytes: cli_files.read_bytes(jet_cli_authority_path(toolchain, row.path)) ?? return None
-        jet_cli_receipt_frame(framed, row.path.bytes())
-        jet_cli_receipt_frame(framed, bytes)
+        jet_driver_run_receipt_frame(framed, row.path.bytes())
+        jet_driver_run_receipt_frame(framed, bytes)
     }
     Val(budget_crypto.sha256(framed).hex())
 }

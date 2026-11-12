@@ -6,6 +6,8 @@
 // path-based fallbacks; Core source declarations do not execute these services.
 use jet_foundation.[
     AccessConvention,
+    CORE_COMPILER_METADATA_ERROR,
+    CORE_COMPILER_RUN_RECEIPT,
     CORE_COMPILER_SCHEMA_SNAPSHOT,
     CallArg,
     Diagnostic,
@@ -44,7 +46,7 @@ sema_compiler_services_result: fn(value_name: String, error_name: String) -> Typ
 // Routing needs only membership, not an allocated typed argument contract.
 // This same predicate guards construction of the compiler query contract.
 sema_compiler_services_is_compiler_query: fn(module_name: String, member: String) -> Bool Never! {
-    module_name == "core.compiler" && (member == "lex" || member == "parse" || member == "check" || member == "source_map" || member == "manifest" || member == "package" || member == "lock" || member == "profiles" || member == "schema")
+    module_name == "core.compiler" && (member == "lex" || member == "parse" || member == "check" || member == "source_map" || member == "manifest" || member == "package" || member == "lock" || member == "profiles" || member == "schema" || member == "receipt")
 }
 
 sema_compiler_services_call_contract: fn(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
@@ -58,6 +60,19 @@ sema_compiler_services_call_contract: fn(module_name: String, member: String) ->
             result_type: Type.Named{name: CORE_COMPILER_SCHEMA_SNAPSHOT},
             failure_carrier: TFailureCarrier.Infallible,
         })
+        // A recorded run, read through the compiler's one receipt reader: the
+        // receipt file's path in, a Core-declared record or metadata failure out.
+        if member == "receipt" {
+            receipt := Type.Named{name: CORE_COMPILER_RUN_RECEIPT}
+            failure := Type.Named{name: CORE_COMPILER_METADATA_ERROR}
+            return Val(SemaCompilerServicesCallContract{
+                module_name: module_name,
+                member: member,
+                parameters: [Type]{Type.String},
+                result_type: Type.Result{ok: receipt.copy(), err: failure.copy()},
+                failure_carrier: TFailureCarrier.Result{success: receipt, error: failure},
+            })
+        }
         value_name := if {
             member == "lex" -> "CompilerLexed"
             member == "parse" -> "CompilerSyntaxTree"

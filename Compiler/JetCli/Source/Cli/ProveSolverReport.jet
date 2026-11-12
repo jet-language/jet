@@ -7,7 +7,7 @@
 // internal error (exit 101), never a result.
 use {
     prove_crypto: core.crypto
-    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, jet_driver_lowering_inputs]
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, jet_driver_lowering_inputs, jet_driver_run_receipt_frame]
     jet_foundation.[Diagnostic, Span, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all, foundation_json_quote]
 }
 
@@ -90,7 +90,7 @@ jet_cli_solver_obligation_id: fn(identity: JetCLIProveIdentity, kind: String, pa
         "{diagnostic_line_at(source, span.end)}", "{diagnostic_column_at(source, span.end)}",
         formula_sha,
     }
-    loop field in fields -> jet_cli_receipt_frame(out, field.bytes())
+    loop field in fields -> jet_driver_run_receipt_frame(out, field.bytes())
     prove_crypto.sha256(out).hex()
 }
 

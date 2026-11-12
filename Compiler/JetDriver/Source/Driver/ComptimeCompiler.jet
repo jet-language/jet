@@ -8,14 +8,23 @@
 // only their argument: no path, package or sibling source. The package views
 // (`manifest`, `package`, `lock`, `profiles`) read the compile's pinned
 // package root (ComptimePackageViews.jet). `schema` answers the running
-// toolchain's executable schema (jet_driver_compiler_schema).
+// toolchain's executable schema (jet_driver_compiler_schema); `receipt`
+// reads a recorded run's receipt file under that root through the one
+// run-receipt reader (RunReceipt.jet; jet_driver_compiler_receipt).
 use {
     jet_foundation.[
+        CORE_COMPILER_COMPILER_STAGE,
         CORE_COMPILER_FACT_KIND,
+        CORE_COMPILER_METADATA_ERROR,
+        CORE_COMPILER_METADATA_FAILURE,
+        CORE_COMPILER_PAIR,
+        CORE_COMPILER_RUN_RECEIPT,
         CORE_COMPILER_SCHEMA_FACT,
         CORE_COMPILER_SCHEMA_SNAPSHOT,
+        CORE_COMPILER_SCOPE_ID,
         CORE_COMPILER_SNAPSHOT_ID,
         CompilerThreads,
+        Diagnostic,
         Span,
         TComptimeEnumArg,
         TComptimeField,
@@ -38,10 +47,12 @@ use {
         jet_eval_compiler_services_source_map_value,
         jet_eval_compiler_services_int,
         jet_eval_compiler_services_lex,
+        jet_eval_compiler_services_option_span,
         jet_eval_compiler_services_parse,
         jet_eval_compiler_services_span,
         jet_eval_compiler_services_string,
     ]
+    jet_pkg_model.[AuthorityError, AuthorityResolver]
 }
 
 JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
@@ -87,6 +98,11 @@ JetDriverComptimeCompiler: struct {
                 return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
             }
             if query == "schema" -> return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_schema()})
+            if query == "receipt" {
+                path: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+                permit: self.context.guard_read()
+                return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_receipt(path, permit.value.root, span)})
+            }
             None
         }
     }
@@ -158,6 +174,82 @@ jet_driver_compiler_schema: fn() -> TComptimeValue Never! {
         TComptimeField{name: "id", value: identity},
         TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
     }}
+}
+
+// `compiler.receipt(path)`: the run receipt at `path` under the compile's
+// pinned root, read through the one run-receipt reader
+// (jet_driver_run_receipt_decode) as a `core.compiler.RunReceipt`. No file
+// there is `Unavailable` (a receipt exists once its run has emitted it), a
+// path the root's authority refuses is `Denied`, and bytes the reader refuses
+// are `Invalid`, with the reader's refusal as their diagnostic.
+jet_driver_compiler_receipt: fn(path: String, root: String, span: Span) -[FS, Env]> TComptimeValue Never! {
+    resolver: AuthorityResolver.open(root) ?? return jet_driver_compiler_receipt_denied(root, err, span)
+    bytes := [U8]{}
+    if resolver.checked_file(path) == {
+        .Ok(file) -> bytes = file.bytes
+        .Err(error) -> {
+            if !error.is_missing() -> return jet_driver_compiler_receipt_denied(root, error, span)
+            stage: TComptimeValue.Enum{type_name: CORE_COMPILER_COMPILER_STAGE, variant: "Emitted", args: [TComptimeEnumArg]{}}
+            return jet_driver_compiler_receipt_failed("Unavailable", [TComptimeEnumArg]{
+                TComptimeEnumArg{name: Val("required_stage"), value: stage},
+                TComptimeEnumArg{name: Val("reason"), value: jet_eval_compiler_services_string("no run receipt at `{path}`")},
+            }, span)
+        }
+    }
+    if jet_driver_run_receipt_decode(bytes) == {
+        .Ok(receipt) -> {
+            sections := [TComptimeValue]{}
+            loop section in receipt.sections -> sections.push(jet_driver_compiler_pair(section.name, section.type_name))
+            TComptimeValue.Present{value: TComptimeValue.Struct{type_name: CORE_COMPILER_RUN_RECEIPT, fields: [TComptimeField]{
+                TComptimeField{name: "path", value: jet_eval_compiler_services_string(path)},
+                TComptimeField{name: "status", value: jet_eval_compiler_services_int(receipt.status)},
+                TComptimeField{name: "digest", value: jet_eval_compiler_services_string(receipt.digest)},
+                TComptimeField{name: "claim", value: jet_driver_compiler_pair(receipt.claim.verb, receipt.claim.key)},
+                TComptimeField{name: "sections", value: TComptimeValue.List{values: sections}},
+                TComptimeField{name: "consumed", value: jet_driver_compiler_links(receipt.consumed)},
+                TComptimeField{name: "produced", value: jet_driver_compiler_links(receipt.produced)},
+            }}}
+        }
+        .Err(error) -> {
+            diagnostic: diagnostic_from_registry("E2105", Val(span), "`{path}` is not a valid run receipt: {error.message}", "a run receipt is read only when it decodes and its digest authenticates its body", "record the run again to write its receipt")
+            jet_driver_compiler_receipt_failed("Invalid", [TComptimeEnumArg]{
+                TComptimeEnumArg{name: None, value: jet_eval_compiler_services_diagnostic_values([Diagnostic]{diagnostic})},
+            }, span)
+        }
+    }
+}
+
+// A path the pinned root's authority refuses: `Denied` in that root.
+jet_driver_compiler_receipt_denied: fn(root: String, error: AuthorityError, span: Span) -> TComptimeValue Never! {
+    scope: TComptimeValue.Struct{type_name: CORE_COMPILER_SCOPE_ID, fields: [TComptimeField]{
+        TComptimeField{name: "name", value: jet_eval_compiler_services_string("package root `{root}`")},
+    }}
+    jet_driver_compiler_receipt_failed("Denied", [TComptimeEnumArg]{
+        TComptimeEnumArg{name: Val("scope"), value: scope},
+        TComptimeEnumArg{name: Val("reason"), value: jet_eval_compiler_services_string("{error.message()}: {jet_driver_package_authority_reason(error)}")},
+    }, span)
+}
+
+// `receipt`'s `MetadataError` with failure `variant(args)`, at the call.
+jet_driver_compiler_receipt_failed: fn(variant: String, args: [TComptimeEnumArg], span: Span) -> TComptimeValue Never! {
+    TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.Struct{type_name: CORE_COMPILER_METADATA_ERROR, fields: [TComptimeField]{
+        TComptimeField{name: "kind", value: TComptimeValue.Enum{type_name: CORE_COMPILER_METADATA_FAILURE, variant: variant, args: args}},
+        TComptimeField{name: "query", value: jet_eval_compiler_services_string("receipt")},
+        TComptimeField{name: "source", value: jet_eval_compiler_services_option_span(Val(span))},
+    }}}}
+}
+
+jet_driver_compiler_pair: fn(left: String, right: String) -> TComptimeValue Never! {
+    TComptimeValue.Struct{type_name: CORE_COMPILER_PAIR, fields: [TComptimeField]{
+        TComptimeField{name: "left", value: jet_eval_compiler_services_string(left)},
+        TComptimeField{name: "right", value: jet_eval_compiler_services_string(right)},
+    }}
+}
+
+// Record links as `core.compiler.Pair`s of record kind and artifact id.
+jet_driver_compiler_links: fn(links: [JetDriverRecordLink]) -> TComptimeValue Never! {
+    values: loop link in links -> jet_driver_compiler_pair(link.kind, link.artifact_id)
+    TComptimeValue.List{values: values}
 }
 
 // `check(syntax)`: the check query over the syntax tree's source. A source

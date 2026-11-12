@@ -10,8 +10,8 @@ use {
         jet_target_machine_errors_debug, jet_target_machine_use_default, jet_target_machine_validate,
         jet_target_programmer_missing_fact, jet_target_provider_identity, sha256_hex,
     ]
-    jet_driver.[jet_driver_target_machine_by_name]
-    jet_cli.[jet_cli_receipt_section_new]
+    jet_driver.[jet_driver_target_machine_by_name, JetDriverRunReceiptSection, jet_driver_run_receipt_section_new]
+    jet_cli.[jet_cli_read_error]
 }
 JET_CLI_FLASH_RECEIPT_SCHEMA: "jet.flash.receipt"
 JET_CLI_FLASH_PLAN_SCHEMA: "jet.flash.plan"
@@ -475,6 +475,6 @@ jet_cli_flash_receipt_to_json: fn(receipt: JetCLIFlashReceipt) -> CanonicalJSON 
     canonical_json_object(fields) ?? panic("flash receipt JSON keys are unique")
 }
 // Rust FlashReceipt::section.
-jet_cli_flash_receipt_section: fn(receipt: JetCLIFlashReceipt) -> JetCLIReceiptSection JetCLIReadError! {
-    jet_cli_receipt_section_new("flash", "FlashReceipt", canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
+jet_cli_flash_receipt_section: fn(receipt: JetCLIFlashReceipt) -> JetDriverRunReceiptSection JetCLIReadError! {
+    Ok(jet_driver_run_receipt_section_new("flash", "FlashReceipt", canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt))) ?? return Err(jet_cli_read_error(err.message)))
 }

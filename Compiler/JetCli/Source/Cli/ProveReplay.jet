@@ -16,7 +16,7 @@ use {
     prove_crypto: core.crypto
     replay_base64: core.encoding.base64
     replay_random: core.crypto.random
-    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverRecordLink, jet_driver_run_receipt_frame]
     jet_foundation.[
         BuildSettingOverride, CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Diagnostic, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
         canonical_json_bytes, canonical_json_value, import_alias, import_walk_bindings,
@@ -428,7 +428,7 @@ jet_cli_replay_io_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIPro
 
 jet_cli_replay_site_digest: fn(domain: String, identity: JetCLIProveIdentity, members: [JetCLIProveMember], operation: String) -> String Never! {
     out := [U8]{}
-    loop field in ([String]{domain, jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_cli_receipt_frame(out, field.bytes())
+    loop field in ([String]{domain, jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_driver_run_receipt_frame(out, field.bytes())
     prove_crypto.sha256(out).hex()
 }
 
@@ -840,7 +840,7 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     indexed: ".jet/replays/{name}"
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_unfinalized(err.message))
     record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
-    row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_unfinalized(err.message))
     Ok(indexed)
 }
@@ -917,7 +917,7 @@ jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> Str
     path: jet_cli_replay_record_path(record.name)
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: JET_VERSION, engine: "jet-prove-v1"}
-    row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_record_index_failed(err.message))
     Ok(path)
 }

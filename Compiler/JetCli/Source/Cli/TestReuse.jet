@@ -17,6 +17,7 @@
 // shared-memory tmpfs holds ordinary files a project (or a test runner's
 // staging) keeps there, so they key by content like any other file.
 use {
+    jet_driver.[jet_driver_run_receipt_frame]
     test_reuse_files: core.files
     test_reuse_sys: core.sys
     test_reuse_crypto: core.crypto
@@ -37,14 +38,14 @@ JetCLITestRead: struct { kind: String, name: String, print: String }
 jet_cli_test_reuse_at: fn(root: String, binary: String, settings: String, records_path: String) -> JetCLITestReuse? Never! {
     bytes: test_reuse_files.read_bytes(binary) ?? return None
     framed := [U8]{}
-    jet_cli_receipt_frame(framed, "jet-test-results-v1".bytes())
-    jet_cli_receipt_frame(framed, test_reuse_crypto.sha256(bytes).hex().bytes())
-    jet_cli_receipt_frame(framed, settings.bytes())
+    jet_driver_run_receipt_frame(framed, "jet-test-results-v1".bytes())
+    jet_driver_run_receipt_frame(framed, test_reuse_crypto.sha256(bytes).hex().bytes())
+    jet_driver_run_receipt_frame(framed, settings.bytes())
     names := test_reuse_sys.vars() ?? return None
     names.sort()
     loop name in names {
         if !name.starts_with("JET_") || name == JET_CLI_TEST_READS_ENV -> next
-        jet_cli_receipt_frame(framed, "{name}={test_reuse_sys.get(name) ?? ""}".bytes())
+        jet_driver_run_receipt_frame(framed, "{name}={test_reuse_sys.get(name) ?? ""}".bytes())
     }
     key: test_reuse_crypto.sha256(framed).hex()
     Val(JetCLITestReuse{store: "{root}/.jet/test-results/{key}", reads: "{records_path}.reads"})

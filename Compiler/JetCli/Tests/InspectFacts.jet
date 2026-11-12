@@ -1,7 +1,7 @@
 // `jet inspect facts` answers one concrete question, a store and a kind, and
 // answers it with `core.compiler.query` itself.
 use {
-    jet_cli.[jet_cli_facts_program, jet_cli_facts_program_query, jet_cli_plan]
+    jet_cli.[jet_cli_facts_program, jet_cli_facts_program_query, jet_cli_facts_run_program, jet_cli_plan]
     jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
 }
 
@@ -17,7 +17,7 @@ inspect_facts_refused: fn(argv: [String], what: String) Never! {
 
 #Test("inspect facts needs a store and a kind, and the schema store takes no SOURCE") {
     inspect_facts_refused([String]{"inspect", "facts", "--kind=marker"}, "needs a store")
-    inspect_facts_refused([String]{"inspect", "facts", "--store=ledger", "--kind=marker"}, "`--store=ledger` names no fact store; the stores are schema, program")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=ledger", "--kind=marker"}, "`--store=ledger` names no fact store; the stores are schema, program, run")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema"}, "needs a fact kind")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=field"}, "`--kind=field` names no fact kind")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=marker", "main.jet"}, "takes no SOURCE: `main.jet`")
@@ -59,4 +59,20 @@ inspect_facts_refused: fn(argv: [String], what: String) Never! {
         return
     }
     panic("`jet inspect facts --store=program --kind=marker-arg main.jet` is not a host inspect job")
+}
+
+#Test("the run store reads exactly one RECEIPT") {
+    inspect_facts_refused([String]{"inspect", "facts", "--store=run", "--kind=claim"}, "run store reads one recorded run: name its RECEIPT file")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=run", "--kind=claim", "a.receipt", "b.receipt"}, "run store reads one RECEIPT, not both `a.receipt` and `b.receipt`")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=run", "--kind=status", "a.receipt"}, "`--kind=status` names no fact kind")
+}
+
+#Test("the run store reads RECEIPT with compiler.receipt and runs the core.compiler query over it") {
+    program: jet_cli_facts_run_program("runs/build.receipt", "consumed")
+    assert(program.contains("if compiler.receipt(\"runs/build.receipt\") == {{"))
+    assert(program.contains("compiler.query(compiler.FactSource.Run{{receipt: receipt}}, compiler.FactKind.Consumed)"))
+    assert(program.contains("JET_FACTS_ANSWER: #run {{"))
+    // The path is a Jet string literal in the generated program.
+    quoted: jet_cli_facts_run_program("odd \"{{name}}\\.receipt", "claim")
+    assert(quoted.contains("compiler.receipt(\"odd \\\"{{{{name}}}}\\\\.receipt\")"))
 }

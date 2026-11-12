@@ -1,14 +1,16 @@
 // The Rust original read-only snapshot semantics. Filesystem publication
 // remains owned by the canonical store; this layer validates the graph before
 // any row, including a redacted row, is exposed to a CLI consumer.
+use jet_driver.[JetDriverRecordLink, jet_driver_record_kind_rank]
+
 jet_cli_record_key: fn(kind: String, artifact_id: String) -> String Never! {
-    rank: jet_cli_record_kind_rank(kind) ?? panic("validated record kind")
+    rank: jet_driver_record_kind_rank(kind) ?? panic("validated record kind")
     "{rank}/{artifact_id}"
 }
 
 jet_cli_record_entry_order: fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> Ordering Never! {
-    left_rank: jet_cli_record_kind_rank(left.kind) ?? panic("validated record kind")
-    right_rank: jet_cli_record_kind_rank(right.kind) ?? panic("validated record kind")
+    left_rank: jet_driver_record_kind_rank(left.kind) ?? panic("validated record kind")
+    right_rank: jet_driver_record_kind_rank(right.kind) ?? panic("validated record kind")
     (left_rank <=> right_rank).then(left.artifact_id <=> right.artifact_id).then(left.identity.target_inputs_sha256 <=> right.identity.target_inputs_sha256).then(left.identity.tool_version <=> right.identity.tool_version).then(left.identity.engine <=> right.identity.engine).then(left.path <=> right.path)
 }
 
@@ -112,8 +114,8 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
         if !authenticated && entry.capture == "sensitive" -> next
         row := entry
         if !authenticated {
-            consumed := [JetCLIRecordLink]{}
-            produced := [JetCLIRecordLink]{}
+            consumed := [JetDriverRecordLink]{}
+            produced := [JetDriverRecordLink]{}
             loop link in entry.consumed {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
                     consumed.push(link.copy())

@@ -2,7 +2,7 @@
 // remains visible, and status never runs a producer.
 use {
     jet_foundation.[canonical_json_bytes]
-    jet_driver.[JET_DRIVER_EXIT_OK]
+    jet_driver.[JET_DRIVER_EXIT_OK, JetDriverRunReceipt, jet_driver_run_receipt_query_sections]
     cli_files: core.files
 }
 JetCLIProjectClaim: struct {
@@ -36,7 +36,7 @@ jet_cli_project_status_target: fn(args: [String]) -> String? JetCLIReadError! {
     Ok(target)
 }
 
-jet_cli_project_status_matches: fn(receipt: JetCLIReceipt, target: String, directory: Bool) -[FS]> Bool Never! {
+jet_cli_project_status_matches: fn(receipt: JetDriverRunReceipt, target: String, directory: Bool) -[FS]> Bool Never! {
     loop input in receipt.claim.inputs {
         path: cli_files.realpath(input.path) ?? input.path
         if path == target || (directory && (target == "/" || path.starts_with("{target}/"))) -> return true
@@ -44,16 +44,16 @@ jet_cli_project_status_matches: fn(receipt: JetCLIReceipt, target: String, direc
     false
 }
 
-jet_cli_project_status_sections: fn(receipt: JetCLIReceipt) -> JetCLIStatusValue Never! {
-    value: jet_cli_receipt_query_sections(receipt.sections, None) ?? return jet_cli_status_object([JetCLIStatusField]{})
+jet_cli_project_status_sections: fn(receipt: JetDriverRunReceipt) -> JetCLIStatusValue Never! {
+    value: jet_driver_run_receipt_query_sections(receipt.sections, None) ?? return jet_cli_status_object([JetCLIStatusField]{})
     text: String.from_bytes(canonical_json_bytes(value)) ?? return jet_cli_status_object([JetCLIStatusField]{})
     jet_cli_status_value_parse(text) ?? jet_cli_status_object([JetCLIStatusField]{})
 }
 
-jet_cli_project_status_summarize: fn(root: String, receipts: [JetCLIReceipt], name: String, target: String) -[FS, Time.Wait]> JetCLIProjectClaim Never! {
-    success := JetCLIReceipt?{None}
-    failure := JetCLIReceipt?{None}
-    stale := JetCLIReceipt?{None}
+jet_cli_project_status_summarize: fn(root: String, receipts: [JetDriverRunReceipt], name: String, target: String) -[FS, Time.Wait]> JetCLIProjectClaim Never! {
+    success := JetDriverRunReceipt?{None}
+    failure := JetDriverRunReceipt?{None}
+    stale := JetDriverRunReceipt?{None}
     loop receipt in receipts {
         if jet_cli_receipt_lookup(root, receipt.claim) == {
             .Val(_) -> {
@@ -63,7 +63,7 @@ jet_cli_project_status_summarize: fn(root: String, receipts: [JetCLIReceipt], na
             .Err(_) -> failure = Val(receipt)
         }
     }
-    selected := JetCLIReceipt?{None}
+    selected := JetDriverRunReceipt?{None}
     state := "unproven"
     reason := "no receipt proves this claim"
     if failure != None {
@@ -128,19 +128,19 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
         .Ok(info) -> info.is_dir
         .Err(_) -> false
     }
-    by_verb := [String:[JetCLIReceipt]]{}
+    by_verb := [String:[JetDriverRunReceipt]]{}
     verbs := [String]{}
     loop receipt in receipts {
         if !jet_cli_project_status_matches(receipt, canonical, directory) -> next
         name: receipt.claim.verb
         if by_verb.get(name) == None {
             verbs.push(name.copy())
-            by_verb[name] = [JetCLIReceipt]{}
+            by_verb[name] = [JetDriverRunReceipt]{}
         }
         by_verb[name].push(receipt)
     }
     verbs.sort()
     rows := [JetCLIProjectClaim]{}
-    loop name in verbs -> rows.push(jet_cli_project_status_summarize(root, by_verb.get(name) ?? [JetCLIReceipt]{}, name, target))
+    loop name in verbs -> rows.push(jet_cli_project_status_summarize(root, by_verb.get(name) ?? [JetDriverRunReceipt]{}, name, target))
     jet_cli_project_status_render(target, rows, "", json)
 }

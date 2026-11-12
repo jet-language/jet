@@ -6,6 +6,7 @@ use {
     status_text: core.text
     core.encoding.[Dyn]
     jet_foundation.[foundation_float_display, foundation_json_integer]
+    jet_driver.[JetDriverRunReceiptError]
 }
 
 // Rust's `String` refusals from the status readers (StatusValue::parse and
@@ -17,6 +18,11 @@ JetCLIReadError: struct {
 
 jet_cli_read_error: fn(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
+}
+
+// The run-receipt reader's refusals, at the CLI's read boundary.
+impl JetDriverRunReceiptError -> JetCLIReadError {
+    return jet_cli_read_error(self.message)
 }
 
 // A JSON text as a status tree (Jetpack Foundation `report_status_value_parse`).

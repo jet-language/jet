@@ -4,6 +4,7 @@
 // source only against indexed, current import evidence and a matched comparison
 // bound to the same boundary, tool, target, coverage, and assumptions.
 use {
+    jet_driver.[JetDriverRecordLink, JetDriverRunReceiptSection, jet_driver_run_receipt_decode, jet_driver_run_receipt_encode, jet_driver_run_receipt_section_new]
     import_update_crypto: core.crypto
     import_update_files: core.files
     jet_foundation.[
@@ -138,7 +139,7 @@ jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cw
             stale_reason = Val("indexed comparison receipt `{entry.artifact_id}` could not be authenticated: {jet_cli_io_error_text(err)}")
             next
         }
-        raw_receipt: jet_cli_receipt_decode(raw_bytes) ?? {
+        raw_receipt: jet_driver_run_receipt_decode(raw_bytes) ?? {
             stale_reason = Val("indexed comparison receipt `{entry.artifact_id}` could not be authenticated: {err.message}")
             next
         }
@@ -151,7 +152,7 @@ jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cw
             }
             .Err(error) -> { return Err(jet_cli_import_update_error(error.message)) }
         }
-        found := JetCLIReceiptSection?{None}
+        found := JetDriverRunReceiptSection?{None}
         loop section in receipt.sections {
             if section.name == "comparison" && section.type_name == "ComparisonRecord" {
                 found = Val(section.copy())
@@ -278,19 +279,19 @@ jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: For
     argv: [String]{"import", plan.source.copy(), "--update"}
     paths: loop file in files -> file.copy()
     payload: jet_cli_import_accepted_receipt_json(receipt, plan.boundary.assumptions) ?? return Err(err)
-    section: jet_cli_receipt_section_new("foreign-source-replacement", "ForeignSourceReceipt", canonical_json_bytes(payload)) ?? return Err(jet_cli_import_update_error(err.message))
-    consumed := [JetCLIRecordLink]{}
+    section: jet_driver_run_receipt_section_new("foreign-source-replacement", "ForeignSourceReceipt", canonical_json_bytes(payload)) ?? return Err(jet_cli_import_update_error(err.message))
+    consumed := [JetDriverRecordLink]{}
     loop evidence in receipt.evidence {
-        link: JetCLIRecordLink{kind: "evidence", artifact_id: evidence.report_id.copy()}
+        link: JetDriverRecordLink{kind: "evidence", artifact_id: evidence.report_id.copy()}
         if !consumed.contains(link) -> consumed.push(link)
     }
-    comparison_link: JetCLIRecordLink{kind: "comparison", artifact_id: receipt.comparison_artifact_id.copy()}
+    comparison_link: JetDriverRecordLink{kind: "comparison", artifact_id: receipt.comparison_artifact_id.copy()}
     if !consumed.contains(comparison_link) -> consumed.push(comparison_link)
     claim: jet_cli_receipt_claim("import", paths, argv, jet_cli_terminal_bits()) ?? return Err(jet_cli_import_update_error(err.message))
     cache := WorkspaceDeclarationCache.new()
     start: AuthorityResolver.authority_walk_root(plan.source) ?? return Err(jet_cli_import_update_error("could not resolve the import source directory"))
     receipt_root: jet_cli_receipt_project_root(cache, start)
-    prepared: jet_cli_receipt_prepare(claim, 0, [U8]{}, [U8]{}, [JetCLIReceiptSection]{section}, consumed, [JetCLIRecordLink]{}, [String]{}) ?? return Err(jet_cli_import_update_error(err.message))
+    prepared: jet_cli_receipt_prepare(claim, 0, [U8]{}, [U8]{}, [JetDriverRunReceiptSection]{section}, consumed, [JetDriverRecordLink]{}, [String]{}) ?? return Err(jet_cli_import_update_error(err.message))
     _: jet_cli_receipt_publish(receipt_root, prepared) ?? return Err(jet_cli_import_update_error(err.message))
     published: if jet_cli_receipt_lookup(receipt_root, claim) == {
         .Val(current) -> current
@@ -299,7 +300,7 @@ jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: For
     }
     target: jet_cli_receipt_target_identity(cache, plan.source, claim.inputs) ?? return Err(jet_cli_import_update_error(err.message))
     index := jet_cli_record_index_load(receipt_root) ?? return Err(jet_cli_import_update_error(err.message))
-    receipt_bytes: jet_cli_receipt_encode(published) ?? return Err(jet_cli_import_update_error(err.message))
+    receipt_bytes: jet_driver_run_receipt_encode(published) ?? return Err(jet_cli_import_update_error(err.message))
     identity: JetCLIRecordIdentity{target_inputs_sha256: target.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
     entry: jet_cli_comparison_index_entry(index, identity, "receipt", claim.key, ".jet/receipts/objects/{claim.key}", receipt_bytes.len(), published.consumed, published.produced, false) ?? return Err(jet_cli_import_update_error(err.message))
     jet_cli_record_index_upsert_many_and_store(index, receipt_root, [JetCLIRecordIndexEntry]{entry.move()}) ?? return Err(jet_cli_import_update_error(err.message))

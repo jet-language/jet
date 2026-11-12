@@ -1,0 +1,65 @@
+# `jet inspect facts --store=run` reads a recorded run's receipt with
+# `core.compiler.receipt`, the compiler's one receipt reader, and renders the
+# `core.compiler.query` a build makes over it: the claim, section and record
+# rows the command prints for run.receipt are the rows main.jet's own build
+# reads, with the same identities. A run holds no markers, a missing receipt
+# is no store, and a receipt whose digest doesn't authenticate it is refused
+# (#4276 c97).
+fixture: inspect_facts_run_store_is_the_receipt_query.fixture
+step: jet inspect facts --store=run --kind=claim run.receipt
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "run receipt run.receipt digest 6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf, kind claim: 1 facts, complete" # the header names the receipt by its digest
+stdout: ~ "test  33241a3c556d7789d327a9aa564c89a6139a830dff2631c4e57d8e32d29f7fe0  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#claim:test" # the test claim's row and identity
+stderr: empty
+step: jet inspect facts --store=run --kind=section run.receipt
+env: NO_COLOR=1
+exit: 0
+stdout: ~ ", kind section: 1 facts, complete" # the receipt has one section
+stdout: ~ "summary  TestSummary  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#section:summary" # the summary section's row and identity
+stderr: empty
+step: jet inspect facts --store=run --kind=produced run.receipt
+env: NO_COLOR=1
+exit: 0
+stdout: ~ ", kind produced: 2 facts, complete" # the receipt produced two records
+stdout: ~ "r-1  receipt  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#produced:receipt/r-1" # the receipt record's row and identity
+stdout: ~ "e-1  evidence  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#produced:evidence/e-1" # the evidence record's row and identity
+stderr: empty
+step: jet inspect facts --store=run --kind=consumed run.receipt --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "inspect.facts" # one inspect.facts envelope
+stdout: ~ "\"receipt\"" # the JSON names the run receipt
+stdout: ~ "\"digest\"" # the JSON names the receipt's digest
+stdout: ~ "p-1" # the consumed proof record
+stderr: empty
+step: jet build main.jet
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "FACTS" # the build's error report carries the program's FACTS line
+stdout+stderr: ~ "5 facts: " # the build reads the receipt's five facts
+stdout+stderr: ~ "[test  33241a3c556d7789d327a9aa564c89a6139a830dff2631c4e57d8e32d29f7fe0  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#claim:test]" # the build's claim row has the command's identity
+stdout+stderr: ~ "[summary  TestSummary  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#section:summary]" # the build's section row has the command's identity
+stdout+stderr: ~ "[p-1  proof  6ea0a8f6b93366d1bc63aad05cd8f287668aa16e6c4c420beddd974e0a107eaf#consumed:proof/p-1]" # the build's consumed row has the command's identity
+stdout+stderr: ~ "status=0" # the receipt's recorded run status
+stdout+stderr: ~ "marker=query: unsupported: marker facts of the run store" # the build sees the same refusal as the command
+step: jet inspect facts --store=run --kind=marker run.receipt
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "unsupported: marker facts of the run store" # a run holds no markers
+step: jet inspect facts --store=run --kind=claim missing.receipt
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "receipt: unavailable before emission: no run receipt at `missing.receipt`" # a missing receipt is no store, named by its path
+step: jet inspect facts --store=run --kind=claim corrupt.receipt
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2105" # the query refusal's code; the rest of the report is the renderer's
+stderr: ~ "`corrupt.receipt` is not a valid run receipt: receipt digest does not authenticate its body" # the refusal names the file and the failed digest check
+step: jet inspect facts --store=run --kind=claim
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "name its RECEIPT file" # the run store's missing-operand refusal

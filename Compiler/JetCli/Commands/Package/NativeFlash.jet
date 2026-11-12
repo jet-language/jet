@@ -1,6 +1,7 @@
 // Execute only the validated declared invocation. NativeSandbox owns isolation.
 // No programmer shell or ambient tool selection.
 use {
+    jet_driver.[JetDriverRecordLink, JetDriverRunReceiptSection]
     jet_foundation.[canonical_json_bytes]
     jetpack_foundation.[foundation_native_sandbox_status, foundation_run_native_sandboxed]
     flash_paths: core.files.path
@@ -71,7 +72,7 @@ jet_cli_flash_execute: fn(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Je
 jet_cli_flash_publish: fn(receipt_root: String, args: [String], terminal: [U8], receipt: JetCLIFlashReceipt, secret_values: [String]) -[FS, Env, Time.Wait]> String JetCLIReadError! {
     claim: jet_cli_receipt_claim("flash", [String]{receipt.plan.image.raw, receipt.plan.audit.raw}, args, terminal)
     section: jet_cli_flash_receipt_section(receipt)
-    stored: jet_cli_receipt_prepare(claim, if receipt.success -> 0 else -> 1, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)), [U8]{}, [JetCLIReceiptSection]{section}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, secret_values)
+    stored: jet_cli_receipt_prepare(claim, if receipt.success -> 0 else -> 1, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)), [U8]{}, [JetDriverRunReceiptSection]{section}, [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, secret_values)
     if !jet_cli_receipt_publish(receipt_root, stored) -> return Err(jet_cli_read_error("flash inputs changed before receipt publication"))
     Ok(stored.digest)
 }

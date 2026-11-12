@@ -1,5 +1,6 @@
 // The comparison and receipt index rows land together.
 use {
+    jet_driver.[JetDriverRecordLink, JetDriverRunReceiptSection, jet_driver_run_receipt_encode, jet_driver_run_receipt_section_new]
     jet_foundation.[
         EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind,
         EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record,
@@ -58,7 +59,7 @@ jet_cli_comparison_evidence: fn(run: JetCLIComparisonRun, target: String, artifa
     Ok(report)
 }
 
-jet_cli_comparison_index_entry: fn(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, kind: String, id: String, path: String, size: Int, consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], protected: Bool) -> JetCLIRecordIndexEntry JetCLIReadError! {
+jet_cli_comparison_index_entry: fn(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, kind: String, id: String, path: String, size: Int, consumed: [JetDriverRecordLink], produced: [JetDriverRecordLink], protected: Bool) -> JetCLIRecordIndexEntry JetCLIReadError! {
     existing: jet_cli_record_index_find(index, kind, id, true)
     sequence: if existing == .Val(entry) -> entry.recorded_sequence else -> jet_cli_record_index_next_sequence(index)
     saved: protected || (if existing == .Val(entry) -> entry.saved else -> false)
@@ -85,7 +86,7 @@ jet_cli_evidence_persist_at: fn(root: String, report: EvidenceReport, bytes: [U8
     _: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
     index := jet_cli_record_index_load(root)
     identity: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}
-    entry: jet_cli_comparison_index_entry(index, identity, "evidence", name, ".jet/evidence/{name}.json", bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, protected)
+    entry: jet_cli_comparison_index_entry(index, identity, "evidence", name, ".jet/evidence/{name}.json", bytes.len(), [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, protected)
     jet_cli_record_index_publish_and_store(index, root, entry)
 }
 
@@ -111,11 +112,11 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     corpus: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize comparison corpus {target}: {jet_cli_io_error_text(err)}"))
     start: AuthorityResolver.authority_walk_root(jet_cli_parent(corpus) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
     receipt_root: jet_cli_receipt_project_root(cache, start)
-    section: jet_cli_receipt_section_new("comparison", "ComparisonRecord", bytes)
-    consumed: [JetCLIRecordLink]{JetCLIRecordLink{kind: "evidence", artifact_id: report_id}}
-    produced: [JetCLIRecordLink]{JetCLIRecordLink{kind: "comparison", artifact_id: artifact_id}}
+    section: jet_driver_run_receipt_section_new("comparison", "ComparisonRecord", bytes)
+    consumed: [JetDriverRecordLink]{JetDriverRecordLink{kind: "evidence", artifact_id: report_id}}
+    produced: [JetDriverRecordLink]{JetDriverRecordLink{kind: "comparison", artifact_id: artifact_id}}
     status: if run.record.status == ComparisonStatus.Matched -> 0 else -> 1
-    receipt: jet_cli_receipt_prepare(claim, status, [U8]{}, [U8]{}, [JetCLIReceiptSection]{section}, consumed, produced, [String]{})
+    receipt: jet_cli_receipt_prepare(claim, status, [U8]{}, [U8]{}, [JetDriverRunReceiptSection]{section}, consumed, produced, [String]{})
     _: jet_cli_receipt_publish(receipt_root, receipt)
     published: if jet_cli_receipt_lookup(receipt_root, claim) == {
         .Val(current) -> current
@@ -126,9 +127,9 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     index := jet_cli_record_index_load(receipt_root)
     path: ".jet/receipts/objects/{claim.key}"
     comparison_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_VERSION, engine: "jet-comparison-v1"}
-    comparison_entry: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetCLIRecordLink]{}, false)
+    comparison_entry: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetDriverRecordLink]{}, false)
     receipt_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_VERSION, engine: "jet-receipt-v2"}
-    receipt_bytes: jet_cli_receipt_encode(published)
+    receipt_bytes: jet_driver_run_receipt_encode(published)
     receipt_entry: jet_cli_comparison_index_entry(index, receipt_identity, "receipt", claim.key, path, receipt_bytes.len(), consumed, produced, false)
     jet_cli_record_index_upsert_many_and_store(index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry.move(), receipt_entry.move()})
 }

@@ -3,6 +3,7 @@
 // read and published only through the rooted store (RootedStore.jet), never by
 // pathname.
 use {
+    jet_driver.[JetDriverRecordLink]
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
@@ -307,7 +308,7 @@ jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, projec
 
 jet_cli_record_index_test_row: fn(run: Int) -> JetCLIRecordIndexEntry Never! {
     name: "test:cccccccccccccccc:{run}:{run * 1000}"
-    JetCLIRecordIndexEntry{identity: JetCLIRecordIdentity{target_inputs_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", tool_version: "a0.0.1", engine: "jet-test"}, kind: "evidence", artifact_id: name, path: ".jet/evidence/{name}.json", recorded_sequence: U64.from_int(run) ?? panic("a test run number is non-negative"), size: U64{1103}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}
+    JetCLIRecordIndexEntry{identity: JetCLIRecordIdentity{target_inputs_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", tool_version: "a0.0.1", engine: "jet-test"}, kind: "evidence", artifact_id: name, path: ".jet/evidence/{name}.json", recorded_sequence: U64.from_int(run) ?? panic("a test run number is non-negative"), size: U64{1103}, capture: "safe", saved: false, consumed: [JetDriverRecordLink]{}, produced: [JetDriverRecordLink]{}}
 }
 
 // Validation sorts its own copy of the rows; the caller's rows stay intact

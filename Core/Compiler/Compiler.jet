@@ -9,7 +9,7 @@ package: {
     }
 }
 use {
-    query_rows.[program_fact]
+    query_rows.[fact_kind_refusal, program_fact, run_fact]
 }
 lang: module
 
@@ -108,9 +108,11 @@ MetadataError: struct {
 /// The kinds of fact a store holds. In the executable schema they are its
 /// marker rules and its typed fact reads; in a checked program they are the
 /// markers its declarations carry, each marker's written arguments, and the
-/// typed facts the checker recorded. A store asked for a kind it doesn't
-/// hold refuses with `Unsupported`.
-FactKind: enum { Marker MarkerArg Read }
+/// typed facts the checker recorded; in a run they are the records its receipt
+/// holds: its claim, the typed sections it published, and the records it
+/// consumed and produced. A store asked for a kind it doesn't hold refuses
+/// with `Unsupported`.
+FactKind: enum { Marker MarkerArg Read Claim Section Consumed Produced }
 
 /// One row of the toolchain's executable schema.
 SchemaFact: struct {
@@ -156,17 +158,56 @@ ProgramFact: struct {
     source: SnapshotID
 }
 
-/// The immutable snapshot a query reads: the running toolchain's schema, or
-/// a program checked through the normal pipeline (`b.program` in a build).
+/// One record of a run's receipt: the claim the run answered (`name` is the
+/// command's verb, `detail` the claim key), a typed section it published
+/// (the section's name and type name), or a record it consumed or produced
+/// (the record's artifact id and record kind).
+RunFact: struct {
+    kind: FactKind
+    name: String
+    detail: String
+    /// The row's stable identity: `digest#kind:key`, where `digest` is the
+    /// receipt's and `key` is the claim's verb, the section's name, or a
+    /// consumed or produced record's `record-kind/artifact-id`.
+    identity: String
+    /// The receipt's digest.
+    source: SnapshotID
+}
+
+/// A recorded run, as `receipt(path)` reads it from its receipt file through
+/// the compiler's one receipt reader. The status and the digest are the
+/// run's; its claim, sections and record links are the facts `query` reads.
+RunReceipt: struct {
+    /// The receipt file, as `receipt(path)` named it.
+    path: String
+    /// The run's exit status.
+    status: Int
+    /// The receipt's digest, which authenticates its body.
+    digest: String
+    /// The claim: the command's verb (`left`) and the claim key (`right`).
+    priv claim: Pair
+    /// Each section's name (`left`) and type name (`right`), in name order.
+    priv sections: [Pair]
+    /// Each consumed record's kind (`left`) and artifact id (`right`).
+    priv consumed: [Pair]
+    /// Each produced record's kind (`left`) and artifact id (`right`).
+    priv produced: [Pair]
+}
+
+/// The immutable snapshot a query reads: the running toolchain's schema, a
+/// program checked through the normal pipeline (`b.program` in a build), or
+/// a recorded run.
 FactSource: enum {
     Schema(snapshot: SchemaSnapshot)
     Program(program: ProgramInfo)
+    Run(receipt: RunReceipt)
 }
 
 /// One fact a query returns, tagged by the store it comes from.
 Fact: enum {
     Schema(fact: SchemaFact)
     Program(fact: ProgramFact)
+    Run(fact: RunFact)
 }
 
 /// A point in a run's recorded timeline, in milliseconds from the run's
@@ -176,34 +217,37 @@ QueryTime: struct {
 }
 
 /// The facts of `kind` in `source`, in the source's canonical order: a
-/// program's types, then its functions, each in declaration order. Facts a
-/// query can't answer completely are a `MetadataError`, never a shorter list:
-/// more matches than `limit` is `Truncated`.
+/// program's types, then its functions, each in declaration order; a run's
+/// claim, then its sections in name order, then its record links in the
+/// receipt's order. Facts a query can't answer completely are a
+/// `MetadataError`, never a shorter list: more matches than `limit` is
+/// `Truncated`, and a kind the source's store doesn't hold is `Unsupported`.
 query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError! {
     rows := [Fact]{}
     if source == {
         .Schema(snapshot) -> {
             if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
-            if kind == FactKind.MarkerArg -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "marker-argument facts of the schema store"}, query: "query", source: None})
+            if kind != FactKind.Marker && kind != FactKind.Read -> return Err(fact_kind_refusal(kind, "schema"))
             loop fact in snapshot.facts {
                 if fact.kind == kind -> rows.push(Fact.Schema{fact: fact.copy()})
             }
         }
         .Program(program) -> {
             if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a checked program"}, query: "query", source: None})
+            if kind != FactKind.Marker && kind != FactKind.MarkerArg && kind != FactKind.Read -> return Err(fact_kind_refusal(kind, "program"))
             revision: SnapshotID{digest: program.revision()}
             loop package in program.packages() {
                 loop info in package.types {
                     seen := [String]{}
                     scope: FactScope{package: package.name.copy(), module: info.module.copy(), item: info.name.copy()}
-                    if kind == {
-                        .Marker -> { loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity, scope, revision, seen)) }
-                        .MarkerArg -> {
-                            loop marker in info.markers {
-                                loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity, scope, revision, seen))
-                            }
+                    if kind == FactKind.Marker {
+                        loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity, scope, revision, seen))
+                    } else if kind == FactKind.MarkerArg {
+                        loop marker in info.markers {
+                            loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity, scope, revision, seen))
                         }
-                        .Read -> { loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity, scope, revision, seen)) }
+                    } else {
+                        loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity, scope, revision, seen))
                     }
                 }
             }
@@ -217,6 +261,17 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
                 }
             }
         }
+        .Run(receipt) -> {
+            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a run receipt"}, query: "query", source: None})
+            digest: SnapshotID{digest: receipt.digest.copy()}
+            if kind == {
+                .Claim -> rows.push(run_fact(kind, receipt.claim.left, receipt.claim.right, receipt.claim.left, digest))
+                .Section -> { loop section in receipt.sections -> rows.push(run_fact(kind, section.left, section.right, section.left, digest)) }
+                .Consumed -> { loop link in receipt.consumed -> rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest)) }
+                .Produced -> { loop link in receipt.produced -> rows.push(run_fact(kind, link.right, link.left, "{link.left}/{link.right}", digest)) }
+                .Marker | .MarkerArg | .Read -> return Err(fact_kind_refusal(kind, "run"))
+            }
+        }
     }
     if limit == .Val(most) {
         if rows.len() > most -> return Err(MetadataError{kind: MetadataFailure.Truncated{limit: most, observed: rows.len()}, query: "query", source: None})
@@ -226,14 +281,38 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
 
 // The rows `query` builds, not part of the compiler surface.
 priv query_rows: module {
-    // One program row. `seen` holds the names already given on this subject,
-    // so a repeated name gets its `@n` identity.
-    program_fact: fn(kind: FactKind, name: String, subject: String, scope: FactScope, revision: SnapshotID, seen: &[String]) -> Fact Never! {
-        word: if kind == {
+    // The kind's spelling in a row's identity, as `jet inspect facts --kind=`
+    // spells it.
+    fact_kind_word: fn(kind: FactKind) -> String Never! {
+        if kind == {
             .Marker -> "marker"
             .MarkerArg -> "marker-arg"
             .Read -> "read"
+            .Claim -> "claim"
+            .Section -> "section"
+            .Consumed -> "consumed"
+            .Produced -> "produced"
         }
+    }
+
+    // A store's refusal of a kind it doesn't hold.
+    fact_kind_refusal: fn(kind: FactKind, store: String) -> MetadataError Never! {
+        noun: if kind == {
+            .Marker -> "marker"
+            .MarkerArg -> "marker-argument"
+            .Read -> "read"
+            .Claim -> "claim"
+            .Section -> "section"
+            .Consumed -> "consumed-record"
+            .Produced -> "produced-record"
+        }
+        MetadataError{kind: MetadataFailure.Unsupported{capability: "{noun} facts of the {store} store"}, query: "query", source: None}
+    }
+
+    // One program row. `seen` holds the names already given on this subject,
+    // so a repeated name gets its `@n` identity.
+    program_fact: fn(kind: FactKind, name: String, subject: String, scope: FactScope, revision: SnapshotID, seen: &[String]) -> Fact Never! {
+        word: fact_kind_word(kind)
         repeat := 0
         loop earlier in seen {
             if earlier == name -> repeat += 1
@@ -241,5 +320,10 @@ priv query_rows: module {
         seen.push(name.copy())
         identity: if repeat == 0 -> "{subject}#{word}:{name}" else -> "{subject}#{word}:{name}@{repeat}"
         Fact.Program{fact: ProgramFact{kind: kind, name: name.copy(), subject: subject.copy(), identity: identity, scope: scope.copy(), source: revision.copy()}}
+    }
+
+    // One run row; `key` names the row within its kind.
+    run_fact: fn(kind: FactKind, name: String, detail: String, key: String, digest: SnapshotID) -> Fact Never! {
+        Fact.Run{fact: RunFact{kind: kind, name: name.copy(), detail: detail.copy(), identity: "{digest.text()}#{fact_kind_word(kind)}:{key}", source: digest.copy()}}
     }
 }

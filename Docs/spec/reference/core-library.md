@@ -447,11 +447,35 @@ n-th repeat of a name on the same subject. `scope` is a `FactScope { package,
 module, item }`. `source` is the program's revision: `program.revision()`, the
 content hash of the checked sources, as a `SnapshotID`.
 
-`jet inspect facts --store=<schema|program> --kind=<marker|marker-arg|read>
-[SOURCE] [--json]` prints the answer of this same function. The command checks
-a generated program that calls `query`, over `schema()` or over SOURCE's
-checked `ProgramInfo`, and renders the rows it returns with the snapshot it
-read: the schema's identity, or SOURCE and the program's revision.
+`receipt(path: String) -> RunReceipt MetadataError!` reads a recorded run: the
+receipt file at `path` under the compile's package root, through the
+compiler's one receipt reader, the same reader `jet` uses for its own receipt
+store. It has the same compile-time gate (a runtime call is E0956). No file at
+`path` is `Unavailable`, a path the root's authority refuses (outside the
+root, a symlink, not a file) is `Denied`, and bytes the reader refuses (a bad
+frame, or a digest that doesn't authenticate the body) are `Invalid`, with the
+reader's refusal as their one diagnostic. A `RunReceipt` carries the file's
+`path`, the run's exit `status` and the receipt's `digest`; those are fields,
+not facts. `FactSource.Run(receipt)` answers exactly the rows a receipt
+records, as `RunFact { kind, name, detail, identity, source }` rows:
+`FactKind.Claim` gives the claim (`name` is the command's verb, `detail` the
+claim key); `FactKind.Section` gives one row per typed section in name order
+(its name and type name); `FactKind.Consumed` and `FactKind.Produced` give one
+row per record link in the receipt's order (the artifact id and the record
+kind). `identity` is `digest#kind:key`, where `key` is the verb, the section
+name, or `record-kind/artifact-id`, and `source` is the receipt's digest as a
+`SnapshotID`.
+
+`jet inspect facts --store=<schema|program|run> --kind=<kind>
+[SOURCE|RECEIPT] [--json]` prints the answer of this same function; `--kind`
+spells a `FactKind` in lowercase words joined by `-` (`marker`, `marker-arg`,
+`read`, `claim`, `section`, `consumed`, `produced`). The command checks a
+generated program that calls `query`, over `schema()`, over SOURCE's checked
+`ProgramInfo`, or over `receipt(RECEIPT)`, and renders the rows it returns
+with the snapshot it read: the schema's identity, SOURCE and the program's
+revision, or RECEIPT and its digest. The run store has no default: RECEIPT
+names the one receipt file it reads, and a receipt `receipt()` refuses is the
+command's error.
 
 A query that can't answer completely fails; it never returns a shorter list.
 An empty list is a checked empty answer. `MetadataError { kind, query, source }`
@@ -459,8 +483,10 @@ carries a `MetadataFailure`: `Unavailable(required_stage: CompilerStage,
 reason)`, `Unsupported(capability)`, `Stale(requested: SnapshotID, current:
 SnapshotID)`, `Invalid(diagnostics)`, `Denied(scope: ScopeID, reason)` or
 `Truncated(limit, observed)`. More matches than `limit` is `Truncated`. A time
-view (`at`) of a schema snapshot or a checked program is `Unsupported`, and so
-is a kind the store doesn't hold: the schema holds no `MarkerArg` rows.
+view (`at`) of a schema snapshot, a checked program or a run receipt is
+`Unsupported`, and so is a kind the store doesn't hold: the schema holds only
+`Marker` and `Read` rows, a program only `Marker`, `MarkerArg` and `Read`
+rows, and a run only `Claim`, `Section`, `Consumed` and `Produced` rows.
 Identity types are spelled `SnapshotID` and `ScopeID`, following the
 acronym-casing rule.
 
