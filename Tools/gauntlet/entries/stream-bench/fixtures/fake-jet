@@ -1,0 +1,13 @@
+#!/bin/sh
+# A stand-in for `jet run SOURCE`, run from the repository root: SOURCE must
+# be byte for byte the program sources/ holds under its name, and what it
+# prints is the text its print line names. FAKE_JET=wrong prints the wrong
+# text; FAKE_JET=fail fails.
+[ "$1" = run ] || { echo "fake-jet: expected run, got $*" >&2; exit 2; }
+want="Tools/gauntlet/entries/stream-bench/fixtures/sources/$(basename "$2")"
+cmp -s "$2" "$want" || { echo "fake-jet: $2 is not $want" >&2; exit 4; }
+case "$FAKE_JET" in
+    fail) echo "fake-jet: failing as asked" >&2; echo "partial"; exit 3 ;;
+    wrong) echo "wrong"; exit 0 ;;
+esac
+awk -F'"' '/print\(/ { print $2 }' "$2"

@@ -1,0 +1,20 @@
+{
+  "name": "corelib-compare",
+  "mode": "tool",
+  "description": "Tools/perf/corelib_compare.py and its Jet twin corelib_compare/run.jet, matched Core workloads timed after compilation: base64 encoding through a standalone Rust program, Jet's Rust-backed Core API and a Jet source module, each built in a scratch directory under corelib-compare in the jet-dev state directory of ~/.cache, checked, sampled, and reported as JSON with each arm's median and its ratio to the Rust arm. HOME is the case directory's home/. The repository has no Tools/perf/package.jet, which the scratch package copies, so every run that gets past its arguments makes the scratch root, then exits 1 and leaves it empty. Cases: the defaults; every option, by prefix and with `=`; --help; a zero round count, a negative sample count, a word for a count, a missing value, an extra argument and a value for --require-win (each exit 2, no scratch root).",
+  "tool": {
+    "original": "Tools/perf/corelib_compare.py",
+    "jet": "Tools/perf/corelib_compare/run.jet",
+    "cases": [
+      {"args": [], "env": {"HOME": "home"}, "exit": 1, "check": "check.jet", "expected": "expected/scratch.out"},
+      {"args": ["--ro", "10", "--sa=1", "--require-win"], "env": {"HOME": "home"}, "exit": 1, "check": "check.jet", "expected": "expected/scratch.out"},
+      {"args": ["--help"], "env": {"HOME": "home"}, "check": "check.jet", "expected": "expected/help.out"},
+      {"args": ["--rounds", "0"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--samples", "-3"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--rounds", "many"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--samples"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["extra"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--require-win=yes"], "env": {"HOME": "home"}, "exit": 2, "check": "check.jet", "expected": "expected/refused.out"}
+    ]
+  }
+}

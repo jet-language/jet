@@ -1,0 +1,235 @@
+// The Jet twin of Tools/perf/stream_bench.py: Stream creation, pull and
+// early close against Python generators. For each size (1, 1000, 10000) and
+// case it writes a Jet program to a temporary directory, then times one fresh
+// Python worker and one `jet run` of the program, and prints every row as
+// JSON with sorted keys. Timings are host-specific; the workload and metric
+// names are fixed so repeated runs can be compared.
+//
+//   jet Tools/perf/stream_bench/run.jet
+//
+// JET_STREAM_BENCH_COMMAND overrides the Jet command, split as shlex.split
+// splits it (default `Tools/agent/JetEnv.jet jet`, from the repository root).
+// The workers are `-- --python-worker CASE N` and `-- --jet-worker CASE N
+// SOURCE`, which print one row's JSON; any other arguments are ignored.
+//
+// Peak memory is `ru_maxrss`, which also counts the resident memory of the
+// process a program was started from, and under `jet run` this program is
+// the size of the Jet host. So each arm starts from a small Python process,
+// as the original's workers do: the Python worker through LAUNCH, and the Jet
+// command through JET_MEASURE, which times it and reads its peak.
+use core.[files, process, regex, sys]
+use core.text.fmt
+use core.encoding.json
+
+SIZES: [1, 1000, 10000]
+CASES: ["creation", "pull", "early_close"]
+
+// Each case's producer and the loop body that drains it once.
+SHAPES: [
+    "creation": (producer: "empty: fn() => Stream<Int> {{\n}}", body: "loop value in empty() {{\n            break\n        }}"),
+    "pull": (producer: "one: fn() => Stream<Int> {{\n    yield 1\n}}", body: "loop value in one() {{\n            total += value\n        }}"),
+    "early_close": (producer: "many: fn() => Stream<Int> {{\n    yield 1\n    yield 2\n}}", body: "loop value in many() {{\n            break\n        }}"),
+]
+
+// Runs argv (its arguments) with this process's standard streams and exits
+// with its status.
+LAUNCH: "import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:]).returncode)"
+
+// Runs argv from the working directory with its output captured, and prints
+// its wall time, the peak resident memory of it and the children it waited
+// for, its status and its output as JSON.
+JET_MEASURE: [
+    "import json, resource, subprocess, sys, time",
+    "start = time.perf_counter_ns()",
+    "completed = subprocess.run(sys.argv[1:], capture_output=True, text=True, check=False)",
+    "elapsed = time.perf_counter_ns() - start",
+    "peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss",
+    "print(json.dumps({{'wall_ns': elapsed, 'peak_kib': peak // 1024 if sys.platform == 'darwin' else peak, 'returncode': completed.returncode, 'stdout': completed.stdout, 'stderr': completed.stderr}}))",
+].join("\n")
+
+// The Python arm, run as `python3 -c PYTHON_WORKER CASE N`: the original's
+// generators, timed in the worker, with its own peak resident memory. It
+// imports what the original's worker, the whole script, imports.
+PYTHON_WORKER: [
+    "import json, os, resource, shlex, subprocess, sys, tempfile, time",
+    "from pathlib import Path",
+    "def empty():",
+    "    if False:",
+    "        yield 0",
+    "def one():",
+    "    yield 1",
+    "def many():",
+    "    yield 1",
+    "    yield 2",
+    "case, size = sys.argv[1], int(sys.argv[2])",
+    "start = time.perf_counter_ns()",
+    "if case == 'creation':",
+    "    for _ in range(size):",
+    "        for _value in empty():",
+    "            break",
+    "elif case == 'pull':",
+    "    total = 0",
+    "    for _ in range(size):",
+    "        for value in one():",
+    "            total += value",
+    "    assert total == size",
+    "elif case == 'early_close':",
+    "    for _ in range(size):",
+    "        for _value in many():",
+    "            break",
+    "else:",
+    "    raise ValueError(f'unknown case: {{case}}')",
+    "elapsed = time.perf_counter_ns() - start",
+    "peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss",
+    "print(json.dumps({{'wall_ns': elapsed, 'peak_kib': peak // 1024 if sys.platform == 'darwin' else peak}}))",
+].join("\n")
+
+// One shlex word: unquoted characters, backslash escapes and quoted runs.
+WORD: Regex{"(?:[^ \t\r\n'\"\\]|\\.|'[^']*'|\"(?:[^\"\\]|\\.)*\")+"}
+
+// One piece of a word: unquoted characters, an escaped character, a
+// single-quoted run or a double-quoted run, each in its own group.
+PIECE: Regex{"([^ \t\r\n'\"\\]+)|\\(.)|'([^']*)'|\"((?:[^\"\\]|\\.)*)\""}
+
+// How repr writes the characters it escapes by name.
+REPR_ESCAPES: ["\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "'": "\\'", "\"": "\\\""]
+
+// What JET_MEASURE prints.
+#Decode
+Measured: struct {
+    wall_ns: Int
+    peak_kib: Int
+    returncode: Int
+    stdout: String
+    stderr: String
+}
+
+// The Jet arm of a row, in the Jet worker's key order.
+#Encode
+JetRow: struct {
+    wall_ns: Int
+    peak_kib: Int
+    stdout: String
+    expected_stdout: String
+}
+
+#Encode
+Row: struct {
+    case: String
+    n: Int
+    python: Dyn
+    jet: JetRow
+}
+
+#Encode
+Report: struct {
+    benchmark: String
+    results: [Row]
+}
+
+run: fn() -> Never Err! {
+    args: process.args()
+    root: files.dirname(files.dirname(files.dirname(files.dirname(sys.executable()))))
+    // The Python worker reads its own arguments, and fails as the original's
+    // does on a missing size, a size that is not a number or an unknown case.
+    if args.get(0) == Val("--python-worker") -> process.exec(["python3", "-c", LAUNCH, "python3", "-c", PYTHON_WORKER].concat(args.skip(1).to_list()))
+    if args.get(0) == Val("--jet-worker") {
+        if args.len() < 4 -> return Err("IndexError: list index out of range")
+        size: Int.parse(args[2].trim()) ?? return Err("ValueError: invalid literal for int() with base 10: {python_repr(args[2])}")
+        print(tight(json.to_string_pretty(jet_worker(root, args[1], size, args[3]))))
+        process.exit(0)
+    }
+    report: Report{benchmark: "stream-pull-v1", results: bench(root)}
+    // json.canonical writes every object's keys sorted, and parsing keeps
+    // their order: the report as json.dumps(sort_keys=True, indent=2) writes it.
+    print(json.to_string_pretty(json.parse(json.canonical(report.encode()))))
+    process.exit(0)
+}
+
+// Every row, sizes outermost, each case's program written to a temporary
+// directory that is gone when this returns; the first failing worker ends
+// the run.
+bench: fn(root: String) -> [Row] Err! {
+    temp: files.temp_dir("jet-stream-bench-")
+    results := [Row]{}
+    loop size in SIZES {
+        loop case in CASES -> results.push(row(root, files.join(temp.path, "{case}-{size}.jet"), case, size))
+    }
+    Ok(results)
+}
+
+// One row: the case's program written to `source`, one Python worker, then
+// one Jet run.
+row: fn(root: String, source: String, case: String, size: Int) -> Row Err! {
+    files.write(source, jet_source(case, size))
+    receipt: process.cmd(["python3", "-c", LAUNCH, "python3", "-c", PYTHON_WORKER, case, "{size}"]).cwd(root).run()
+    if !receipt.success -> return Err(if receipt.errors != "" -> receipt.errors.copy() else -> receipt.output.copy())  // copy: the message outlives the receipt
+    Ok(Row{case: case, n: size, python: json.parse(receipt.output), jet: jet_worker(root, case, size, source)})
+}
+
+// What the case's program prints.
+expected_stdout: fn(case: String, size: Int) -> String Err! {
+    if !SHAPES.has_key(case) -> return Err("ValueError: unknown case: {case}")
+    Ok(if case == "pull" -> "{size}" else -> "ok")
+}
+
+// The Jet program of one row: `size` times, one loop over the case's stream.
+jet_source: fn(case: String, size: Int) -> String Err! {
+    shape: SHAPES[case]
+    "{shape.producer}\n\nrun: fn() {{\n    total := 0\n    i := 0\n    loop i < {size} {{\n        {shape.body}\n        i += 1\n    }}\n    print(\"{expected_stdout(case, size)}\")\n}}\n"
+}
+
+// The Jet command: JET_STREAM_BENCH_COMMAND split as shlex.split splits it,
+// or the repository's JetEnv wrapper.
+jet_command: fn() -> [String] Err! {
+    configured: process.env_get("JET_STREAM_BENCH_COMMAND") ?? ""
+    if configured == "" -> return Ok(["Tools/agent/JetEnv.jet", "jet"])
+    // What no word takes is an unclosed quote or a trailing backslash.
+    left: WORD.replace(configured, "").trim()
+    if left != "" -> return Err(if left.ends_with("\\") -> "ValueError: No escaped character" else -> "ValueError: No closing quotation")
+    Ok(WORD.find_all(configured).map(word -> unquote(word)))
+}
+
+// A shlex word without its quoting: in double quotes a backslash escapes
+// only a double quote or a backslash.
+unquote: fn(word: String) -> String Never! {
+    PIECE.replace_all_with(word, found -> "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}")
+}
+
+// repr of printable text: in single quotes, or in double quotes when it has
+// a single quote and no double quote; backslashes, that quote and control
+// characters escaped.
+python_repr: fn(text: String) -> String Never! {
+    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, found -> repr_escape(found.text))}\""
+    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, found -> repr_escape(found.text))}'"
+}
+
+repr_escape: fn(character: String) -> String Never! {
+    REPR_ESCAPES.get(character) ?? "\\x{fmt.hex(Int{character.bytes()[0]}, 2)}"
+}
+
+// One `jet run` of `source` from the repository root through JET_MEASURE:
+// its wall time, the peak resident memory of the command and the children it
+// waited for, and its trimmed output, which must be the case's expected
+// output.
+jet_worker: fn(root: String, case: String, size: Int, source: String) -> JetRow Err! {
+    argv := ["python3", "-c", JET_MEASURE]
+    argv.extend(jet_command())
+    argv.extend(["run", source])
+    receipt: process.cmd(argv).cwd(root).run()
+    if !receipt.success -> return Err(receipt.errors.copy())  // copy: the message outlives the receipt
+    measured: json.decode<Measured>(receipt.output)
+    if measured.returncode != 0 -> return Err("Jet benchmark failed for {case}/{size}:\nstdout:\n{measured.stdout}\nstderr:\n{measured.stderr}")
+    actual: measured.stdout.trim()
+    expected: expected_stdout(case, size)
+    if actual != expected -> return Err("Jet benchmark output failed for {case}/{size}: expected {python_repr(expected)}, got {python_repr(actual)}")
+    Ok(JetRow{wall_ns: measured.wall_ns, peak_kib: measured.peak_kib, stdout: actual, expected_stdout: expected})
+}
+
+// Indented JSON on one line with json.dumps's `, ` and `: ` separators. A
+// JSON string holds no raw newline, so each newline is layout.
+tight: fn(pretty: String) -> String Never! {
+    opened: regex.replace(Regex{"([\[{{])\n *"}, pretty, "$1")
+    closed: regex.replace(Regex{"\n *([\]}}])"}, opened, "$1")
+    regex.replace(Regex{",\n *"}, closed, ", ")
+}

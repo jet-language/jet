@@ -1,0 +1,23 @@
+usage: corelib_compare.py [-h] [--rounds ROUNDS] [--samples SAMPLES]
+                          [--require-win]
+
+Measure matched Core workloads after compilation. The benchmark has three
+executable arms: * ``rust_native`` is a standalone optimized Rust
+implementation of the workload and is the Rust baseline. * ``rust_core_aot``
+is the same workload through Jet's Rust-backed Core API. * ``jet_source_aot``
+imports the checked-in Jet source module. Compilation and source generation
+happen before samples. Samples measure only process execution, and every arm's
+stdout is checked against the same expected result. The source arm is evidence
+for a cutover decision; it is not silently called a pass when it loses the
+strict Rust gate. Run from the repository root: python3
+Tools/perf/corelib_compare.py --rounds 5000 --samples 5 Add ``--require-win``
+to fail unless every Jet arm is strictly faster than ``rust_native`` (Jet/Rust
+below 1.00).
+
+options:
+  -h, --help         show this help message and exit
+  --rounds ROUNDS
+  --samples SAMPLES
+  --require-win
+== scratch
+missing

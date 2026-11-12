@@ -1,0 +1,26 @@
+// What a corelib-compare case produced (PortBars.jet runs this in the case
+// directory with the file holding the program's output): the output, then
+// under `== scratch` whether the case's home/ holds corelib-compare in the
+// jet-dev state directory of .cache, and the names in it, which the run
+// leaves empty.
+use {
+    files: core.files
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    scratch: [String]{"home", ".cache", "jet-dev", "corelib-compare"}.join("/")
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    print(printed.trim_end())
+    print("== scratch")
+    if !files.is_dir(scratch) -> return print("missing")
+    names := (files.list_dir(scratch) ?? process.fail(1, "{err}")).map(entry -> entry.name)
+    names.sort()
+    print("directory with {names.len()} entries")
+    loop name in names -> print(name)
+}

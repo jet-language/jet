@@ -1,0 +1,35 @@
+// What a stream-bench case printed (PortBars.jet runs this in the case
+// directory with the file holding the program's output): `no output`, or
+// each value of the printed JSON as `path: value` in its own key order, with
+// the wall times and peak memory, which vary by run and machine, as N.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+MEASURED: ["wall_ns", "peak_kib"]
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: (files.read(check.stdout) ?? process.fail(1, "{err}")).trim()
+    if printed == "" -> print("no output") else -> show("", json.parse(printed) ?? process.fail(1, err.display_text()), "")
+}
+
+// Each value under `value`, the value of field `key`, as `path: value`; under
+// a measured key a number is N.
+show: fn(path: String, value: Dyn, key: String) {
+    if value == {
+        .Object(fields) -> loop field in fields -> show("{path}.{field.key}", field.value, field.key)
+        .Array(items) -> {
+            if items.len() == 0 -> print("{path}: []")
+            loop index in 0..<items.len() -> show("{path}[{index}]", items[index], key)
+        }
+        .Int(_) | .Float(_) | .Number(_) -> print("{path}: {if MEASURED.contains(key) -> "N" else -> json.stringify(value)}")
+        .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> print("{path}: {json.stringify(value)}")
+    }
+}

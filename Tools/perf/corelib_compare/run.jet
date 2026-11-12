@@ -1,0 +1,344 @@
+// The Jet twin of Tools/perf/corelib_compare.py: matched Core workloads
+// timed after compilation. Three arms encode a 257-byte payload --rounds
+// times in base64: `rust_native`, a standalone optimized Rust program (the
+// baseline); `rust_core_aot`, the workload through Jet's Rust-backed Core
+// API; and `jet_source_aot`, through a checked-in Jet source module. Every
+// arm is built first in a scratch directory under corelib-compare in the
+// jet-dev state directory of ~/.cache, run once to check its output, then run
+// --samples times; the report, with each arm's median and its ratio to
+// `rust_native`, is printed as json.dumps prints it: keys sorted, non-ASCII
+// escaped, two-space indents.
+//
+//   jet Tools/perf/corelib_compare/run.jet -- --rounds 5000 --samples 5
+//
+// --require-win exits 1 unless every Jet arm is strictly faster than
+// `rust_native`. An arm that does not build prints the builds on one line and
+// exits 1. Options are read as argparse reads them: a unique prefix names an
+// option, and `--option=value` is `--option value`; a refusal exits 2.
+use core.[files, process, regex, sys, term, text, time]
+use core.text.fmt
+use core.encoding.json
+use core.mem.scope
+
+HELP: [
+    "usage: corelib_compare.py [-h] [--rounds ROUNDS] [--samples SAMPLES]",
+    "                          [--require-win]",
+    "",
+    "Measure matched Core workloads after compilation. The benchmark has three",
+    "executable arms: * ``rust_native`` is a standalone optimized Rust",
+    "implementation of the workload and is the Rust baseline. * ``rust_core_aot``",
+    "is the same workload through Jet's Rust-backed Core API. * ``jet_source_aot``",
+    "imports the checked-in Jet source module. Compilation and source generation",
+    "happen before samples. Samples measure only process execution, and every arm's",
+    "stdout is checked against the same expected result. The source arm is evidence",
+    "for a cutover decision; it is not silently called a pass when it loses the",
+    "strict Rust gate. Run from the repository root: python3",
+    "Tools/perf/corelib_compare.py --rounds 5000 --samples 5 Add ``--require-win``",
+    "to fail unless every Jet arm is strictly faster than ``rust_native`` (Jet/Rust",
+    "below 1.00).",
+    "",
+    "options:",
+    "  -h, --help         show this help message and exit",
+    "  --rounds ROUNDS",
+    "  --samples SAMPLES",
+    "  --require-win",
+].join("\n")
+
+OPTIONS: ["-h", "--help", "--rounds", "--samples", "--require-win"]
+
+EXPECTED: "344\n"
+
+// The Jet workload; `{rounds}` becomes the round count and `b64` is bound by
+// the line put before it.
+JET_WORKLOAD: [
+    "to_u8: fn(n: Int) -> U8 {{ (U8{{n & 255}}) }}",
+    "",
+    "run: fn() {{",
+    "    payload := [U8]{{}}",
+    "    i := 0",
+    "    loop i < 257 {{",
+    "        payload.push(to_u8(i % 251))",
+    "        i += 1",
+    "    }}",
+    "    rounds: {{rounds}}",
+    "    encoded := \"\"",
+    "    i = 0",
+    "    loop i < rounds {{",
+    "        encoded = b64.encode(payload)",
+    "        i += 1",
+    "    }}",
+    "    print(encoded.len())",
+    "}}",
+    "",
+].join("\n")
+
+RUST_WORKLOAD: [
+    "const ALPHABET: &[u8; 64] = b\"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/\";",
+    "",
+    "fn encode(data: &[u8]) -> String {{",
+    "    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);",
+    "    for chunk in data.chunks(3) {{",
+    "        let b0 = chunk[0] as u32;",
+    "        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;",
+    "        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;",
+    "        let n = (b0 << 16) | (b1 << 8) | b2;",
+    "        out.push(ALPHABET[(n >> 18) as usize] as char);",
+    "        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);",
+    "        out.push(if chunk.len() > 1 {{ ALPHABET[((n >> 6) & 63) as usize] as char }} else {{ '=' }});",
+    "        out.push(if chunk.len() > 2 {{ ALPHABET[(n & 63) as usize] as char }} else {{ '=' }});",
+    "    }}",
+    "    out",
+    "}}",
+    "",
+    "fn main() {{",
+    "    let payload: Vec<u8> = (0..257).map(|i| (i % 251) as u8).collect();",
+    "    let rounds: usize = {{rounds}};",
+    "    let mut encoded = String::new();",
+    "    for _ in 0..rounds {{",
+    "        encoded = encode(&payload);",
+    "    }}",
+    "    println!(\"{{}}\", encoded.len());",
+    "}}",
+    "",
+].join("\n")
+
+// One build as the report records it, its keys in sorted order.
+#Encode
+Build: struct {
+    artifact: String
+    exit: Int
+    stderr: String
+    stdout: String
+}
+
+#Encode
+Builds: struct {
+    jet_source_aot: Build
+    rust_core_aot: Build
+    rust_native: Build
+}
+
+// What an arm that does not build prints.
+#Encode
+Unbuilt: struct {
+    builds: Builds
+    metric: String
+    #Rename("pass") passed: Bool
+}
+
+#Encode
+Arm: struct {
+    median_ns: Int
+    ratio_to_rust_native: Float
+    samples: [Int]
+}
+
+#Encode
+Arms: struct {
+    jet_source_aot: Arm
+    rust_core_aot: Arm
+    rust_native: Arm
+}
+
+#Encode
+JetRatios: struct {
+    jet_source_aot: Float
+    rust_core_aot: Float
+}
+
+#Encode
+Report: struct {
+    arms: Arms
+    builds: Builds
+    jet_ratios_to_rust_native: JetRatios
+    metric: String
+    output: String
+    #Rename("pass") passed: Bool
+    rounds: Int
+    samples: Int
+    workload: String
+}
+
+// The parsed command line.
+Options: struct {
+    rounds: Int
+    samples: Int
+    require_win: Bool
+}
+
+run: fn() -> Never Err! {
+    // `--option=value` splits at its first `=`, as argparse splits it; a
+    // positional is refused either way.
+    tokens: process.args().flat_map(arg -> text.splitn(arg, "=", 2))
+    values := [String: String]{"--rounds": "5000", "--samples": "5"}
+    require_win := false
+    i := 0
+    loop i < tokens.len() {
+        token: tokens[i]
+        named: OPTIONS.filter(option -> option.starts_with(token))
+        if named.len() != 1 -> refuse("unrecognized or ambiguous argument {tokens[i]}")
+        option: named[0]
+        if ["-h", "--help"].contains(option) {
+            print(HELP)
+            process.exit(0)
+        }
+        if {
+            option == "--require-win" -> require_win = true
+            else -> {
+                values[option] = tokens.get(i + 1) ?? refuse("argument {option}: expected one argument")
+                i += 1
+            }
+        }
+        i += 1
+    }
+    outcome: measure(Options{rounds: positive(values["--rounds"]), samples: positive(values["--samples"]), require_win: require_win})
+    print(ascii(outcome.report))
+    process.exit(outcome.code)
+}
+
+// argparse's refusal: the usage and the error on stderr, exit 2.
+refuse: fn(message: String) -> Never {
+    term.eprint("{HELP.lines().take(2).join("\n")}\ncorelib_compare.py: error: {message}")
+    process.exit(2)
+}
+
+// A count option's value: a whole number above zero.
+positive: fn(value: String) -> Int Never! {
+    count: Int.parse(value.trim()) ?? refuse("invalid int value: '{value}'")
+    if count <= 0 -> refuse("--rounds and --samples must be positive")
+    count
+}
+
+// `written` with each character past ASCII written as its UTF-16 `\uXXXX`
+// escapes, as json.dumps writes it by default: an astral character as its
+// surrogate pair.
+ascii: fn(written: String) -> String Never! {
+    astral: Regex{"[\x{{10000}}-\x{{10FFFF}}]"}.replace_all_with(written, found -> pair(scalar(found.text) - 65536))
+    Regex{"[\x{{80}}-\x{{FFFF}}]"}.replace_all_with(astral, found -> "\\u{fmt.hex(scalar(found.text), 4)}")
+}
+
+// The surrogate pair of an astral character `offset` past U+10000.
+pair: fn(offset: Int) -> String Never! { "\\u{fmt.hex(55296 + offset /% 1024, 4)}\\u{fmt.hex(56320 + offset % 1024, 4)}" }
+
+// The scalar value of one UTF-8 character of two to four bytes: the lead
+// byte's low 7 - N bits, then six bits from each continuation byte.
+scalar: fn(character: String) -> Int Never! {
+    bytes: character.bytes()
+    value := Int{bytes[0]} % (64 >> (bytes.len() - 1))
+    loop byte in bytes.skip(1) -> value = value * 64 + Int{byte} % 64
+    value
+}
+
+// `argv` from `cwd`, its output captured, at most 900 seconds; a program
+// that cannot start or runs out of time ends the run.
+run_command: fn(spec: ProcessSpec) -> ProcessReceipt Err! {
+    receipt: spec.timeout(time.duration_seconds(900)).output_limit(268435456).run()
+    if receipt.timed_out -> return Err("subprocess.TimeoutExpired: timed out after 900 seconds")
+    Ok(receipt)
+}
+
+// The build record of `receipt`: its exit status as Python reports it (the
+// code, or minus the signal).
+built: fn(receipt: ProcessReceipt, artifact: String) -> Build Never! {
+    exit: if receipt.signal == .Val(signal) -> -signal else -> receipt.code
+    Build{artifact: artifact, exit: exit, stderr: receipt.errors.copy(), stdout: receipt.output.copy()}  // copy: the receipt is the caller's
+}
+
+// `jet build ENTRY --release` in `scratch`: the build's record, its
+// artifact at `.jet/build/STEM` beside the entry.
+build_jet: fn(root: String, scratch: String, name: String) -> Build Err! {
+    entry: files.join(scratch, "{name}.jet")
+    receipt: run_command(process.cmd([files.join(root, "target/debug/jet"), "build", entry, "--release"]).cwd(scratch).env("JET_ROOT", scratch).env("PWD", scratch))
+    Ok(built(receipt, files.join_all([scratch, ".jet/build", name])))
+}
+
+// One run of `binary` from the repository root: its wall time in
+// nanoseconds; a failure or an output other than EXPECTED ends the run.
+run_binary: fn(root: String, binary: String) -> Int Err! {
+    started: time.instant()
+    receipt: run_command(process.cmd([binary]).cwd(root))
+    elapsed: started.elapsed().ns
+    name: files.basename(binary)
+    if !receipt.success -> return Err("{name} failed with exit {built(receipt, binary).exit}\nstdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
+    if receipt.output != EXPECTED -> return Err("{name} output mismatch: expected {json.dumps(EXPECTED.encode())}, got {json.dumps(receipt.output.encode())}")
+    Ok(elapsed)
+}
+
+// int(statistics.median(values)): the middle sample, or the mean of the
+// middle two truncated.
+median: fn(values: [Int]) -> Int Never! {
+    sorted := values.copy()  // copy: the report keeps the run order
+    sorted.sort()
+    m: sorted.len() /% 2
+    if sorted.len() % 2 == 1 -> sorted[m] else -> (sorted[m - 1] + sorted[m]) /% 2
+}
+
+// Each arm's samples as one arm of the report; `baseline` is rust_native's
+// median, which a process run never brings to zero.
+arm: fn(samples: [Int], baseline: Int) -> Arm Never! {
+    middle: median(samples)
+    Arm{median_ns: middle, ratio_to_rust_native: Float.from_int(middle) / Float.from_int(baseline), samples: samples}
+}
+
+// The builds, the warm-up and the samples in a fresh scratch directory,
+// which is removed however the measuring ends; then the JSON to print and
+// the exit status.
+measure: fn(options: Options) -> (report: String, code: Int) Err! {
+    rounds: options.rounds
+    samples: options.samples
+    root: files.dirname(files.dirname(files.dirname(files.dirname(sys.executable()))))
+    parent: files.expanduser([String]{"~", ".cache", "jet-dev", "corelib-compare"}.join("/"))
+    files.create_dir_all(parent)
+    scratch: files.join(parent, ".corelib-compare-{sys.pid()}-{time.now().to_unix_ms()}")
+    files.create_dir_all(scratch)
+    _cleanup: scope.guard(() -> files.remove_all(scratch) ?? ())
+    files.write(files.join(scratch, "package.jet"), files.read(files.join(root, "Tools/perf/package.jet")))
+    files.write(files.join(scratch, "source.jet"), "use builtin_b64: core.encoding.base64\nencode: fn(data: [U8]) -> String {{ builtin_b64.encode(data) }}\n")
+    workload: JET_WORKLOAD.replace("{{rounds}}", "{rounds}")
+    files.write(files.join(scratch, "rust_builtin.jet"), "use b64: core.encoding.base64\n{workload}")
+    files.write(files.join(scratch, "jet_source.jet"), "use b64: source\n{workload}")
+    native_source: files.join(scratch, "rust_native.rs")
+    files.write(native_source, RUST_WORKLOAD.replace("{{rounds}}", "{rounds}"))
+    rust: build_jet(root, scratch, "rust_builtin")
+    source: build_jet(root, scratch, "jet_source")
+    native_artifact: files.join(scratch, "rust_native")
+    native: run_command(process.cmd([files.join(root, "Tools/agent/JetEnv.jet"), "rustc", "-O", native_source, "-o", native_artifact]).cwd(root))
+    builds: Builds{jet_source_aot: source, rust_core_aot: rust, rust_native: built(native, native_artifact)}
+    // rust_native, rust_core_aot, jet_source_aot: the order every arm runs in.
+    paths: [builds.rust_native.artifact, builds.rust_core_aot.artifact, builds.jet_source_aot.artifact]
+    // A Jet arm is unbuilt when its build failed or left no program; the
+    // native arm when rustc left none.
+    ready := paths.map(path -> files.is_file(path))
+    ready.extend([rust.exit == 0, source.exit == 0])
+    if ready.contains(false) -> return Ok((report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1))
+    // The warm-up checks every output and is left out of the samples.
+    loop path in paths -> run_binary(root, path)
+    taken := [[Int]]{[], [], []}
+    loop _ in 0..<samples {
+        loop index in 0..<paths.len() -> taken[index].push(run_binary(root, paths[index]))
+    }
+    baseline: median(taken[0])
+    arms: Arms{rust_native: arm(taken[0], baseline), rust_core_aot: arm(taken[1], baseline), jet_source_aot: arm(taken[2], baseline)}
+    ratios: JetRatios{rust_core_aot: arms.rust_core_aot.ratio_to_rust_native, jet_source_aot: arms.jet_source_aot.ratio_to_rust_native}
+    passed: [ratios.rust_core_aot, ratios.jet_source_aot].all(ratio -> ratio < 1.0)
+    report: Report{
+        arms: arms,
+        builds: builds,
+        jet_ratios_to_rust_native: ratios,
+        metric: "runtime_only_ns",
+        output: "344",
+        passed: passed,
+        rounds: rounds,
+        samples: samples,
+        workload: "base64 encode, 257-byte payload",
+    }
+    Ok((report: json.to_string_pretty(report), code: if passed || !options.require_win -> 0 else -> 1))
+}
+
+// Indented JSON on one line with json.dumps's `, ` and `: ` separators. A
+// JSON string holds no raw newline, so each newline is layout.
+tight: fn(pretty: String) -> String Never! {
+    opened: regex.replace(Regex{"([\[{{])\n *"}, pretty, "$1")
+    closed: regex.replace(Regex{"\n *([\]}}])"}, opened, "$1")
+    regex.replace(Regex{",\n *"}, closed, ", ")
+}
