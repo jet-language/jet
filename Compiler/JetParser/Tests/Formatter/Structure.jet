@@ -76,6 +76,16 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(!formatted.text.contains("->"))
 }
 
+#Test("a braced explicit drop loop body takes the arrow except on a callable's last line") {
+    statement: jet_format_source("run: fn() {{\n    loop v in values {{ value().drop(\"checked\") }}\n    done()\n}}\n", false)
+    assert(statement.ok)
+    assert(statement.text.contains("loop v in values -> value().drop(\"checked\")\n"))
+    tail: jet_format_source("run: fn() {{\n    each: () -> {{\n        loop v in values {{ value().drop(\"checked\") }}\n    }}\n    each()\n}}\n", false)
+    assert(tail.ok)
+    assert_eq(tail.structure_change ?? "none", "none")
+    assert(tail.text.contains("loop v in values {{ value().drop(\"checked\") }}"))
+}
+
 #Test("a bracketed single import keeps its brackets") {
     source: "use geo.[Point]\n\nrun: fn() {{\n    print(Point)\n}}\n"
     formatted: jet_format_source(source, false)

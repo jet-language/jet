@@ -1218,9 +1218,22 @@ jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_b
         .Expr(_) -> true
         .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
     })
-    preserve_braced_expr: !arrow_body && single_expr && jfmt_single_stmt_braces(f, body[0]) != None
+    // An explicit `.drop(…)` is Unit, so its braced body takes the arrow as
+    // well, except on the last line of a callable body with a value
+    // (jfmt_value_tail_begin), where the parser reads an arrow loop as a
+    // collecting one.
+    at_value_tail: f.value_tail_at >= 0 && (header_end == 0 || header_end > f.value_tail_at)
+    explicit_drop: single_expr && !at_value_tail && jfmt_is_explicit_drop(body[0])
+    preserve_braced_expr: !arrow_body && single_expr && !explicit_drop && jfmt_single_stmt_braces(f, body[0]) != None
     force_braces: preserve_braced_expr || (!arrow_body && body.len() == 1 && jfmt_is_loop_exit_stmt(body[0]))
     jfmt_fmt_control_body_after_header(f, body, force_braces)
+}
+
+jfmt_is_explicit_drop: fn(stmt: Stmt) -> Bool {
+    if stmt == .Expr(expression) {
+        if expression == .MethodCall(_, method, _, _, _, _, _) -> return method == "drop"
+    }
+    false
 }
 
 // Render a dispatch body
