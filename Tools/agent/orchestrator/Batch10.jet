@@ -90,7 +90,6 @@ error_lines: fn(integ: String) -> [String] {
 run: fn() {
     main: "{roots.roots()["JET_SCRATCH_ROOT"]}/lanes/Main"
     integrate: "{process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())}/Integrate10.jet"
-    jet: process.env_nonempty("JET") ?? "jet"
     // One batch at a time: two runs of the same BATCH would write into one integ dir.
     _held: files.try_lock("{main}/integ/.batch.lock") ?? fail("batch: another batch holds the lock", 75)
     args: process.args()
@@ -104,7 +103,7 @@ run: fn() {
         if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
     }
     // rc 2: the export or the apply step stopped (integrate10 printed why); there is no census to attribute.
-    if (Sh{"{jet} -A {integrate} {batch}"}.extend(run).status()) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
+    if (Sh{"jet -A {integrate} {batch}"}.extend(run).status()) == 2 -> fail("batch: integrate stopped before the census (rc 2)", 2)
     integ: "{main}/integ/{batch}"
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
@@ -114,7 +113,7 @@ run: fn() {
         split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read_or("{sub}/patch", ""), word))
         if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
         print("QUARANTINED (regen) {split.blamed.join(" ")}")
-        process.exit(Sh{"{jet} -A {integrate} {"{batch}-r"}"}.extend(split.keep).status())
+        process.exit(Sh{"jet -A {integrate} {"{batch}-r"}"}.extend(split.keep).status())
     }
     if files.read_or("{integ}/REPORT.md", "").has_line_prefix("Census rc=0 ") -> process.exit(0)
     rows: census_rows(integ)
@@ -130,6 +129,6 @@ run: fn() {
     if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)
     print("QUARANTINED {split.blamed.join(" ")}")
     if split.keep.len() == 0 -> process.exit(1)
-    code: Sh{"{jet} -A {integrate} {"{batch}-r"}"}.extend(split.keep).status()
+    code: Sh{"jet -A {integrate} {"{batch}-r"}"}.extend(split.keep).status()
     if code != 0 -> process.exit(code)
 }

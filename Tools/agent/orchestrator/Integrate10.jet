@@ -115,7 +115,6 @@ run: fn() {
     w: r["JET_DEV_WORKTREE"]
     g: "{r["JET_STATE_ROOT"]}/scratch/Main"
     o: process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())
-    jet: process.env_nonempty("JET") ?? "jet"
     i: "{r["JET_SCRATCH_ROOT"]}/lanes/Main/integ/{batch}"
     t: "{i}/tree"
     files.remove_all(i) ?? ()
@@ -140,7 +139,7 @@ run: fn() {
         print("PRE {files.basename(pd)} from {pb}")
     }
     // Apply (three-way, generated files excluded and regenerated): IntegApply6.jet prints the applied SUBs last.
-    apply: Sh{"{jet} -A {"{o}/IntegApply6.jet"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
+    apply: Sh{"jet -A {"{o}/IntegApply6.jet"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
     files.write("{i}/apply.out", apply.output)
     if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(line -> line.starts_with("integ-apply:")).last() ?? ""}", 2)
     listing: apply.output.partition("--applied--\n")
@@ -159,7 +158,7 @@ run: fn() {
     loop s in applied -> touched.extend(lines_of("{i}/{files.basename(s)}.files"))
     touched = unique(touched)
     print("census start")
-    census: Sh{"bash {"{g}/capped.sh"} 32G {jet} -A {"{o}/CensusSnap2.jet"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
+    census: Sh{"bash {"{g}/capped.sh"} 32G jet -A {"{o}/CensusSnap2.jet"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
     files.write("{i}/census.out", census.output)
     crc := census.code
     print("census rc={crc}")
