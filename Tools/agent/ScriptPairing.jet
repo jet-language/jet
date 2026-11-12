@@ -557,10 +557,17 @@ refusals: fn(repo: String, added: [String], entries: Entries) -[FS]> [String] Ne
     out
 }
 
-git_lines: fn(repo: String, args: [String]) -[Exec, Time.Wait]> [String] PairingError! {
+// Whose repository a git read sees.
+// - Caller: the caller's, as git finds it: its GIT_DIR, GIT_INDEX_FILE and
+//   GIT_WORK_TREE when exported, which a checkout with no `.git` of its own
+//   (a land tree) needs.
+// - Own: the repository at `repo` alone, whatever the caller exports.
+GitScope: enum { Caller Own }
+
+git_lines: fn(repo: String, args: [String], scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
     argv := [String]{"git", "-c", "core.quotepath=off"}
     argv.extend(args.copy())
-    receipt: process.cmd(argv).cwd(repo).output_limit(268435456).run() ?? return Err(pairing_fail("git cannot start: {err}"))
+    receipt: git_command(repo, argv, scope).output_limit(268435456).run() ?? return Err(pairing_fail("git cannot start: {err}"))
     if receipt.code != 0 || receipt.signal != None -> return Err(pairing_fail("{argv.join(" ")} failed ({receipt.code}): {receipt.errors.trim()}"))
     lines := [String]{}
     loop line in receipt.output.lines() {
@@ -569,11 +576,20 @@ git_lines: fn(repo: String, args: [String]) -[Exec, Time.Wait]> [String] Pairing
     Ok(lines)
 }
 
+// `argv`, a git command, run in `repo` on the repository `scope` names.
+git_command: fn(repo: String, argv: [String], scope: GitScope) -> process.ProcessSpec {
+    spec: process.cmd(argv).cwd(repo)
+    if scope == {
+        .Caller -> spec
+        .Own -> spec.env_remove("GIT_DIR").env_remove("GIT_INDEX_FILE").env_remove("GIT_WORK_TREE")
+    }
+}
+
 // The files added since `base`, staged, unstaged or untracked; a rename is
 // not an addition.
-added_files: fn(repo: String, base: String) -[Exec, Time.Wait]> [String] PairingError! {
-    added: git_lines(repo, [String]{"diff", "--name-only", "--find-renames", "--diff-filter=A", base, "--"}) ?? return Err(err)
-    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}) ?? return Err(err)
+added_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    added: git_lines(repo, [String]{"diff", "--name-only", "--find-renames", "--diff-filter=A", base, "--"}, scope) ?? return Err(err)
+    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
     out := added.copy()
     loop path in untracked {
         if !out.contains(path) -> out.push(path.copy())
@@ -584,9 +600,9 @@ added_files: fn(repo: String, base: String) -[Exec, Time.Wait]> [String] Pairing
 
 // Every file changed since `base`, staged, unstaged or untracked; a rename
 // is both of its paths.
-changed_files: fn(repo: String, base: String) -[Exec, Time.Wait]> [String] PairingError! {
-    changed: git_lines(repo, [String]{"diff", "--name-only", "--no-renames", base, "--"}) ?? return Err(err)
-    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}) ?? return Err(err)
+changed_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    changed: git_lines(repo, [String]{"diff", "--name-only", "--no-renames", base, "--"}, scope) ?? return Err(err)
+    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
     out := changed.copy()
     loop path in untracked {
         if !out.contains(path) -> out.push(path.copy())
@@ -631,8 +647,8 @@ judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [Stri
 }
 
 // Every file of the checkout, tracked or untracked and not ignored.
-checkout_files: fn(repo: String) -[Exec, Time.Wait]> [String] PairingError! {
-    listed: git_lines(repo, [String]{"ls-files", "--cached", "--others", "--exclude-standard"}) ?? return Err(err)
+checkout_files: fn(repo: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    listed: git_lines(repo, [String]{"ls-files", "--cached", "--others", "--exclude-standard"}, scope) ?? return Err(err)
     out := listed.copy()
     out.sort()
     Ok(out)
@@ -697,7 +713,7 @@ run: fn() {
     args: process.args()
     repo: repo_root()
     if args.len() == 1 && args[0] == "--census" {
-        paths: checkout_files(repo) ?? process.fail(64, err.message)
+        paths: checkout_files(repo, .Caller) ?? process.fail(64, err.message)
         rows: census_rows(repo, paths, read_entries(repo))
         loop row in rows -> print(row)
         print(census_counts(rows))
@@ -706,8 +722,8 @@ run: fn() {
     if args.len() == 0 || args[0] != "--check" -> usage()
     base: if args.len() == 3 && args[1] == "--base" -> args[2].copy() else -> "HEAD"
     if args.len() != 1 && args.len() != 3 -> usage()
-    added: added_files(repo, base) ?? process.fail(64, err.message)
-    changed: changed_files(repo, base) ?? process.fail(64, err.message)
+    added: added_files(repo, base, .Caller) ?? process.fail(64, err.message)
+    changed: changed_files(repo, base, .Caller) ?? process.fail(64, err.message)
     entries: read_entries(repo)
     refused := refusals(repo, added, entries)
     refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
@@ -742,7 +758,8 @@ run: fn() {
     assert(extensionless(".envrc") && extensionless("a/b/run") && !extensionless("a/b.c/run.sh"))
 }
 
-// A scratch checkout with one commit, for the planted cases.
+// A scratch checkout with one commit, for the planted cases; its git sees it
+// alone, as the planted reads (GitScope.Own) do.
 planted_repo: fn() -[Env, Exec, FS, Time.Wait]> String Never! {
     dir: files.mkdtemp("script-pairing") ?? panic("a temporary directory cannot be made: {err}")
     files.write("{dir}/README.md", "planted\n") ?? panic("{dir}: {err}")
@@ -752,7 +769,7 @@ planted_repo: fn() -[Env, Exec, FS, Time.Wait]> String Never! {
         [String]{"git", "-c", "user.name=planted", "-c", "user.email=planted@example.invalid", "commit", "-q", "-m", "base"},
     }
     loop argv in steps {
-        receipt: process.cmd(argv).cwd(dir).run() ?? panic("git cannot start: {err}")
+        receipt: git_command(dir, argv, .Own).run() ?? panic("git cannot start: {err}")
         assert_eq(receipt.code, 0)
     }
     dir
@@ -784,14 +801,14 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/peer.py", "print(5)\n")
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/run.jet", "run: fn() {{ print(5) }}\n")
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/expected.out", "5\n")
-    added: added_files(dir, "HEAD") ?? panic(err.message)
+    added: added_files(dir, "HEAD", .Own) ?? panic(err.message)
     assert(added.contains("Tools/stray/report.mjs") && added.contains("Compiler/JetCanvas/Source/CanvasAssets/js/clock.js"))
     refused: refusals(dir, added, read_entries(dir))
     assert_eq(refused.len(), 3)
     assert(refused[0].starts_with("{ENTRIES_ROOT}/half/python/main.py: a script in another language with no gauntlet pair (entry `half` is incomplete: it does not list `jet` among its languages); "))
     assert(refused[1].starts_with("Tools/stray/fetch: a script in another language with no gauntlet pair; "))
     assert(refused[2].starts_with("Tools/stray/report.mjs: a script in another language with no gauntlet pair; "))
-    rows: census_rows(dir, checkout_files(dir) ?? panic(err.message), read_entries(dir))
+    rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), read_entries(dir))
     assert(rows.contains("Tools/count/count.py\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/count/fixtures/fake-git.sh\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/sum/python/main.py\tpaired\tsum {ENTRIES_ROOT}/sum/jet"))
@@ -829,7 +846,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert_eq(imports.map(taken -> taken.path.copy()), [String]{"Tools/gauntlet/harness/tally-lib.mjs", "Tools/gauntlet/harness/partial.mjs"})
     assert_eq(imports[0].names, [String]{"add", "total"})
     assert_eq(js_exports(dir, "Tools/gauntlet/harness/partial.mjs"), [String]{"used", "spare", "renamed"})
-    refused: refusals(dir, added_files(dir, "HEAD") ?? panic(err.message), entries)
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), entries)
     assert_eq(refused.len(), 7)
     assert(refused[0].starts_with("{AXES_ROOT}gen/js/build.mjs: a script in another language with no gauntlet pair; "))
     assert(refused[1].starts_with("{AXES_ROOT}reload/driver.mjs: a script in another language with no gauntlet pair; "))
@@ -838,7 +855,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert(refused[4].starts_with("Tools/gauntlet/harness/partial.test.mjs: a script in another language with no gauntlet pair (missing: Tools/gauntlet/harness/partial.mjs); "))
     assert(refused[5].starts_with("Tools/gauntlet/harness/stray.mjs: a script in another language with no gauntlet pair; "))
     assert(refused[6].starts_with("Tools/tool/helper.mjs: a script in another language with no gauntlet pair; "))
-    rows: census_rows(dir, checkout_files(dir) ?? panic(err.message), entries)
+    rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), entries)
     assert(rows.contains("{DRIVERS_ROOT}tally.mjs\tpaired\ttally Tools/tally/Tally.jet"))
     assert(rows.contains("Tools/gauntlet/harness/tally-lib.mjs\tcovered\ttally"))
     assert(rows.contains("Tools/gauntlet/harness/tally-lib.test.mjs\tcovered\ttally"))
@@ -856,7 +873,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     dir: planted_repo()
     plant(dir, "Tools/count/count.py", "print(3)\n")
     plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/count/count.py\", \"jet\": \"Tools/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"expected\": \"expected/plain.out\", \"check\": \"check.sh\"}}]}}}}\n")
-    refused: refusals(dir, added_files(dir, "HEAD") ?? panic(err.message), read_entries(dir))
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), read_entries(dir))
     assert_eq(refused.len(), 2)
     assert(refused[0].starts_with("Tools/count/count.py: a script in another language with no gauntlet pair; "))
     assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist; case 1's check `{ENTRIES_ROOT}/count/check.sh` is not a Jet program")
@@ -874,4 +891,30 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     assert_eq(switched_entries(entries, [String]{"{ENTRIES_ROOT}/count/count.py", "Tools/count/count.py"}), [String]{"count"})
     assert_eq(switched_entries(entries, [String]{"Tools/count/Count.jet"}), [String]{"count"})
     assert_eq(switched_entries(entries, [String]{"Tools/sum/Sum.jet", "{ENTRIES_ROOT}/sum/entry.json"}), [String]{})
+}
+
+#Test("a planted read sees its own checkout under an exported GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE; a caller read follows them") {
+    decoy: planted_repo()
+    plant(decoy, "Tools/decoy/fetch.py", "print(0)\n")
+    bare: files.mkdtemp("script-pairing-tree") ?? panic("a temporary directory cannot be made: {err}")
+    names: ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"]
+    saved: names.map(name -> sys.get(name))
+    sys.set("GIT_DIR", "{decoy}/.git")
+    sys.set("GIT_INDEX_FILE", "{decoy}/.git/index")
+    sys.set("GIT_WORK_TREE", decoy)
+    dir: planted_repo()
+    plant(dir, "Tools/stray/report.mjs", "console.log(1)\n")
+    added: added_files(dir, "HEAD", .Own) ?? [String]{err.message}
+    listed: checkout_files(dir, .Own) ?? [String]{err.message}
+    followed: added_files(bare, "HEAD", .Caller) ?? [String]{err.message}
+    loop index in 0..<names.len() {
+        if saved[index] == {
+            .Val(value) -> sys.set(names[index], value)
+            .None -> sys.unset(names[index]) ?? false
+        }
+    }
+    assert_eq(added, [String]{"Tools/stray/report.mjs"})
+    assert_eq(listed, [String]{"README.md", "Tools/stray/report.mjs"})
+    assert_eq(followed, [String]{"Tools/decoy/fetch.py"})
+    loop path in [dir, decoy, bare] -> files.remove_all(path) ?? ()
 }

@@ -1,0 +1,47 @@
+// The gauntlet driver of the kit's Scoreboard module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-scoreboard.mjs: the scoreboard export
+// of Tools/gauntlet/harness/run.mjs, buildScoreboard.
+//
+//   jet driver scoreboard DIR
+//
+// DIR holds JSON files, each an object with the `matrix`, the measured
+// `results`, the measurement `manifest` and, when given, a Tower store
+// (`tower`: its `rev` and `cards`) and the machine `ceiling` (its
+// `references` and `measurements`); each is judged in name order and shown
+// as the file name and the scoreboard as JSON.
+package: {
+    name: "run_scoreboard_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[read_json, scoreboard, tower_state, value_at]
+    json: core.encoding.json
+    process: core.process
+}
+
+USAGE: "usage: driver scoreboard DIR"
+
+print_scoreboards: fn(dir: String) {
+    listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
+    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        input: read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        tower: if value_at(input, "tower") == .Val(store) -> Val(tower_state(store)) else -> None
+        board: scoreboard(value_at(input, "matrix") ?? Dyn.Null, value_at(input, "results") ?? Dyn.Null, value_at(input, "manifest") ?? Dyn.Null, tower, value_at(input, "ceiling") ?? Dyn.Null)
+        print("{name}\t{json.stringify(board)}")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if {
+        args.get(0) == Val("scoreboard") && args.len() >= 2 -> print_scoreboards(args[1])
+        else -> process.fail(64, USAGE)
+    }
+}

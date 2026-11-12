@@ -19,7 +19,7 @@ package: {
 
 use {
     files: core.files
-    jet_gauntlet_kit.[LOSS_OWNERS, ceiling_reference_issues, items_at, matrix_peer_languages, member, metric_applicability, number_at, ratio_verdict, read_json, strict_performance_policy, strict_performance_policy_issues, text_at]
+    jet_gauntlet_kit.[LOSS_OWNERS, ceiling_policy, ceiling_reference_issues, items_at, matrix_peer_languages, member, metric_applicability, number_at, ratio_verdict, read_json, strict_performance_policy, strict_performance_policy_issues, text_at]
     json: core.encoding.json
     process: core.process
     sys: core.sys
@@ -50,7 +50,7 @@ run: fn() {
         "policy" -> {
             categories := Dyn.object()
             loop owner in LOSS_OWNERS -> categories[owner.metric] = owner.category
-            print(json.stringify(Dyn{[String: Dyn]{"strict_performance_policy": strict_performance_policy(), "loss_owner_category_by_metric": categories}}, 2))
+            print(json.stringify(Dyn{[String: Dyn]{"strict_performance_policy": strict_performance_policy(), "ceiling_policy": ceiling_policy(), "loss_owner_category_by_metric": categories}}, 2))
         }
         "issues" -> print_issues(strict_performance_policy_issues(input(args, 1)))
         "references" -> print_issues(ceiling_reference_issues(input(args, 1), input(args, 2), repo_root()))

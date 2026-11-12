@@ -197,6 +197,43 @@
     },
     "text": "Jet's performance target has two stages. The first stage is the peer floor, and it is a hard, structural requirement: a Jet program must be faster and use less peak memory than the same program in every other language. Jet/peer must be below `1.00` for every matched peer, for each required cell and for both wall time and peak memory. Rust is judged like every other peer, with no parity band. A loss to any peer on either metric is a codegen, runtime or Core failure. It is fixed generally and structurally, so that any Jet program beats the other languages, never only the measured one. The second and final stage is the machine ceiling: hand-written, maximally optimized machine code for the same workload, which Jet must match or beat in both cycles and bytes (Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can. Closing the remaining ceiling gap is the hill-climbing stage: until the owner opens it, a cell passes the gate on the peer floor, and its ceiling ratio is measured and reported but does not fail the gate.\n\nEvery required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. A cell without a reference is uncovered and fails the gate once hill climbing opens the ceiling stage. A better technique replaces the reference and raises the target.\n\nRequired cells cover the foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it; never claim a niche win without one.\n\nApply the comparator separately to each cell and metric. Never average away a loss, substitute an easier workload or tier, drop a peer, or accept wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts stay immutable under the policy they were recorded with and never weaken the current gate."
   },
+  "ceiling_policy": {
+    "stages": [
+      {
+        "id": "peer_floor",
+        "role": "initial",
+        "against": "every_matched_peer",
+        "comparators": {
+          "win": "<1",
+          "loss": ">=1"
+        }
+      },
+      {
+        "id": "machine_ceiling",
+        "role": "final",
+        "against": "hand_written_machine_code",
+        "comparators": {
+          "meet": "<=1",
+          "miss": ">1"
+        }
+      }
+    ],
+    "closes_cell": "peer_floor",
+    "peer_win_closes_cell": true,
+    "ceiling_gate": "reported_until_hill_climbing_opens",
+    "required_cells": "every_required_cell",
+    "metrics": {
+      "runtime": "cycles",
+      "latency": "cycles",
+      "binary": "bytes"
+    },
+    "references": "Tools/perf/asm-parity/cells.json",
+    "reference_source": "ref.S",
+    "reference_link": "gauntlet",
+    "missing_reference": "uncovered",
+    "reference_technique": "best_known_for_the_workload",
+    "better_technique": "replaces_reference_and_raises_target"
+  },
   "loss_owner_category_by_metric": {
     "runtime_wall_seconds": "runtime",
     "runtime_first_stdout_seconds": "runtime",

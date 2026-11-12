@@ -12,6 +12,7 @@
 // a JSON array of Jet/peer ratios.
 import fs from 'node:fs';
 import {
+  CEILING_POLICY,
   LOSS_OWNER_CATEGORY_BY_METRIC,
   STRICT_PERFORMANCE_POLICY,
   ceilingReferenceIssues,
@@ -30,7 +31,7 @@ const list = (issues) => {
 };
 
 if (command === 'policy') {
-  console.log(JSON.stringify({ strict_performance_policy: STRICT_PERFORMANCE_POLICY, loss_owner_category_by_metric: LOSS_OWNER_CATEGORY_BY_METRIC }, null, 2));
+  console.log(JSON.stringify({ strict_performance_policy: STRICT_PERFORMANCE_POLICY, ceiling_policy: CEILING_POLICY, loss_owner_category_by_metric: LOSS_OWNER_CATEGORY_BY_METRIC }, null, 2));
 } else if (command === 'issues') {
   list(strictPerformancePolicyIssues(read(first)));
 } else if (command === 'references') {
