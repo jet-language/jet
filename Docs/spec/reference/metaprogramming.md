@@ -545,6 +545,11 @@ only reads, so it needs no Meta effect, and the build refuses a value whose
 build has returned. A handler that rewrites a heard function `f` uses
 `Meta.Rewrite` like any other caller; `f.package` is the identity of the
 package that declares it.
+A handler runs inside the build's own call, so it spends the build's
+compile-time step budget, the one every compile-time call has: the build and
+all its handlers share it. A build that runs out stops there with E0952, and
+the build publishes nothing: no handler's `meta.add` lands and nothing is
+compiled. Only a program run (`jet eval`, like a built binary) has no budget.
 Code that `meta.add` or `meta.rewrite_body` hands the compiler can't write
 `#Unsafe`: it is never audited where it lands, so the call is refused (E3503)
 and the build publishes nothing. An unsafe operation stays in a function of

@@ -1,0 +1,40 @@
+// @programmable_build
+// @cli_build
+// A `meta.events` handler runs in the build's own code, so it spends the
+// build's compile-time step budget. This one spins before it adds `extra`:
+// the build runs out of steps, reports it, and publishes nothing, so the
+// program is never built and `extra` never exists.
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#Traced
+load: fn() -> Int { 1 }
+
+spin: fn() -> Int {
+    i := 0
+    loop i >= 0 -> i += 1
+    i
+}
+
+install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                steps: spin()
+                if steps > 0 -> meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra")
+            }
+        },
+    )
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_handler_fuel_publishes_none.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(load()) }

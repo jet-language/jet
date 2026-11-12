@@ -549,7 +549,7 @@ jet_eval_native_missing_stub: fn(code: &IRModule, name: String, symbol: String, 
 jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     s := JetEvalIRState{
         child: X64ComptimeChild{}, pages: [[U8]]{}, page_rows: [Int:Int]{},
-        budget: if program.runtime_execution -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
+        budget: if config.fuel < 0 -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
         stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, impure: config.impure, impure_gate: config.impure_gate, effect_call: config.effect_call, span: span,
         failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,

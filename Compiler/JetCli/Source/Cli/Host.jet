@@ -528,6 +528,8 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
     entry: name_rows_value(built.program.function_rows, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.runtime_execution = true
+    // A program run has no step budget, like a built binary.
+    config.fuel = -1
     config.eval_entry = true
     program := jet_eval_native_load(JetEvalIRComptime{code: built.program.move(), layouts: Shared{[IRProgram]{layouts.move()}}, items: [Int]{entry}, build_failures: [String]{}}, config)
     evaluated: jet_eval_native_run(program, 0, [TComptimeValue]{}, config, span)
