@@ -42,7 +42,10 @@ run: fn() IOError! {
     mode: process.args().get(0) ?? ""
     if mode == "child" -> process.exit(0)
     if mode == "hog" {
-        held: "x".repeat(268435456)
+        // The size is read at run time (one argument, so 256 MiB): a local
+        // value of constant calls is computed while compiling, and every
+        // child that runs this file would then build the string in its scope.
+        held: "x".repeat(268435456 * process.args().len())
         print("held {held.len()} bytes")
         process.exit(0)
     }

@@ -88,12 +88,14 @@ worker_limit_cell: fn() {
 
 double: fn(n: Int) -> Int { n * 2 }
 
-// Explicit join and scope-owned join.
-join_cell: fn() {
+// Explicit join and scope-owned join. The scope-owned tasks take `base`, a
+// run-time value: a local value of constant calls is computed while
+// compiling, and the group would then start no task.
+join_cell: fn(base: Int) {
     t: task double(21)
     print("join: explicit {t.join() ?? -1}")
     task.group g {
-        both: task.all {double(1), double(2)} ?? panic("all")
+        both: task.all {double(base), double(base + 1)} ?? panic("all")
         print("join: scope-owned {both[0]} {both[1]}")
     }
     print("join: group closed")
@@ -151,7 +153,7 @@ shield_cell: fn() {
 run: fn() {
     backpressure_cell()
     worker_limit_cell()
-    join_cell()
+    join_cell(1)
     failfast_cell()
     shield_cell()
 }
