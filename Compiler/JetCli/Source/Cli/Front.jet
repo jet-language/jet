@@ -2422,9 +2422,9 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             }
         }
     }
-    quiet: owned.contains("--quiet")
-    verbose: owned.contains("--verbose") || owned.contains("-v")
-    json: jet_cli_wants_json(owned)
+    quiet := owned.contains("--quiet")
+    verbose := owned.contains("--verbose") || owned.contains("-v")
+    json := jet_cli_wants_json(owned)
     if raw.len() == 0 -> return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
 
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
@@ -2540,14 +2540,25 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     // (CommandLayers.jet), after the words typed, or before the file of the
     // `jet <file>` shorthand, whose later words are the program's. A compiler
     // control's setting is left to its reader, which ranks it below the
-    // environment variable (Controls.jet).
+    // environment variable (Controls.jet). A remembered output flag sets the
+    // output as its typed word does; a typed flag's setting adds no word.
     if jet_cli_settings_word(jet_argv) == .Val(word) {
         if jet_cli_command_flag_words(word, jet_argv, false) == {
             .Refused(reports) -> return JetCLIPlan.Done{output: jet_cli_command_settings_output(reports, color)}
             .Words(words) -> if words.len() > 0 {
                 at: jet_cli_shorthand_file(argv) ?? separator
                 remembered := jet_cli_prefix(argv, at)
-                loop item in words -> remembered.push(item.copy()) // copy: the settings keep their words.
+                loop item in words {
+                    if item == "--quiet" -> quiet = true
+                    if item == "--verbose" -> verbose = true
+                    if item == "--json" -> json = true
+                    if item == "--color" || item == "--color=always" -> color = true
+                    if item == "--color=auto" || item == "--color=never" -> color = false
+                    if item.starts_with("--color=") && item != "--color=auto" && item != "--color=always" && item != "--color=never" {
+                        return jet_cli_report_done("", "E2104", "invalid color request {jet_cli_debug_quote(item.slice(8..<item.len()))}; expected auto, always, or never", jet_cli_why("E2104"), "Set the `color` setting to \"auto\", \"always\", or \"never\"", false, JET_DRIVER_EXIT_USAGE)
+                    }
+                    remembered.push(item.copy()) // copy: the settings keep their words.
+                }
                 loop item in jet_cli_tail(argv, at) -> remembered.push(item)
                 argv = remembered
                 separator = separator + words.len()

@@ -1,0 +1,25 @@
+# #6606 c1: `jet test --json` and the user setting `test.json` have one effect:
+# bare `jet test` in an empty directory prints the same stdout and stderr and
+# exits the same with either.
+fixture: json_flag_and_setting_have_one_effect_on_test.fixture
+env: NO_COLOR=1
+mkdir: p
+step: jet test --json
+cwd: {work}/p
+exit: 2
+capture: flag_out = text stdout
+capture: flag_err = text stderr
+write: flag.out = "{cap:flag_out}"
+write: flag.err = "{cap:flag_err}"
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet test
+cwd: {work}/p
+env: XDG_CONFIG_HOME={work}/config
+exit: 2 # the setting's exit is the flag's
+capture: setting_out = text stdout
+capture: setting_err = text stderr
+write: setting.out = "{cap:setting_out}"
+write: setting.err = "{cap:setting_err}"
+file: setting.out == flag.out
+file: setting.err == flag.err

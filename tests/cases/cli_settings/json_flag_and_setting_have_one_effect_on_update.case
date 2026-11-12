@@ -1,0 +1,25 @@
+# #6606 c1: `jet update --json` and the user setting `update.json` have one effect:
+# bare `jet update` in an empty directory prints the same stdout and stderr and
+# exits the same with either.
+fixture: json_flag_and_setting_have_one_effect_on_update.fixture
+env: NO_COLOR=1
+mkdir: p
+step: jet update --json
+cwd: {work}/p
+exit: 1
+capture: flag_out = text stdout
+capture: flag_err = text stderr
+write: flag.out = "{cap:flag_out}"
+write: flag.err = "{cap:flag_err}"
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet update
+cwd: {work}/p
+env: XDG_CONFIG_HOME={work}/config
+exit: 1 # the setting's exit is the flag's
+capture: setting_out = text stdout
+capture: setting_err = text stderr
+write: setting.out = "{cap:setting_out}"
+write: setting.err = "{cap:setting_err}"
+file: setting.out == flag.out
+file: setting.err == flag.err
