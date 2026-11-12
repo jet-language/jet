@@ -1,0 +1,341 @@
+// The mid-size build-time workload; the twin of midsize.mjs's generator.
+//
+// One shape, four languages: every unit declares the same record, the same
+// three-case sum type, and the same classify/score/step/unit functions with
+// identical integer arithmetic, and `run`/`main` folds every unit into one
+// checksum line. The Jet source is ~5k lines; the peers are the idiomatic
+// spelling of the same program in Go, Zig, and Rust. All values stay
+// non-negative and below 2^40, so `%` means the same thing everywhere and no
+// language can overflow or trap. The manifest pins the SHA-256 of every
+// generated source and of the shared expected output, so the text below is
+// the workload byte for byte, the header naming midsize.mjs included.
+UNITS: 90
+MODULUS: 1000003
+
+// One unit's constants: multipliers c1, c2, c3, thresholds t1 < t2, and the
+// number of steps n.
+Constants: struct {
+    c1: Int
+    c2: Int
+    c3: Int
+    t1: Int
+    t2: Int
+    n: Int
+}
+
+unit_constants: fn(i: Int) -> Constants {
+    t1: 200 + (i * 17) % 300
+    Constants{c1: 3 + (i * 7) % 17, c2: 5 + (i * 11) % 23, c3: 101 + (i * 13) % 97, t1: t1, t2: t1 + 300 + (i * 19) % 200, n: 12 + i % 5}
+}
+
+seed: fn(i: Int) -> Int { i * 37 + 1 }
+
+// `render(i)` for every unit, one per line.
+every_unit: fn(render: fn(Int) -> String) -> String {
+    out := [String]{}
+    loop i in 0..<UNITS -> out.push(render(i))
+    out.join("\n")
+}
+
+jet_unit: fn(i: Int) -> String {
+    k: unit_constants(i)
+    """
+        // Unit {i}: state step, classification, and scoring.
+        State{i}: struct {{
+            a: Int
+            b: Int
+            c: Int
+        }}
+
+        Kind{i}: enum {{
+            Low(Int)
+            Mid(Int)
+            High
+        }}
+
+        classify_{i}: fn(x: Int) -> Kind{i} {{
+            if x < {k.t1} {{
+                return Kind{i}.Low(x)
+            }}
+            if x < {k.t2} {{
+                return Kind{i}.Mid(x - {k.t1})
+            }}
+            return Kind{i}.High
+        }}
+
+        score_{i}: fn(kind: Kind{i}) -> Int {{
+            return if kind == {{
+                .Low(v) -> v * {k.c1} + 1
+                .Mid(v) -> v * {k.c2} + 7
+                .High -> {k.c3}
+            }}
+        }}
+
+        step_{i}: fn(s: State{i}, x: Int) -> State{i} {{
+            a: (s.a * {k.c1} + x + 1) % {MODULUS}
+            b: (s.b + a * {k.c2}) % {MODULUS}
+            c: (s.c + a + b * 3) % {MODULUS}
+            return State{i}{{a: a, b: b, c: c}}
+        }}
+
+        unit_{i}: fn(seed: Int) -> Int {{
+            s := State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}
+            values := [Int]{{}}
+            loop j in 0..<{k.n} {{
+                s = step_{i}(s, j)
+                &values.push(score_{i}(classify_{i}(s.a % 1000)))
+            }}
+            total := 0
+            loop v in values {{
+                if v % 2 == 0 {{
+                    total += v
+                }} else {{
+                    total += v * 3
+                }}
+            }}
+            return (total + s.b + s.c) % {MODULUS}
+        }}
+
+        """
+}
+
+go_unit: fn(i: Int) -> String {
+    k: unit_constants(i)
+    [
+        "// Unit {i}: state step, classification, and scoring.",
+        "type State{i} struct {{",
+        "\ta int64",
+        "\tb int64",
+        "\tc int64",
+        "}}",
+        "",
+        "const (",
+        "\tkind{i}Low = iota",
+        "\tkind{i}Mid",
+        "\tkind{i}High",
+        ")",
+        "",
+        "type Kind{i} struct {{",
+        "\tint: tag",
+        "\tv   int64",
+        "}}",
+        "",
+        "func classify{i}(x int64) Kind{i} {{",
+        "\tif x < {k.t1} {{",
+        "\t\treturn Kind{i}{{tag: kind{i}Low, v: x}}",
+        "\t}}",
+        "\tif x < {k.t2} {{",
+        "\t\treturn Kind{i}{{tag: kind{i}Mid, v: x - {k.t1}}}",
+        "\t}}",
+        "\treturn Kind{i}{{tag: kind{i}High}}",
+        "}}",
+        "",
+        "func score{i}(kind Kind{i}) int64 {{",
+        "\tswitch kind.tag {{",
+        "\tcase kind{i}Low:",
+        "\t\treturn kind.v*{k.c1} + 1",
+        "\tcase kind{i}Mid:",
+        "\t\treturn kind.v*{k.c2} + 7",
+        "\tdefault:",
+        "\t\treturn {k.c3}",
+        "\t}}",
+        "}}",
+        "",
+        "func step{i}(s State{i}, x int64) State{i} {{",
+        "\ta := (s.a*{k.c1} + x + 1) % {MODULUS}",
+        "\tb := (s.b + a*{k.c2}) % {MODULUS}",
+        "\tc := (s.c + a + b*3) % {MODULUS}",
+        "\treturn State{i}{{a: a, b: b, c: c}}",
+        "}}",
+        "",
+        "func unit{i}(seed int64) int64 {{",
+        "\ts := State{i}{{a: seed % {MODULUS}, b: {k.c2}, c: {k.c3}}}",
+        "\tvalues := []int64{{}}",
+        "\tfor j := int64(0); j < {k.n}; j++ {{",
+        "\t\ts = step{i}(s, j)",
+        "\t\tvalues = append(values, score{i}(classify{i}(s.a%1000)))",
+        "\t}}",
+        "\tvar total int64",
+        "\tfor _, v := range values {{",
+        "\t\tif v%2 == 0 {{",
+        "\t\t\ttotal += v",
+        "\t\t}} else {{",
+        "\t\t\ttotal += v * 3",
+        "\t\t}}",
+        "\t}}",
+        "\treturn (total + s.b + s.c) % {MODULUS}",
+        "}}",
+        "",
+    ].join("\n")
+}
+
+zig_unit: fn(i: Int) -> String {
+    k: unit_constants(i)
+    """
+        // Unit {i}: state step, classification, and scoring.
+        const State{i} = struct {{
+            a: i64,
+            b: i64,
+            c: i64,
+        }};
+
+        const Kind{i} = union(enum) {{
+            low: i64,
+            mid: i64,
+            high: void,
+        }};
+
+        fn classify{i}(x: i64) Kind{i} {{
+            if (x < {k.t1}) {{
+                return .{{ .low = x }};
+            }}
+            if (x < {k.t2}) {{
+                return .{{ .mid = x - {k.t1} }};
+            }}
+            return .high;
+        }}
+
+        fn score{i}(kind: Kind{i}) i64 {{
+            return switch (kind) {{
+                .low => |v| v * {k.c1} + 1,
+                .mid => |v| v * {k.c2} + 7,
+                .high => {k.c3},
+            }};
+        }}
+
+        fn step{i}(s: State{i}, x: i64) State{i} {{
+            const a = @mod(s.a * {k.c1} + x + 1, {MODULUS});
+            const b = @mod(s.b + a * {k.c2}, {MODULUS});
+            const c = @mod(s.c + a + b * 3, {MODULUS});
+            return .{{ .a = a, .b = b, .c = c }};
+        }}
+
+        fn unit{i}(allocator: std.mem.Allocator, seed: i64) !i64 {{
+            var s = State{i}{{ .a = @mod(seed, {MODULUS}), .b = {k.c2}, .c = {k.c3} }};
+            var values: std.ArrayList(i64) = .empty;
+            defer values.deinit(allocator);
+            var j: i64 = 0;
+            while (j < {k.n}) : (j += 1) {{
+                s = step{i}(s, j);
+                try values.append(allocator, score{i}(classify{i}(@mod(s.a, 1000))));
+            }}
+            var total: i64 = 0;
+            for (values.items) |v| {{
+                if (@mod(v, 2) == 0) {{
+                    total += v;
+                }} else {{
+                    total += v * 3;
+                }}
+            }}
+            return @mod(total + s.b + s.c, {MODULUS});
+        }}
+
+        """
+}
+
+rust_unit: fn(i: Int) -> String {
+    k: unit_constants(i)
+    """
+        // Unit {i}: state step, classification, and scoring.
+        struct State{i} {{
+            a: i64,
+            b: i64,
+            c: i64,
+        }}
+
+        enum Kind{i} {{
+            Low(i64),
+            Mid(i64),
+            High,
+        }}
+
+        fn classify_{i}(x: i64) -> Kind{i} {{
+            if x < {k.t1} {{
+                return Kind{i}::Low(x);
+            }}
+            if x < {k.t2} {{
+                return Kind{i}::Mid(x - {k.t1});
+            }}
+            Kind{i}::High
+        }}
+
+        fn score_{i}(kind: Kind{i}) -> i64 {{
+            match kind {{
+                Kind{i}::Low(v) => v * {k.c1} + 1,
+                Kind{i}::Mid(v) => v * {k.c2} + 7,
+                Kind{i}::High => {k.c3},
+            }}
+        }}
+
+        fn step_{i}(s: &State{i}, x: i64) -> State{i} {{
+            let a = (s.a * {k.c1} + x + 1) % {MODULUS};
+            let b = (s.b + a * {k.c2}) % {MODULUS};
+            let c = (s.c + a + b * 3) % {MODULUS};
+            State{i} {{ a, b, c }}
+        }}
+
+        fn unit_{i}(seed: i64) -> i64 {{
+            let mut s = State{i} {{ a: seed % {MODULUS}, b: {k.c2}, c: {k.c3} }};
+            let mut values: Vec<i64> = Vec::new();
+            for j in 0..{k.n} {{
+                s = step_{i}(&s, j);
+                values.push(score_{i}(classify_{i}(s.a % 1000)));
+            }}
+            let mut total: i64 = 0;
+            for v in &values {{
+                if v % 2 == 0 {{
+                    total += v;
+                }} else {{
+                    total += v * 3;
+                }}
+            }}
+            (total + s.b + s.c) % {MODULUS}
+        }}
+
+        """
+}
+
+HEADER: "Mid-size build-time workload (generated by Tools/perf/build-time/midsize.mjs; do not edit)."
+
+jet_fold: fn(i: Int) -> String { "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS}" }
+go_fold: fn(i: Int) -> String { "\ttotal = (total*31 + unit{i}({seed(i)})) % {MODULUS}" }
+zig_fold: fn(i: Int) -> String { "    total = @mod(total * 31 + try unit{i}(allocator, {seed(i)}), {MODULUS});" }
+rust_fold: fn(i: Int) -> String { "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS};" }
+
+// Each program: the header, every unit, then `run`/`main` with every fold.
+jet_program: fn(units: String, folds: String) -> String {
+    "// {HEADER}\n{units}\nrun: fn() {{\n    total := 0\n{folds}\n    print(\"checksum {{total}}\")\n}}\n"
+}
+
+go_program: fn(units: String, folds: String) -> String {
+    "// {HEADER}\npackage main\n\nimport \"fmt\"\n\n{units}\nfunc main() {{\n\tvar total int64\n{folds}\n\tfmt.Printf(\"checksum %d\\n\", total)\n}}\n"
+}
+
+zig_program: fn(units: String, folds: String) -> String {
+    "// {HEADER}\nconst std = @import(\"std\");\n\n{units}\npub fn main(init: std.process.Init) !void {{\n    const allocator = std.heap.page_allocator;\n    var total: i64 = 0;\n{folds}\n    var out_buffer: [64]u8 = undefined;\n    var out = std.Io.File.Writer.init(.stdout(), init.io, &out_buffer);\n    try out.interface.print(\"checksum {{d}}\\n\", .{{total}});\n    try out.interface.flush();\n}}\n"
+}
+
+rust_program: fn(units: String, folds: String) -> String {
+    "// {HEADER}\n{units}\nfn main() {{\n    let mut total: i64 = 0;\n{folds}\n    println!(\"checksum {{total}}\");\n}}\n"
+}
+
+// One language of the workload: its file is main.<extension>.
+Language: struct {
+    extension: String
+    unit: fn(Int) -> String
+    fold: fn(Int) -> String
+    program: fn(String, String) -> String
+}
+
+// Every language, in the order midsize writes them.
+languages: fn() -> [Language] {
+    [
+        Language{extension: "jet", unit: jet_unit, fold: jet_fold, program: jet_program},
+        Language{extension: "go", unit: go_unit, fold: go_fold, program: go_program},
+        Language{extension: "zig", unit: zig_unit, fold: zig_fold, program: zig_program},
+        Language{extension: "rs", unit: rust_unit, fold: rust_fold, program: rust_program},
+    ]
+}
+
+// The whole program in `language`.
+midsize: fn(language: Language) -> String { language.program(every_unit(language.unit), every_unit(language.fold)) }

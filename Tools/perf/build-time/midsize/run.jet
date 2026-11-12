@@ -1,0 +1,25 @@
+// Writes the mid-size build-time workload (jet_midsize_units's Midsize.jet) as
+// OUT_DIR/{main.jet,main.go,main.zig,main.rs}; the twin of midsize.mjs.
+//
+// Usage: jet Tools/perf/build-time/midsize OUT_DIR
+package: {
+    name: "midsize"
+    version: "0.0.1"
+    deps: {
+        jet_midsize_units: ../units,
+    }
+}
+
+use {
+    jet_midsize_units.[languages, midsize]
+    files: core.files
+    process: core.process
+}
+
+run: fn() Err! {
+    out: process.args().get(0) ?? process.fail(64, "usage: jet Tools/perf/build-time/midsize OUT_DIR")
+    files.create_dir_all(out)
+    loop language in languages() {
+        files.write(files.join(out, "main.{language.extension}"), midsize(language))
+    }
+}
