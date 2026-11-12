@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6772,
-    "rev": 99947,
+    "rev": 99948,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98967,6 +98967,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "Owner 2026-11-12: compile speed and memory belong to G11 (speed and size), not G4. Removed from G4; the card stays in G11."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Main 2026-11-12: G4Ports-c1one (2844b04984, in b12) splices the comptime.bodies child's owners after finalize. jetc 0.060 s with 1 bodies program, NCC clean. But JET_RECHECK_VERIFY on RCC shows differences from the full recheck: the pass's comptime closures seed new Core demand (core.regex compile, is_match and match; core.net error_detail, net_err and valid_text; RunColdContext extract_source), and the full recheck re-solves those bodies' failure facts. About 30 comptime cases ERROR under verify (comptime_diff module_calls_match_runtime_source03-24, cbor_canonical, zstd_*, typed_datetime_head, comptime_core_pure_parity rustc_backed_*). Fix order: (1) G4Ports-c1guard, first in b13: refuse the splice whenever the pass has comptime functions with Core call facts; proof is verify clean on RCC, NCC and jetc, plus zero verify ERRORs over the comptime cases. (2) The A/B split of sema_finalize_graph: A is the body pass plus the codec and derive waves; the local-only comptime splice runs between A and B; B is Core demand, the failure solve and recheck, and the side and effect passes, run once seeded with every function. That is exactly the full recheck's input, and it drops the first B (about 0.5 s on RCC). Probes g4p-fin1 and g4p-fin2. c1 stays open until RCC meets the target with verify clean."
         },
         {
@@ -99035,13 +99040,12 @@
       "refs": [],
       "tags": [],
       "goals": [
-        "G11",
-        "G4"
+        "G11"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-12T09:18:19.620Z",
+      "updated": "2026-11-12T10:37:22.812Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -200207,6 +200211,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:37:22.812Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry,goals"
+    },
     {
       "at": "2026-11-12T10:30:15.819Z",
       "by": "Main",
