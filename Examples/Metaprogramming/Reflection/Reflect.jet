@@ -12,7 +12,7 @@ build: fn(b: Build) {
         if {
             info.name == "CustomerID" -> {
                 if {
-                    info.has_marker("Comparable") -> { next }
+                    info.marker(Comparable) != None -> { next }
                     else -> {
                         b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
                     }
@@ -93,14 +93,14 @@ Summarize: struct {
             method_maturity: info.methods[0].reflect().maturity.level
             pub_field: info.fields[0].name
             hidden_pub: info.fields[1].is_pub
-            has_debug: info.has_marker("Debug")
+            has_debug: info.marker(Debug) != None
             summary: fn(self) -> String { "{target.reflect().name}/{method}[{method_marker}]/{pub_field} debug={has_debug} hidden_pub={hidden_pub} effects={method_effects} send={method_sendability} moved={method_movedness} track={method_origin} view={method_view_mutable}" }
         }
     }
 }
 
 // `Debug` no longer has an explicit derive spelling — it
-// auto-derives whenever every field qualifies (S55). `has_marker("Debug")`
+// auto-derives whenever every field qualifies (S55). `marker(Debug)`
 // below reads the type's WRITTEN markers, so it now honestly reports
 // `false` for a type that only qualifies for auto-derive.
 #Summarize

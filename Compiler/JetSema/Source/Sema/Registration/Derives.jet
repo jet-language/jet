@@ -202,6 +202,9 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
             }
         }
         .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Eq || op == BinOp.Ne {
+                if sema_derive_static_absence(expansion, left, right) == .Val(missing) -> return Val(CtValue.Bool{value: if op == BinOp.Eq -> missing else -> !missing})
+            }
             lhs: sema_derive_static_value(expansion, left) ?? return None
             rhs: sema_derive_static_value(expansion, right) ?? return None
             sema_derive_static_binary(op, lhs, rhs)
@@ -272,6 +275,29 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
     }
 }
 
+// `value == None` (either side) over a known-time Option such as
+// `target.marker(T) != None`: whether the value is absent, or None when
+// neither side is `None` or the other side is no known-time Option.
+sema_derive_static_absence: fn(expansion: SemaDeriveExpansion, left: Expr, right: Expr) -> Bool? Never! {
+    if left == .Absent(_, _) {
+        value: sema_derive_static_value(expansion, right) ?? return None
+        return sema_derive_ct_absent(value)
+    }
+    if right == .Absent(_, _) {
+        value: sema_derive_static_value(expansion, left) ?? return None
+        return sema_derive_ct_absent(value)
+    }
+    None
+}
+
+sema_derive_ct_absent: fn(value: CtValue) -> Bool? Never! {
+    if value == {
+        .Present(_) -> Val(false)
+        .Failed(_) -> Val(true)
+        .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Closure(_) -> None
+    }
+}
+
 sema_derive_static_length: fn(owner: CtValue) -> CtValue? Never! {
     count := -1
     if owner == .List(values) -> count = values.len()
@@ -315,7 +341,6 @@ sema_derive_static_method: fn(expansion: SemaDeriveExpansion, receiver: Expr, me
     wanted := ""
     if argument == .Str(text) -> wanted = text
     if wanted == "" -> return None
-    if method == "has_marker" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "markers", wanted) != None})
     if method == "has_method" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "methods", wanted) != None})
     None
 }

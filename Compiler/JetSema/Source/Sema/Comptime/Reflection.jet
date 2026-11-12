@@ -745,46 +745,6 @@ sema_comptime_reflection_enum_layout: fn(definition: EnumDef, engine: TargetLayo
     }
     sema_comptime_reflection_layout_info(kind, guarantee, "enum declaration", target, facts, None, None, layout_fields)
 }
-sema_comptime_reflection_marker_name: fn(value: TComptimeValue) -> String? {
-    if value == {
-        .String(name) -> return Val(name)
-        .Struct(_, fields) -> loop field in fields {
-            if field.name == "name" {
-                if field.value == {
-                    .String(name) -> return Val(name)
-                    .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
-                }
-            }
-        }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> {}
-    }
-    None
-}
-
-// The native comptime evaluator accepts exactly these three reflected
-// metadata records and reads only their written `markers` list.
-sema_comptime_reflection_has_marker: fn(value: TComptimeValue, wanted: String) -> Bool? {
-    if value == {
-        .Struct(type_name, fields) -> {
-            if type_name != "TypeInfo" && type_name != "FieldInfo" && type_name != "MethodInfo" -> return None
-            loop field in fields {
-                if field.name != "markers" -> next
-                if field.value == {
-                    .List(markers) -> {
-                        loop marker in markers {
-                            name: sema_comptime_reflection_marker_name(marker) ?? next
-                            if name == wanted -> return Val(true)
-                        }
-                        return Val(false)
-                    }
-                    .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return Val(false)
-                }
-            }
-            return Val(false)
-        }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None
-    }
-}
 
 sema_comptime_reflection_member_markers: fn(markers: [Marker], registry: SemaScopeMembersMarkerRegistry) -> [TComptimeValue] Never! {
     infos: loop marker in markers -> sema_comptime_reflection_marker_info(marker, registry)

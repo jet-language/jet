@@ -204,7 +204,7 @@ build: fn(b: Build) {
         if {
             info.name == "CustomerID" -> {
                 if {
-                    info.has_marker("Comparable") -> { next }
+                    info.marker(Comparable) != None -> { next }
                     else -> {
                         b.error(info.span, "REFLECT", "missing marker",
                             "#Comparable was lost",
@@ -338,7 +338,9 @@ substituted field type, as the same example shows for `Box<Int>`.
 `info.marker(T)` on a `TypeInfo`, `FieldInfo` or `MethodInfo` reads the marker
 `T` written on the reflected item as a `T?`: a `T` whose fields are the
 marker's arguments, or `None` when the item does not carry it. `T` names a
-marker struct (one with an `impl Marker` block); any other name is E1134. The
+marker struct (one with an `impl Marker` block) or a Prelude marker, so
+`info.marker(Codable) != None` asks whether `#Codable` is written; any other
+name is E1134. A string test by name (`has_marker("…")`) is gone. The
 read gives the same answer in a marker body, a marker that adds methods, a
 comptime constant and `build: fn`, as
 [`ReflectionRungs`](../../../Examples/Metaprogramming/Reflection/ReflectionRungs/run.jet)

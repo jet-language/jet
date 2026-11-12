@@ -597,6 +597,17 @@ sema_marker_module_prelude_rules: fn() -> [TAppliedRule] {
     rows
 }
 
+// The Prelude marker declared as `name` in the one marker vocabulary source,
+// for a typed `marker(T)` lookup the program's own markers do not answer.
+sema_marker_module_prelude_declaration: fn(name: String) -> MarkerDecl? {
+    parsed: parse_generated_source(MARKER_SOURCE.bytes())
+    if parsed.diagnostics.len() > 0 -> return None
+    loop item in parsed.program.items {
+        if item == .MarkerDecl(declaration) && declaration.name == name -> return Val(declaration)
+    }
+    None
+}
+
 // Rust CheckerMarkers `validate_rule_arguments`: an applied rule evaluates an
 // argument only where its binding observes one. A menu word or identifier
 // (`#Layout(c)`, `#Rename(.Camel)`), an open value (outside `#Default`), an

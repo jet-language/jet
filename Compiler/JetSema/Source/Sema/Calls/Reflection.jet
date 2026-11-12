@@ -250,11 +250,7 @@ sema_call_reflection_method_return: fn(type_name: String, method: String, args: 
         if method == "name" -> return Val(Type.String)
         if method == "value" -> return Val(Type.Named{name: "Value"})
     }
-    if type_name == "TypeInfo" && (method == "has_marker" || method == "has_method") {
-        if args.len() != 1 || args[0] != Type.String -> return None
-        return Val(Type.Bool)
-    }
-    if (type_name == "FieldInfo" || type_name == "MethodInfo") && method == "has_marker" {
+    if type_name == "TypeInfo" && method == "has_method" {
         if args.len() != 1 || args[0] != Type.String -> return None
         return Val(Type.Bool)
     }
@@ -270,8 +266,8 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
 }
 
 sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
-    if owner == "TypeInfo" -> return method == "has_marker" || method == "has_method" || method == "marker"
-    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker" || method == "marker"
+    if owner == "TypeInfo" -> return method == "has_method" || method == "marker"
+    if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "marker"
     false
 }
 
@@ -288,10 +284,11 @@ sema_call_reflection_marker_name: fn(expression: Expr) -> String? Never! {
 // `info.marker(T)` on a TypeInfo, FieldInfo or MethodInfo: the marker `T`
 // written on the reflected item, read as a `T` whose fields are its
 // arguments, or None when the item does not carry it. `T` names a marker
-// struct (one with an `impl Marker` block) visible here, else E1134. The host
-// call carries the marker's name, then each parameter with a declared default
-// as its name and default value, which fill the arguments the use site left
-// out (jet_eval_reflection_marker_value).
+// struct (one with an `impl Marker` block) visible here or a Prelude marker
+// (`marker(Codable) != None` asks whether `#Codable` is written), else E1134.
+// The host call carries the marker's name, then each parameter with a
+// declared default as its name and default value, which fill the arguments
+// the use site left out (jet_eval_reflection_marker_value).
 sema_call_reflection_marker_lookup: fn(
     owner: String,
     receiver: Expr,
@@ -314,9 +311,16 @@ sema_call_reflection_marker_lookup: fn(
     written: sema_call_reflection_marker_name(args[0].expr) ?? ""
     declaration := MarkerDecl?{None}
     if written != "" && program.registration_graph == .Val(graph) -> declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
+    // A Prelude marker is no type in the program: its record is named for it
+    // and keeps only the defaults that check where the lookup is written.
+    prelude := false
+    if declaration == None && written != "" && !written.contains(".") {
+        declaration = sema_marker_module_prelude_declaration(written)
+        prelude = declaration != None
+    }
     marker: declaration ?? {
         shown: if written == "" -> "this argument" else -> "`{written}`"
-        diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block", "name a marker struct visible here, or test a marker by name with `has_marker`"))
+        diagnostics.push(sema_error("E1134", args[0].span, "{shown} is not a marker", "`marker(T)` reads the marker `T` written on a reflected item, so `T` names a struct with an `impl Marker` block or a Prelude marker", "name a marker struct visible here or a Prelude marker such as `Codable`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.marker", span, [EffectRowEntry]{}, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -324,11 +328,19 @@ sema_call_reflection_marker_lookup: fn(
     loop param in marker.params {
         if param.name.starts_with("$") -> next
         default: param.value ?? next
+        if prelude {
+            refusals := [Diagnostic]{}
+            checked: sema_check_expression(default, None, environment, program, scopes, state, tail_store, context, refusals) ?? next
+            if refusals.len() > 0 -> next
+            host_args.push(sema_call_reflection_text(param.name, span))
+            host_args.push(checked)
+            next
+        }
         checked: sema_check_expression(default, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? next
         host_args.push(sema_call_reflection_text(param.name, span))
         host_args.push(checked)
     }
-    marker_type: sema_call_resolved_type(Type.Named{name: written}, environment, program)
+    marker_type: if prelude -> Type.Named{name: marker.name.copy()} else -> sema_call_resolved_type(Type.Named{name: written}, environment, program)
     value := sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
@@ -353,7 +365,7 @@ sema_call_try_reflection_metadata_method: fn(
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one marker, trait, or method name", "call `.{method}(name)` with one String"))
+        diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects one String argument, got {args.len()}", "metadata predicates inspect one trait or method name", "call `.{method}(name)` with one String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params := [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}

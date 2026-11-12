@@ -1,5 +1,5 @@
 // `marker(T)` reads a marker written on a reflected item, so `T` names a
-// struct with an `impl Marker` block (E1134 otherwise).
+// struct with an `impl Marker` block or a Prelude marker (E1134 otherwise).
 Label: struct {
     text: String
 
@@ -16,6 +16,7 @@ Point: struct {
 count: fn(info: TypeInfo) -> Int {
     found := 0
     if info.marker(Label) != None -> found += 1
+    if info.marker(Codable) != None -> found += 1
     if info.marker(Point) != None -> found += 1
     if info.marker(Missing) != None -> found += 1
     found
