@@ -17,7 +17,7 @@ use {
         ast_program,
         type_name,
     ]
-    jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog]
+    jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, record_key_digest]
     jet_sema.[sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
@@ -717,10 +717,18 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
             {name: "functions", value: TComptimeValue.List{values: package_functions}},
         }})
     }
+    // The revision is the content hash of the checked sources: each module's
+    // identity and text, in load order.
+    revision_fields := [String]{}
+    loop module_source in module_sources {
+        revision_fields.push(module_source.module_identity.copy())
+        revision_fields.push(module_source.source.copy())
+    }
     fields := [TComptimeField]{
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
         {name: "packages", value: TComptimeValue.List{values: packages}},
+        {name: "revision", value: jet_eval_compiler_services_string(record_key_digest(revision_fields))},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
     }
     if index.value == .Struct(_, index_fields) {

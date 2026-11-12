@@ -265,7 +265,7 @@ sema_call_compiler_value_owner: fn(ty: Type) -> String? {
 
 sema_call_compiler_value_expected_args: fn(owner: String, method: String) -> Int? {
     if owner == "ProgramInfo" {
-        if method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" -> return Val(0)
+        if method == "types" || method == "functions" || method == "packages" || method == "definitions" || method == "references" || method == "call_edges" || method == "structural_nodes" || method == "revision" -> return Val(0)
     }
     if owner == "FunctionInfo" && method == "reaches_panic" -> return Val(0)
     if owner == "EffectInfo" && method == "has" -> return Val(1)
@@ -330,6 +330,7 @@ sema_call_compiler_value_method_type: fn(owner: String, method: String) -> Type?
         if method == "references" -> return Val(Type.List{element: Type.Named{name: "CompilerReference"}})
         if method == "call_edges" -> return Val(Type.List{element: Type.Named{name: "CompilerCall"}})
         if method == "structural_nodes" -> return Val(Type.List{element: Type.Named{name: "CompilerStructuralNode"}})
+        if method == "revision" -> return Val(Type.String)
     }
     if owner == "FunctionInfo" && method == "reaches_panic" -> return Val(Type.Bool)
     if owner == "EffectInfo" && method == "has" -> return Val(Type.Bool)
