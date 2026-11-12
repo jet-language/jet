@@ -41,14 +41,14 @@ run: fn() {
     shelf: make_shelf()
     copied := shelf.copy()
     assert_eq(copied.timers[0].clock.advance(10), 10)
-    assert_eq(copied.named["c"].clock.advance(10), 12)
+    assert_eq(copied.named["c"].clock.tick(10), 12)
     if copied.latest == .Val(timer) {
         ticking := timer
-        assert_eq(ticking.clock.advance(10), 11)
+        assert_eq(ticking.clock.tick(10), 11)
     }
     if copied.outcome == .Ok(clock) {
         ticking := clock
-        assert_eq(ticking.advance(10), 13)
+        assert_eq(ticking.tick(10), 13)
     }
     print("{shelf.timers[0].clock.now()} {latest_now(shelf)} {shelf.named["c"].clock.now()} {outcome_now(shelf)}")
     first := shelf.timers[0].copy()
