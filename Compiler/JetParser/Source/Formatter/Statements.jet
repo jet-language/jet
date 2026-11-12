@@ -1905,11 +1905,12 @@ jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
     }
 }
 
-// The prepared value of a compile-time binding: `#run value` when the value
-// is one postfix operand (a name, a call, a member, an index, a slice or a
-// literal), else `#run { value }`.
+// The prepared value of a compile-time binding keeps the spelling the author
+// wrote: `#run { value }` stays braced, and `#run value` stays bare when the
+// value is one postfix operand (a name, a call, a member, an index, a slice
+// or a literal). Any other value takes the braces.
 jfmt_fmt_prepared_value: fn(f: &JetFmt, value: Expr) {
-    if jfmt_prepared_operand(value) {
+    if jfmt_prepared_operand(value) && !jfmt_value_was_braced(f, value) {
         jfmt_write(f, "#run ")
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
         return

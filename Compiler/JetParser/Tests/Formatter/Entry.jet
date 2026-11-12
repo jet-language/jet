@@ -313,3 +313,43 @@ g: fn() -> String {
     assert(formatted.contains("print(\"deep-tail\")"))
     assert(!formatted.contains(line), "a chain past the line width expands")
 }
+#Test("a comment above a trait member stays above it") {
+    source: `Edit: trait {
+    // Sets a field from text.
+    set: fn(&self, field: String, text: String) -> Bool
+    // The current field names.
+    names: fn(self) -> [String]
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("// Sets a field from text.") && formatted.contains("// The current field names."))
+    assert(parser_test_find(formatted, "// Sets a field from text.") < parser_test_find(formatted, "set: fn"))
+    assert(parser_test_find(formatted, "set: fn") < parser_test_find(formatted, "// The current field names."))
+    assert(parser_test_find(formatted, "// The current field names.") < parser_test_find(formatted, "names: fn"))
+}
+#Test("a marker setting written twice keeps both rows") {
+    // Sema reports the second row (E0937); fmt keeps what was written.
+    source: `Traced: struct {
+    label: String
+
+    impl Marker {
+        sites: [.Function]
+        sites: [.Method]
+    }
+}
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("sites: [.Function]\n        sites: [.Method]"), "both rows print, in written order")
+}
+#Test("a prepared value keeps the braces its author wrote") {
+    source: `count: fn() -> Int { 3 }
+
+BRACED: #run { count() }
+BARE: #run count()
+SUM: #run { count() + 1 }
+`
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("BRACED: #run {{ count() }}\n"), "a braced operand stays braced")
+    assert(formatted.contains("BARE: #run count()\n"), "a bare operand stays bare")
+    assert(formatted.contains("SUM: #run {{ count() + 1 }}\n"), "a wider value keeps its braces")
+}

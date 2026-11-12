@@ -1235,6 +1235,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             next
         }
         if member.kind == JFMT_MEMBER_ASSOC_TYPE {
+            jfmt_emit_leading_declaration(f, member.start)
             jfmt_write(f, t.assoc_types[member.index].name)
             jfmt_write(f, ": type")
             jfmt_newline(f)
@@ -1242,6 +1243,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
         }
         if member.kind == JFMT_MEMBER_CONSTANT {
             constant: t.constants[member.index]
+            jfmt_emit_leading_declaration(f, member.start)
             jfmt_write(f, constant.name)
             jfmt_write(f, ": ")
             jfmt_fmt_type(f, constant.ty)
@@ -1254,6 +1256,8 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             next
         }
         m: t.methods[member.index]
+        // A comment above the signature leads it, as in an impl body.
+        jfmt_emit_leading_declaration(f, m.name_span.start)
         jfmt_fmt_rules_before(f, RuleSite.Method, m.name_span.start)
         jfmt_fmt_callable_markers(f, m.markers)
         jfmt_write(f, m.name)
@@ -2124,7 +2128,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_fmt_marker_line(f, body.markers[member.index])
     } else if member.kind == JFMT_MEMBER_MARKER_IMPL {
         declaration: body.marker ?? return
-        jfmt_fmt_marker_impl(f, declaration, member.start, body.marker_expand_span)
+        jfmt_fmt_marker_impl(f, declaration, body.trait_impls, member.start, body.marker_expand_span)
     } else if member.kind == JFMT_MEMBER_EFFECT_IMPL {
         declared: body.effect_impl ?? return
         jfmt_fmt_effect_impl(f, declared)
@@ -2134,12 +2138,28 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
 // `impl Marker { … }`: the settings stack on adjacent lines with the group,
 // and the `expand` template is set off by a blank line. The struct prints the
 // fields, so only the `$` settings of the declaration print here, without
-// their sigil.
-jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand: Span?) {
+// their sigil. A setting written twice keeps both rows: sema reports the
+// second (E0937), and the declaration holds only the first, so the second
+// comes from the block's generated `Marker` impl.
+jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], start: Int, expand: Span?) {
     jfmt_emit_leading(f, start)
     settings := [MarkerDeclParam]{}
     loop param in declaration.params {
         if param.name.starts_with("$") && param.value != None -> settings.push(param.copy())
+    }
+    loop block in impls {
+        if !block.compiler_generated || block.trait_name != "Marker" -> next
+        loop constant in block.constants {
+            at := settings.len()
+            loop index in 0..<settings.len() {
+                if settings[index].name_span.start >= constant.name_span.start {
+                    at = index
+                    break
+                }
+            }
+            if at < settings.len() && settings[at].name_span.start == constant.name_span.start -> next
+            settings.insert(at, MarkerDeclParam{name: "${constant.name}", name_span: constant.name_span, ty: None, value: Val(constant.value.copy()), variadic: false})
+        }
     }
     if settings.len() == 0 && declaration.group == None && declaration.body == None {
         jfmt_write(f, "impl Marker {{}}")
