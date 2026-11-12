@@ -157,6 +157,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             scope := JetDriverBuildQueryScope{next_session_id: 1}
             query_request := request.move()
             query_request.build_args = build_args.copy()
+            // `--gate impure=allow` opens `build: fn`'s `#Impure` file calls
+            // (BuildQueries.jet config.impure_gate), as it does a compile's.
+            query_request.gate_set.allowed = options.gates.copy()
             log: Shared{JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}}}
             // copy: the build query records into the one shared log; this build reads it back.
             query_request.comptime_input_log = Val(log.copy())

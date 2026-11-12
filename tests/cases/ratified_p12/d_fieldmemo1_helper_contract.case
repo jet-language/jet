@@ -1,7 +1,9 @@
 # D-FIELDMEMO1 (#4276 c3): a `#Memo` computed field's generated helper is
 # checked under the failure contract it returns with. A formula that only reads
 # values has no failure source, so the helper is `Int Never!`; a formula with a
-# call keeps the default `Int !`. Both build and keep their answers.
+# call keeps the default `Int !`. Both build and keep their answers, at the
+# default level and in a release build (this fixture has no `debug` witness,
+# so it is the one v32_cutover_regression's release tier runs).
 fixture: d_fieldmemo1_helper_contract.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -13,4 +15,7 @@ stdout: ~ "Stats.__computed_attack__memo: Int Never! (explicit Never! (proven un
 stdout: ~ "Party.__computed_total__memo: Int (implicit default Err!)" # a call: the default route
 step run: jet run --optimize=none main.jet
 exit: 0
-stdout: = "attack 26\nattack 26\ntotal 20\ntotal 30\n"
+stdout: = "attack 23\nattack 23\ntotal 20\ntotal 30\n"
+step release: jet run --release main.jet
+exit: 0
+stdout: = "attack 23\nattack 23\ntotal 20\ntotal 30\n"

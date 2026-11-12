@@ -1,8 +1,10 @@
 # V32 (#4276 c16): the inspected contradiction, a `#Memo` computed field that
 # evaluated its formula on every read, is absent from the public product path.
-# The canonical consumer runs through `jet` on every staged engine with the
-# same stdout, stderr and exit; the evaluation count on stderr is the witness,
-# so a read that bypasses the kept answer and evaluates again fails it. The
+# The canonical consumer runs through `jet` at every optimization level with
+# the same stdout, stderr and exit; the evaluation count on stderr is the
+# witness, so a read that bypasses the kept answer and evaluates again fails
+# it. A release build refuses that `debug` witness (E3405), so the release
+# tier runs in d_fieldmemo1_helper_contract, whose fixture has none. The
 # retired re-evaluating getter has no compatibility alias, and the refusals are
 # located registered errors.
 fixture: d_fieldmemo1_contract.fixture
@@ -19,10 +21,6 @@ exit: 0
 stdout: = d_fieldmemo1_contract.stdout.expected
 stderr: = d_fieldmemo1_contract.stderr.expected
 step o2: jet run --optimize=full main.jet
-exit: 0
-stdout: = d_fieldmemo1_contract.stdout.expected
-stderr: = d_fieldmemo1_contract.stderr.expected
-step release: jet run --release main.jet
 exit: 0
 stdout: = d_fieldmemo1_contract.stdout.expected
 stderr: = d_fieldmemo1_contract.stderr.expected

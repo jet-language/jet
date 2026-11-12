@@ -7529,10 +7529,12 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
 // building, or None. A body that takes a raw address or makes a pointer from
 // one names storage only the running program has: a computed value would bake
 // an address that points at nothing (an expired sentry frame reads as no
-// allocation at all). With `unsafe_runs`, an `#Unsafe` function or block is
-// also refused: its effect row is a claim the compiler can't check, so the
-// call runs in the program whatever the row says (#6758: host reads and
-// unchecked code are never baked in at build time).
+// allocation at all). With `unsafe_runs` (a local value), an `#Unsafe`
+// function or block is also refused: its effect row is a claim the compiler
+// can't check, so the call runs in the program whatever the row says (#6758:
+// host reads and unchecked code are never baked in at build time). So is a
+// `#Memo` function: the program reads its result store (`name.cache()`), so
+// each call must reach the store at run time.
 sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String? Never! {
     name: "`{sema_effect_comptime_callee_name(function.key)}`"
     loop node in function.tree.nodes {
@@ -7541,6 +7543,7 @@ sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String
     }
     if !unsafe_runs -> return None
     if function.is_unsafe || function.unsafe_gate != None -> return Val("it calls {name}, which is `#Unsafe` code")
+    if function.memo_bound != None || function.memo_unbounded -> return Val("it calls {name}, whose `#Memo` result store the program reads")
     loop statement in function.tree.stmts {
         if statement == .Unsafe(_, _) || statement == .UnsafeBlock(_, _, _) -> return Val("it calls {name}, which runs an `#Unsafe` block")
     }

@@ -199,9 +199,15 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
             span = Span{start: first, end: last}
         }
         report: build_session_plan_report(message, span.start, span.end)
+        // The structured code is the one the typed error carries (E3502),
+        // whichever row the message's report reads.
+        code := report.code.copy()
+        if jet_eval_build_field_present(error, "code") == .Val(carried) {
+            if carried == .String(text) -> code = text
+        }
         diagnostic := diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val(report.code), message: message, typed_identity: Val("BuildError::{variant}"),
+            code: Val(code), message: message, typed_identity: Val("BuildError::{variant}"),
             details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
         }})
         return Val(diagnostic)
