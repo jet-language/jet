@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99651,
+    "rev": 99652,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65539,12 +65539,12 @@
         },
         {
           "n": 25,
-          "text": "jet fmt formats every canonical source, including Compiler/Prelude/Core.jet and Compiler/Prelude/CoreSurfaceInventory.jet. Today these two don't parse in the library lane, so jet fmt silently leaves them out. Each file is formatted under its own lane; FmtLossless includes both; and jet fmt --check over the repository reports no source left out for a lane mismatch.",
+          "text": "Every .jet file in the repository is Jet that jet fmt formats. Compiler/Prelude/Core.jet and CoreSurfaceInventory.jet are row-table inputs that only the generators read (CoreSourceRows.jet and CoreSurfaceLedger.jet), so they are renamed to a non-Jet extension (.rows) in one cutover covering every reader, LaneCheck and the docs. LaneCheck's generator-input skip and the FmtCorpus exception are removed. jet fmt carries no path special case. git grep for the old names finds no hits, and the generators' --check still owns the files' canonical form.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T00:20:36.840Z"
+          "at": "2026-11-12T00:21:22.873Z"
         }
       ],
       "refs": [],
@@ -65555,7 +65555,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-11-12T00:20:36.840Z",
+      "updated": "2026-11-12T00:21:22.873Z",
       "updatedBy": "Main",
       "goals": [],
       "criteriaLastN": 25
@@ -198791,6 +198791,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T00:21:22.873Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0kob6cb",
+      "note": "#25: G6Meta-2 found the two files are not Jet in any lane (row DSLs that only generators read). The fix is to rename them, not to add a fmt lane or a fmt path special case.; was: jet fmt formats every canonical source, including Compiler/Prelude/Core.jet and Compiler/Prelude/CoreSurfaceInventory.jet. Today these two don't parse in the library lane, so jet fmt silently leaves t"
+    },
     {
       "at": "2026-11-12T00:20:36.840Z",
       "by": "Main",
