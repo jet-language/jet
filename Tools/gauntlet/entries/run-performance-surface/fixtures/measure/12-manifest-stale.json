@@ -1,0 +1,71 @@
+{
+  "identity": {
+    "artifact": {
+      "path": "fake-jet.txt",
+      "sha256": "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"
+    },
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "toolchain": {
+      "rustc": "rustc 1.0.0",
+      "node": "v22.0.0"
+    },
+    "host": {
+      "hostname": "fixture",
+      "cpu_affinity": "0"
+    }
+  },
+  "manifest": {
+    "performance_surface_pairs": {
+      "evidence": {
+        "file": "Tools/gauntlet/performance-surface-evidence.json",
+        "path": "pairs",
+        "tier": "native",
+        "metric": "wall_time_ms",
+        "target": "jet build --optimize=full",
+        "input": "100000-element integer reduction: total starts at 0 and consumes range 0..<100000",
+        "setup": "one jet build --optimize=full per arm into a fresh directory; each warmup/trial runs that executable as a fresh process in a fresh empty directory",
+        "warmups": 10,
+        "trials": 50,
+        "output_oracle": "performance-surface:compound_assign_vs_binary_assign:4999950000\n"
+      },
+      "pair_measurement": {
+        "inputs": {
+          "iterations": 100000,
+          "range": "0..<100000",
+          "expected_sum": 4999950000
+        },
+        "tier": "native",
+        "target": "jet build --optimize=full",
+        "artifact_binding": "one_artifact_sha256",
+        "environment_binding": "one_host_toolchain_affinity_identity",
+        "sampling": "balanced_seeded_fisher_yates; one build per arm, fresh process and fresh empty directory per sample",
+        "output_validation": "exact_utf8_stdout_bytes"
+      },
+      "pairs": [
+        {
+          "id": "compound_assign_vs_binary_assign",
+          "surface": "compound",
+          "plain": "binary expression followed by assignment",
+          "workload": "100000-element integer reduction with identical final stdout",
+          "surface_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:surface",
+          "plain_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:plain",
+          "evidence_key": "compound_assign_vs_binary_assign",
+          "surface_field": "surface_wall_time_ms",
+          "plain_field": "plain_wall_time_ms",
+          "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+          "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+          "input_range": "0..<100000",
+          "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000\n",
+          "measured": {
+            "surface_wall_time_ms": 2251.736,
+            "plain_wall_time_ms": 2232.34,
+            "ratio": 1.0086886406192603
+          },
+          "verdict": "inconclusive",
+          "verdict_reason": "Historical: measured on the retired interpreter tier, where runs across four unrelated clean binaries straddled 1.00. The pair needs a new measurement on the native tier.",
+          "bug_card": "#2977"
+        }
+      ]
+    }
+  }
+}

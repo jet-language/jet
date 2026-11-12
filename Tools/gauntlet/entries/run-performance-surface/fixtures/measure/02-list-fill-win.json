@@ -1,0 +1,45 @@
+{
+  "identity": {
+    "artifact": {
+      "path": "fake-jet.txt",
+      "sha256": "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d"
+    },
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "toolchain": {
+      "rustc": "rustc 1.0.0",
+      "node": "v22.0.0"
+    },
+    "host": {
+      "hostname": "fixture",
+      "cpu_affinity": "0"
+    }
+  },
+  "pair": {
+    "id": "list_fill_vs_index_loop",
+    "surface": "list fill",
+    "plain": "index loop storing one value",
+    "workload": "65536-pixel RGBA struct row (a 256x256 image) cleared to one pixel over 2048 frames with an identical checksum",
+    "surface_program": "gauntlet:performance-surface:list_fill_vs_index_loop:surface",
+    "plain_program": "gauntlet:performance-surface:list_fill_vs_index_loop:plain",
+    "evidence_key": "list_fill_vs_index_loop",
+    "evidence_file": "Tools/gauntlet/performance-surface-list-fill-evidence.json",
+    "surface_field": "surface_wall_time_ms",
+    "plain_field": "plain_wall_time_ms",
+    "surface_source": "// Real paired workload: list_fill_vs_index_loop surface spelling\nPixel: struct {\n    r: U8\n    g: U8\n    b: U8\n    a: U8\n}\n\nrun: fn() {\n    row := [Pixel]{}\n    loop i in 0..<65536 {\n        row.push(Pixel{r: 0, g: 0, b: 0, a: 255})\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        shade: U8.from_int(frame % 256) ?? 0\n        value: Pixel{r: shade, g: shade, b: shade, a: 255}\n        row.fill(0..<65536, value)\n        total = total + Int.from_u8(row[frame].r)\n    }\n    loop pixel in row {\n        total = total + Int.from_u8(pixel.r)\n    }\n    print(\"performance-surface:list_fill_vs_index_loop:{total}\")\n}",
+    "plain_source": "// Real paired workload: list_fill_vs_index_loop plain spelling\nPixel: struct {\n    r: U8\n    g: U8\n    b: U8\n    a: U8\n}\n\nrun: fn() {\n    row := [Pixel]{}\n    loop i in 0..<65536 {\n        row.push(Pixel{r: 0, g: 0, b: 0, a: 255})\n    }\n    total := 0\n    loop frame in 0..<2048 {\n        shade: U8.from_int(frame % 256) ?? 0\n        value: Pixel{r: shade, g: shade, b: shade, a: 255}\n        loop i in 0..<65536 {\n            row[i] = value\n        }\n        total = total + Int.from_u8(row[frame].r)\n    }\n    loop pixel in row {\n        total = total + Int.from_u8(pixel.r)\n    }\n    print(\"performance-surface:list_fill_vs_index_loop:{total}\")\n}",
+    "input_range": "0..<65536",
+    "inputs": {
+      "frames": 2048,
+      "range": "0..<65536",
+      "expected_total": 16972800
+    },
+    "expected_output": "performance-surface:list_fill_vs_index_loop:16972800\n",
+    "measured": {
+      "surface_wall_time_ms": 9.89,
+      "plain_wall_time_ms": 58.586,
+      "ratio": 0.16881166148909296
+    },
+    "verdict": "win",
+    "verdict_reason": "Strict win on the native tier: median ratio 0.169, paired-bootstrap 95% upper bound 0.174 (100 trials, 10 warmups)."
+  }
+}

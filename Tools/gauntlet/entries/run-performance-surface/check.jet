@@ -1,0 +1,36 @@
+// What a run-performance-surface `manifest` case produced (PortBars.jet runs
+// this in the case directory with the file holding the program's output):
+// its lines are those the original driver,
+// Tools/gauntlet/harness/drivers/run-performance-surface.mjs, gives each
+// performance-surface pair of the canonical measurement manifest, with the
+// manifest's own issues and the validation of the evidence receipt the pair
+// names. The manifest and the receipts change as the gauntlet does, so the
+// check compares the two programs rather than either one with a fixed text,
+// and prints how many pairs they agree on; a pair judged otherwise is shown
+// on stderr and fails the check.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    driver: files.normalize(files.join(files.dirname(sys.executable()), "../../harness/drivers/run-performance-surface.mjs"))
+    original: process.cmd(["node", driver, "manifest"]).run() ?? process.fail(1, "{err}")
+    if original.code != 0 -> process.fail(1, "the original exits {original.code}: {original.errors.trim()}")
+    ours: printed.lines()
+    theirs: original.output.lines()
+    if ours.len() == 0 -> process.fail(1, "the program judged no pairs")
+    loop index in 0..<theirs.len() {
+        line: ours.get(index) ?? process.fail(1, "the program judged {ours.len()} pairs, the original {theirs.len()}")
+        if line != theirs[index] -> process.fail(1, "pair {index + 1} is judged otherwise than the original judges it:\n{line}\n{theirs[index]}")
+    }
+    if ours.len() != theirs.len() -> process.fail(1, "the program judged {ours.len()} pairs, the original {theirs.len()}")
+    print("{ours.len()} performance-surface pairs judged against Tools/gauntlet/measurement-manifest.json as the original judges them")
+}

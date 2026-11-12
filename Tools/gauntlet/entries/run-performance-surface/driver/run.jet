@@ -1,0 +1,190 @@
+// The gauntlet driver of the kit's PerformanceSurface module (#5072 c8), the
+// twin of Tools/gauntlet/harness/drivers/run-performance-surface.mjs: the
+// paired surface/plain measurement of
+// Tools/gauntlet/harness/performance-surface.mjs, its receipt's validation
+// and its command line.
+//
+//   jet driver measure DIR
+//   jet driver manifest
+//   jet driver main [ARG...]
+//
+// `measure` measures each scenario of DIR (JSON files, in name order) with
+// stand-in builds and runs: the compiler `identity`, the manifest `pair` row
+// measured (none for the compound pair), the `manifest` the measurement is
+// held to, each arm's build fields (`builds`), its wall times by sample
+// index (`times`, cycled) and the fields of a named sample that went wrong
+// (`faults`). Each is shown as its name, the receipt's status, verdict and
+// preflight issues, the receipt's SHA-256 and its validation: the verdict,
+// the count, first three and SHA-256 of its findings, and the SHA-256 of its
+// statistics; a scenario with a `patch` (JSON Patch operations) shows the
+// validation of the receipt so changed, against `spec` when it names one.
+// `manifest` shows each pair of the canonical measurement manifest,
+// Tools/gauntlet/measurement-manifest.json, with the manifest's own issues and
+// the validation of the evidence receipt it names. `main` runs the command
+// line, an error shown on stdout.
+package: {
+    name: "run_performance_surface_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    base64: core.encoding.base64
+    files: core.files
+    jet_gauntlet_kit.[ArmBuild, ArmRun, PS_PAIR_ID, PS_TIMEOUT_MS, SurfaceOptions, dyn_at, items_at, measure_pair, performance_surface_main, read_json, sha_hex, text_at, text_or_empty, texts, validate_manifest_pair, validate_performance_surface, value_at]
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver measure DIR | manifest | main [ARG...]"
+BUILT_SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// The repository this driver sits in.
+repo_dir: fn() -> String {
+    files.normalize(files.join(files.dirname(sys.executable()), "../../../../.."))
+}
+
+// A validation as its verdict, the count, first three and SHA-256 of its
+// findings, and the SHA-256 of its statistics (its pair row is the
+// receipt's own).
+shown: fn(validation: Dyn) -> String {
+    kept := Dyn.object()
+    if validation == .Object(fields) {
+        loop field in fields {
+            if field.key != "pair" && field.key != "statistics" && field.key != "findings" -> kept[field.key.copy()] = field.value.copy()
+        }
+    }
+    findings: items_at(validation, "findings")
+    first := [Dyn]{}
+    loop index in 0..<min(3, findings.len()) -> first.push(findings[index].copy())
+    "{json.stringify(kept)}\t{findings.len()} findings {json.stringify(Dyn.Array(first))} {sha_hex(json.stringify(dyn_at(validation, "findings")))}\t{sha_hex(json.stringify(dyn_at(validation, "statistics")))}"
+}
+
+// `fields`, when an object, laid over `out`.
+overlay: fn(out: &Dyn, fields: Dyn) {
+    if fields == .Object(rows) {
+        loop row in rows -> out[row.key.copy()] = row.value.copy()
+    }
+}
+
+// The build of `request` as the scenario has it: built unless its fields
+// say otherwise.
+stub_build: fn(scenario: Dyn, request: ArmBuild) -> Dyn {
+    out := Dyn{[String: Dyn]{"root": Dyn.Null, "executable": Dyn.Text("{request.label}-main"), "executable_sha256": BUILT_SHA256, "source_sha256": Dyn.Text(sha_hex(request.source)), "status": 0, "signal": Dyn.Null, "error_code": Dyn.Null, "stderr": ""}}
+    overlay(out, dyn_at(scenario, "builds/{request.label}"))
+    out
+}
+
+// A sample of `request` as the scenario has it: the oracle's output in its
+// cycled wall time unless a fault says otherwise.
+stub_sample: fn(scenario: Dyn, request: ArmRun) -> Dyn {
+    parts: request.label.split("-").collect()
+    index: Int.parse(parts[1]) ?? 0
+    arm: parts[2]
+    times := items_at(scenario, "times/{arm}")
+    if times.len() == 0 -> times = [Dyn.Int(if arm == "surface" -> 10 else -> 20)]
+    fault: dyn_at(scenario, "faults/{request.label}")
+    stdout: text_at(fault, "stdout") ?? request.expected_output.copy()
+    matches: stdout == request.expected_output
+    context: request.context
+    out := Dyn{[String: Dyn]{"label": Dyn.Text(request.label.copy()), "source_file": "main.jet", "source_sha256": Dyn.Text(sha_hex(request.source))}}
+    out["pair_context_sha256"] = dyn_at(context, "context_sha256")
+    out["artifact_sha256"] = dyn_at(context, "artifact_sha256")
+    out["environment_sha256"] = dyn_at(context, "environment_sha256")
+    out["tier"] = dyn_at(context, "tier")
+    out["target"] = dyn_at(context, "target")
+    out["input_range"] = dyn_at(context, "inputs/range")
+    out["output_oracle"] = dyn_at(context, "output_validation/oracle")
+    out["wall_time_ms"] = times[index %% times.len()].copy()
+    out["status"] = 0
+    out["exit_code"] = 0
+    out["signal"] = Dyn.Null
+    out["timed_out"] = false
+    out["error_code"] = Dyn.Null
+    encoded: base64.encode(stdout.bytes())
+    out["stdout"] = Dyn.Text(stdout)
+    out["stderr"] = ""
+    out["stdout_bytes_base64"] = Dyn.Text(encoded)
+    out["stderr_bytes_base64"] = ""
+    out["output_verified"] = Dyn.Bool(matches)
+    out["output_matches"] = Dyn.Bool(matches)
+    out["contaminated"] = false
+    out["directory_entries"] = Dyn.Array([])
+    overlay(out, fault)
+    out
+}
+
+// Each scenario of `dir` measured, and its receipt shown and validated.
+measure: fn(dir: String) {
+    listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
+    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names.sort()
+    here: files.cwd() ?? process.fail(1, "{err}")
+    scratch: files.join(here, "scratch")
+    loop name in names {
+        scenario: read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        options: SurfaceOptions{
+            repo_dir: here.copy(),
+            artifact_path: files.join(here, text_at(scenario, "artifact") ?? "fake-jet.txt"),
+            scratch_root: scratch.copy(),
+            identity: dyn_at(scenario, "identity"),
+            pair: dyn_at(scenario, "pair"),
+            manifest: dyn_at(scenario, "manifest"),
+            timeout_ms: PS_TIMEOUT_MS,
+            generated_at: "2026-01-01T00:00:00.000Z",
+            generated_command: "fixture",
+            build_line: Dyn.Text("fixture"),
+            historical_receipts: Dyn.Array([]),
+            prior_canonical_receipt: Dyn.Null,
+        }
+        building: scenario.copy()  // copy: each stand-in keeps its own scenario
+        running: scenario.copy()  // copy: each stand-in keeps its own scenario
+        measured: measure_pair(options, (request: ArmBuild) -> stub_build(building, request), (request: ArmRun) -> stub_sample(running, request))
+        files.remove_all(scratch) ?? ()
+        receipt: measured.receipt
+        head: "{name}\t{text_or_empty(receipt, "status")} {text_or_empty(receipt, "verdict")}\t{json.stringify(dyn_at(receipt, "preflight_issues"))}\t{sha_hex(json.stringify(receipt))}"
+        validation: if value_at(scenario, "patch") == .Val(operations) -> patched(receipt, operations, scenario, name) else -> measured.validation
+        print("{head}\t{shown(validation)}")
+    }
+}
+
+// The validation of `receipt` changed by `operations`, against the
+// scenario's `spec` when it names one, else its pair.
+patched: fn(receipt: Dyn, operations: Dyn, scenario: Dyn, name: String) -> Dyn {
+    changed: json.patch(receipt, operations) ?? process.fail(1, "{name}: {err}")
+    validate_performance_surface(changed, if value_at(scenario, "spec") == .Val(spec) -> spec else -> dyn_at(scenario, "pair"))
+}
+
+// Each pair of the canonical measurement manifest, with the manifest's own
+// issues and the validation of the evidence receipt it names.
+manifest: fn() {
+    repo: repo_dir()
+    surface: dyn_at(read_json(files.join(repo, "Tools/gauntlet/measurement-manifest.json")) ?? process.fail(1, "the measurement manifest is not a JSON file"), "performance_surface_pairs")
+    loop spec in items_at(surface, "pairs") {
+        issues: if text_at(spec, "id") == Val(PS_PAIR_ID) -> validate_manifest_pair(spec, dyn_at(surface, "evidence"), dyn_at(surface, "pair_measurement")) else -> [String]{}
+        file: text_at(spec, "evidence_file") ?? "Tools/gauntlet/performance-surface-evidence.json"
+        receipt: read_json(files.join(repo, file)) ?? process.fail(1, "{file} is not a JSON file")
+        print("{text_or_empty(spec, "id")}\t{file}\t{json.stringify(texts(issues))}\t{shown(validate_performance_surface(receipt, spec))}")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if {
+        args.get(0) == Val("measure") && args.len() >= 2 -> measure(args[1])
+        args.get(0) == Val("manifest") -> manifest()
+        args.get(0) == Val("main") -> {
+            if performance_surface_main(repo_dir(), args.slice(1, args.len())) == {
+                .Ok(code) -> if code != 0 -> process.exit(code)
+                .Err(failure) -> {
+                    print("performance surface: {failure.message}")
+                    process.exit(1)
+                }
+            }
+        }
+        else -> process.fail(64, USAGE)
+    }
+}
