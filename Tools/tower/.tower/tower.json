@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6761,
-    "rev": 99805,
+    "nextNum": 6762,
+    "rev": 99807,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99003,6 +99003,47 @@
       "needsAcceptance": false,
       "created": "2026-11-12T04:55:11.076Z",
       "updated": "2026-11-12T04:55:22.537Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c01afamh",
+      "num": 6761,
+      "title": "jet test packages profile ignores the memory limit: package_jobs runs 4+ children of about 5.5 GB each and is OOM-killed under any cap below about 22G",
+      "body": "Found by G5DevX-1, 2026-11-11 23:56: jet test Compiler --profile packages under a systemd-run scope with MemoryMax 12G or 14G was OOM-killed. The journal says the kernel OOM killer killed processes in the unit, and OOMPolicy=stop then sent SIGTERM to the parent jet, which gave rc 143 with no output. That happens even for a 2-package filter. Compiler/test.jet package_jobs() runs max(PACKAGE_JOBS=4, cpus/4) package children at once, and its own comment budgets about 5.5 GB each. It never reads the profile memory setting or the cgroup memory.max, while the corpus pool does. The job count should come from the same memory budget the corpus pool uses, and never exceed the number of selected packages.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet test Compiler --profile packages sizes its concurrent package children from the cgroup memory.max and the profile memory setting, through the same budget function as the corpus pool, and never runs more children than the selected packages. Proof: jet test Compiler --profile packages --filter Compiler/JetLSP under a 10G MemoryMax scope passes with 39 rows, 39 passed, plus a #Test of the job count for given memory, CPU and package numbers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T04:59:56.370Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T04:59:43.939Z",
+      "updated": "2026-11-12T04:59:56.370Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -199468,6 +199509,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T04:59:56.370Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01afamh",
+      "note": "#1 jet test Compiler --profile packages sizes its concurrent pa"
+    },
+    {
+      "at": "2026-11-12T04:59:43.939Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c01afamh",
+      "note": "jet test packages profile ignores the memory limit: package_jobs runs 4+ children of about 5.5 GB each and is OOM-killed under any cap below about 22G"
+    },
     {
       "at": "2026-11-12T04:55:22.537Z",
       "by": "Main",
