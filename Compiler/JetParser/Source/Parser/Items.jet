@@ -2384,7 +2384,7 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     terminator := parser_current(state)
     terminator_span := terminator.span
     if terminator.kind == TOKEN_RBRACE || terminator.kind == TOKEN_EOF -> terminator_span = parsed_value.span
-    if terminator.kind != TOKEN_SEMI && terminator.kind != TOKEN_RBRACE && terminator.kind != TOKEN_EOF {
+    if terminator.kind != TOKEN_SEMI && terminator.kind != TOKEN_RBRACE && terminator.kind != TOKEN_EOF && parser_text_prefix_token(state, terminator) == None {
         terminator_text: parser_text(state, terminator)
         parser_add_error(state, terminator.span, "something unexpected appeared after this line, found `{terminator_text}`", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
     }

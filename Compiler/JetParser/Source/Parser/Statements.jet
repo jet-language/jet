@@ -1962,6 +1962,10 @@ parser_finish_statement: fn(state: &JetParserState) {
         return
     }
     if parser_at_statement_end(state) -> return
+    if parser_text_prefix_token(state, token) == .Val(prefix) {
+        parser_text_prefix_error(state, prefix, token)
+        return
+    }
     found: parser_describe_token(state, token)
     parser_add_error(state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
 }
@@ -1972,6 +1976,37 @@ parser_at_statement_end: fn(state: &JetParserState) -> Bool {
     kind: parser_current_kind(state)
     if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF || (kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) || (kind == TOKEN_COMMA && state.table_arm_block_depth == state.block_depth) -> return true
     state.arm_body_depth > 0 && parser_at_arm_through(state)
+}
+
+// A name written against quoted text (`sql"…"`) is a string prefix, which Jet
+// doesn't have: the head names the text's type and the body is its quoted
+// recipe, `SQL{"…"}`. The retired `sql`, `html` and `sh` prefixes name their
+// head (#4276 c32). `token` is the text a statement ended before; its prefix
+// is the name that touches it.
+parser_text_prefix_token: fn(state: JetParserState, token: Token) -> Token? Never! {
+    if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING -> return None
+    index := state.position - 1
+    loop index >= 0 && parser_is_trivia(state.tokens[index].kind) -> index -= 1
+    if index < 0 -> return None
+    prefix: state.tokens[index]
+    if prefix.kind == TOKEN_IDENT && prefix.span.end == token.span.start -> return Val(prefix)
+    None
+}
+
+parser_text_prefix_error: fn(state: &JetParserState, prefix: Token, text: Token) {
+    name: parser_text(state, prefix)
+    span: Span{start: prefix.span.start, end: text.span.end}
+    head: if name == {
+        "sql" -> "SQL"
+        "html" -> "HTML"
+        "sh" -> "Sh"
+        else -> ""
+    }
+    if head != "" {
+        parser_add_error(state, span, "`{name}\"…\"` is a retired text prefix", "a checked text value writes its type as the head and its text as the quoted body; Jet has no string prefixes", "write `{head}{{\"…\"}}`")
+        return
+    }
+    parser_add_error(state, span, "`{name}\"…\"` puts a name before quoted text, and Jet has no string prefixes", "a checked text value writes its type as the head and its text as the quoted body, as in `SQL{{\"…\"}}`, and the type reads that body through its `CheckedText` impl", "write `Type{{\"…\"}}` with a type that implements `CheckedText`, or separate `{name}` from the text")
 }
 
 parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {

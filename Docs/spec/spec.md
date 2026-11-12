@@ -89,7 +89,9 @@ vocabulary](vocabulary.md).
   a hole. Converting a runtime `String` to checked text is E0149; the audited
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
-  D-UNIFYLIT1=A).
+  D-UNIFYLIT1=A). Jet has no string prefixes: a name written against quoted
+  text, such as the retired `sql"…"`, `html"…"` and `sh"…"`, is E0003, and
+  the retired three name their `SQL{"…"}`, `HTML{"…"}` or `Sh{"…"}` head.
 - A checked text type is any nominal with one `CheckedText` impl. A
   `distinct String` type's literal is the joined text, with each hole passed
   through `encode_hole`. A type that binds `Hole: T` and declares

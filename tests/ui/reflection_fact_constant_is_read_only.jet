@@ -1,0 +1,14 @@
+// A reflection fact is a value the compiler folds once; a program reads it and
+// never writes it back. Writing a field of a folded `T.reflect()` constant is
+// E0111, like any other constant.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+INFO: comptime { Point.reflect() }
+
+run: fn() {
+    INFO.name = "Other"
+    print(INFO.name)
+}

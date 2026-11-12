@@ -1,0 +1,51 @@
+use {
+    jet_foundation.[Span]
+}
+
+// Jet has no string prefixes: a name against quoted text is one E0003 over
+// the name and the text. The retired `sql`, `html` and `sh` prefixes name the
+// head that replaced them (#4276 c32).
+#Test("text_prefix_retired_names_its_head") {
+    source: `run: fn() {
+    id: 7
+    query: sql"select * from t where id = {id}"
+}
+`
+    diagnostics: parser_test_errors(source)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0003")
+    assert(diagnostics[0].what.contains("`sql\"…\"` is a retired text prefix"), diagnostics[0].what)
+    assert(diagnostics[0].fix.contains("`SQL{{\"…\"}}`"), diagnostics[0].fix)
+    start: parser_test_find(source, "sql\"")
+    finish: parser_test_find(source, "{{id}}\"") + 5
+    assert_eq(diagnostics[0].span, Val(Span{start: start, end: finish}))
+}
+
+#Test("text_prefix_unknown_name_teaches_the_type_head") {
+    diagnostics: parser_test_errors(`run: fn() {
+    query: gql"query { user }"
+}
+`)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0003")
+    assert(diagnostics[0].what.contains("`gql\"…\"` puts a name before quoted text"), diagnostics[0].what)
+    assert(diagnostics[0].fix.contains("`CheckedText`"), diagnostics[0].fix)
+}
+
+#Test("text_prefix_on_a_module_constant_reports_once") {
+    diagnostics: parser_test_errors(`PAGE: html"<p>hi</p>"
+
+run: fn() {}
+`)
+    assert_eq(diagnostics.len(), 1)
+    assert(diagnostics[0].fix.contains("`HTML{{\"…\"}}`"), diagnostics[0].fix)
+}
+
+#Test("text_prefix_spaced_name_keeps_the_line_end_report") {
+    diagnostics: parser_test_errors(`run: fn() {
+    query: sql "select 1"
+}
+`)
+    assert_eq(diagnostics.len(), 1)
+    assert(diagnostics[0].what.contains("Something unexpected appeared after this line"), diagnostics[0].what)
+}
