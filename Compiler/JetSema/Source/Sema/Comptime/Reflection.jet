@@ -609,7 +609,7 @@ sema_comptime_reflection_marker_info: fn(marker: Marker, registry: SemaScopeMemb
         source_type: if argument_parameter == .Val(value) -> value.source_type else -> "Value"
         args.push(sema_comptime_reflection_struct("MarkerArgInfo", [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: argument_name}},
-            SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: source_type}},
+            SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id_record(source_type, source_type)},
             SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_marker_argument_value(argument, source_type, registry)},
         }))
     }
@@ -1054,12 +1054,14 @@ sema_comptime_reflection_layout_field: fn(facts: LayoutFacts, name: String) -> F
     None
 }
 
-sema_comptime_reflection_layout_field_info: fn(name: String, ty: Type, target: JetTargetLayout, guarantee: String, source: String, facts: FieldLayoutFacts?) -> TComptimeValue Never! {
+// `ty` is the field's TypeId (an enum case's names its payload, as its
+// FieldInfo does).
+sema_comptime_reflection_layout_field_info: fn(name: String, ty: TComptimeValue, target: JetTargetLayout, guarantee: String, source: String, facts: FieldLayoutFacts?) -> TComptimeValue Never! {
     offset: if facts == .Val(value) -> value.offset else -> None
     size: if facts == .Val(value) -> value.size else -> None
     sema_comptime_reflection_struct("LayoutFieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
-        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "type", value: ty},
         SemaComptimeReflectionField{name: "offset", value: sema_comptime_reflection_layout_optional(offset)},
         SemaComptimeReflectionField{name: "size", value: sema_comptime_reflection_layout_optional(size)},
         SemaComptimeReflectionField{name: "target", value: TComptimeValue.String{value: target.triple}},
@@ -1086,7 +1088,8 @@ sema_comptime_reflection_layout_info: fn(kind: String, guarantee: String, source
 
 // `facts` are the struct's layout on the engine's target
 // (jet_target_layout_struct_facts_in_module), computed once by the caller.
-sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: TargetLayoutEngine, facts: LayoutFacts) -> TComptimeValue Never! {
+// `caller` is the row of the module that declares the struct.
+sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, caller: Int, definition: StructDef, engine: TargetLayoutEngine, facts: LayoutFacts) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
     kind := "default"
     guarantee := "optimized"
@@ -1128,23 +1131,12 @@ sema_comptime_reflection_struct_layout: fn(definition: StructDef, engine: Target
         if definition.fields[field_index].computed != None -> next
         layout_fact: sema_comptime_reflection_layout_field(facts, definition.fields[field_index].name)
         layout_name: sema_checked_field_shape_names(definition, definition.fields[field_index]).layout ?? definition.fields[field_index].name
-        layout_fields.push(sema_comptime_reflection_layout_field_info(layout_name, definition.fields[field_index].ty, target, guarantee, "struct declaration", layout_fact))
+        layout_fields.push(sema_comptime_reflection_layout_field_info(layout_name, sema_comptime_reflection_type_id(registration, caller, definition.fields[field_index].ty), target, guarantee, "struct declaration", layout_fact))
     }
     sema_comptime_reflection_layout_info(kind, guarantee, "struct declaration", target, facts, requested, effective, layout_fields)
 }
 
-sema_comptime_reflection_enum_payload_type: fn(payload: VariantPayload) -> String Never! {
-    if payload == {
-        .Unit -> "Unit"
-        .Single(ty, _) -> type_name(ty)
-        .Named(fields) -> {
-            names: loop field in fields -> "{field.name}: {type_name(field.ty)}"
-            "{{{names.join(", ")}}}"
-        }
-    }
-}
-
-sema_comptime_reflection_enum_layout: fn(definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
+sema_comptime_reflection_enum_layout: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
     c_tag: jet_target_layout_enum_c_tag(definition)
     kind: if c_tag != None -> "c" else -> "default"
@@ -1153,7 +1145,7 @@ sema_comptime_reflection_enum_layout: fn(definition: EnumDef, engine: TargetLayo
     layout_fields := [TComptimeValue]{}
     loop variant_index in 0..<definition.variants.len() {
         index: sema_comptime_reflection_layout_field(facts, definition.variants[variant_index].name)
-        layout_fields.push(sema_comptime_reflection_layout_field_info(definition.variants[variant_index].name, Type.Named{name: sema_comptime_reflection_enum_payload_type(definition.variants[variant_index].payload)}, target, guarantee, "enum declaration", index))
+        layout_fields.push(sema_comptime_reflection_layout_field_info(definition.variants[variant_index].name, sema_comptime_reflection_variant_type_id(registration, caller, definition.variants[variant_index].payload), target, guarantee, "enum declaration", index))
     }
     sema_comptime_reflection_layout_info(kind, guarantee, "enum declaration", target, facts, None, None, layout_fields)
 }
@@ -2312,7 +2304,7 @@ sema_comptime_reflection_struct_type_info: fn(
         registered_module.module_path,
         identity,
         "struct",
-        sema_comptime_reflection_struct_layout(definition, engine, layout_facts),
+        sema_comptime_reflection_struct_layout(registration, caller, definition, engine, layout_facts),
         definition.name_span,
         reflection_fields,
         method_values,
@@ -2379,7 +2371,7 @@ sema_comptime_reflection_enum_type_info: fn(
         registered_module.module_path,
         identity,
         "enum",
-        sema_comptime_reflection_enum_layout(definition, engine, registered_module.module_identity),
+        sema_comptime_reflection_enum_layout(registration, caller, definition, engine, registered_module.module_identity),
         definition.name_span,
         variant_values,
         methods,

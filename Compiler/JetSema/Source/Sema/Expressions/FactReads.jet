@@ -290,7 +290,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "LayoutField" {
         return if {
-            field == "name" || field == "type" || field == "target" || field == "guarantee" || field == "source" -> Val(string)
+            field == "name" || field == "target" || field == "guarantee" || field == "source" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
             field == "offset" || field == "size" -> Val(Type.Option{inner: Type.Int})
             else -> None
         }

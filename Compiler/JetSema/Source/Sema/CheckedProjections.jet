@@ -5,20 +5,22 @@ SemaLayoutProjectionRow: struct {
     span: Span
     value: TComptimeValue
 }
-sema_checked_layout_items: fn(items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: &[SemaLayoutProjectionRow]) Never! {
+// `module_index` is the row in `registration` of the module whose `items`
+// these are; it qualifies each layout field's TypeId.
+sema_checked_layout_items: fn(registration: SemaRegistrationGraph, module_index: Int, items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: &[SemaLayoutProjectionRow]) {
     loop item in items {
         if item == {
-            .Struct(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_struct_layout(definition, engine, jet_target_layout_struct_facts_in_module(engine, definition, module_identity))})
-            .Enum(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_enum_layout(definition, engine, module_identity)})
-            .CodeModule(definition) -> if definition.body == .Val(body) -> sema_checked_layout_items(body, engine, module_identity, rows)
-            .GenericModule(definition) -> sema_checked_layout_items(definition.body, engine, module_identity, rows)
+            .Struct(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_struct_layout(registration, module_index, definition, engine, jet_target_layout_struct_facts_in_module(engine, definition, module_identity))})
+            .Enum(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_enum_layout(registration, module_index, definition, engine, module_identity)})
+            .CodeModule(definition) -> if definition.body == .Val(body) -> sema_checked_layout_items(registration, module_index, body, engine, module_identity, rows)
+            .GenericModule(definition) -> sema_checked_layout_items(registration, module_index, definition.body, engine, module_identity, rows)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
-sema_checked_layout_projections: fn(items: [Item], engine: TargetLayoutEngine, module_identity: String) -> [SemaLayoutProjectionRow] Never! {
+sema_checked_layout_projections: fn(registration: SemaRegistrationGraph, module_index: Int, items: [Item], engine: TargetLayoutEngine, module_identity: String) -> [SemaLayoutProjectionRow] {
     rows := [SemaLayoutProjectionRow]{}
-    sema_checked_layout_items(items, engine, module_identity, rows)
+    sema_checked_layout_items(registration, module_index, items, engine, module_identity, rows)
     rows
 }
 sema_origin_optional_int: fn(value: Int?) -> TComptimeValue Never! {

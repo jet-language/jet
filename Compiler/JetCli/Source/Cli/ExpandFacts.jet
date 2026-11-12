@@ -119,7 +119,9 @@ jet_cli_expand_layout_text: fn(layout: TComptimeValue) -> String Never! {
     if jet_cli_expand_checked_field(layout, "fields") == .Val(.List(values)) {
         loop field in values {
             name: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "name"))
-            ty: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "type"))
+            // A layout field's `type` is a TypeId; the line shows its name.
+            type_id: jet_cli_expand_checked_field(field, "type")
+            ty: jet_cli_expand_checked_display(if type_id == .Val(found) -> jet_cli_expand_checked_field(found, "name") else -> TComptimeValue?{None})
             offset: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "offset"))
             size: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "size"))
             fields.push("{name}:{ty}(offset={offset},size={size})")

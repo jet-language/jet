@@ -1,5 +1,6 @@
 // Focused layout facts and full reflection share one typed model; a struct
-// without `#Layout` reports the bytes the compiler chose for it.
+// without `#Layout` reports the bytes the compiler chose for it. A layout
+// field's `type` is a TypeId, printed here by its `name`.
 LayoutFacts: struct {
     impl Marker {
         sites: [.Type]
@@ -16,7 +17,8 @@ LayoutFacts: struct {
             reflected_offset: reflected.fields[0].offset
             reflected_kind: reflected.kind
             field_name: selected.name
-            layout_facts: fn(self) -> String { "{kind}:{target}:{size}:{reflected_size}:{selected_offset}:{reflected_offset}:{reflected_kind}:{field_name}" }
+            field_type: selected.type.name
+            layout_facts: fn(self) -> String { "{kind}:{target}:{size}:{reflected_size}:{selected_offset}:{reflected_offset}:{reflected_kind}:{field_name}:{field_type}" }
         }
     }
 }
