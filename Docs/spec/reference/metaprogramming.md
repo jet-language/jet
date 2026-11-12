@@ -311,7 +311,9 @@ returns, a `String?` that is `None` when it returns no value; its `effects` is a
 its `calling_convention` is a `CallingConvention` (`Jet`, `Kernel` for a
 `#Kernel` function, or `Foreign` for one whose body is inline foreign code); and
 its `generic_bindings` is a `[GenericBindingInfo]`, empty on a declaration,
-which binds no generic parameter. No record carries the signature as text.
+which binds no generic parameter, and on a specialization's method pairs each
+of the owner's type parameters with its argument. No record carries the
+signature as text.
 
 Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 (its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,
@@ -403,7 +405,12 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
 - `generic_bindings` pairs each type parameter with the type written for it
   when the type is named with its arguments: `Pair<Int, String>.reflect()`
   binds `A` to `Int` and `B` to `String`. Naming the generic type alone, or
-  reflecting its declaration in a marker body, gives an empty list.
+  reflecting its declaration in a marker body, gives an empty list. A type
+  named with its arguments reflects that specialization, not the declaration:
+  its `identity` names the arguments (`Pair<Int, String>` and
+  `Pair<String, Int>` differ), and its fields, variant payloads and method
+  signatures read each argument where the declaration writes its parameter
+  (a field `first: A` reads `Int`).
 - `numeric` is the `NumericInfo` of a number type: whether it is `signed`, its
   width in `bits` and whether it `is_float`. A builtin number reflects too:
   `I32.reflect().numeric` is `signed: true, bits: 32`, `U8`'s is unsigned

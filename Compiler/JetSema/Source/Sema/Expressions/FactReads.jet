@@ -1038,16 +1038,17 @@ sema_fact_subject_item: fn(symbol: Symbol?, environment: SemaScopeEnvironment, p
 // `TypeInfo` for a registered nominal subject. Fact reads need only the
 // type's own fact rows, so the marker catalog is empty here. A type the
 // module scope does not bind (a Core type, `module.Type`) is the nominal row
-// its path names from this module.
-sema_fact_type_info: fn(symbol: Symbol?, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
+// its path names from this module. `args` names a specialization
+// (`Shelf<Int>.reflect()`, see sema_comptime_reflection_type_info).
+sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     if program.registration_graph == .Val(graph) {
         if symbol == .Val(resolved) {
             if resolved.kind != SymbolKind.Type -> return None
-            return sema_comptime_reflection_type_info(graph, resolved.module_name, name, catalog)
+            return sema_comptime_reflection_type_info(graph, resolved.module_name, name, catalog, args)
         }
         row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
-        return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog)
+        return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
     }
     None
 }
@@ -1135,7 +1136,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
         if read == FactRead.Layout && symbol == None && program.registration_graph == .Val(graph) {
             if sema_comptime_reflection_builtin_layout(graph, name) == .Val(layout) -> return Val(SemaFactReadValue{ty: sema_fact_named("LayoutInfo"), value: sema_fact_declared_value(layout)})
         }
-        info: sema_fact_type_info(symbol, name, environment, program) ?? return None
+        info: sema_fact_type_info(symbol, name, [Type]{}, environment, program) ?? return None
         field: if read == FactRead.Layout -> "layout" else -> if read == FactRead.Name -> "name" else -> "fields"
         value: sema_fact_declared_value(sema_fact_struct_field(info, field) ?? return None)
         ty: sema_fact_reflection_field_type("TypeInfo", field) ?? return None
@@ -1153,7 +1154,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
         return Val(SemaFactReadValue{ty: sema_fact_named("DimensionInfo"), value: sema_comptime_reflection_dimension(dimension)})
     }
     if read == FactRead.Measure || read == FactRead.Exactness || read == FactRead.Classification || read == FactRead.Obligation {
-        info: sema_fact_type_info(symbol, name, environment, program) ?? return None
+        info: sema_fact_type_info(symbol, name, [Type]{}, environment, program) ?? return None
         value: sema_fact_reflected_read(info, read) ?? return None
         ty: sema_fact_reflected_type(sema_fact_named("TypeInfo"), read) ?? return None
         return Val(SemaFactReadValue{ty: ty, value: value})

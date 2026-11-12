@@ -722,7 +722,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
-                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
+                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
                 types.push(value.copy())
                 module_types.push(value)
             }

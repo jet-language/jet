@@ -11,6 +11,10 @@
 // a CaptureInfo per captured binding with the mode the checker chose: `Read`
 // in place, `Write` to the owner's binding, `Copy` into an escaping closure,
 // `Materialize` for an owned copy of a view, `Move` when it takes the value.
+// A generic type named with its arguments (`Shelf<Int>.reflect()`) reflects
+// that specialization: its identity names the arguments, its fields and
+// method signatures read them in place of `T`, and each signature's
+// `generic_bindings` pairs `T` with its argument.
 connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host}:{seconds}:{tls}"
 }
@@ -21,6 +25,12 @@ Log: struct {
     note: fn(self, text: String, tags: ...String) -> Int { self.lines.len() + tags.len() }
 
     drain: fn(self, sink: &[String], batch: &&[String]) -> Int { sink.len() + batch.len() }
+}
+
+Shelf: struct<T> {
+    items: [T]
+
+    size_with: fn(self, extra: [T]) -> Int { self.items.len() + extra.len() }
 }
 
 send: fn(text: String) -[Net]> Int { text.len() }
@@ -90,4 +100,17 @@ run: fn() {
     first: keep("ada")
     second: keep("grace")
     print("keep ada {first}, grace {second}; {count} calls; budget {kept[0].call()}")
+    shelf: Shelf<Int>.reflect()
+    bound: (loop binding in shelf.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
+    print("{shelf.name} with {bound}")
+    loop field in shelf.fields -> print("  field {field.name}: {field.type}")
+    loop method in shelf.methods {
+        params: (loop param in method.signature.params if param.name != "self" -> "{param.name}: {param.type}").join(", ")
+        binds: (loop binding in method.signature.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
+        print("  {method.name}({params}) -> {method.signature.return_type ?? "nothing"}, binding {binds}")
+    }
+    words: Shelf<String>.reflect()
+    print("Shelf<Int> and Shelf<String> are distinct instances: {shelf.identity != words.identity}")
+    numbers: Shelf<Int>{items: [Int]{1, 2}}
+    print("a Shelf<Int> of 2 with 1 more holds {numbers.size_with([Int]{3})}")
 }
