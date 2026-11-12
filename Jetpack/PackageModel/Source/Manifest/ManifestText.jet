@@ -125,18 +125,17 @@ pkg_text_has_space: fn(text: String) -> Bool Never! {
     false
 }
 
-// `mod::strip_comments`: drop `//` line comments outside strings, keeping
-// the newline that ends each comment.
-pkg_strip_comments: fn(value: String) -> String Never! {
+// `mod::strip_comments`'s lexer: the span of every `//` line comment outside
+// a string, up to (not including) the newline that ends it.
+pkg_comment_spans: fn(value: String) -> [EditSpan] Never! {
     raw: value.bytes()
-    out := [U8]{}
+    spans := [EditSpan]{}
     quoted := false
     escaped := false
     index := 0
     loop index < raw.len() {
         code: Int.from_u8(raw[index])
         if quoted {
-            out.push(raw[index])
             if {
                 escaped -> escaped = false
                 code == 92 -> escaped = true
@@ -148,25 +147,31 @@ pkg_strip_comments: fn(value: String) -> String Never! {
         }
         if code == 34 {
             quoted = true
-            out.push(raw[index])
             index += 1
             next
         }
         if code == 47 && pkg_bytes_code(raw, index + 1) == 47 {
-            index += 2
-            loop index < raw.len() {
-                if Int.from_u8(raw[index]) == 10 {
-                    out.push(raw[index])
-                    index += 1
-                    break
-                }
-                index += 1
-            }
+            start: index
+            loop index < raw.len() && Int.from_u8(raw[index]) != 10 -> index += 1
+            spans.push(EditSpan{start: start, end: index})
             next
         }
-        out.push(raw[index])
         index += 1
     }
+    spans
+}
+
+// `mod::strip_comments`: drop `//` line comments outside strings, keeping
+// the newline that ends each comment.
+pkg_strip_comments: fn(value: String) -> String Never! {
+    raw: value.bytes()
+    out := [U8]{}
+    cursor := 0
+    loop span in pkg_comment_spans(value) {
+        loop index in cursor..<span.start -> out.push(raw[index])
+        cursor = span.end
+    }
+    loop index in cursor..<raw.len() -> out.push(raw[index])
     pkg_bytes_text(out, 0, out.len())
 }
 
@@ -275,7 +280,13 @@ pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
 // and the next `ident:` separated only by whitespace.
 pkg_top_level_entries: fn(value: String) -> [String] Never! {
     raw: value.bytes()
-    entries := [String]{}
+    loop span in pkg_top_level_entry_spans(value) -> pkg_bytes_text(raw, span.start, span.end)
+}
+
+// The byte span of each pkg_top_level_entries piece, untrimmed.
+pkg_top_level_entry_spans: fn(value: String) -> [EditSpan] Never! {
+    raw: value.bytes()
+    entries := [EditSpan]{}
     start := 0
     depth := 0
     quoted := false
@@ -309,24 +320,21 @@ pkg_top_level_entries: fn(value: String) -> [String] Never! {
             next
         }
         if depth == 0 && (code == 44 || code == 10) {
-            current: pkg_bytes_text(raw, start, index)
-            if current.trim() != "" -> entries.push(current)
+            if pkg_bytes_text(raw, start, index).trim() != "" -> entries.push(EditSpan{start: start, end: index})
             start = index + 1
             index += 1
             next
         }
         width: pkg_bytes_space_width(raw, index)
         if depth == 0 && width > 0 && pkg_implicit_field_start(raw, index, pkg_bytes_text(raw, start, index)) {
-            current: pkg_bytes_text(raw, start, index)
-            if current.trim() != "" -> entries.push(current)
+            if pkg_bytes_text(raw, start, index).trim() != "" -> entries.push(EditSpan{start: start, end: index})
             index = pkg_bytes_skip_space(raw, index)
             start = index
             next
         }
         index += if width > 0 -> width else -> 1
     }
-    tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> entries.push(tail)
+    if pkg_bytes_text(raw, start, raw.len()).trim() != "" -> entries.push(EditSpan{start: start, end: raw.len()})
     entries
 }
 

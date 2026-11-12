@@ -1,0 +1,14 @@
+# tests/fmt.rs::package_formatter_fails_closed_on_comments at tests/fmt.rs:145; hand-port, superseded
+# Claim: the Package formatter formats a commented manifest instead of refusing it (#6005 c26)
+# Claim: each comment stays with what it sits by: the header and the comment on an entry's line,
+#   on a `{` line, before an entry, and after a record's last entry
+# Claim: a second run finds the formatted manifest clean
+fixture: package_formatter_keeps_comments.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt comments/package.jet
+exit: 0
+file: comments/package.jet = "// The demo package.\n\nname: \"demo\" // the package name\nversion: \"0.1.0\"\noutputs: { // every output\n    // the app\n    app: .Executable{\n        name: \"app\",\n        entry: run\n    }, // the app output\n    // nothing after the app\n}\n"
+step: jet fmt --check comments/package.jet
+exit: 0

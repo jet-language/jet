@@ -1087,9 +1087,12 @@ formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
 the ratified rewrites. The retired-spelling status lines go to stderr unless
 `--quiet`. `package.jet` goes through the typed Package formatter (the Jetpack
 Package model, referenced into the Compiler unit from `Jetpack/PackageModel`):
-an unreadable manifest stops the run with its E1215 manifest diagnostic, and a
-layout the model declines (authored comments) is left as written. Every other
-`.jet` file, a `Config` record source included, goes through the Jet formatter.
+an unreadable manifest stops the run with its E1215 manifest diagnostic.
+Comments stay with what they sit by: one at the end of an entry's line stays
+after that entry, an own-line one leads the entry below it, and one after a
+record's last entry closes the record; a manifest the formatter cannot lay out
+with its comments in order is left as written. Every other `.jet` file, a
+`Config` record source included, goes through the Jet formatter.
 `--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
 Ordinary-source formatting preserves declaration meaning: a raw

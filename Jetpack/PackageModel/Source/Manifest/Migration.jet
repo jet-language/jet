@@ -9,14 +9,45 @@ PackageFormatError: struct {
     message: String
 }
 
+// A manifest as written (`text`), the same bytes with every `//` comment
+// blanked to spaces (`masked`, so every offset still holds), and each
+// comment's span. The layout scanners read `masked`; the output copies
+// values and comments from `text`.
+ManifestSource: struct {
+    text: String
+    masked: String
+    comments: [EditSpan]
+}
+
+pkg_manifest_source: fn(text: String) -> ManifestSource Never! {
+    comments: pkg_comment_spans(text)
+    raw := text.bytes()
+    loop comment in comments {
+        loop index in comment.start..<comment.end -> raw[index] = U8{32}
+    }
+    ManifestSource{text: text, masked: pkg_bytes_text(raw, 0, raw.len()), comments: comments}
+}
+
+// A record body's formatted lines, each indented; the comments on its `{`
+// line (`open`); and how many entries it holds.
+ManifestBody: struct {
+    lines: [String]
+    open: [String]
+    entries: Int
+}
+
 // Format one canonical Package or Config source file after validating it
-// with the same model that loads it.
-// Files with comments fail closed.
+// with the same model that loads it. Each comment stays with what it sits
+// by: one on an entry's last line stays after that entry, an own-line one
+// leads the entry below it, one after a record's last entry closes the
+// record, and one on a `{` line stays after the `{`. An entry with a comment
+// in its key, before its record's `{`, or in a value that is not a record is
+// kept as written. The output holds the input's comments in order, byte for
+// byte, or the source is refused.
 pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError! {
-    stripped: pkg_strip_comments(text)
-    trimmed: stripped.trim()
+    source: pkg_manifest_source(text)
+    trimmed: source.masked.trim()
     if trimmed == "" -> return Err(PackageFormatError{message: "Package or Config source is empty"})
-    if stripped != text -> return Err(PackageFormatError{message: "Package or Config formatter cannot safely rewrite comments in `{origin}`"})
     is_config: if pkg_config_wrapper(trimmed) == {
         .Ok(wrapper) -> wrapper != None || trimmed.starts_with("Config")
         .Err(error) -> {
@@ -28,25 +59,74 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     } else {
         if PackageFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
     }
-    entries: pkg_top_level_entries(text)
-    if entries.len() == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
-    separator: if pkg_package_top_level_comma(text) != None -> ",\n" else -> "\n"
-    // A blank line between two top-level fields stays (one at most): it
-    // groups the manifest the way its author wrote it (`deps: {}` apart).
-    body := ""
-    cursor := 0
-    loop (index, entry) in entries {
-        found: pkg_binder_tail(text, cursor).find(entry)
-        start: if found < 0 -> cursor else -> cursor + found
-        if index > 0 {
-            body = "{body}{separator}"
-            if pkg_format_newlines(pkg_binder_slice(text, cursor, start)) > 1 -> body = "{body}\n"
-        }
-        body = "{body}{pkg_format_package_entry(entry, 0)}"
-        if found >= 0 -> cursor = start + entry.bytes().len()
+    body: pkg_format_body(source, 0, source.masked.bytes().len(), 0, true)
+    if body.entries == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
+    formatted: "{body.lines.join("\n")}\n"
+    if pkg_comment_texts(formatted) != pkg_comment_texts(text) -> return Err(PackageFormatError{message: "Package or Config formatter would move a comment out of order in `{origin}`"})
+    Ok(formatted)
+}
+
+// Each `//` comment of `text`, in order.
+pkg_comment_texts: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
+    loop span in pkg_comment_spans(text) -> pkg_bytes_text(raw, span.start, span.end)
+}
+
+// Whether a comment starts in `[start, end)`.
+pkg_has_comment: fn(source: ManifestSource, start: Int, end: Int) -> Bool Never! {
+    loop comment in source.comments {
+        if comment.start >= start && comment.start < end -> return true
     }
-    if pkg_package_has_trailing_top_level_comma(text) -> body = "{body},"
-    Ok("{body}\n")
+    false
+}
+
+// The entries of the record body `[start, end)` and the comments among
+// them, one line each (a nested record spans several). At the top level
+// (`top`) a blank line between two of them stays, one at most: it groups
+// the manifest the way its author wrote it (`deps: {}` apart).
+pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, top: Bool) -> ManifestBody Never! {
+    region: pkg_binder_slice(source.masked, start, end)
+    cores := [EditSpan]{}
+    loop span in pkg_top_level_entry_spans(region) -> cores.push(pkg_trim_span(source.masked, EditSpan{start: start + span.start, end: start + span.end}))
+    comma: pkg_package_top_level_comma(region) != None
+    trailing_comma: pkg_package_has_trailing_top_level_comma(region)
+    pad: " ".repeat(indent)
+    lines := [String]{}
+    open := [String]{}
+    last_end := start
+    // Whether the last line is an entry that no comment follows yet.
+    entry_line := false
+    comment_index := 0
+    loop entry_index in 0..<cores.len() + 1 {
+        limit: if entry_index < cores.len() -> cores[entry_index].start else -> end
+        loop comment_index < source.comments.len() && source.comments[comment_index].start < limit {
+            comment: source.comments[comment_index]
+            comment_index += 1
+            // Outside this body, or inside an entry, whose own formatting
+            // keeps it.
+            if comment.start < last_end || comment.start < start -> next
+            text: pkg_binder_slice(source.text, comment.start, comment.end)
+            same_line: pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) == 0
+            if {
+                entry_line && same_line -> lines[lines.len() - 1] = "{lines[lines.len() - 1]} {text}"
+                entry_index == 0 && !top && same_line -> open.push(text)
+                else -> {
+                    if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 -> lines.push("")
+                    lines.push("{pad}{text}")
+                }
+            }
+            entry_line = false
+            last_end = comment.end
+        }
+        if entry_index == cores.len() -> break
+        core: cores[entry_index]
+        if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, core.start)) > 1 -> lines.push("")
+        separator: if comma && (entry_index + 1 < cores.len() || trailing_comma) -> "," else -> ""
+        lines.push("{pad}{pkg_format_entry_at(source, core, indent)}{separator}")
+        entry_line = true
+        last_end = core.end
+    }
+    ManifestBody{lines: lines, open: open, entries: cores.len()}
 }
 
 pkg_format_newlines: fn(gap: String) -> Int Never! {
@@ -61,12 +141,23 @@ pkg_trim_entry_terminators: fn(value: String) -> String Never! {
     pkg_binder_trim_end_matches(pkg_binder_trim_end_matches(value.trim(), ","), ";").trim()
 }
 
-pkg_format_package_entry: fn(input: String, indent: Int) -> String Never! {
-    entry: pkg_trim_entry_terminators(input)
-    binding: pkg_split_package_binding(entry) ?? return pkg_format_package_value(entry, indent)
+// The part of `span` that pkg_trim_entry_terminators keeps.
+pkg_trim_span: fn(text: String, span: EditSpan) -> EditSpan Never! {
+    piece: pkg_binder_slice(text, span.start, span.end)
+    lead: piece.bytes().len() - piece.trim_start().bytes().len()
+    kept: pkg_trim_entry_terminators(piece)
+    EditSpan{start: span.start + lead, end: span.start + lead + kept.bytes().len()}
+}
+
+// The entry `core`, a span of the masked text that pkg_trim_span gave.
+pkg_format_entry_at: fn(source: ManifestSource, core: EditSpan, indent: Int) -> String Never! {
+    entry: pkg_binder_slice(source.masked, core.start, core.end)
+    binding: pkg_split_package_binding(entry) ?? return pkg_format_value_at(source, core, indent)
+    colon: core.start + binding.left.bytes().len()
+    if pkg_has_comment(source, core.start, colon + 1) -> return pkg_binder_slice(source.text, core.start, core.end)
     left: pkg_binder_words(binding.left).join(" ")
-    if pkg_is_function_value(binding.right) -> return pkg_format_function_entry(left, binding.right, indent)
-    "{left}: {pkg_format_package_value(binding.right, indent)}"
+    if pkg_is_function_value(binding.right) -> return pkg_format_function_entry(left, pkg_binder_slice(source.text, colon + 1, core.end), indent)
+    "{left}: {pkg_format_value_at(source, pkg_trim_span(source.masked, EditSpan{start: colon + 1, end: core.end}), indent)}"
 }
 
 // A field whose value is a function (`build: fn(b: Build) { … }`), not a
@@ -78,8 +169,9 @@ pkg_is_function_value: fn(value: String) -> Bool Never! {
     rest.starts_with("(") || rest.starts_with("<")
 }
 
-// A function field in the form `jet fmt` gives any top-level function. A
-// nested one, or one the Jet formatter can't read, stays as written.
+// A function field in the form `jet fmt` gives any top-level function, its
+// comments kept by the Jet formatter. A nested one, or one the Jet formatter
+// can't read, stays as written.
 pkg_format_function_entry: fn(left: String, value: String, indent: Int) -> String Never! {
     written: "{left}: {value.trim()}"
     if indent > 0 -> return written
@@ -88,20 +180,20 @@ pkg_format_function_entry: fn(left: String, value: String, indent: Int) -> Strin
     formatted.text.trim_end()
 }
 
-pkg_format_package_value: fn(input: String, indent: Int) -> String Never! {
-    value: pkg_trim_entry_terminators(input)
-    bounds: pkg_package_record_bounds(value) ?? return value
+// The value `span` (trimmed, of the masked text): a record laid out one
+// entry per line, anything else as written. A comment before the record's
+// `{` keeps the value as written.
+pkg_format_value_at: fn(source: ManifestSource, span: EditSpan, indent: Int) -> String Never! {
+    value: pkg_binder_slice(source.masked, span.start, span.end)
+    written: pkg_binder_slice(source.text, span.start, span.end)
+    bounds: pkg_package_record_bounds(value) ?? return written
+    if pkg_has_comment(source, span.start, span.start + bounds.start) -> return written
     prefix: pkg_binder_slice(value, 0, bounds.start).trim_end()
-    suffix: pkg_binder_tail(value, bounds.end + 1).trim()
-    inner: pkg_binder_slice(value, bounds.start + 1, bounds.end)
-    entries: pkg_top_level_entries(inner)
-    if entries.len() == 0 -> return "{prefix}{{}}{suffix}"
-    lines := [String]{}
-    loop entry in entries -> lines.push("{" ".repeat(indent + 4)}{pkg_format_package_entry(entry, indent + 4)}")
-    separator: if pkg_package_top_level_comma(inner) != None -> ",\n" else -> "\n"
-    body := lines.join(separator)
-    if pkg_package_has_trailing_top_level_comma(inner) -> body = "{body},"
-    "{prefix}{{\n{body}\n{" ".repeat(indent)}}}{suffix}"
+    body: pkg_format_body(source, span.start + bounds.start + 1, span.start + bounds.end, indent + 4, false)
+    head: if body.open.len() == 0 -> "{prefix}{{" else -> "{prefix}{{ {body.open.join(" ")}"
+    if body.lines.len() == 0 && body.open.len() == 0 -> return "{prefix}{{}}"
+    if body.lines.len() == 0 -> return "{head}\n{" ".repeat(indent)}}}"
+    "{head}\n{body.lines.join("\n")}\n{" ".repeat(indent)}}}"
 }
 
 pkg_package_has_trailing_top_level_comma: fn(value: String) -> Bool Never! {
