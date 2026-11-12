@@ -1892,6 +1892,12 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
 }
 
 sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+    // A call through a `:` local bound to a lambda written in this body adds
+    // nothing: that lambda's effects are already this function's where it is
+    // written (sema_effect_merge_lambda). The call node itself skips its fact
+    // (sema_effect_local_lambda_call), but another body node with the call's
+    // span finds the same fact here.
+    if fact.facts.local_lambda != None -> return
     // A foreign body with a known effect root records that root and an open
     // memory dispatch; only an extern with no root, or a C binding whose row no
     // descriptor owns, is an unknown callee that forces the maximal set.
