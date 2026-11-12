@@ -5,12 +5,12 @@
 use {
     fs: core.files
     jet_driver.[
-        JET_DRIVER_ROUTED_MODULES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JET_DRIVER_MEMBER_ROUTES, JET_DRIVER_ROUTED_MODULES, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult, JetDriverParseJob,
         jet_driver_core_route, jet_driver_core_routes, jet_driver_core_text, jet_driver_has_errors, jet_driver_load, jet_driver_parse_one,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[compiler_threads_single]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, Func, compiler_threads_single]
 }
 
 // A check request for the one user file `source`, with no Core sources yet.
@@ -157,11 +157,15 @@ reach_test_load_module: fn(source: String, module_name: String, owned: [String],
     load
 }
 
-#Test("a routed Core module's `__` helpers load by use, and its compiler routes always load") {
+#Test("a routed Core module's `__` helpers and F32 forms load by use, and its compiler routes always load") {
     text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n__sin_f32: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\nfabs: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
     routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"__sin_f32", "fabs"}, text)
-    assert_eq(reach_test_constants(routed, "core.math"), [String]{"__WIDTH", "__RATIO"})
-    assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "__sin_f32", "fabs"})
+    assert_eq(reach_test_constants(routed, "core.math"), [String]{"__RATIO"})
+    assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "fabs"})
+    // A call of `sin` (on an F32) runs its F32 form.
+    narrow: reach_test_load_module("use m: core.math\nrun: fn(x: F32) {{ print(m.sin(x)) }}\n", "core.math", [String]{"__sin_f32", "fabs"}, text)
+    assert_eq(reach_test_constants(narrow, "core.math"), [String]{"__WIDTH", "__RATIO"})
+    assert_eq(reach_test_functions(narrow, "core.math"), [String]{"__sin_f32", "fabs"})
     // Any other module's `__` names stay routes as a group.
     grouped: reach_test_load_module("use m: core.devtools\nrun: fn() {{ print(m.plain()) }}\n", "core.devtools", [String]{}, text)
     assert_eq(reach_test_constants(grouped, "core.devtools"), [String]{"__TABLE", "__WIDTH", "__RATIO"})
@@ -231,4 +235,145 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     // One row per lazy declaration, then the rest, which is empty.
     assert_eq(words.spells.len(), 3)
     assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
+}
+
+reach_test_types: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
+    names := [String]{}
+    loop module_row in load.modules {
+        if module_row.module_name != module_name -> next
+        loop item in module_row.program.items {
+            if item == .Struct(value) -> names.push(value.name)
+            if item == .Enum(value) -> names.push(value.name)
+        }
+    }
+    names
+}
+
+// The inherent methods of `type_name`, then each trait impl method as
+// `Trait.method`.
+reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name: String) -> [String] Never! {
+    names := [String]{}
+    loop module_row in load.modules {
+        if module_row.module_name != module_name -> next
+        loop item in module_row.program.items {
+            if item == .Struct(value) && value.name == type_name {
+                loop method in value.methods -> names.push(method.name)
+                loop block in value.trait_impls {
+                    loop method in block.methods -> names.push("{block.trait_name}.{method.name}")
+                }
+            }
+        }
+    }
+    names
+}
+
+#Test("a routed module's types load by name, and each method once its type and its name are reached") {
+    text: "Box: struct {{\n    width: Float\n\n    area: fn(self) -> Float Never! {{ self.width * self.width }}\n    spare: fn(self) -> Float Never! {{ self.width }}\n    __hidden: fn(self) -> Float Never! {{ 0.0 }}\n}}\n\nPad: struct {{\n    size: Float\n\n    area: fn(self) -> Float Never! {{ self.size }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n"
+    load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().area()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_types(load, "core.math"), [String]{"Box"})
+    assert_eq(reach_test_methods(load, "core.math", "Box"), [String]{"area", "__hidden"})
+    assert_eq(reach_test_functions(load, "core.math"), [String]{"make"})
+    // A name reached before its type waits for it.
+    named: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make()) }}\nlater: fn(pad: m.Pad) -> Float {{ pad.area() }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_types(named, "core.math"), [String]{"Box", "Pad"})
+    assert_eq(reach_test_methods(named, "core.math", "Box"), [String]{"area", "__hidden"})
+    assert_eq(reach_test_methods(named, "core.math", "Pad"), [String]{"area"})
+}
+
+#Test("a routed Core constant that only user comptime names still loads") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nSCALE: 3.0\n\nOTHER: 4.0\n"
+    load: reach_test_load_module("use m: core.math\nDOUBLE: comptime {{ m.SCALE * 2.0 }}\nrun: fn() {{ print(DOUBLE) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_constants(load, "core.math"), [String]{"SCALE"})
+    assert_eq(reach_test_functions(load, "core.math"), [String]{})
+}
+
+#Test("a routed type reached only through an alias keeps its trait impls, and a method only comptime calls still loads") {
+    text: "Shape: trait {{\n    area: fn(self) -> Float Never!\n}}\n\nBox: struct {{\n    width: Float\n\n    spare: fn(self) -> Float Never! {{ self.width }}\n\n    impl Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nSquare: Box\n\nBoxes: [Box]\n\nmake: fn() -> Square Never! {{ Square{{width: 2.0}} }}\n"
+    // `make` names only the bare-path alias `Square`; a trait call (`area`
+    // through Shape) needs the impl, which stays with its type.
+    aliased: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_types(aliased, "core.math"), [String]{"Box"})
+    assert_eq(reach_test_constants(aliased, "core.math"), [String]{"Square"})
+    assert_eq(reach_test_methods(aliased, "core.math", "Box"), [String]{"Shape.area"})
+    // A type alias reaches its type the same way.
+    listed: reach_test_load_module("use m: core.math\nkeep: fn(boxes: m.Boxes) -> Int {{ boxes.len() }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_types(listed, "core.math"), [String]{"Box"})
+    assert_eq(reach_test_functions(listed, "core.math"), [String]{})
+    // A method only user comptime calls loads with its type.
+    timed: reach_test_load_module("use m: core.math\nWIDTH: comptime {{ m.make().spare() }}\nrun: fn() {{ print(WIDTH) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_methods(timed, "core.math", "Box"), [String]{"spare", "Shape.area"})
+    assert_eq(reach_test_functions(timed, "core.math"), [String]{"make"})
+}
+
+#Test("a routed module's precise family loads with its type, and an imaginary literal reaches Complex") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int\n}}\n\n__fraction_add: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float\n}}\n\n__complex_add: fn(a: Complex) -> Complex Never! {{ a }}\n"
+    // The two family members are core.math registry members this text owns.
+    owned: [String]{"__fraction_add", "__complex_add"}
+    plain: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", owned, text)
+    assert_eq(reach_test_types(plain, "core.math"), [String]{})
+    assert_eq(reach_test_functions(plain, "core.math"), [String]{"plain"})
+    // Any Fraction value runs the Fraction family.
+    fraction: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\nkeep: fn(f: m.Fraction) -> m.Fraction {{ f }}\n", "core.math", owned, text)
+    assert_eq(reach_test_types(fraction, "core.math"), [String]{"Fraction"})
+    assert_eq(reach_test_functions(fraction, "core.math"), [String]{"plain", "__fraction_add"})
+    // `4i` is a Complex, as Sema types it.
+    imaginary: reach_test_load_module("use m: core.math\nrun: fn() {{ print(4i) }}\n", "core.math", owned, text)
+    assert_eq(reach_test_types(imaginary, "core.math"), [String]{"Complex"})
+    assert_eq(reach_test_functions(imaginary, "core.math"), [String]{"__complex_add"})
+}
+
+#Test("what a Core module's dropped tests spell reaches nothing") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nsecret: fn() -> Int Never! {{ 2 }}\n\n#Test(\"secret is two\") {{\n    assert_eq(secret(), 2)\n}}\n"
+    load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_functions(load, "core.math"), [String]{"plain"})
+}
+
+// Counts the methods of `methods` whose names the compiler spells as a
+// literal, and adds to `missing` each one JET_DRIVER_MEMBER_ROUTES lacks.
+reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: &[String], missing: &[String]) Never! {
+    loop method in methods {
+        if method.name.starts_with("__") || literals.get(method.name) == None -> next
+        if !found.contains(method.name) -> found.push(method.name)
+        if !JET_DRIVER_MEMBER_ROUTES.contains(method.name) && !missing.contains(method.name) -> missing.push(method.name)
+    }
+}
+
+// The compiler may look a method up by a name it spells as a literal (a
+// handle route's `"cross"`), so a routed module's type keeps each such
+// method; JET_DRIVER_MEMBER_ROUTES holds exactly those names.
+#Test("each inherent method of a routed module's types that the compiler spells as a literal stays with its type") {
+    files := [String]{}
+    reach_test_sources("Compiler", files)
+    literals := [String:Bool]{}
+    loop path in files {
+        if !path.contains("/Source/") -> next
+        // copy: read takes its path, and the failure rows still name `path`.
+        text: fs.read(path.copy()) ?? panic("cannot read {path}: {err}")
+        loop line in text.split("\n") {
+            parts: line.split("\"").to_list()
+            loop index in 0..<parts.len() {
+                if index % 2 == 1 -> literals[parts[index]] = true
+            }
+        }
+    }
+    found := [String]{}
+    missing := [String]{}
+    loop module_name in JET_DRIVER_ROUTED_MODULES {
+        loop row in CORE_SOURCE_OWNED_ROWS {
+            if row.module_name != module_name || row.owner != "" -> next
+            // copy: read takes its path, and the failure rows still name it.
+            text: fs.read(row.path.copy()) ?? panic("cannot read {row.path}: {err}")
+            parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: module_name, owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+            loop item in parsed.parsed.program.items {
+                if item == .Struct(value) -> reach_test_spelled_methods(value.methods, literals, found, missing)
+                if item == .Enum(value) -> reach_test_spelled_methods(value.methods, literals, found, missing)
+            }
+        }
+    }
+    assert_eq(missing, [String]{})
+    stale := [String]{}
+    loop name in JET_DRIVER_MEMBER_ROUTES {
+        if !found.contains(name) -> stale.push(name)
+    }
+    assert_eq(stale, [String]{})
 }

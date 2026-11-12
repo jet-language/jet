@@ -142,6 +142,16 @@ ir_precise_source_family: fn(name: String, owner: String, prefix: String) -> Boo
     helper == name
 }
 
+// The precise type (`Fraction`, `Decimal`, `Complex`) whose registry family
+// holds `name` (`__fraction_add`), or None. Only a value of that type runs
+// the family.
+ir_precise_source_family_owner: fn(name: String) -> String? Never! {
+    if ir_precise_source_family(name, "Fraction", "__fraction_") -> return Val("Fraction")
+    if ir_precise_source_family(name, "Decimal", "__decimal_") -> return Val("Decimal")
+    if ir_precise_source_family(name, "Complex", "__complex_") -> return Val("Complex")
+    None
+}
+
 // A precise operation (the typed `abs` helpers, the Float and F32 `pow`
 // powers and the Fraction, Decimal and Complex registry) or a fallible unit
 // conversion lowers to its `Core/Math/Math.jet` helper by name from sites with
@@ -153,7 +163,7 @@ ir_precise_source_name: fn(name: String) -> Bool Never! {
         if (ir_precise_source_helper(owner, "abs") ?? "") == name || (ir_precise_source_helper(owner, "pow") ?? "") == name -> return true
     }
     if name == ir_unit_conversion_helper(false) || name == ir_unit_conversion_helper(true) -> return true
-    ir_precise_source_family(name, "Fraction", "__fraction_") || ir_precise_source_family(name, "Decimal", "__decimal_") || ir_precise_source_family(name, "Complex", "__complex_")
+    ir_precise_source_family_owner(name) != None
 }
 
 ir_precise_source_target: fn(function: FnBody) -> Bool Never! {
