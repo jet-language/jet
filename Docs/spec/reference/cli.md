@@ -1288,6 +1288,11 @@ state through Jetpack's shared pin reader. It does not resolve or move a pin.
 The report is a human renderable: `--json` suppresses successful report bytes,
 while missing or malformed package authority remains an error.
 
+`jet explain` takes a diagnostic as its code (`E0001`), its full name
+(`jet.StrayCharacter`), or its bare name (`StrayCharacter`), and all three print
+the same registry entry. A bare name that is not a registered diagnostic falls
+through to the other lookups.
+
 Offline `jet explain` queries also project registered fact declarations and
 corpus truths. Fact essays state the row's attachment target, safe direction,
 written loosening gates, and read-only prover where one is declared. Corpus

@@ -1,0 +1,18 @@
+# A bare diagnostic name is Jet's own `jet.` name: `jet explain StrayCharacter`
+# prints the jet.StrayCharacter entry, not a package lookup.
+step: jet explain StrayCharacter
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "E0001" # the code of jet.StrayCharacter
+stdout: ~ "What this means:" # the registry entry
+stderr: !~ "MissingStoreRecord" # not a package lookup
+stderr: !~ "not built yet" # explain is built
+step: jet explain jet.StrayCharacter
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "E0001" # the same entry under its full name
+step: jet explain NoSuchDiagnosticName
+env: NO_COLOR=1
+exit: any # an unknown name stays a lookup miss
+stderr: ~ "NoSuchDiagnosticName" # the miss names the query
+stderr: !~ "not built yet" # explain is built
