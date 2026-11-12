@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1422,
+  "total": 1423,
   "counts": {
-    "Compiler": 750,
+    "Compiler": 751,
     "Core": 170,
     "Docs": 8,
     "Examples": 41,
@@ -2948,63 +2948,63 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 7,
+      "line": 8,
       "column": 5,
       "reason": "the audited caller supplies the Linux syscall's valid word arguments"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 96,
+      "line": 97,
       "column": 5,
       "reason": "the caller lends the C-ABI tuple's Bool byte and two writable Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 159,
+      "line": 160,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 190,
+      "line": 191,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 210,
+      "line": 211,
       "column": 5,
       "reason": "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 226,
+      "line": 227,
       "column": 5,
       "reason": "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 240,
+      "line": 241,
       "column": 5,
       "reason": "some lends a writable C-ABI Option success word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 250,
+      "line": 251,
       "column": 5,
       "reason": "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostProcess.jet",
-      "line": 262,
+      "line": 263,
       "column": 5,
       "reason": "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots"
     },
@@ -3305,9 +3305,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 437,
-      "column": 9,
-      "reason": "a main's startup envp is a live, null-terminated pointer array"
+      "line": 453,
+      "column": 5,
+      "reason": "key_data lends key_length bytes"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
+      "line": 461,
+      "column": 5,
+      "reason": "envp is a live null-terminated pointer array of NUL-terminated rows"
     },
     {
       "package": "Compiler",
@@ -4530,42 +4537,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 29,
-      "column": 9,
-      "reason": "startup lends the immutable, null-terminated envp pointer array"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 39,
-      "column": 13,
-      "reason": "the startup entry is a live NUL-terminated path for open"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 49,
+      "line": 33,
       "column": 5,
       "reason": "startup is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 94,
+      "line": 49,
+      "column": 5,
+      "reason": "the startup entry is a live NUL-terminated path for open"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/TestReads.jet",
+      "line": 62,
+      "column": 5,
+      "reason": "an idempotent install: every racing first use opens the same log"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/TestReads.jet",
+      "line": 105,
       "column": 13,
       "reason": "buffer lends 4096 writable bytes after the kind byte to getcwd"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 101,
+      "line": 112,
       "column": 13,
       "reason": "link is a live NUL-terminated /proc path and buffer lends 4096 writable bytes after the kind byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/TestReads.jet",
-      "line": 161,
+      "line": 172,
       "column": 5,
       "reason": "data lends `length` initialized bytes to one write"
     },
@@ -10184,14 +10191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 750 |
+| Compiler | 751 |
 | Core | 170 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 438 |
-| **total** | **1422** |
+| **total** | **1423** |
 
 ### Regions
 
@@ -10586,15 +10593,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 526:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 534:5 | "cpuid and xgetbv only report processor identification and the OS-enabled state" |
 | Compiler | Compiler/JetRuntime/Source/HostPipe.jet | 165:13 | "the FD72 lock protects this initialized refill-buffer byte" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 7:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 96:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 159:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 190:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 210:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 226:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 240:5 | "some lends a writable C-ABI Option success word" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 250:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 262:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 8:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 97:5 | "the caller lends the C-ABI tuple's Bool byte and two writable Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 160:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 191:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 211:5 | "buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 227:5 | "buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 241:5 | "some lends a writable C-ABI Option success word" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 251:5 | "status lends an eight-byte out slot; wait4 writes its low four bytes and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 263:5 | "read_fd lends eight writable bytes to pipe's two u32 results; split both facts into the caller's separate word slots" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 13:9 | "the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 55:13 | "accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 62:13 | "private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer" |
@@ -10637,7 +10644,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 339:9 | "argv[1] is an immutable startup string of `length` bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 385:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 403:5 | "the startup index and key bytes are immutable borrowed data" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 437:9 | "a main's startup envp is a live, null-terminated pointer array" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 453:5 | "key_data lends key_length bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 461:5 | "envp is a live null-terminated pointer array of NUL-terminated rows" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 21:5 | "value borrows a complete immutable startup NUL string; output lends one writable U64 word" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 48:5 | "value borrows length immutable captured startup bytes; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 82:5 | "the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer" |
@@ -10812,12 +10820,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Test.jet | 132:9 | "the OS leaf borrows at most eight initialized bytes from its own stack word" |
 | Compiler | Compiler/JetRuntime/Source/TestCapture.jet | 31:9 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TestContracts.jet | 28:5 | "the harness main opens contracts before any test, so before any other thread observes one" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 29:9 | "startup lends the immutable, null-terminated envp pointer array" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 39:13 | "the startup entry is a live NUL-terminated path for open" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 49:5 | "startup is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 94:13 | "buffer lends 4096 writable bytes after the kind byte to getcwd" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 101:13 | "link is a live NUL-terminated /proc path and buffer lends 4096 writable bytes after the kind byte" |
-| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 161:5 | "data lends `length` initialized bytes to one write" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 33:5 | "startup is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 49:5 | "the startup entry is a live NUL-terminated path for open" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 62:5 | "an idempotent install: every racing first use opens the same log" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 105:13 | "buffer lends 4096 writable bytes after the kind byte to getcwd" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 112:13 | "link is a live NUL-terminated /proc path and buffer lends 4096 writable bytes after the kind byte" |
+| Compiler | Compiler/JetRuntime/Source/TestReads.jet | 172:5 | "data lends `length` initialized bytes to one write" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 24:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 83:5 | "`test: fn` calls `t.run()` on the harness's main thread, before any test task exists" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 92:5 | "the pinned named-fn box code takes its box and writable inline 16B result storage" |
