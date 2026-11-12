@@ -17,8 +17,8 @@ REFLECTION_APP: Output.Executable{ name: "reflection", entry: reflection_probe }
 REFLECTION_BASE: comptime { Pattern.reflect().base }
 reflection_implements: fn() -> Bool {
     found := false
-    loop name in Pattern.reflect().implements {
-        if name == "CheckedText" -> found = true
+    loop implemented in Pattern.reflect().traits {
+        if implemented.name == "CheckedText" -> found = true
     }
     return found
 }
@@ -28,7 +28,7 @@ reflection_contract: fn() -> [Bool] {
     error_type := false
     check_method := false
     encode_method := false
-    loop contract in Pattern.reflect().trait_contracts {
+    loop contract in Pattern.reflect().traits {
         if contract.name == "CheckedText" {
             found = true
             loop association in contract.associated_types {
@@ -49,7 +49,7 @@ reflection_probe: fn() {
     // Original tests/reflect.rs:126-129 base String.
     print(REFLECTION_BASE)
     
-    // Original tests/reflect.rs:130-134 implements contains CheckedText.
+    // Original tests/reflect.rs:130-134 the traits list contains CheckedText.
     print(REFLECTION_IMPLEMENTS)
     
     // Original tests/reflect.rs:135-141 first matching CheckedText contract exists.

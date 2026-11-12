@@ -255,7 +255,10 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "methods" -> Val(sema_fact_list_of("MethodInfo"))
             field == "type_params" -> Val(sema_fact_list_of("TypeParamInfo"))
             field == "markers" || field == "expanded_markers" -> Val(sema_fact_list_of("MarkerInfo"))
-            field == "implements" -> Val(Type.List{element: string})
+            field == "traits" -> Val(sema_fact_list_of("TraitInfo"))
+            field == "constants" -> Val(sema_fact_list_of("ConstantInfo"))
+            field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
+            field == "numeric" -> Val(sema_fact_optional("NumericInfo"))
             field == "states" -> Val(sema_fact_list_of("StateInfo"))
             field == "transitions" -> Val(sema_fact_list_of("TransitionInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -476,6 +479,29 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "name" -> Val(string)
             field == "bounds" -> Val(Type.List{element: string})
             field == "span" -> Val(sema_fact_named("SourceSpan"))
+            else -> None
+        }
+    }
+    if type_name == "TraitInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "associated_types" -> Val(sema_fact_list_of("AssociatedTypeInfo"))
+            field == "methods" -> Val(sema_fact_list_of("MethodInfo"))
+            else -> None
+        }
+    }
+    if type_name == "AssociatedTypeInfo" || type_name == "GenericBindingInfo" -> return sema_fact_field_when(field == "name" || field == "type", string)
+    if type_name == "NumericInfo" {
+        return if {
+            field == "signed" || field == "is_float" -> Val(Type.Bool)
+            field == "bits" -> Val(Type.Int)
+            else -> None
+        }
+    }
+    if type_name == "ConstantInfo" {
+        return if {
+            field == "name" || field == "trait_name" || field == "type" -> Val(string)
+            field == "value" -> Val(Type.Option{inner: string})
             else -> None
         }
     }
@@ -937,11 +963,11 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, environment: SemaScopeEnv
 }
 
 // A reflection record folded into a program value keeps only the fields its
-// Core record rows declare. Producer-only members (`TypeInfo.trait_contracts`,
-// a marker's `sites`) feed derive templates; no program can name them, and
-// the IR builds a record constant from its declared layout. A struct with no
-// declared row at all is not a Core record and keeps every field. A written
-// marker argument keeps its value too (sema_fact_answered_member).
+// Core record rows declare. Producer-only members (a marker's `sites`) feed
+// derive templates; no program can name them, and the IR builds a record
+// constant from its declared layout. A struct with no declared row at all is
+// not a Core record and keeps every field. A written marker argument keeps its
+// value too (sema_fact_answered_member).
 sema_fact_declared_value: fn(value: TComptimeValue) -> TComptimeValue Never! {
     if value == {
         .Struct(type_name, fields) -> {

@@ -1,0 +1,17 @@
+# A type's TypeInfo lists the traits it implements as typed `traits` records,
+# its traits' associated constants with their values (`constants`, a left-out
+# constant reading the trait's default), for a generic type named with its
+# arguments each parameter's binding (`generic_bindings`), and for a number
+# (a builtin or a distinct one) its signedness and bit width (`numeric`)
+# (#3520 c25). A `comptime` value and the running program print the same lines.
+fixture: type_info_lists_traits_constants_and_generic_bindings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = type_info_lists_traits_constants_and_generic_bindings.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = type_info_lists_traits_constants_and_generic_bindings.stdout.expected
+stderr: empty

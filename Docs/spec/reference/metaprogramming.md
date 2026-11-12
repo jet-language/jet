@@ -276,6 +276,27 @@ field without a written default, else a `DefaultInfo` whose `source` is the
 `SourceSpan` of the default expression. Reading `default` never runs the
 expression.
 
+A `TypeInfo` lists what the type implements and binds, and the form of a number:
+
+- `traits` has one `TraitInfo` per trait the type implements, with its `name`,
+  its `associated_types` (`AssociatedTypeInfo` `name` and `type`) and the
+  `methods` the implementation gives. Ask whether a type implements a trait by
+  looking for its name in `traits`; there is no string `implements` query.
+- `constants` has one `ConstantInfo` per associated constant of those traits:
+  its `name`, the `trait_name` that declares it, its declared `type`, and its
+  `value` as `print` shows it (`None` when the value is not known at
+  compile time, which is reported where the implementation gives it). A
+  constant the implementation leaves out reads the trait's default.
+- `generic_bindings` pairs each type parameter with the type written for it
+  when the type is named with its arguments: `Pair<Int, String>.reflect()`
+  binds `A` to `Int` and `B` to `String`. Naming the generic type alone, or
+  reflecting its declaration in a marker body, gives an empty list.
+- `numeric` is the `NumericInfo` of a number type: whether it is `signed`, its
+  width in `bits` and whether it `is_float`. A builtin number reflects too:
+  `I32.reflect().numeric` is `signed: true, bits: 32`, `U8`'s is unsigned
+  with 8 bits and `F32`'s is a 32-bit float. A `distinct` type over a number
+  reports its base's form; any other type has `None`.
+
 [`reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet) combines typed
 fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/Metaprogramming/Reflection/ReflectValue.jet)
 shows the runtime floor:

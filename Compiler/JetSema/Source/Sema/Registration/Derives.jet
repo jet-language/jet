@@ -317,15 +317,6 @@ sema_derive_static_method: fn(expansion: SemaDeriveExpansion, receiver: Expr, me
     if wanted == "" -> return None
     if method == "has_marker" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "markers", wanted) != None})
     if method == "has_method" -> return Val(CtValue.Bool{value: sema_derive_named_row(owner, "methods", wanted) != None})
-    if method != "implements" -> return None
-    if sema_derive_struct_field(owner, "implements") == .Val(.List(names)) {
-        loop name in names {
-            if name == .Str(text) {
-                if text == wanted -> return Val(CtValue.Bool{value: true})
-            }
-        }
-        return Val(CtValue.Bool{value: false})
-    }
     None
 }
 

@@ -1,0 +1,72 @@
+// A type's TypeInfo lists the traits it implements (`traits`), the
+// associated constants of those traits with their values (`constants`), the
+// type each parameter is bound to when the type is named with its arguments
+// (`generic_bindings`), and a number's signedness and width (`numeric`). A
+// compile-time value and the program read the same records.
+Shape: trait {
+    sides: Int
+    label: String{"shape"}
+    angles: [Int]
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        sides: 4
+        angles: [90, 90, 90, 90]
+
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Pair: struct<A, B> {
+    first: A
+    second: B
+}
+
+Meters: distinct Float
+
+number: fn(info: TypeInfo) -> String {
+    form: info.numeric ?? return "{info.name}: not a number"
+    sign: if form.signed -> "signed" else -> "unsigned"
+    kind: if form.is_float -> "float" else -> "integer"
+    "{info.name}: {sign} {form.bits}-bit {kind}"
+}
+
+NUMBERS: comptime { [number(I32.reflect()), number(U8.reflect()), number(F32.reflect()), number(Int.reflect())] }
+
+PREPARED: comptime { Square.reflect() }
+PAIR: comptime { Pair<Int, String>.reflect() }
+
+describe: fn(info: TypeInfo) -> String {
+    traits := [String]{}
+    loop implemented in info.traits -> traits.push("{implemented.name} ({implemented.methods.len()} methods)")
+    constants := [String]{}
+    loop constant in info.constants -> constants.push("{constant.trait_name}.{constant.name}: {constant.type} = {constant.value ?? "unknown"}")
+    bindings := [String]{}
+    loop binding in info.generic_bindings -> bindings.push("{binding.name} = {binding.type}")
+    "{info.name}: traits [{traits.join(", ")}]; constants [{constants.join("; ")}]; bindings [{bindings.join(", ")}]"
+}
+
+implements: fn(info: TypeInfo, name: String) -> Bool {
+    loop implemented in info.traits {
+        if implemented.name == name -> return true
+    }
+    false
+}
+
+run: fn() {
+    print("prepared: {describe(PREPARED)}")
+    print("program: {describe(Square.reflect())}")
+    print("pair: {describe(PAIR)}")
+    print("pair in program: {describe(Pair<Int, String>.reflect())}")
+    print("bare pair: {describe(Pair.reflect())}")
+    print("Square implements Shape: {implements(Square.reflect(), "Shape")}")
+    print("Pair implements Shape: {implements(PAIR, "Shape")}")
+    print("area {Square{side: 3}.area()}")
+    print("prepared numbers: {NUMBERS.join(", ")}")
+    print("numbers: {number(I32.reflect())}, {number(U8.reflect())}, {number(F32.reflect())}, {number(Int.reflect())}")
+    print("{number(Meters.reflect())}; {number(Square.reflect())}")
+}

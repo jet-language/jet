@@ -13,7 +13,7 @@ use {
 }
 
 jet_eval_reflection_metadata_supported: fn(owner: String, method: String) -> Bool Never! {
-    if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method" || method == "marker"
+    if owner == "TypeInfo" -> return method == "has_marker" || method == "has_method" || method == "marker"
     if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker" || method == "marker"
     false
 }
@@ -115,19 +115,6 @@ jet_eval_reflection_calls_to: fn(program: TComptimeValue, wanted: String) -> TCo
     Val(TComptimeValue.List{values: heard})
 }
 
-jet_eval_reflection_metadata_string_list_contains: fn(fields: [TComptimeField], field_name: String, wanted: String) -> Bool Never! {
-    list: jet_eval_compiler_value_field(fields, field_name) ?? return false
-    if list == {
-        .List(values) -> {
-            loop value in values {
-                if value == .String(name) && name == wanted -> return true
-            }
-            return false
-        }
-        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
-    }
-}
-
 jet_eval_reflection_metadata_method_list_contains: fn(fields: [TComptimeField], wanted: String) -> Bool Never! {
     list: jet_eval_compiler_value_field(fields, "methods") ?? return false
     if list == {
@@ -156,6 +143,6 @@ jet_eval_reflection_answer: fn(owner: String, method: String, args: [TComptimeVa
         marked: sema_comptime_reflection_has_marker(receiver, wanted) ?? return jet_eval_compiler_value_fault("reflection metadata marker receiver is not {owner}")
         return JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Bool{value: marked}}
     }
-    found: if method == "implements" -> jet_eval_reflection_metadata_string_list_contains(fields, "implements", wanted) else -> jet_eval_reflection_metadata_method_list_contains(fields, wanted)
+    found: jet_eval_reflection_metadata_method_list_contains(fields, wanted)
     JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Bool{value: found}}
 }

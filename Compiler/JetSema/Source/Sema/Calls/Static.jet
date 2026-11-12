@@ -1024,6 +1024,16 @@ sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, environ
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
 }
 
+// `Int.reflect()`, `U8.reflect()`, `F32.reflect()` and the other builtin
+// numbers: the number's TypeInfo, with its numeric form. None for a name
+// that is not a builtin number.
+sema_call_static_reflect_builtin: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    graph: program.registration_graph ?? return None
+    info: sema_comptime_reflection_builtin_type_info(graph, name) ?? return None
+    folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
+    Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)})
+}
+
 sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor, _) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     static_owner: sema_call_static_source_owner(receiver, method, owner_type_args, environment, program, scopes) ?? {
@@ -1032,6 +1042,9 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if name == "Option" && method == "lift2" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_option_lift2(args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if sema_scope_resolve_index(scopes, name) == None && owner_type_args.len() == 0 && type_args.len() == 0 {
+                if method == "reflect" && args.len() == 0 {
+                    if sema_call_static_reflect_builtin(name, span, expected, environment, program, diagnostics) == .Val(reflected) -> return reflected
+                }
                 math := sema_call_try_math_static(name, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 if math.handled -> return math
             }
@@ -1075,12 +1088,19 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         if distinct.handled -> return distinct
         // `T.reflect()` on a declared type is that type's TypeInfo record,
         // computed while compiling: in compile-time code, in `build: fn` and in
-        // the running program, which holds it as data.
-        if method == "reflect" && args.len() == 0 && type_args.len() == 0 && static_args.len() == 0 {
+        // the running program, which holds it as data. A generic type named
+        // with its type arguments binds each parameter to its argument.
+        if method == "reflect" && args.len() == 0 && type_args.len() == 0 {
             if sema_fact_type_info(Val(owner_symbol), type_name, environment, program) == .Val(info) {
-                folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
+                declared := sema_fact_declared_value(info)
+                if static_args.len() > 0 {
+                    bound: sema_comptime_reflection_bind_generics(declared, static_args)
+                    if bound == .Val(record) -> declared = record.copy()
+                }
+                folded: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: declared}, span)
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
             }
+            if static_args.len() == 0 && sema_call_static_reflect_builtin(type_name, span, expected, environment, program, diagnostics) == .Val(reflected) -> return reflected
         }
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
