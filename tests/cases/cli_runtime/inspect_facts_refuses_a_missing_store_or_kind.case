@@ -1,6 +1,7 @@
 # `jet inspect facts` answers one concrete question: a store and a kind. A
-# missing or unknown store or kind, or a SOURCE for the schema store (the
-# running toolchain's own), is refused before any query runs (#4276 c97).
+# missing or unknown store or kind, a SOURCE for the schema store (the
+# running toolchain's own), or a program store without exactly one SOURCE is
+# refused before any query runs (#4276 c97).
 step: jet inspect facts --kind=marker
 env: NO_COLOR=1
 exit: nonzero
@@ -26,6 +27,16 @@ env: NO_COLOR=1
 exit: nonzero
 stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
 stderr: ~ "takes no SOURCE" # the schema store is the running toolchain's own
+step: jet inspect facts --store=program --kind=marker
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "name its SOURCE" # the program store's missing-operand refusal
+step: jet inspect facts --store=program --kind=marker a.jet b.jet
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "reads one SOURCE" # two SOURCE files are refused
 step: jet inspect facts --kind=marker --json
 env: NO_COLOR=1
 exit: nonzero

@@ -1,0 +1,23 @@
+use compiler: core.compiler
+
+#Codable
+Order: struct {
+    id: Int
+    total: Int
+}
+
+#Comparable
+OrderID: distinct Int
+
+// The build makes the same query `jet inspect facts --store=program` makes,
+// over the ProgramInfo it is handed, and reports the rows it read.
+build: fn(b: Build) {
+    rows: compiler.query(compiler.FactSource.Program{program: b.program}, compiler.FactKind.Marker) ?? panic("the program store refused: {err}")
+    text := ""
+    loop row in rows {
+        if row == .Program(fact) -> text = "{text}[{fact.name}  {fact.subject}]"
+    }
+    b.error(b.program.types()[0].span, "FACTS", "{rows.len()} facts: {text}", "the build read the program store", "none: the report is the evidence")
+}
+
+run: fn() { print("ok") }

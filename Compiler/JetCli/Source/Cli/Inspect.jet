@@ -1505,6 +1505,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     }
     source: cli_files.read(job.file) ?? ""
     if job.action == "decisions" -> return jet_cli_inspect_decisions_host(job, source)
+    if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "explain-effects"

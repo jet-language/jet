@@ -1,0 +1,24 @@
+# `jet inspect facts --store=program` renders the very `core.compiler.query` a
+# build makes over its ProgramInfo: the marker rows the command prints for
+# main.jet are the rows main.jet's own build reads from `b.program` (#4276 c97).
+fixture: inspect_facts_program_store_is_the_build_query.fixture
+step: jet inspect facts --store=program --kind=marker main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "program source main.jet, kind marker: " # the header names the source and kind
+stdout: ~ " facts, complete" # the query ends complete; the count is the toolchain's
+stdout: ~ "Codable  main::Order" # Order's marker row
+stdout: ~ "Comparable  main::OrderID" # OrderID's marker row
+stderr: empty
+step: jet build main.jet
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "FACTS" # the build's error report carries the program's FACTS line
+stdout+stderr: ~ "[Codable  main::Order]" # the build reads Order's Codable marker
+stdout+stderr: ~ "[Comparable  main::OrderID]" # the build reads OrderID's Comparable marker
+step: jet inspect facts --store=program --kind=read main.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "inspect.facts" # one inspect.facts envelope
+stdout: ~ "\"source\"" # the JSON names the program source
+stderr: empty

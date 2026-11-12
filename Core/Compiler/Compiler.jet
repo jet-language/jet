@@ -102,8 +102,9 @@ MetadataError: struct {
     }
 }
 
-/// The kinds of fact the executable schema declares: its marker rules and
-/// its typed fact reads.
+/// The kinds of fact a store holds. In the executable schema they are its
+/// marker rules and its typed fact reads; in a checked program they are the
+/// markers its declarations carry and the typed facts the checker recorded.
 FactKind: enum { Marker Read }
 
 /// One row of the toolchain's executable schema.
@@ -124,14 +125,27 @@ SchemaSnapshot: struct {
     identity: fn(self) -> SnapshotID Never! { self.id.copy() }
 }
 
-/// The immutable snapshot a query reads.
+/// One fact of a checked program: a marker a declaration carries, or a typed
+/// fact the checker recorded on a type or function.
+ProgramFact: struct {
+    kind: FactKind
+    /// The marker's name, or the recorded fact's name.
+    name: String
+    /// The canonical identity of the type or function it belongs to.
+    subject: String
+}
+
+/// The immutable snapshot a query reads: the running toolchain's schema, or
+/// a program checked through the normal pipeline (`b.program` in a build).
 FactSource: enum {
     Schema(snapshot: SchemaSnapshot)
+    Program(program: ProgramInfo)
 }
 
 /// One fact a query returns, tagged by the store it comes from.
 Fact: enum {
     Schema(fact: SchemaFact)
+    Program(fact: ProgramFact)
 }
 
 /// A point in a run's recorded timeline, in milliseconds from the run's
@@ -140,7 +154,8 @@ QueryTime: struct {
     elapsed_ms: Int
 }
 
-/// The facts of `kind` in `source`, in the source's canonical order. Facts a
+/// The facts of `kind` in `source`, in the source's canonical order: a
+/// program's types, then its functions, each in declaration order. Facts a
 /// query can't answer completely are a `MetadataError`, never a shorter list:
 /// more matches than `limit` is `Truncated`.
 query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError! {
@@ -150,6 +165,20 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
             if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
             loop fact in snapshot.facts {
                 if fact.kind == kind -> rows.push(Fact.Schema{fact: fact.copy()})
+            }
+        }
+        .Program(program) -> {
+            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a checked program"}, query: "query", source: None})
+            loop info in program.types() {
+                if kind == {
+                    .Marker -> { loop marker in info.markers -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: marker.name.copy(), subject: info.identity.copy()}}) }
+                    .Read -> { loop fact in info.facts -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: fact.name.copy(), subject: info.identity.copy()}}) }
+                }
+            }
+            if kind == FactKind.Read {
+                loop function in program.functions() {
+                    loop fact in function.facts -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: fact.name.copy(), subject: function.identity.copy()}})
+                }
             }
         }
     }

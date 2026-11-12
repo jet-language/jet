@@ -432,14 +432,28 @@ row per readable `$` member (`scope` holds its planes).
 `snapshot.identity()` is a compiler-issued `SnapshotID`: the digest of the
 rows, equal for equal schemas.
 
+`FactSource.Program(program)` reads a program checked through the normal
+pipeline: the `ProgramInfo` a build reads as `b.program`. Its facts are
+`ProgramFact { kind, name, subject }` rows. `FactKind.Marker` gives one row per
+marker a type declaration carries; `FactKind.Read` gives one row per typed
+fact the checker recorded on a type, then on a function. `subject` is the
+type's or function's canonical identity, and rows follow the program's type
+order, then its function order.
+
+`jet inspect facts --store=<schema|program> --kind=<marker|read> [SOURCE]
+[--json]` prints the answer of this same function. The command checks a
+generated program that calls `query`, over `schema()` or over SOURCE's checked
+`ProgramInfo`, and renders the rows it returns.
+
 A query that can't answer completely fails; it never returns a shorter list.
 An empty list is a checked empty answer. `MetadataError { kind, query, source }`
 carries a `MetadataFailure`: `Unavailable(required_stage: CompilerStage,
 reason)`, `Unsupported(capability)`, `Stale(requested: SnapshotID, current:
 SnapshotID)`, `Invalid(diagnostics)`, `Denied(scope: ScopeID, reason)` or
 `Truncated(limit, observed)`. More matches than `limit` is `Truncated`, and a
-time view (`at`) of a schema snapshot is `Unsupported`. Identity types are
-spelled `SnapshotID` and `ScopeID`, following the acronym-casing rule.
+time view (`at`) of a schema snapshot or a checked program is `Unsupported`.
+Identity types are spelled `SnapshotID` and `ScopeID`, following the
+acronym-casing rule.
 
 ```jet
 use compiler: core.compiler

@@ -1,7 +1,7 @@
 // `jet inspect facts` answers one concrete question, a store and a kind, and
 // answers it with `core.compiler.query` itself.
 use {
-    jet_cli.[jet_cli_facts_program, jet_cli_plan]
+    jet_cli.[jet_cli_facts_program, jet_cli_facts_program_query, jet_cli_plan]
     jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
 }
 
@@ -17,7 +17,7 @@ inspect_facts_refused: fn(argv: [String], what: String) Never! {
 
 #Test("inspect facts needs a store and a kind, and the schema store takes no SOURCE") {
     inspect_facts_refused([String]{"inspect", "facts", "--kind=marker"}, "needs a store")
-    inspect_facts_refused([String]{"inspect", "facts", "--store=ledger", "--kind=marker"}, "`--store=ledger` names no fact store")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=ledger", "--kind=marker"}, "`--store=ledger` names no fact store; the stores are schema, program")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema"}, "needs a fact kind")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=field"}, "`--kind=field` names no fact kind")
     inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=marker", "main.jet"}, "takes no SOURCE: `main.jet`")
@@ -28,4 +28,23 @@ inspect_facts_refused: fn(argv: [String], what: String) Never! {
     program: jet_cli_facts_program("read")
     assert(program.contains("JET_FACTS_SNAPSHOT: #run compiler.schema()"))
     assert(program.contains("compiler.query(compiler.FactSource.Schema{{snapshot: JET_FACTS_SNAPSHOT.copy()}}, compiler.FactKind.Read)"))
+}
+
+#Test("the program store reads exactly one SOURCE, checked by the host") {
+    inspect_facts_refused([String]{"inspect", "facts", "--store=program", "--kind=marker"}, "name its SOURCE")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=program", "--kind=marker", "a.jet", "b.jet"}, "not both `a.jet` and `b.jet`")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=program", "--kind=field", "main.jet"}, "`--kind=field` names no fact kind")
+    if jet_cli_plan([String]{"inspect", "facts", "--store=program", "--kind=read", "main.jet"}) == .Inspect(job) {
+        assert_eq(job.action, "facts")
+        assert_eq(job.file, "main.jet")
+        assert(job.subject == Val("read"))
+        return
+    }
+    panic("`jet inspect facts --store=program --kind=read main.jet` is not a host inspect job")
+}
+
+#Test("the program store runs the core.compiler query over the checked ProgramInfo") {
+    program: jet_cli_facts_program_query("marker")
+    assert(program.contains("jet_facts_answer: fn(program: ProgramInfo) -> JetFactsAnswer {{"))
+    assert(program.contains("compiler.query(compiler.FactSource.Program{{program: program}}, compiler.FactKind.Marker)"))
 }
