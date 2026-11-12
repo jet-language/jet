@@ -3,7 +3,7 @@
 use {
     jet_pkg_model.[
         AuthorityResolver, ComposeError, ConfigFacts, ManifestEntry, PackageFacts, PackageOutputKind,
-        PackageParseError, pkg_build_entry_source, pkg_extract_inline_package, pkg_format_source, pkg_path_file_name, pkg_path_parent,
+        PackageParseError, pkg_build_entry_source, pkg_extract_inline_package, pkg_format_source, pkg_package_marker_source, pkg_path_file_name, pkg_path_parent,
     ]
     files: core.files
 }
@@ -379,6 +379,8 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     assert_eq(facts.markers[0].end, 14)
     assert_eq(facts.markers[1].name, "tools.Audit")
     assert_eq(facts.markers[1].args, "level: 2, name: \"x\"")
+    // The Jet parser reads each marker alone, at its own offsets.
+    assert_eq(pkg_package_marker_source(source, facts.markers[1]), "      \n       \n#tools.Audit(level: 2, name: \"x\")")
     plain: PackageFacts.parse("name: \"demo\"\n", "package.jet") ?? panic("plain parses")
     assert(plain.markers.len() == 0)
     assert(facts.semantic_digest() != plain.semantic_digest())

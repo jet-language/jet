@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, diagnostic_with_edit, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -518,6 +518,73 @@ sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRule
         unknown_rules.push(unknown)
     }
     diagnostics
+}
+
+// The package site: the markers `package.jet`'s header writes on the package
+// record, each bound to its declaration (its declaring module and span) and
+// the diagnostics of their checks, placed in `package.jet`.
+SemaMarkerPackageSite: struct {
+    markers: [Marker]
+    diagnostics: [Diagnostic]
+}
+
+// The laws of the package site (SemaBuildFacts.package_markers). A header
+// marker resolves as one written at the entry module's head does: a builtin
+// rule by name, any other marker through the entry module's own
+// declarations and its imports (`#Tools.Audit`). A builtin rule must list
+// `.Package` among its sites, a declared marker `sites: [.Package]`; the
+// package record is the one target, so a rule that is not repeatable is
+// written once.
+sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry) -> SemaMarkerPackageSite {
+    markers := [Marker]{}
+    diagnostics := [Diagnostic]{}
+    if graph.build_facts.package_markers.len() == 0 -> return SemaMarkerPackageSite{markers: markers, diagnostics: diagnostics}
+    entry_identity: graph.entry_module_identity
+    site := ast_program()
+    loop written in graph.build_facts.package_markers {
+        marker := written
+        if sema_marker_rules_catalog_rule_index(catalog.applied_rules, written.name) == None {
+            if sema_marker_module_case_error(written.name, written.name_span) == .Val(error) {
+                diagnostics.push(error)
+                next
+            }
+            resolved: sema_marker_module_resolve_scoped(graph, entry_identity, written.name, "")
+            if resolved.status == "private" {
+                diagnostics.push(sema_error("E0605", written.name_span, "marker `#{written.name}` is private to its declaring module", "a marker declared inside a `priv module` is usable only by that module's parent and its other children", "use a marker from a public module, or remove `priv` from the module"))
+                next
+            }
+            if resolved.status == "ambiguous" {
+                diagnostics.push(sema_error("E0086", written.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
+                next
+            }
+            if resolved.status != "found" || resolved.declaration == None {
+                diagnostics.push(sema_marker_rules_unknown_error(catalog, written))
+                next
+            }
+            marker.declaration_module = Val(resolved.declaring_module_identity)
+            if resolved.declaration == .Val(declaration) -> marker.declaration_span = Val(declaration.name_span)
+        }
+        // copy: the application is checked here; the bound marker is the package record's.
+        site.rule_facts.push(AppliedRuleApplication{marker: marker.copy(), target: Val(Span{start: 0, end: 0}), site: Val(RuleSite.Package)})
+        markers.push(marker)
+    }
+    sema_marker_module_check_unbuilt_rules(catalog, site, diagnostics)
+    if sema_registration_module_index(graph, entry_identity) == .Val(entry) {
+        if sema_scope_members_build_marker_registry(graph, entry_identity, graph.modules[entry].program, applied) == .Val(built) {
+            registry := built
+            loop marker in markers {
+                if marker.declaration_module == None -> next
+                resolved: sema_marker_module_resolve_application(graph, entry_identity, marker)
+                declaration := resolved.declaration ?? next
+                declaration.name = marker.name
+                _ := sema_scope_members_registry_add_identity(registry, declaration, marker.declaration_module, marker.declaration_span)
+            }
+            sema_marker_rules_validate_user_sites(registry, site, diagnostics)
+            sema_marker_rules_validate_repeatability(registry, site, diagnostics)
+        }
+    }
+    loop index in 0..<diagnostics.len() -> diagnostics[index] = diagnostic_with_source_path(diagnostics[index], graph.build_facts.package_manifest, 0)
+    SemaMarkerPackageSite{markers: markers, diagnostics: diagnostics}
 }
 
 // Compiler derive spellings that are not owned traits (Rust `DERIVE_RULES`

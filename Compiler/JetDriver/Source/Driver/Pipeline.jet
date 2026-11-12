@@ -125,6 +125,7 @@ use {
         decl_table_find,
         Diagnostic,
         Item,
+        Marker,
         name_ledger_from_facts,
         SourceFile,
         TargetMachine,
@@ -693,11 +694,15 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     package_name := ""
     package_version := ""
     settings := [SemaBuildSetting]{}
+    package_markers := [Marker]{}
+    package_manifest := ""
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
             package_version = package.version ?? ""
             settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
+            package_markers = package.markers
+            package_manifest = package.manifest_path ?? ""
         }
     }
     if package_name.len() == 0 {
@@ -732,6 +737,8 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         artifact_build: request.artifact_build,
         settings: settings.move(),
         compiler_identity: request.host_facts.compiler_identity ?? "",
+        package_markers: package_markers.move(),
+        package_manifest: package_manifest,
     }
 }
 

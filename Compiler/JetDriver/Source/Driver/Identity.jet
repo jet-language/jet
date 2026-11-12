@@ -2,7 +2,7 @@ use {
     core.build.[BuildGraphNode]
     // Source, module, and package identities remain separate at the driver boundary.
     jet_sema.[SemaOutputIntent]
-    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant, PackageMarker]
+    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant]
     jet_foundation.[
         AppAuthorizedDirectory,
         AppRouteRoot,
@@ -22,6 +22,7 @@ use {
         JetTargetLayout,
         AllocatorPolicy,
         RuntimeLayer,
+        Marker,
         SourceFile,
         NameLedger,
         StructureFact,
@@ -620,8 +621,9 @@ JetDriverPackageInfo: struct {
     // between this package's modules and any loaded module (Boundaries.jet).
     boundaries: [ImportBoundary]{[ImportBoundary]{}}
     // The markers `package.jet`'s header writes on the package record, in
-    // order (pkg_package_markers), each placed in `manifest_path`.
-    markers: [PackageMarker]{[PackageMarker]{}}
+    // order, as the Jet parser reads them (spans in `manifest_path`); the
+    // package site's rules (sema_marker_package_check).
+    markers: [Marker]{[Marker]{}}
 }
 
 JetDriverPackageOutputs: struct {

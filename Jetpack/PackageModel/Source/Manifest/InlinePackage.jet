@@ -623,3 +623,12 @@ pkg_package_markers_masked: fn(text: String, markers: [PackageMarker]) -> String
     loop marker in markers -> pkg_blank_range(masked, marker.start, marker.end)
     String.from_bytes(masked) ?? text
 }
+
+// `marker` alone as Jet source at its own offsets: the file cut after it and
+// blanked before it, so the Jet parser reads it as the file's last rule and
+// every span stays a `package.jet` span.
+pkg_package_marker_source: fn(text: String, marker: PackageMarker) -> String Never! {
+    masked := pkg_binder_slice(text, 0, marker.end).bytes()
+    pkg_blank_range(masked, 0, marker.start)
+    String.from_bytes(masked) ?? ""
+}

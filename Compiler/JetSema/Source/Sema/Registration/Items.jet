@@ -725,6 +725,11 @@ SemaBuildFacts: struct {
     // The host's compiler identity ("" when the host names none); a history
     // artifact's `tool` names it (#6410).
     compiler_identity: String{""}
+    // The markers `package.jet`'s header writes on the package record (the
+    // Package site), as written and, after sema_marker_package_check, bound
+    // to their declarations; their spans are in `package_manifest`.
+    package_markers: [Marker]{[Marker]{}}
+    package_manifest: String{""}
 }
 
 // One declared setting: its type as written (`Bool`, `Int`, `Char`,
@@ -4581,12 +4586,20 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // generated rule bodies. The complete loader edge set detects ambiguous
     // qualified markers even when two imports share their local alias.
     marker_diagnostics := [Diagnostic]?{None}
+    package_markers := [Marker]?{None}
     if sema_marker_module_applied_catalog(graph) == .Val(applied) {
         graph.marker_catalog = sema_marker_module_catalog_registry(applied)
         unknown_rules := [[Diagnostic]]{}
-        if graph.marker_catalog == .Val(catalog) -> marker_diagnostics = Val(sema_marker_module_check(graph, applied, catalog, unknown_rules))
+        if graph.marker_catalog == .Val(catalog) {
+            found := sema_marker_module_check(graph, applied, catalog, unknown_rules)
+            package_site := sema_marker_package_check(graph, applied, catalog)
+            loop diagnostic in package_site.diagnostics -> found.push(diagnostic)
+            package_markers = Val(package_site.markers.move())
+            marker_diagnostics = Val(found)
+        }
         graph.unknown_rule_diagnostics = unknown_rules.move()
     }
+    if package_markers == .Val(bound) -> graph.build_facts.package_markers = bound
     if marker_diagnostics == .Val(found) {
         loop diagnostic in found -> graph.diagnostics.push(diagnostic)
         if found.len() > 0 {
