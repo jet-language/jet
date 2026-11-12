@@ -13,9 +13,13 @@ time: module {
     // The host's monotonic clock in nanoseconds (HostTime.jet).
     #Import(c) host_monotonic_ns: fn() -[Time]> Int = "jet_time_raw_host_monotonic_ns"
 
-    // The same clock read as a pure value: a `Clock`'s own reading, which
-    // its owner already holds the Time authority for.
-    #Import(c) clock_mono_ns: fn() -> Int = "jet_time_raw_host_monotonic_ns"
+    // The same clock read for the deadlines and intervals of the program's
+    // own work. It carries Time.Wait, the deny-only leaf for that timing,
+    // so every caller that already waits on a deadline holds it. The row is
+    // why it is never folded: sema computes a local while building only when
+    // its initializer's row is empty, and a build-time reading would stand
+    // in for every run's clock. A wall-clock read stays Time.
+    #Import(c) clock_mono_ns: fn() -[Time.Wait]> Int = "jet_time_raw_host_monotonic_ns"
 
     // Sleeps `nanos` nanoseconds under the shared scheduler's wait policy
     // (deadline checks, clamping, cancellation); a negative delay sleeps none.
@@ -57,8 +61,4 @@ time: module {
     // A workflow sleep of `nanos` nanoseconds that ends in a code instead of
     // unwinding: 0 slept, 1 cancelled, 2 deadline (HostTime.jet).
     #Import(c) priv workflow_sleep_wait: fn(nanos: Int) -[Time.Wait]> Int = "jet_services_workflow_sleep_wait"
-
-    // The wall clock read for a service's own record stamps, which its
-    // owner already holds the Time authority for (core.service).
-    #Import(c) priv service_wall_sample: fn() -> (epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool) = "jet_time_raw_wall_sample"
 }

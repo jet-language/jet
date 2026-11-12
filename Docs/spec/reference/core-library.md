@@ -289,7 +289,7 @@ modules declare bindings; an `#Import(c)` in a user module of any name,
 E3203 for a non-C type, E1341 for a shared symbol).
 
 `jet.runtime.time` holds the clock, wait and zone reads of the `core.time`
-leaves: `host_monotonic_ns` and the pure `clock_mono_ns` (`Int`), `sleep_ns`
+leaves: `host_monotonic_ns` (`-[Time]> Int`) and `clock_mono_ns` (`-[Time.Wait]> Int`, the deadline reads of waits), `sleep_ns`
 (`-[Time.Wait]>`), `task_timeout` (the `task.timeout` deadline),
 `reject_uncontrolled`, `wall_sample`
 (`(epoch_seconds: Int, fraction_ns: Int, pre_epoch: Bool)`), the controlled

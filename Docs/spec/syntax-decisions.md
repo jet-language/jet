@@ -9907,8 +9907,8 @@ ownership introduced with its canonical declaration and lost in the Clock
 branch collapse; restoring that row also prevents native trait seeding.
 This preserves
 the source method's result, receiver convention, and effect row rather than
-substituting the native time contract. The owner-only `__clock_mono_ns` seam
-retains its pure zero-argument `Int` signature; labeled Clock state variants
+substituting the native time contract. The owner-only `clock_mono_ns` seam
+is a zero-argument `Int` read under `-[Time.Wait]>`, so no build evaluates it; labeled Clock state variants
 construct with `System{started_ns: ..., offset_ms: ...}` (D-LIT-DOT1=B).
 Canonical Core sources may name another Core source's private declarations
 and native carriers without making them public. Source-only functions resolve

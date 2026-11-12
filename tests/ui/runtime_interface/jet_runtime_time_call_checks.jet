@@ -10,7 +10,7 @@ nap: fn(nanos: Int) -[Time]> Int {
     rt.reject_uncontrolled("clock")
     sample: rt.wall_sample()
     if sample.pre_epoch -> return rt.world_wall_ms() ?? 0
-    sample.epoch_seconds + sample.fraction_ns + rt.host_monotonic_ns()
+    sample.epoch_seconds + sample.fraction_ns + rt.host_monotonic_ns() + rt.clock_mono_ns()
 }
 
 zone: fn(name: String) -[Env, FS.Read]> Int {
@@ -21,7 +21,7 @@ zone: fn(name: String) -[Env, FS.Read]> Int {
 
 pure_reads: fn() -> Int {
     embedded: rt.embedded_zone_bytes("UTC") ?? [U8]{}
-    rt.clock_mono_ns() + embedded.len()
+    embedded.len()
 }
 
 run: fn() -[IO, Env, FS.Read, Time]> {

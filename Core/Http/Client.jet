@@ -1909,3 +1909,10 @@ __client_trim_ows: fn(text: String) -> String Never! {
 __build_slice_text: fn(text: String, start: Int, end: Int) -> String Never! {
     String.from_bytes(__build_slice(text.bytes(), start, end)) ?? ""
 }
+
+#Test("A send's phase deadline counts from when the send reads the clock, not from a reading the build kept") {
+    first: __client_until(0, C_BUILD_INT_MAX)
+    rt.sleep_ns(5000000)
+    second: __client_until(0, C_BUILD_INT_MAX)
+    assert(second - first >= 5000000)
+}

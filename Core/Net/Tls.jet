@@ -1949,3 +1949,10 @@ __prove_net_record: fn(tape: [U8]) Never! {
 // A replay traces this hop's request and takes the next recorded hop's
 // bytes; empty once the run diverged.
 __prove_net_take: fn(request: [U8]) -> [U8] Never! { core.net.tls.__host_prove_take(request) ?? [U8]{} }
+
+#Test("A TLS operation's deadline counts from when the operation reads the clock, not from a reading the build kept") {
+    first: __deadline_end(Duration{ns: 0}, "tls read") ?? panic("{err}")
+    rt.sleep_ns(5000000)
+    second: __deadline_end(Duration{ns: 0}, "tls read") ?? panic("{err}")
+    assert(second - first >= 5000000)
+}
