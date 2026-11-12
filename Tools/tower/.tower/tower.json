@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100091,
+    "rev": 100093,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -68897,6 +68897,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:29:19.481Z"
+        },
+        {
+          "n": 3,
+          "text": "Setting a key on a Dyn object costs the same whatever the object already holds: `out[key] = v` does no native-to-handle round trip over the object's existing contents. Found by G4Ports-1 (2026-11-12, performance-surface twin): 30 small keys set after a 110-row array take 390 ms per 20 objects, against 12 ms when set before it (32x). Proof: a paired two-program cell (keys set before and after a large member) whose times are equal within noise, plus a second program that builds a large JSON report with interleaved keys, on O0/O1/O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T21:47:38.509Z"
+        },
+        {
+          "n": 4,
+          "text": "core.json tree_depth (Core/Json/Json.jet, the `value.keys()` plus `value[key]` walk) is linear in the document size, so json.patch on a large document is not quadratic. Proof: a case timing tree_depth and patch on a document and on one 4x larger, where time grows at most about 4x, on O0/O1/O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T21:47:39.518Z"
         }
       ],
       "refs": [
@@ -68910,11 +68928,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:12.272Z",
-      "updated": "2026-11-11T12:44:58.323Z",
+      "updated": "2026-11-12T21:47:39.518Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
-      ]
+      ],
+      "criteriaLastN": 4
     },
     {
       "id": "c0lkpkuc",
@@ -199927,6 +199946,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T21:47:39.518Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hsgoa6",
+      "note": "#4 core.json tree_depth (Core/Json/Json.jet, the `value.keys()`"
+    },
+    {
+      "at": "2026-11-12T21:47:38.509Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hsgoa6",
+      "note": "#3 Setting a key on a Dyn object costs the same whatever the ob"
+    },
     {
       "at": "2026-11-12T21:43:24.164Z",
       "by": "Main",
