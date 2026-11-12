@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6766,
-    "rev": 99910,
+    "rev": 99912,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99195,7 +99195,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -99203,16 +99203,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 met (690bb98a80): a failing jetpack-areas row leaves no receipt and check-gate refuses; a clean census writes a receipt that admits. All criteria met."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Land.jet census writes its receipt only when every phase row of that run is clean, jetpack-areas included, and the receipt lists every row. Land.jet receipt and every --check-gate refuse a receipt that is missing a row or holds a failing row. Proof: a census whose jetpack-areas row fails (one area forced over its cap) leaves no new receipt, and check-gate rc!=0 for that tree and seed. A clean run still writes one that admits.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T07:18:45.327Z"
+          "evidence": "Landed as dev 690bb98a80 (Land.jet only; Lander5 landfix.sh with land6763-dev.patch, 2026-11-12). landproof on 50a2cbc7e6 plus that Land.jet, boot seed seed-b10 jet@a0.0.45#c089d4d3. Forced run, CENSUS_AREA_CAP=1G: census rc=1, 17 failing rows (the jetpack-areas row plus all 16 area lanes killed at 1024M), no receipt written; receipt commit rc=1; Tools/release/Main.jet admit --check-gate rc=2 'refused: no preflight receipt'. Clean run: census rc=0, 16 areas in 5 lanes, v2 receipt written with 24 rows and 0 failing; receipt commit rc=0; admit --check-gate rc=0. On dev 831b178482 with the patch and seed-b12 jet@a0.0.45#…b5c287db: jet check Tools/agent/Land.jet rc 0; jet test Tools/agent/Land.jet 25 passed, 0 failed.",
+          "at": "2026-11-12T09:21:53.233Z"
         }
       ],
       "refs": [],
@@ -99223,9 +99229,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T07:18:38.825Z",
-      "updated": "2026-11-12T07:18:45.327Z",
+      "updated": "2026-11-12T09:21:55.614Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-12T09:21:55.614Z"
     },
     {
       "id": "c0nul956",
@@ -199935,6 +199942,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T09:21:55.615Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c012p9p9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-12T09:21:53.233Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c012p9p9",
+      "note": "#1"
+    },
     {
       "at": "2026-11-12T09:18:19.620Z",
       "by": "Main",
