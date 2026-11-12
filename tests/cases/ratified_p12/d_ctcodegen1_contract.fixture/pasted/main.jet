@@ -1,0 +1,29 @@
+// The paste is checked after it is filled in: `#{type_name}` becomes the
+// text "Point", which an Int method can't return, and the error names the
+// paste in the template.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            type_name: target.name
+            count: target.fields.len()
+            impl #{type_name} {
+                describe: fn(self) -> String { "{type_name}" }
+
+                field_count: fn(self) -> Int { #{type_name} }
+            }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    print("{point.describe()} has {point.field_count()} fields")
+}

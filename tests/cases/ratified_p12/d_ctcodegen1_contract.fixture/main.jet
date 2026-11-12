@@ -1,0 +1,29 @@
+// A marker's `expand` writes its members as ordinary Jet source. The members
+// it generates are lexed, parsed and checked like the hand-written copy in
+// written/main.jet, and both programs print the same lines.
+Describe: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            type_name: target.name
+            count: target.fields.len()
+            impl #{type_name} {
+                describe: fn(self) -> String { "{type_name}" }
+
+                field_count: fn(self) -> Int { #{count} }
+            }
+        }
+    }
+}
+
+#Describe
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    print("{point.describe()} has {point.field_count()} fields")
+}

@@ -1,0 +1,42 @@
+# Generated code is source, checked like written code (#4276 c1): a marker's
+# `expand` template is Jet source, parsed where it is written,
+# and the members it generates go through the checker like hand-written ones.
+# Nothing hands the checker a ready-made tree. The generated program prints
+# the same line as its hand-written copy, on both tiers. A malformed template
+# is a located parse error. A type error in a generated member, or in a value
+# pasted into one, is reported at the template line.
+fixture: d_ctcodegen1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_ctcodegen1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_ctcodegen1_contract.stdout.expected
+stderr: empty
+step written: jet run --optimize=none written/main.jet
+exit: 0
+stdout: = d_ctcodegen1_contract.stdout.expected
+stderr: empty
+step fmt: jet fmt --check main.jet written/main.jet typeerr/main.jet pasted/main.jet
+exit: 0 # every well-formed fixture file is in `jet fmt` form
+step malformed: jet check malformed/main.jet
+exit: 1
+stderr: ~ "Expected a value, found `}`" # the template is parsed as written
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse error code
+stderr: ~ "--> main.jet:14:59" # at the template line
+stderr: ~ "1 problem found" # nothing else is reported
+step typeerr: jet check typeerr/main.jet
+exit: 1
+stderr: ~ "This value is String (text), but `describe` returns Int" # the generated member is checked
+stderr: ~ "jet-lang.dev/e/E0113" # the ordinary return mismatch code
+stderr: ~ "--> main.jet:12:45" # at the template line
+stderr: ~ "1 problem found" # nothing else is reported
+step pasted: jet check pasted/main.jet
+exit: 1
+stderr: ~ "This value is String (text), but `field_count` returns Int" # the filled-in paste is checked
+stderr: ~ "jet-lang.dev/e/E0113" # the ordinary return mismatch code
+stderr: ~ "--> main.jet:14:48" # at the paste
+stderr: ~ "1 problem found" # nothing else is reported
