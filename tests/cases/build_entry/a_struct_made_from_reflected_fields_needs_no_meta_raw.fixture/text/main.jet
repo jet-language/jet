@@ -1,0 +1,14 @@
+// The same `Shape` joined into source text, under the row that lets the
+// reflected factory build: text is unparsed code, so it needs `Meta.Raw`.
+build: fn(b: Build) -[!Meta.Raw]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields: [String]{"flag: U8", "id: I64", "total: I32"}
+    body: fields.join("\n    ")
+    meta.add("Shape: struct {{\n    {body}\n}}\n", scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    print(Shape{flag: U8{1}, id: I64{40}, total: I32{2}}.id)
+}

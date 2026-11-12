@@ -289,16 +289,19 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
 // `compiler.allow_rewrite`). `meta.events(watch: .Functions{marked: m},
 // handler)` hands the handler each checked function carrying `m`'s marker,
 // and `meta.events(watch: .Calls{to: f}, handler)` each checked call of `f`.
+// `meta.add_struct(name, fields, scope: module)` declares a struct of
+// `CompilerField{name:, type:}` values.
 sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if method == "rewrite_body" -> return sema_call_compiler_rewrite_body(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "allow_rewrite" -> return sema_call_compiler_allow_rewrite(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "add_struct" -> return sema_call_compiler_add_struct(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "events" -> return sema_call_compiler_events(receiver, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "events.functions" || method == "events.calls" -> return sema_call_compiler_events_read(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
-        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")` or `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)`"))
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.add_struct(\"Name\", fields, scope: \"name\")`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")` or `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)`"))
         return failed
     }
     code := CallArg?{None}
@@ -371,6 +374,72 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     values.push(sema_call_compiler_producer(environment, program, scopes, span))
     values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: performed.join(", ")}}}, span))
     value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `meta.add_struct(name, fields, scope: module)`: the build host writes the
+// struct `name` of `fields` and adds it as the generated module `module`,
+// as `meta.add` adds source text. Each field is a `CompilerField` of a name
+// and a type's spelling, written out or read from a reflected field
+// (`f.type`), so a build makes the type from values. The build host checks
+// every name (one identifier in its kind's casing) and every type (one
+// type's spelling: no default, block, marker or second line), so no code a
+// build computes is written: it uses `Meta.Generate` and `Meta.Types`, never
+// `Meta.Raw`.
+sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    shape: "meta.add_struct(\"Name\", fields, scope: \"name\")"
+    positional := [CallArg]{}
+    scope := CallArg?{None}
+    loop argument in args {
+        label: if argument.label == .Val(written) -> written.name.copy() else -> ""
+        takes: if label == {
+            "" -> positional.len() < 2
+            "scope" -> scope == None
+            else -> false
+        }
+        if argument.spread || argument.flags.template_items != None || !takes {
+            diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add_struct` doesn't take this argument", "`meta.add_struct` takes the struct's name, its fields and the `scope:` module it joins", "write `{shape}`"))
+            return failed
+        }
+        unlabelled := argument.copy()
+        unlabelled.label = None
+        if label == "scope" -> scope = Val(unlabelled) else -> positional.push(unlabelled)
+    }
+    if positional.len() != 2 {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.add_struct` expects a name and a list of fields", "`meta.add_struct` declares one struct of the fields `meta.field` makes", "write `{shape}`"))
+        return failed
+    }
+    scope_arg: scope ?? {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.add_struct` expects `scope:`", "the struct joins the generated module `scope:` names", "write `{shape}`"))
+        return failed
+    }
+    // The session reads the name, the fields, then the scope's String.
+    ordinary := [CallArg]{positional[0], positional[1], scope_arg}
+    wanted := [Type]{Type.String, Type.List{element: Type.Named{name: "CompilerField"}}, Type.String}
+    values := [TExpr]{}
+    params := [SemaCallParam]{}
+    loop index in 0..<ordinary.len() {
+        value: sema_check_expression(ordinary[index].expr, Val(wanted[index]), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        fits: sema_call_type_assignable(wanted[index], value.ty, environment, program) ?? return failed
+        if !fits {
+            diagnostics.push(sema_type_mismatch(wanted[index], value.ty, ordinary[index].span))
+            return failed
+        }
+        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+        values.push(value)
+    }
+    ownership: sema_ownership_check_method_call(state, "Compiler.add_struct", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    performed: [String]{META_GENERATE, META_TYPES}
+    entries := [EffectRowEntry]{}
+    loop name in performed -> entries.push(EffectRowEntry{name: name, span: span})
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.add_struct", span, entries, diagnostics) -> return failed
+    // Then the caller and the Meta effects the add performs, which the
+    // build's provenance records.
+    values.push(sema_call_compiler_producer(environment, program, scopes, span))
+    values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: performed.join(", ")}}}, span))
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "add_struct", args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

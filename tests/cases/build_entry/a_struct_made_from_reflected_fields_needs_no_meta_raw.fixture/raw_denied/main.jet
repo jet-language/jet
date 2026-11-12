@@ -1,0 +1,27 @@
+// The same reflected factory under a row that denies `Meta.Raw`: no source
+// text is parsed, so it builds.
+Source: struct {
+    flag: U8
+    id: I64
+    secret: String
+    count: I32
+}
+
+build: fn(b: Build) -[!Meta.Raw]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    source: Source.reflect()
+    fields := [CompilerField]{}
+    loop field in source.fields {
+        if field.name == "secret" -> next
+        name: if field.name == "count" -> "total" else -> field.name.copy()
+        fields.push(CompilerField{name: name, type: field.type.copy()})
+    }
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    shape: Shape{flag: U8{1}, id: I64{40}, total: I32{2}}
+    print(shape.id + I64{shape.total})
+}

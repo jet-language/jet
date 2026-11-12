@@ -2,7 +2,7 @@
 // code (JetEval Native.jet) reaches every Build and BuildPlan host method of
 // the invocation through it.
 use {
-    jet_foundation.[Span, TComptimeField, TComptimeValue]
+    jet_foundation.[SemaNameCase, Span, TComptimeField, TComptimeValue, sema_casing_ascii_has_case]
     jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_field, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value, jet_eval_reflection_calls_to, jet_eval_reflection_marked_functions]
 
     build_input_crypto: core.crypto
@@ -191,7 +191,11 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // watched callee's identity, and reads the functions of the value's checked
 // program that carry that marker, or the root's checked calls of that
 // callee, once the session accepts the value as one of its own while it
-// runs (JetBuildSession `compiler.live`).
+// runs (JetBuildSession `compiler.live`). `meta.add_struct(name, fields,
+// scope:)` declares the struct `name` of `CompilerField` values and adds it
+// like `meta.add` adds source text. It refuses a name that is not one
+// identifier in its kind's casing (E0357) and a field type that is not one
+// type's spelling, so values a build computes write only that declaration.
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
     compiler: if args.len() > 0 -> jet_eval_build_session_input(args[0]) else -> None
     if (member == "Compiler.events.functions" || member == "Compiler.events.calls") && args.len() == 2 {
@@ -208,6 +212,30 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
         package: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its package name")
         reply: build_session_call(session, "compiler.allow_rewrite", [BuildSessionValue]{held, package}, None, false, span.start, span.end)
+        return jet_driver_compiler_reply(session, reply, span)
+    }
+    if member == "Compiler.add_struct" && args.len() == 6 {
+        held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+        name: if args[1] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its type's name") }
+        if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
+        // A field's name and type may be computed (a reflected field's
+        // `type`), so each is checked before it is written.
+        source := "{name}: struct {{\n"
+        listed: if args[2] == .List(values) -> values.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its fields") }
+        loop field in listed {
+            field_name: jet_eval_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
+            field_type: jet_eval_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+            written: if field_name == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name") }
+            spelled: if field_type == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
+            if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
+            if !jet_driver_meta_type_text_plain(spelled) -> return jet_driver_build_host_failure(session, span, "`{member}` was given the type \"{spelled}\" for the field `{written}`, which is not one type's spelling")
+            source = "{source}    {written}: {spelled}\n"
+        }
+        source = "{source}}}\n"
+        scope: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+        producer: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+        authority: jet_eval_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
+        reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer, authority}, Val(source), false, span.start, span.end)
         return jet_driver_compiler_reply(session, reply, span)
     }
     rewrite: member == "Compiler.rewrite_body" || member == "Compiler.rewrite_body.heard"
@@ -287,6 +315,31 @@ jet_driver_code_unsafe_refusal: fn(span: Span, call: String) -> JetEvalBuildRepl
         start: span.start,
         end: span.end,
     })}
+}
+
+// A name a build computes for `meta.add_struct` is one identifier in its
+// kind's casing, so it declares exactly one thing.
+jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: String, casing: String) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
+        code: "E0357",
+        what: "`{call}` was given the {kind} name \"{name}\", which is not an identifier",
+        why: "A name a build computes becomes a declaration of the generated module, so it must be one ASCII identifier in its kind's casing and can't write anything else",
+        fix: "Give `{call}` a {kind} name in {casing}",
+        start: span.start,
+        end: span.end,
+    })}
+}
+
+// A field's type is one type's spelling: it can't end the struct, start
+// another item, or carry a default, a block, a string or a marker, so a
+// computed type writes no code.
+jet_driver_meta_type_text_plain: fn(text: String) -> Bool Never! {
+    if text.trim() == "" -> return false
+    banned_texts: [String]{"\n", "\r", "{{", "}}", ";", "=", "#", "\"", "'", "`", "$", "//", "/*"}
+    loop banned in banned_texts {
+        if text.contains(banned) -> return false
+    }
+    true
 }
 
 // Whether `text`, read as a path under the build file's directory, names a

@@ -1,0 +1,15 @@
+// @programmable_build
+// @cli_build
+// A field name a build computes for `meta.add_struct` must be one snake_case
+// identifier; one that is not is refused when the build runs.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_ladder_add_struct_refuses_a_computed_name.jet"], [])
+    meta: b.compiler(app)
+    names: [String]{"id", "two words"}
+    fields := [CompilerField]{}
+    loop name in names -> fields.push(CompilerField{name: name, type: "I64"})
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() { print(2) }

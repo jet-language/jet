@@ -1,0 +1,13 @@
+// @programmable_build
+// @cli_build
+// `meta.add_struct` declares a type, so a row that prohibits `Meta.Types`
+// refuses it even though no source text is parsed.
+build: fn(b: Build) -[!Meta.Types]> {
+    app: b.add_executable("app", ["meta_ladder_add_struct_denied_by_a_types_row.jet"], [])
+    meta: b.compiler(app)
+    fields: [CompilerField]{CompilerField{name: "id", type: "I64"}}
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() { print(2) }
