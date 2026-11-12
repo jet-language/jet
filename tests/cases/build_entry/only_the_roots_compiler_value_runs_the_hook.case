@@ -14,6 +14,16 @@
 #   line, and no app is built.
 # - `denied`: the root hands the hook its value but denies `Meta.Rewrite`.
 #   The denial reaches the rewrite inside the hook (E0749), and no app is built.
+# - `header`: the root hands its value to `mint`, which adds a module whose
+#   function calls `b.compiler`. Code a value made is not the root's own
+#   source, so it can't make a value of its own: E0776, noted at mint's
+#   `meta.add`, and no app is built.
+# - `spawn`: the root hands its `Compiler` value to `launch`, whose helper
+#   `start` starts a process that would run another compiler. Code handed
+#   the value launches no process, so the check refuses `launch` (E3410)
+#   with the call path to the launch: nothing is spawned and no app is built.
+#   A declared step's process still runs
+#   (a_build_holding_a_compiler_value_runs_its_process_steps.case).
 # No step has a TTY, and none asks for one.
 fixture: only_the_roots_compiler_value_runs_the_hook.fixture
 env: NO_COLOR=1
@@ -53,3 +63,15 @@ exit: 1
 stderr: ~ E0749 # the root's denial reaches the rewrite inside the hook
 stderr: ~ "reaches the `Meta.Rewrite` effect, which the package denies with `authority: { deny: [Meta.Rewrite] }`" # the report names the root's row
 file: denied/.jet/build/app absent
+step: jet build header/main.jet
+exit: 1
+stderr: ~ E0776 # generated code can't make a `Compiler` value
+stderr: ~ "mint.jet:4 added this module through the root's `Compiler` value" # the note names the dependency's call that made it
+file: header/.jet/build/app absent
+step: jet build spawn/main.jet
+exit: 1
+stderr: ~ E3410 # code holding the Compiler value launches no process
+stderr: ~ "`launch` takes the root's `Compiler` value and launches a process through launch → start → core.process.call" # the report names the hook and its call path
+file: spawned.txt absent
+file: spawn/spawned.txt absent
+file: spawn/.jet/build/app absent

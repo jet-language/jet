@@ -246,6 +246,18 @@ SemaEffectLambdaBound: struct {
     span: Span
 }
 
+// A lambda handed the root's `Compiler` value: one that takes it, or the
+// `CompilerEvent` it hears (`taken`, the type's name), as a `meta.events`
+// handler does. Its own row is held to launch no process once every row is
+// solved (E3410 at `span`, sema_effect_check_compiler_hooks).
+SemaEffectHookLambda: struct {
+    direct: [String]
+    call_edges: [String]
+    maximal: Bool
+    taken: String
+    span: Span
+}
+
 // A call through a type parameter's trait bound (`self.inner.work()` with
 // `inner: T`, `T: Worker`). Which implementation runs is fixed where the
 // instantiation is written, so the call's effects belong to the caller that
@@ -350,6 +362,9 @@ SemaEffectNode: struct {
     // with lambdas.
     callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
     lambda_bounds: [SemaEffectLambdaBound]{[SemaEffectLambdaBound]{}}
+    // The lambdas this body hands the root's `Compiler` value to (a
+    // `meta.events` handler), held to launch no process.
+    hook_lambdas: [SemaEffectHookLambda]{[SemaEffectHookLambda]{}}
     // This function's type parameters, its owner type's first, and the
     // owner type's parameters in the order its type arguments bind them.
     type_params: [String]{[String]{}}
@@ -1187,6 +1202,109 @@ sema_effect_runtime_input_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], i
     if path.len() == 1 -> return sema_error("E0956", input.span, "`{maker}` runs in the program, so it can't call `{input.name}`", "the compiler answers `{input.name}` while it compiles, and nothing calls `{maker}` at compile time, so the call would run in the program", "call `{input.name}` from a prepared constant (`NAME: comptime {{ … }}`) and read that value at run time")
     chain: loop step in path -> nodes[step].chain_name
     sema_error("E0956", input.span, "`{maker}` calls `{input.name}`, and the running program reaches `{maker}` from `{chain[0]}`", "the call path {chain.join(" → ")} runs in the program, and the compiler answers `{input.name}` only while it compiles", "call `{maker}` only from compile-time code, such as a prepared constant (`NAME: comptime {{ {maker}() }}`), and read that value at run time")
+}
+
+// Code handed the root's `Compiler` value runs while the build runs and acts
+// through the value: a function that takes it (a hook, as `install: fn(meta:
+// Compiler)` is) and a `meta.events` handler, which takes the
+// `CompilerEvent` the value hears. Such code launches no process (E3410), so
+// it can't start another compiler run with authority of its own; the report
+// names the hook and the call path to the launch. Build code that takes no
+// value, `#Impure` build code and declared steps (`b.run`, which the build
+// runs after its `build: fn` returns) are never held to this.
+sema_effect_check_compiler_hooks: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
+    launch: [String]{"Exec"}
+    // A hook's own report covers the handlers it registers, whose calls are
+    // its calls.
+    reported := (loop _ in nodes -> false)
+    loop module_row in inputs {
+        loop function in modules[module_row.module_index].functions {
+            taken: sema_effect_compiler_hook_param(loop parameter in function.params -> parameter.ty) ?? next
+            node_index: sema_effect_node_index(node_by_key, function.key) ?? next
+            if sema_effect_covered(solved[node_index], launch).len() == 0 -> next
+            reported[node_index] = true
+            seen := (loop _ in nodes -> false)
+            path: sema_effect_launch_path(nodes, node_by_key, solved, node_index, seen)
+            chain: loop step in path -> sema_effect_launch_step_name(nodes[step])
+            hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic("`{nodes[node_index].name}`", taken, chain, nodes[node_index].name_span)}
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, hook_diagnostics)
+        }
+    }
+    loop node_index in 0..<nodes.len() {
+        if reported[node_index] -> next
+        loop hook in nodes[node_index].hook_lambdas {
+            inferred := hook.direct.copy()
+            if hook.maximal -> sema_effect_set_union(inferred, authority_grantable_roots())
+            loop edge in hook.call_edges {
+                target: sema_effect_node_index(node_by_key, edge) ?? next
+                sema_effect_set_union(inferred, solved[target])
+            }
+            if sema_effect_covered(inferred, launch).len() == 0 -> next
+            chain := [String]{if hook.taken == "CompilerEvent" -> "meta.events handler" else -> "lambda"}
+            if sema_effect_covered(hook.direct, launch).len() == 0 {
+                seen := (loop _ in nodes -> false)
+                loop edge in hook.call_edges {
+                    target: sema_effect_node_index(node_by_key, edge) ?? next
+                    if sema_effect_covered(solved[target], launch).len() == 0 -> next
+                    loop step in sema_effect_launch_path(nodes, node_by_key, solved, target, seen) -> chain.push(sema_effect_launch_step_name(nodes[step]))
+                    break
+                }
+            }
+            subject: if hook.taken == "CompilerEvent" -> "The `meta.events` handler" else -> "The lambda"
+            hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic(subject, hook.taken, chain, hook.span)}
+            sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, hook_diagnostics)
+        }
+    }
+}
+
+// The compiler value type a function or lambda with parameter types `params`
+// takes: the host's `Compiler`, or the Prelude's `CompilerEvent` a
+// `meta.events` handler hears. A program type of either name is
+// module-qualified, so it is neither.
+sema_effect_compiler_hook_param: fn(params: [Type]) -> String? Never! {
+    loop param in params {
+        if param == .Named(name) {
+            if name == "Compiler" -> return Val("Compiler")
+            if name == "CompilerEvent" || name == "<corelib>/core.prelude::CompilerEvent" -> return Val("CompilerEvent")
+        }
+    }
+    None
+}
+
+// The call path from `index` to the process launch its solved row reaches:
+// the functions it calls whose rows reach it, depth-first, up to the one
+// that launches directly or the Core function it calls to, both ends
+// included.
+sema_effect_launch_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], index: Int, seen: &[Bool]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    launch: [String]{"Exec"}
+    if nodes[index].module_identity.starts_with("<corelib>/") || nodes[index].maximal || sema_effect_covered(nodes[index].direct, launch).len() > 0 -> return [Int]{index}
+    loop edge in nodes[index].call_edges {
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        if sema_effect_covered(solved[target], launch).len() == 0 -> next
+        rest: sema_effect_launch_path(nodes, node_by_key, solved, target, seen)
+        if rest.len() == 0 -> next
+        path := [Int]{index}
+        loop step in rest -> path.push(step)
+        return path
+    }
+    [Int]{index}
+}
+
+// A launch path step as the report names it: a Core function by its module
+// (`core.process.call`), any other by its chain name.
+sema_effect_launch_step_name: fn(node: SemaEffectNode) -> String Never! {
+    if node.module_identity.starts_with("<corelib>/") -> return "{node.module_identity.removeprefix("<corelib>/")}.{node.chain_name}"
+    node.chain_name
+}
+
+// E3410 at the hook (`subject`, which takes the `taken` compiler value type)
+// whose call path `chain` launches a process.
+sema_effect_compiler_hook_diagnostic: fn(subject: String, taken: String, chain: [String], span: Span) -> Diagnostic {
+    holds: if taken == "CompilerEvent" -> "hears the root's `Compiler` value" else -> "takes the root's `Compiler` value"
+    diagnostic: sema_error("E3410", span, "{subject} {holds} and launches a process through {chain.join(" → ")}", "code handed the `Compiler` value runs while the build runs and acts only through the value; a process it launched would run another program, such as a second compiler, with authority of its own", "act through the `Compiler` value, or declare the process as a build step (`b.run`) in the root's `build: fn`")
+    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
 }
 
 // A module or type cap as one checked function meets it. `site` names where
@@ -2311,9 +2429,13 @@ sema_effect_record_callback_bound: fn(nodes: &[SemaEffectNode], node_by_key: Nam
 // A lambda whose value type carries a closed effect row (the row of the slot
 // it fills, or its own written row) records its own row: its call facts, and
 // what a walk of its body charges (loops, value reads, stops), on a node
-// appended to `nodes` for the walk and removed again.
+// appended to `nodes` for the walk and removed again. A lambda handed the
+// root's `Compiler` value (a `meta.events` handler) records the same as a
+// compiler hook (sema_effect_check_compiler_hooks).
 sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda, ty: Type, span: Span) {
-    row: sema_effect_callback_row(ty) ?? return
+    row: sema_effect_callback_row(ty)
+    hook: sema_effect_compiler_hook_param(if ty == .Fn(params, _, _, _, _, _) -> params else -> [Type]{})
+    if row == None && hook == None -> return
     // The adapter the compiler writes around an App handler
     // (sema_app_handler_adapter) is no function value the program passes:
     // the function registering the handler already carries the handler's
@@ -2330,13 +2452,15 @@ sema_effect_record_lambda_bound: fn(nodes: &[SemaEffectNode], node_index: Int, f
     lambda_node.maximal_span = None
     lambda_node.callback_bounds = [SemaEffectCallbackBound]{}
     lambda_node.lambda_bounds = [SemaEffectLambdaBound]{}
+    lambda_node.hook_lambdas = [SemaEffectHookLambda]{}
     nodes.push(lambda_node)
     lambda_index: nodes.len() - 1
     sema_effect_merge_lambda(nodes, lambda_index, lambda)
     ignored := [Diagnostic]{}
     sema_effect_walk_lambda_children(SemaEffectWalk.LambdaBody{node_index: lambda_index}, nodes, facts, ignored, caller, tree, lambda)
     walked := nodes.pop() ?? panic("the lambda's row node left the graph")
-    nodes[node_index].lambda_bounds.push(SemaEffectLambdaBound{direct: walked.direct.move(), call_edges: walked.call_edges.move(), maximal: walked.maximal, row: row, span: span})
+    if hook == .Val(taken) -> nodes[node_index].hook_lambdas.push(SemaEffectHookLambda{direct: walked.direct.copy(), call_edges: walked.call_edges.copy(), maximal: walked.maximal, taken: taken, span: span})
+    if row == .Val(bound) -> nodes[node_index].lambda_bounds.push(SemaEffectLambdaBound{direct: walked.direct.move(), call_edges: walked.call_edges.move(), maximal: walked.maximal, row: bound, span: span})
 }
 
 // E0747: a named function's contract is its declared row (or `-[]>`); an
@@ -3922,6 +4046,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
     }
+    sema_effect_check_compiler_hooks(modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     // A pure function may not write module state, itself or through any
     // function it calls or takes as a value.
     loop node_index in 0..<nodes.len() {

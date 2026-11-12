@@ -1,0 +1,7 @@
+// A hook that adds a module whose function asks a `Build` for a `Compiler`
+// value of its own: generated code trying to enable itself.
+install: fn(meta: Compiler) {
+    meta.add(#code {
+        again: fn(b: Build, target: BuildTarget) -> Compiler { b.compiler(target) }
+    }, scope: "again")
+}

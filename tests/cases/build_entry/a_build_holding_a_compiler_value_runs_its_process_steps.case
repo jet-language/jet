@@ -1,0 +1,17 @@
+# #3526: the refusal of a process launched by code that holds the root's
+# `Compiler` value (the `spawn` row of
+# only_the_roots_compiler_value_runs_the_hook.case, E3410) leaves a build's
+# declared steps alone. `steps` makes a `Compiler` value and declares a step
+# that runs `sh`; the build runs the step and builds the app.
+fixture: only_the_roots_compiler_value_runs_the_hook.fixture
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build steps/main.jet --allow=Exec,FS
+exit: 0
+stderr: !~ E3410 # the step's process is the build's, not the value holder's
+file: steps/mark.txt = "ran"
+step: {work}/steps/.jet/build/app
+exit: 0
+stdout: = "plain\n"

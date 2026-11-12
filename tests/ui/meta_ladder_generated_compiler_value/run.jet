@@ -1,0 +1,14 @@
+// @programmable_build
+// @cli_build
+// E0776: a module the build generates calls `b.compiler`. Generated code is
+// not the root's own build source, so it can't make a `Compiler` value.
+build: fn(b: Build) {
+    b.generate("again") {
+        again: fn(b: Build, target: BuildTarget) -> Compiler { b.compiler(target) }
+    }
+    app: b.add_executable("app", ["run.jet", ".jet/generated/run/again.jet"], [])
+    b.default(app)
+}
+run: fn() {
+    print("plain")
+}

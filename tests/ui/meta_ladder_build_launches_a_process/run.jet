@@ -1,0 +1,21 @@
+// @programmable_build
+// @cli_build
+// E3410: a `meta.events` handler, code handed the root's `Compiler` value,
+// reaches a process launch through `start`, here another compiler run. The
+// handler acts only through the value.
+use process: core.process
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["run.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> { start() })
+    b.default(app)
+}
+
+start: fn() {
+    _ := process.call(process.cmd(["jet", "build", "run.jet"]))
+}
+
+run: fn() {
+    print("plain")
+}

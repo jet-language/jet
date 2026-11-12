@@ -1,0 +1,19 @@
+// The root hands its `Compiler` value to `launch`, which starts another
+// compiler run through `start` instead of acting through the value.
+use process: core.process
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    launch(b.compiler(app))
+    b.default(app)
+}
+
+launch: fn(_meta: Compiler) {
+    start()
+}
+
+start: fn() {
+    _ := process.call(process.cmd(["sh", "-c", "touch spawned.txt; jet build main.jet"]))
+}
+
+run: fn() { print("plain") }

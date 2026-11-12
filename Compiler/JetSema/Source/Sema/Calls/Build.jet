@@ -197,9 +197,12 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
 // Only the root package's own build source makes the `Compiler` value: a
 // `b.compiler` call written in any other package is E0776, wherever its
 // `Build` came from, so a root that hands its `Build` to a dependency's
-// function hands it no compiler control. The root is the package of the
-// load's entry module. A function body is checked with the graph in the
-// program tables; the scope environment holds it only between passes.
+// function hands it no compiler control. Code the compiler generated (a
+// `meta.add` or `b.generate` module, a `meta.rewrite_body` body) is not the
+// root's own source either, even inside the root package, so code a value
+// added can't make another one. The root is the package of the load's entry
+// module. A function body is checked with the graph in the program tables;
+// the scope environment holds it only between passes.
 sema_build_compiler_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     root := ""
     if program.registration_graph == .Val(graph) {
@@ -207,7 +210,8 @@ sema_build_compiler_site: fn(environment: SemaScopeEnvironment, program: SemaPro
     } else if environment.registration_graph == .Val(graph) {
         root = sema_build_root_package(graph)
     }
-    if root != "" && environment.package_identity == root -> return true
+    written: environment.source_origin == SemaSourceOrigin.Snapshot
+    if written && root != "" && environment.package_identity == root -> return true
     row: diagnostic_registry_row("E0776") ?? panic("E0776 must have a registry row")
     diagnostics.push(sema_error("E0776", span, row.what, row.why, row.fix))
     false

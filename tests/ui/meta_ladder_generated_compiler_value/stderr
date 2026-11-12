@@ -1,0 +1,12 @@
+Error [jet.CompilerValueOutsideRoot]: `b.compiler` is called outside the root package's own build source
+  --> <build-generated>/source-root:0:/.jet/generated/run/again.jet:1:58
+    |
+  1 | again: fn(b: Build, target: BuildTarget) -> Compiler { b.compiler(target) }
+    |                                                          ^^^^^^^^
+ Why: Only the package being built makes the `Compiler` value; a dependency that receives the root's `Build` gets no compiler control from it
+ Fix: Call `b.compiler(target)` in the root package's `build: fn` and pass the value to the function that needs it
+ Note: `b.generate("again")` at `run.jet:6` generated this module
+More: jet-lang.dev/e/E0776
+
+1 problem found
+run `jet explain E0776` to learn more
