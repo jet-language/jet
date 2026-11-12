@@ -1106,15 +1106,13 @@ JetDriverComptimeStaging: struct {
     sites: SemaComptimeValueSites
 }
 
-// A comptime item that checked completely and waits for its value: a plain
-// literal carries it (`plain`); any other item evaluates `request`, whose
-// checked function closure is `function_keys` (`module\nkey`, in closure
-// order) of its batch's functions.
+// A comptime item that checked completely and waits for its value: it
+// evaluates `request`, whose checked function closure is `function_keys`
+// (`module\nkey`, in closure order) of its batch's functions.
 JetDriverComptimeEntry: struct {
     source: SemaComptimeItemSource
     request: SemaComptimeItemRequest
     function_keys: [String]
-    plain: TComptimeValue?
 }
 
 // Checked items evaluated together on one IR build, in order.
@@ -1561,7 +1559,7 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 // Appends an item to `batch`, moving the functions of its checked closure
 // that the batch does not hold yet out of `functions` (left empty), and
 // adding the foreign functions it reaches that the batch does not hold yet.
-jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction], plain: TComptimeValue?) Never! {
+jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction]) Never! {
     loop row in foreign {
         held: loop previous in batch.foreign {
             if previous.symbol_id.key == row.symbol_id.key -> break true
@@ -1582,9 +1580,9 @@ jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaCo
         batch.function_rows[key] = batch.functions.len()
         batch.functions.push(function)
     }
-    if plain == None && !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
+    if !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
     batch.keys[source.key] = true
-    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys, plain: plain})
+    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys})
 }
 
 // The batch holding only entry `index` of `batch`, with that entry's own
@@ -1597,7 +1595,7 @@ jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) 
         single.function_rows[key] = single.functions.len()
         single.functions.push(batch.functions[row])
     }
-    if entry.plain == None && !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
+    if !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
     single.foreign = batch.foreign.copy()
     single.keys[entry.source.key] = true
     single.entries.push(entry.copy())
@@ -1665,16 +1663,16 @@ jet_driver_comptime_take_modules: fn(to: &[SemaGraphModuleResult], from: &[SemaG
     }
 }
 
-// Lands or evaluates the entries of `batch` in order, exactly as the run
-// would one item at a time: plain literals land their values; the evaluated
-// entries are built into one IR program (jet_driver_comptime_ir_build), on
-// which each runs its own item function. A batch holds several evaluated
-// entries only when each passed jet_driver_comptime_batchable; when their
-// IR does not build, each entry is built and evaluated on its own, so a
-// build failure is reported against its own item. The registration rows a
-// flush reads (module rows, identities) are read from `program`'s graph,
-// whose staged values never change them. `program` is read-only, so that
-// graph is borrowed in place, never copied per flush.
+// Evaluates the entries of `batch` in order, exactly as the run would one
+// item at a time: the entries are built into one IR program
+// (jet_driver_comptime_ir_build), on which each runs its own item function.
+// A batch holds several entries only when each passed
+// jet_driver_comptime_batchable; when their IR does not build, each entry is
+// built and evaluated on its own, so a build failure is reported against its
+// own item. The registration rows a flush reads (module rows, identities) are
+// read from `program`'s graph, whose staged values never change them.
+// `program` is read-only, so that graph is borrowed in place, never copied
+// per flush.
 jet_driver_comptime_flush: fn(
     request: JetDriverCompileRequest,
     batch: JetDriverComptimeBatch,
@@ -1689,40 +1687,29 @@ jet_driver_comptime_flush: fn(
     graph_option: program.registration_graph
     graph: graph_option ?? return JetDriverComptimeFlush{stop: Val(jet_driver_comptime_lost_graph(values, checked_functions, trace)), progressed: false}
     flushed := JetDriverComptimeFlush{stop: None, progressed: false}
-    start := 0
-    loop start < batch.entries.len() {
-        plain: batch.entries[start].plain ?? { break }
-        values.push(jet_driver_comptime_item_value(batch.entries[start].source, plain, batch.entries[start].request.expression))
-        flushed.progressed = true
-        start += 1
-    }
-    if start == batch.entries.len() -> return flushed
-    evaluated := 0
-    loop index in start..<batch.entries.len() {
-        if batch.entries[index].plain == None -> evaluated += 1
-    }
-    // Staging once, at the first evaluated entry that reaches a declaration,
+    if batch.entries.len() == 0 -> return flushed
+    // Staging once, at the first entry that reaches a declaration,
     // serves every entry: an entry's check and closure name only constants
     // that landed before the batch (naming a batch constant makes a check
     // wait on it), and rows of constants an item does not name never change
     // its value.
     if !batch.bare {
-        if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.stage", batch.entries[start].source.source_file, batch.entries[start].source.name)
-        staged: jet_driver_comptime_stage(graph, batch.entries[start].request, values, checked_functions, trace, program, staging, diagnostics)
+        if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.stage", batch.entries[0].source.source_file, batch.entries[0].source.name)
+        staged: jet_driver_comptime_stage(graph, batch.entries[0].request, values, checked_functions, trace, program, staging, diagnostics)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.stage", 1)
         if staged == .Val(stopped) {
             flushed.stop = Val(stopped)
             return flushed
         }
     }
-    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
-    built := jet_driver_comptime_ir_build(batch, start, staging, values, graph.decls)
+    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[0].source.source_file, jet_driver_comptime_batch_names(batch))
+    built := jet_driver_comptime_ir_build(batch, staging, values, graph.decls)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.build", batch.functions.len() + built.items.len())
     counters.programs_built += 1
     counters.functions_built += batch.functions.len() + built.items.len()
     if built.build_failures.len() > 0 {
-        if evaluated > 1 {
-            loop index in start..<batch.entries.len() {
+        if batch.entries.len() > 1 {
+            loop index in 0..<batch.entries.len() {
                 single := jet_driver_comptime_flush(request, jet_driver_comptime_batch_single(batch, index), values, checked_functions, trace, program, staging, counters, diagnostics)
                 if single.progressed -> flushed.progressed = true
                 loop refusal in single.refused -> flushed.refused.push(refusal)
@@ -1733,26 +1720,17 @@ jet_driver_comptime_flush: fn(
             }
             return flushed
         }
-        item_name: batch.entries[start].source.name
+        item_name: batch.entries[0].source.name
         // A local value the IR builder refuses stays run-time code.
-        if batch.entries[start].source.local_value {
-            jet_driver_comptime_local_value_runs(values, batch.entries[start].source, "the compile-time evaluator can't run its code ({built.build_failures[0]})")
+        if batch.entries[0].source.local_value {
+            jet_driver_comptime_local_value_runs(values, batch.entries[0].source, "the compile-time evaluator can't run its code ({built.build_failures[0]})")
             flushed.progressed = true
-            loop index in start + 1..<batch.entries.len() {
-                plain: batch.entries[index].plain ?? next
-                values.push(jet_driver_comptime_item_value(batch.entries[index].source, plain, batch.entries[index].request.expression))
-            }
             return flushed
         }
         // A module value the IR builder refuses can't be computed while
-        // building; the batch's later literals still land.
-        if batch.entries[start].source.module_value {
-            flushed.refused.push(JetDriverModuleValueRefusal{source: batch.entries[start].source, reason: "the compile-time evaluator can't run its code ({built.build_failures[0]})"})
-            loop index in start + 1..<batch.entries.len() {
-                plain: batch.entries[index].plain ?? next
-                values.push(jet_driver_comptime_item_value(batch.entries[index].source, plain, batch.entries[index].request.expression))
-                flushed.progressed = true
-            }
+        // building.
+        if batch.entries[0].source.module_value {
+            flushed.refused.push(JetDriverModuleValueRefusal{source: batch.entries[0].source, reason: "the compile-time evaluator can't run its code ({built.build_failures[0]})"})
             return flushed
         }
         // AGENTS.md I2: checked code the IR builder refuses is a compiler
@@ -1771,20 +1749,12 @@ jet_driver_comptime_flush: fn(
         flushed.stop = Val(stopped.move())
         return flushed
     }
-    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
+    if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[0].source.source_file, jet_driver_comptime_batch_names(batch))
     native := jet_eval_native_load(built, jet_driver_comptime_eval_config(request.eval_config, None, None))
     compiler_queries: jet_driver_comptime_compiler_for(request)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.load", 1)
-    evaluated_index := 0
-    loop index in start..<batch.entries.len() {
-        entry: batch.entries[index]
-        if entry.plain == .Val(plain) {
-            values.push(jet_driver_comptime_item_value(entry.source, plain, entry.request.expression))
-            flushed.progressed = true
-            next
-        }
-        item: evaluated_index
-        evaluated_index += 1
+    loop item in 0..<batch.entries.len() {
+        entry: batch.entries[item]
         counters.item_functions_evaluated += 1
         source: entry.source
         comptime_request: entry.request
@@ -1897,13 +1867,11 @@ jet_driver_checked_text_reason: fn(report: TComptimeReport) -> String? {
     None
 }
 
-// The names of `batch`'s evaluated entries from `start` on, the label of
-// its build's trace span (Tools/perf/comptime-items.mjs splits it).
-jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch, start: Int) -> String Never! {
+// The names of `batch`'s entries, the label of its build's trace span
+// (Tools/perf/comptime-items.mjs splits it).
+jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch) -> String Never! {
     names := [String]{}
-    loop index in start..<batch.entries.len() {
-        if batch.entries[index].plain == None -> names.push(batch.entries[index].source.name)
-    }
+    loop entry in batch.entries -> names.push(entry.source.name)
     names.join(", ")
 }
 
@@ -2116,7 +2084,10 @@ jet_driver_comptime_run: fn(
     // and starts over (`retry`). Either way every check sees exactly the
     // values it would see one item at a time, and a flush leaves the batch
     // empty, so an item starts over at most once. Any other item flushes the
-    // batch before it is evaluated alone.
+    // batch before it is evaluated alone. A literal (sema_comptime_fold) or a
+    // literal input lands at its turn even with a batch waiting: it reads no
+    // batch value, and a later item that names it then reads it landed
+    // instead of flushing the batch early.
     batch := jet_driver_comptime_batch_new()
     // The waits of each pending item (`module\nkey`) whose last check, with
     // its closure, reported nothing: until one of those keys has a value or
@@ -2285,11 +2256,6 @@ jet_driver_comptime_run: fn(
                 if jet_driver_comptime_literal_input(comptime_request.expression) == .Val(literal_input) {
                     if jet_driver_comptime_read_input(request, source.source_file, literal_input) == {
                         .Ok(value) -> {
-                            if batch.entries.len() > 0 {
-                                no_functions := [FnBody]{}
-                                jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, [SemaCheckedForeignFunction]{}, Val(value))
-                                next
-                            }
                             values.push(jet_driver_comptime_item_value(source, value, comptime_request.expression))
                             made_progress = true
                             next
@@ -2317,12 +2283,6 @@ jet_driver_comptime_run: fn(
                 if source.kind != SemaComptimeItemKind.CheckedText && (comptime_request.calls.len() == 0 || folded != None) {
                     if folded == None -> folded = sema_comptime_fold(comptime_request.expression.tree, comptime_request.expression.root, values)
                     if folded == .Val(plain) {
-                        // Behind a batch, the literal's value lands in its turn.
-                        if batch.entries.len() > 0 {
-                            no_functions := [FnBody]{}
-                            jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, [SemaCheckedForeignFunction]{}, Val(plain))
-                            next
-                        }
                         values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression))
                         made_progress = true
                         next
@@ -2431,7 +2391,7 @@ jet_driver_comptime_run: fn(
                 }
                 scanned_functions = checked_functions.len()
                 if jet_driver_comptime_batchable(source) {
-                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign, None)
+                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign)
                     next
                 }
                 if batch.entries.len() > 0 {
@@ -2448,7 +2408,7 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 alone := jet_driver_comptime_batch_new()
-                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, closure.foreign, None)
+                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, closure.foreign)
                 flushed := jet_driver_comptime_flush(request, alone, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
                 if flushed.progressed -> made_progress = true
                 if flushed.stop == .Val(stopped) {

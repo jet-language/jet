@@ -25,19 +25,17 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
     ir_program_declared(type_defs, impls, constants, [FnBody]{})
 }
 
-// The IR of `batch`'s evaluated entries from `start` on: the batch's checked
-// closure and each entry's item function, a zero-parameter function that
-// returns the entry's expression, whose direct calls name `decls` rows. A
-// batch that reaches no declaration (JetDriverComptimeBatch.bare) builds
-// with none; any other builds over the run's declared program, whose
-// constant rows the values landed since its last build take over first (a
-// key's first landed value stands).
-jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
+// The IR of `batch`'s entries: the batch's checked closure and each entry's
+// item function, a zero-parameter function that returns the entry's
+// expression, whose direct calls name `decls` rows. A batch that reaches no
+// declaration (JetDriverComptimeBatch.bare) builds with none; any other
+// builds over the run's declared program, whose constant rows the values
+// landed since its last build take over first (a key's first landed value
+// stands).
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
-    loop index in start..<batch.entries.len() {
-        entry: batch.entries[index]
-        if entry.plain != None -> next
+    loop entry in batch.entries {
         item := ir_comptime_item_function(entry.request, entry.request.module_identity)
         // The request's expression carries its own function-local ids
         // (sema_publish_expression): the item's body returns it.
