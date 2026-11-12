@@ -1,0 +1,26 @@
+# A function type names a borrowed parameter with a declaration's spelling
+# (#6281 c177): `fn(&Seeded) -> Unit` is a field type, a parameter type and a
+# list element type. A value of it is stored, passed and called, and each call
+# writes the caller's value in place, at every optimization level and in a
+# built binary. A function value whose parameter access differs is E0227
+# (tests/ui/marked_function_value).
+fixture: fn_type_names_a_borrowed_parameter_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "field 2\npassed 4\nlist 10\ncalled 11\n"
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "field 2\npassed 4\nlist 10\ncalled 11\n"
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "field 2\npassed 4\nlist 10\ncalled 11\n"
+stderr: empty
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "field 2\npassed 4\nlist 10\ncalled 11\n"
