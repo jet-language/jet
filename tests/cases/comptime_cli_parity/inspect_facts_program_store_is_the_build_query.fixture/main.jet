@@ -10,14 +10,21 @@ Order: struct {
 OrderID: distinct Int
 
 // The build makes the same query `jet inspect facts --store=program` makes,
-// over the ProgramInfo it is handed, and reports the rows it read.
+// over the ProgramInfo it is handed, and reports the rows it read: each row's
+// name, subject, identity and item, and whether every row names the
+// program's revision.
 build: fn(b: Build) {
     rows: compiler.query(compiler.FactSource.Program{program: b.program}, compiler.FactKind.Marker) ?? panic("the program store refused: {err}")
+    revision: b.program.revision()
     text := ""
+    same := true
     loop row in rows {
-        if row == .Program(fact) -> text = "{text}[{fact.name}  {fact.subject}]"
+        if row == .Program(fact) {
+            text = "{text}[{fact.name}  {fact.subject}  {fact.identity}  item {fact.scope.item}]"
+            if fact.source.text() != revision -> same = false
+        }
     }
-    b.error(b.program.types()[0].span, "FACTS", "{rows.len()} facts: {text}", "the build read the program store", "none: the report is the evidence")
+    b.error(b.program.types()[0].span, "FACTS", "{rows.len()} facts: {text} revision-matches={same}", "the build read the program store", "none: the report is the evidence")
 }
 
 run: fn() { print("ok") }

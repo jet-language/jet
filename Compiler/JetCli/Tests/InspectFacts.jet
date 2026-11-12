@@ -48,3 +48,15 @@ inspect_facts_refused: fn(argv: [String], what: String) Never! {
     assert(program.contains("jet_facts_answer: fn(program: ProgramInfo) -> JetFactsAnswer {{"))
     assert(program.contains("compiler.query(compiler.FactSource.Program{{program: program}}, compiler.FactKind.Marker)"))
 }
+
+#Test("marker arguments are their own fact kind, and the program store answers with its revision") {
+    program: jet_cli_facts_program_query("marker-arg")
+    assert(program.contains("compiler.query(compiler.FactSource.Program{{program: program}}, compiler.FactKind.MarkerArg)"))
+    assert(program.contains("revision: program.revision()"))
+    assert(jet_cli_facts_program("marker-arg").contains("compiler.FactKind.MarkerArg)"))
+    if jet_cli_plan([String]{"inspect", "facts", "--store=program", "--kind=marker-arg", "main.jet"}) == .Inspect(job) {
+        assert(job.subject == Val("marker-arg"))
+        return
+    }
+    panic("`jet inspect facts --store=program --kind=marker-arg main.jet` is not a host inspect job")
+}

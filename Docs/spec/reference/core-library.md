@@ -434,24 +434,33 @@ rows, equal for equal schemas.
 
 `FactSource.Program(program)` reads a program checked through the normal
 pipeline: the `ProgramInfo` a build reads as `b.program`. Its facts are
-`ProgramFact { kind, name, subject }` rows. `FactKind.Marker` gives one row per
-marker a type declaration carries; `FactKind.Read` gives one row per typed
-fact the checker recorded on a type, then on a function. `subject` is the
-type's or function's canonical identity, and rows follow the program's type
-order, then its function order.
+`ProgramFact { kind, name, subject, identity, scope, source }` rows.
+`FactKind.Marker` gives one row per marker a type declaration carries;
+`FactKind.MarkerArg` gives one row per argument written in such a marker,
+named `Marker.argument`; `FactKind.Read` gives one row per typed fact the
+checker recorded on a type, then on a function. Markers, their arguments and
+recorded facts are separate kinds; no row folds one into another. `subject` is
+the type's or function's canonical identity, and rows follow the program's
+type order, then its function order. `identity` is the row's stable identity,
+`subject#kind:name` (`marker`, `marker-arg` or `read`), with `@n` added for the
+n-th repeat of a name on the same subject. `scope` is a `FactScope { package,
+module, item }`. `source` is the program's revision: `program.revision()`, the
+content hash of the checked sources, as a `SnapshotID`.
 
-`jet inspect facts --store=<schema|program> --kind=<marker|read> [SOURCE]
-[--json]` prints the answer of this same function. The command checks a
-generated program that calls `query`, over `schema()` or over SOURCE's checked
-`ProgramInfo`, and renders the rows it returns.
+`jet inspect facts --store=<schema|program> --kind=<marker|marker-arg|read>
+[SOURCE] [--json]` prints the answer of this same function. The command checks
+a generated program that calls `query`, over `schema()` or over SOURCE's
+checked `ProgramInfo`, and renders the rows it returns with the snapshot it
+read: the schema's identity, or SOURCE and the program's revision.
 
 A query that can't answer completely fails; it never returns a shorter list.
 An empty list is a checked empty answer. `MetadataError { kind, query, source }`
 carries a `MetadataFailure`: `Unavailable(required_stage: CompilerStage,
 reason)`, `Unsupported(capability)`, `Stale(requested: SnapshotID, current:
 SnapshotID)`, `Invalid(diagnostics)`, `Denied(scope: ScopeID, reason)` or
-`Truncated(limit, observed)`. More matches than `limit` is `Truncated`, and a
-time view (`at`) of a schema snapshot or a checked program is `Unsupported`.
+`Truncated(limit, observed)`. More matches than `limit` is `Truncated`. A time
+view (`at`) of a schema snapshot or a checked program is `Unsupported`, and so
+is a kind the store doesn't hold: the schema holds no `MarkerArg` rows.
 Identity types are spelled `SnapshotID` and `ScopeID`, following the
 acronym-casing rule.
 

@@ -8,6 +8,9 @@ package: {
         compiler: .Library{ entry: compiler }
     }
 }
+use {
+    query_rows.[program_fact]
+}
 lang: module
 
 Token: struct {
@@ -104,8 +107,10 @@ MetadataError: struct {
 
 /// The kinds of fact a store holds. In the executable schema they are its
 /// marker rules and its typed fact reads; in a checked program they are the
-/// markers its declarations carry and the typed facts the checker recorded.
-FactKind: enum { Marker Read }
+/// markers its declarations carry, each marker's written arguments, and the
+/// typed facts the checker recorded. A store asked for a kind it doesn't
+/// hold refuses with `Unsupported`.
+FactKind: enum { Marker MarkerArg Read }
 
 /// One row of the toolchain's executable schema.
 SchemaFact: struct {
@@ -125,14 +130,30 @@ SchemaSnapshot: struct {
     identity: fn(self) -> SnapshotID Never! { self.id.copy() }
 }
 
-/// One fact of a checked program: a marker a declaration carries, or a typed
-/// fact the checker recorded on a type or function.
+/// Where a program fact sits: its package, its module, and the type or
+/// function it belongs to.
+FactScope: struct {
+    package: String
+    module: String
+    item: String
+}
+
+/// One fact of a checked program: a marker a declaration carries, one
+/// argument of such a marker, or a typed fact the checker recorded on a type
+/// or function.
 ProgramFact: struct {
     kind: FactKind
-    /// The marker's name, or the recorded fact's name.
+    /// The marker's name, `Marker.argument` for a marker argument, or the
+    /// recorded fact's name.
     name: String
     /// The canonical identity of the type or function it belongs to.
     subject: String
+    /// The row's stable identity: `subject#kind:name`, then `@n` for the
+    /// n-th repeat of the same name on the same subject.
+    identity: String
+    scope: FactScope
+    /// The checked program's revision: the content hash of its sources.
+    source: SnapshotID
 }
 
 /// The immutable snapshot a query reads: the running toolchain's schema, or
@@ -163,21 +184,36 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
     if source == {
         .Schema(snapshot) -> {
             if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
+            if kind == FactKind.MarkerArg -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "marker-argument facts of the schema store"}, query: "query", source: None})
             loop fact in snapshot.facts {
                 if fact.kind == kind -> rows.push(Fact.Schema{fact: fact.copy()})
             }
         }
         .Program(program) -> {
             if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a checked program"}, query: "query", source: None})
-            loop info in program.types() {
-                if kind == {
-                    .Marker -> { loop marker in info.markers -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: marker.name.copy(), subject: info.identity.copy()}}) }
-                    .Read -> { loop fact in info.facts -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: fact.name.copy(), subject: info.identity.copy()}}) }
+            revision: SnapshotID{digest: program.revision()}
+            loop package in program.packages() {
+                loop info in package.types {
+                    seen := [String]{}
+                    scope: FactScope{package: package.name.copy(), module: info.module.copy(), item: info.name.copy()}
+                    if kind == {
+                        .Marker -> { loop marker in info.markers -> rows.push(program_fact(kind, marker.name, info.identity, scope, revision, seen)) }
+                        .MarkerArg -> {
+                            loop marker in info.markers {
+                                loop arg in marker.args -> rows.push(program_fact(kind, "{marker.name}.{arg.name}", info.identity, scope, revision, seen))
+                            }
+                        }
+                        .Read -> { loop fact in info.facts -> rows.push(program_fact(kind, fact.name, info.identity, scope, revision, seen)) }
+                    }
                 }
             }
             if kind == FactKind.Read {
-                loop function in program.functions() {
-                    loop fact in function.facts -> rows.push(Fact.Program{fact: ProgramFact{kind: kind, name: fact.name.copy(), subject: function.identity.copy()}})
+                loop package in program.packages() {
+                    loop function in package.functions {
+                        seen := [String]{}
+                        scope: FactScope{package: package.name.copy(), module: function.module.copy(), item: function.name.copy()}
+                        loop fact in function.facts -> rows.push(program_fact(kind, fact.name, function.identity, scope, revision, seen))
+                    }
                 }
             }
         }
@@ -186,4 +222,24 @@ query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{
         if rows.len() > most -> return Err(MetadataError{kind: MetadataFailure.Truncated{limit: most, observed: rows.len()}, query: "query", source: None})
     }
     Ok(rows)
+}
+
+// The rows `query` builds, not part of the compiler surface.
+priv query_rows: module {
+    // One program row. `seen` holds the names already given on this subject,
+    // so a repeated name gets its `@n` identity.
+    program_fact: fn(kind: FactKind, name: String, subject: String, scope: FactScope, revision: SnapshotID, seen: &[String]) -> Fact Never! {
+        word: if kind == {
+            .Marker -> "marker"
+            .MarkerArg -> "marker-arg"
+            .Read -> "read"
+        }
+        repeat := 0
+        loop earlier in seen {
+            if earlier == name -> repeat += 1
+        }
+        seen.push(name.copy())
+        identity: if repeat == 0 -> "{subject}#{word}:{name}" else -> "{subject}#{word}:{name}@{repeat}"
+        Fact.Program{fact: ProgramFact{kind: kind, name: name.copy(), subject: subject.copy(), identity: identity, scope: scope.copy(), source: revision.copy()}}
+    }
 }

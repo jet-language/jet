@@ -39,8 +39,11 @@ use {
 // one checked program.
 JET_CLI_FACT_STORES: [String]{"schema", "program"}
 
-// The `--kind` spellings: the variants of core.compiler `FactKind`, lowercased.
-JET_CLI_FACT_KINDS: [String]{"marker", "read"}
+// The fact kinds: the variants of core.compiler `FactKind`. The compiler
+// can't import Core's enum, so this is its mirror copy (the closed-list mirror
+// ledger keeps the two in step), and `--kind` spells each one lowercased, words
+// joined by `-` (jet_cli_facts_kinds).
+JET_CLI_FACT_KINDS: [String]{"Marker", "MarkerArg", "Read"}
 
 // The generated program's one file, and the function the program store runs.
 JET_CLI_FACTS_FILE: "jet_inspect_facts.jet"
@@ -55,8 +58,8 @@ JetCLIFactsAnswer: struct {
     failure_text: String
 }
 
-// The checked query program's answer and, for the schema store, the snapshot
-// identity it read; or why there is no answer.
+// The checked query program's answer and the snapshot it read (the schema's
+// identity, or the program's revision); or why there is no answer.
 JetCLIFactsOutcome: enum {
     Answered(answer: JetCLIFactsAnswer, snapshot: String)
     Failed(reason: String)
@@ -64,11 +67,13 @@ JetCLIFactsOutcome: enum {
 
 // The store that answered: its `--store` spelling, and the snapshot it read
 // under the name the report gives it (the schema's `snapshot` identity, the
-// program store's `source`).
+// program store's `source`), with the program's `revision` ("" for the
+// schema, whose identity is its revision).
 JetCLIFactsStore: struct {
     store: String
     field: String
     snapshot: String
+    revision: String
 }
 
 jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{false}) -> JetCLIPlan Never! {
@@ -102,14 +107,15 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
     if store == "schema" && sources.len() > 0 -> return jet_cli_inspect_b_fail("E2104", "the schema store is the running toolchain's and takes no SOURCE: `{sources[0]}`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
     if store == "program" && sources.len() == 0 -> return jet_cli_inspect_b_fail("E2104", "the program store reads one checked program: name its SOURCE", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
     if sources.len() > 1 -> return jet_cli_inspect_b_fail("E2104", "the program store reads one SOURCE, not both `{sources[0]}` and `{sources[1]}`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    if kind == "" -> return jet_cli_inspect_b_fail("E2104", "`jet inspect facts` needs a fact kind: `--kind=marker` or `--kind=read`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    if !JET_CLI_FACT_KINDS.contains(kind) -> return jet_cli_inspect_b_fail("E2104", "`--kind={kind}` names no fact kind; the kinds are {JET_CLI_FACT_KINDS.join(", ")}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    kinds: jet_cli_facts_kinds()
+    if kind == "" -> return jet_cli_inspect_b_fail("E2104", "`jet inspect facts` needs a fact kind: `--kind=` one of {kinds.join(", ")}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if !kinds.contains(kind) -> return jet_cli_inspect_b_fail("E2104", "`--kind={kind}` names no fact kind; the kinds are {kinds.join(", ")}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
     // The program store checks SOURCE first, so the host runs it, as every
     // inspect projection of a checked program.
     if store == "program" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "facts", file: sources[0].copy(), subject: Val(kind), json: json, color: color, threads: None, notice: "", project: false}}
     if jet_cli_facts_answer(kind) == {
         .Answered(answer, snapshot) -> {
-            output: jet_cli_facts_render(JetCLIFactsStore{store: store, field: "snapshot", snapshot: snapshot.copy()}, kind, answer, color: color, json: json)
+            output: jet_cli_facts_render(JetCLIFactsStore{store: store, field: "snapshot", snapshot: snapshot.copy(), revision: ""}, kind, answer, color: color, json: json)
             jet_cli_done(output.stdout, output.stderr, output.exit_code)
         }
         .Failed(reason) -> jet_cli_inspect_b_error("E2105", "the fact query did not run: {reason}", color, json, JET_DRIVER_EXIT_USER_ERROR)
@@ -141,7 +147,7 @@ jet_cli_inspect_facts_host: fn(job: JetCLIInspectJob, source: String) -> JetDriv
                 .Missing(what, _) -> jet_cli_inspect_finish(job, jet_cli_facts_error_output("E2105", "the fact query did not run: {what}", color: job.color, json: job.json))
             }
             if jet_cli_facts_invoke(jet_cli_facts_program_query(kind), [TComptimeValue]{program}, core_sources, base) == {
-                .Answered(answer, _) -> jet_cli_inspect_finish(job, jet_cli_facts_render(JetCLIFactsStore{store: "program", field: "source", snapshot: job.file.copy()}, kind, answer, color: job.color, json: job.json))
+                .Answered(answer, revision) -> jet_cli_inspect_finish(job, jet_cli_facts_render(JetCLIFactsStore{store: "program", field: "source", snapshot: job.file.copy(), revision: revision.copy()}, kind, answer, color: job.color, json: job.json))
                 .Failed(reason) -> jet_cli_inspect_finish(job, jet_cli_facts_error_output("E2105", "the fact query did not run: {reason}", color: job.color, json: job.json))
             }
         }
@@ -168,8 +174,11 @@ jet_cli_facts_render: fn(origin: JetCLIFactsStore, kind: String, answer: JetCLIF
             jet_cli_status_field("store", jet_cli_status_text(origin.store)),
             jet_cli_status_field("kind", jet_cli_status_text(kind)),
             jet_cli_status_field(origin.field, jet_cli_status_text(origin.snapshot)),
-            jet_cli_status_field("complete", jet_cli_status_bool(complete)),
         }
+        if origin.revision != "" -> fields.push(jet_cli_status_field("revision", jet_cli_status_text(origin.revision)))
+        fields.extend([JetCLIStatusField]{
+            jet_cli_status_field("complete", jet_cli_status_bool(complete)),
+        })
         if complete -> fields.push(jet_cli_status_field("rows", jet_cli_compiler_checked_value(answer.rows)))
         if !complete {
             fields.push(jet_cli_status_field("error", jet_cli_compiler_checked_value(answer.failure)))
@@ -178,7 +187,7 @@ jet_cli_facts_render: fn(origin: JetCLIFactsStore, kind: String, answer: JetCLIF
         exit_code: if complete -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.facts", complete, [JetCLIStatusField]{jet_cli_status_field("facts", jet_cli_status_object(fields))})}\n", stderr: "", exit_code: exit_code}
     }
-    label: "{origin.store} {origin.field} {origin.snapshot}"
+    label: if origin.revision == "" -> "{origin.store} {origin.field} {origin.snapshot}" else -> "{origin.store} {origin.field} {origin.snapshot} revision {origin.revision}"
     if !complete -> return jet_cli_facts_error_output("E2105", "the {label} has no complete answer: {answer.failure_text}", color: color)
     JetDriverVerbOutput{stdout: "{label}, kind {kind}: {jet_cli_facts_count(answer.rows)} facts, complete\n{answer.lines}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
@@ -192,10 +201,33 @@ jet_cli_facts_count: fn(rows: TComptimeValue) -> Int Never! {
     }
 }
 
+// The `--kind` spellings, in FactKind's order: `MarkerArg` is `marker-arg`.
+jet_cli_facts_kinds: fn() -> [String] Never! {
+    kinds := [String]{}
+    loop variant in JET_CLI_FACT_KINDS {
+        spelling := ""
+        loop index in 0..<variant.len() {
+            letter: variant.slice(index..<index + 1)
+            lower: letter.to_lower()
+            if index > 0 && letter != lower -> spelling = "{spelling}-"
+            spelling = "{spelling}{lower}"
+        }
+        kinds.push(spelling)
+    }
+    kinds
+}
+
+// `FactKind`'s variant for a `--kind` spelling: `marker-arg` is `MarkerArg`.
+jet_cli_facts_variant: fn(kind: String) -> String Never! {
+    variant := ""
+    loop word in kind.split("-") -> variant = "{variant}{word.slice(0..<1).to_upper()}{word.slice(1..<word.len())}"
+    variant
+}
+
 // The schema store's program, whose constants are the query: `kind` is a
 // `--kind` spelling.
 jet_cli_facts_program: fn(kind: String) -> String Never! {
-    variant: "{kind.slice(0..<1).to_upper()}{kind.slice(1..<kind.len())}"
+    variant: jet_cli_facts_variant(kind)
     lines: [String]{
         "use compiler: core.compiler",
         "",
@@ -230,9 +262,10 @@ jet_cli_facts_program: fn(kind: String) -> String Never! {
 }
 
 // The program store's program: `jet_facts_answer` makes the query over the
-// ProgramInfo it is handed and returns the rows, their lines and the failure.
+// ProgramInfo it is handed and returns the rows, their lines, the failure and
+// the program's revision.
 jet_cli_facts_program_query: fn(kind: String) -> String Never! {
-    variant: "{kind.slice(0..<1).to_upper()}{kind.slice(1..<kind.len())}"
+    variant: jet_cli_facts_variant(kind)
     lines: [String]{
         "use compiler: core.compiler",
         "",
@@ -241,18 +274,20 @@ jet_cli_facts_program_query: fn(kind: String) -> String Never! {
         "    lines: String",
         "    failure: compiler.MetadataError?",
         "    failure_text: String",
+        "    revision: String",
         "}}",
         "",
         "{JET_CLI_FACTS_ENTRY}: fn(program: ProgramInfo) -> JetFactsAnswer {{",
+        "    revision: program.revision()",
         "    rows: compiler.query(compiler.FactSource.Program{{program: program}}, compiler.FactKind.{variant}) ?? {{",
         "        failure_text: err.display()",
-        "        return JetFactsAnswer{{rows: [compiler.Fact]{{}}, lines: \"\", failure: Val(err), failure_text: failure_text}}",
+        "        return JetFactsAnswer{{rows: [compiler.Fact]{{}}, lines: \"\", failure: Val(err), failure_text: failure_text, revision: revision}}",
         "    }}",
         "    text := \"\"",
         "    loop row in rows {{",
-        "        if row == .Program(fact) -> text = \"{{text}}{{fact.name}}  {{fact.subject}}\\n\"",
+        "        if row == .Program(fact) -> text = \"{{text}}{{fact.name}}  {{fact.subject}}  {{fact.identity}}\\n\"",
         "    }}",
-        "    JetFactsAnswer{{rows: rows, lines: text, failure: None, failure_text: \"\"}}",
+        "    JetFactsAnswer{{rows: rows, lines: text, failure: None, failure_text: \"\", revision: revision}}",
         "}}",
         "",
     }
@@ -310,6 +345,7 @@ jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: 
     if evaluated.internal_problem == .Val(internal) -> return JetCLIFactsOutcome.Failed{reason: internal.message.copy()}
     value := evaluated.value.move() ?? return JetCLIFactsOutcome.Failed{reason: "the query program returned no answer"}
     answer := JetCLIFactsAnswer{rows: TComptimeValue.Unit, lines: "", failure: TComptimeValue.Unit, failure_text: ""}
+    revision := ""
     found := 0
     if value == .Struct(_, fields) {
         loop field in fields {
@@ -318,13 +354,14 @@ jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: 
                 field.name == "lines" -> answer.lines = jet_cli_facts_text(field.value)
                 field.name == "failure" -> answer.failure = field.value.copy()
                 field.name == "failure_text" -> answer.failure_text = jet_cli_facts_text(field.value)
+                field.name == "revision" -> revision = jet_cli_facts_text(field.value)
                 else -> next
             }
             found += 1
         }
     }
-    if found != 4 -> return JetCLIFactsOutcome.Failed{reason: "the query program returned {found} of its 4 answer fields"}
-    JetCLIFactsOutcome.Answered{answer: answer, snapshot: ""}
+    if found != 5 -> return JetCLIFactsOutcome.Failed{reason: "the query program returned {found} of its 5 answer fields"}
+    JetCLIFactsOutcome.Answered{answer: answer, snapshot: revision}
 }
 
 jet_cli_facts_text: fn(value: TComptimeValue) -> String Never! {
