@@ -5,8 +5,9 @@
 //   jet Tools/gauntlet/PortBars.jet [--entry NAME] [--runs N] [--jet PATH] [--repo DIR]
 //   jet Tools/gauntlet/PortBars.jet --measure [--entry NAME] [--repo DIR]
 //
-// `--measure` runs no case: it prints each side's tokens, branches, control
-// nesting depth and files (with each file's tokens) under SOURCE RULES. It
+// `--measure` runs no case: it prints each side's tokens and files (with each
+// file's tokens) under SOURCE RULES, and its branches and control nesting
+// depth under REACH RULES. It
 // also measures a gauntlet program entry (no "mode": "tool"): its
 // jet/run.jet against its python/main.py, the pair the c14 token bar
 // compares there.
@@ -48,10 +49,11 @@
 //     The report gives each measure's Jet/original ratio of medians.
 // (3) reasoning: the entry's review record REVIEW_FILE scores both programs
 //     on the fixed CHECKLIST and Jet's total is at least the original's, and
-//     the measured proxies (branches, control nesting depth, and the
-//     record's hand-written helpers a library call would replace) are no
-//     worse for Jet. A missing record, a missing or unknown checklist item,
-//     or an unknown field fails the bar; it never passes by default.
+//     the measured proxies (branches and control nesting depth of the
+//     definitions each program reaches, REACH RULES, and the record's
+//     hand-written helpers a library call would replace) are no worse for
+//     Jet. A missing record, a missing or unknown checklist item, or an
+//     unknown field fails the bar; it never passes by default.
 // (4) tokens: the Jet twin's source tokens against the original's, by one
 //     written rule per language (TOKEN RULES below), always reported and
 //     never failing a measured port. A twin above the original names the
@@ -97,12 +99,40 @@
 // dependency (`deps: { kit: ../kit, }` in the file's inline `package:` block)
 // counts each file of the package's Source directory that declares a name the
 // file's `use` lines take from it (`kit.[a, b]`, `kit.a`), then each file
-// there declaring a name such a counted file refers to (`references`: a word
-// not written after a `.` that is called, is capitalized or is not a word
-// the file binds itself, so a local, parameter, field label, loop variable,
-// lambda parameter or pattern binding refers to nothing there); a counted
+// there declaring a name such a counted file refers to (`references`: a word,
+// in its code or in the code its string literals interpolate, not written
+// after a `.` that is called, is capitalized or is not a word the file binds
+// itself, so a local, parameter, field label, loop variable, lambda parameter
+// or pattern binding refers to nothing there); a counted
 // package file reaches the path dependencies of its own package.jet the same
-// way. Core, Node built-ins and installed packages are never counted.
+// way. Core, Node built-ins and installed packages are never counted. The
+// tokens bar counts every token of these files; the proxies count only what
+// the REACH RULES keep of them.
+//
+// REACH RULES. The proxies count the definitions a program reaches, not the
+// whole of its files, by one rule for both sides: dead code is charged to
+// neither, a twin that takes one leaf from a large package file is charged
+// that leaf and what it reaches, and an original that inlines everything is
+// charged everything it reaches. Each file of the program (SOURCE RULES)
+// splits into top-level definitions, one at each line that starts at column 0
+// unless it opens with one of CONTINUATIONS or follows a Jet attribute or
+// Python decorator line; a shell file is one definition. A definition
+// declares a name (Jet `name:`, JavaScript `function`, `class`, `const`,
+// `let` and `var`, Python `def`, `class` and `name =`), is a Jet method
+// (`Type.name:`, or an `impl Type {…}` block), is an import that reaches
+// nothing (Jet `use`, JavaScript `import` and `export {…}`, Python `import`
+// and `from`), or is code that runs where it stands. The program reaches its
+// code that runs where it stands and, in Jet, its file's `run` and `main`
+// (every definition of the file when it has neither); then, transitively,
+// every definition a reached one names, in its code or in the code its
+// string literals interpolate (Jet `{…}`, a JavaScript template's `${…}`, a
+// Python f-string's `{…}`): by `references` in Jet, by any word not written
+// after a `.` in the other languages, and by `NS.word` where NS is a
+// namespace import (`import * as NS from './…'`, Python `from . import NS`).
+// A name a file declares itself names its own definition there; any other
+// names each definition of that name in the program. A Jet method or `impl`
+// block is reached once its type is and, for a method, its name is written
+// after a `.` in reached code.
 //
 // PROXY RULES. Branches are decisions, counted by one table per language that
 // spells the same kinds of decision (DECISION TABLES); a decision written in a
@@ -175,6 +205,12 @@ BLOCK_WORDS: [String]{"else", "try", "finally", "do"}
 BLOCK_SYMBOLS: [String]{")", ";", "{{", "}}", "=>"}
 SHELL_OPENERS: [String]{"if", "for", "while", "until", "case"}
 SHELL_CLOSERS: [String]{"fi", "done", "esac"}
+// The first tokens of a column-0 line that continue the statement before it
+// (REACH RULES): a closing bracket, a chained call, or the next clause of a
+// Python `if` or `try`.
+CONTINUATIONS: [String]{"}}", ")", "]", ".", "else", "elif", "except", "finally"}
+// The definitions a Jet program's own file runs from (REACH RULES).
+JET_ENTRIES: [String]{"run", "main"}
 
 #Error
 JudgeError: struct {
@@ -189,12 +225,15 @@ TokenKind: enum { Word Text Symbol }
 
 // One source token: a word's or symbol's text ("" for a string literal);
 // `first` marks the first token of its line and `column` the indentation
-// before it then.
+// before it then. A string literal's `inner` is the code it interpolates
+// (Jet `{…}`, a JavaScript template's `${…}`, a Python f-string's `{…}`),
+// each part on a line of its own; "" for none.
 Token: struct {
     text: String
     kind: TokenKind
     first: Bool
     column: Int
+    inner: String
 }
 
 // What the proxies measure of one program.
@@ -617,6 +656,42 @@ string_prefix: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     true
 }
 
+// The code the string literal at bytes `start..<end` interpolates (Jet
+// `{…}`, a JavaScript template's `${…}`, a Python f-string's `{…}`), each
+// part on a line of its own; "" for none and for a triple-quoted literal.
+interpolated: fn(bytes: [U8], start: Int, end: Int, language: Language) -> String Never! {
+    quote := start
+    loop quote < end && !is_quote(language, byte_at(bytes, quote)) -> quote += 1
+    code: byte_at(bytes, quote)
+    template: language == .JavaScript && code == 96
+    prefix: String.from_bytes_lossy(bytes[start..<quote])
+    formatted: language == .Python && (prefix.contains("f") || prefix.contains("F"))
+    if !(language == .Jet || template || formatted) || (byte_at(bytes, quote + 1) == code && byte_at(bytes, quote + 2) == code) -> return ""
+    out := [U8]{}
+    index := quote + 1
+    loop index < end - 1 {
+        at: byte_at(bytes, index)
+        if at == 92 {
+            index += 2
+            next
+        }
+        if !template && at == 123 && byte_at(bytes, index + 1) == 123 {
+            index += 2
+            next
+        }
+        opens: if template -> at == 36 && byte_at(bytes, index + 1) == 123 else -> at == 123
+        if !opens {
+            index += 1
+            next
+        }
+        body: if template -> index + 2 else -> index + 1
+        index = braces_end(bytes, body, language)
+        if out.len() > 0 -> out.push(U8{10})
+        loop part in body..<index - 1 -> out.push(bytes[part])
+    }
+    String.from_bytes_lossy(out)
+}
+
 // The width of the symbol at `at`: one of MULTI_SYMBOLS, else one byte.
 symbol_len: fn(bytes: [U8], at: Int) -> Int Never! {
     loop symbol in MULTI_SYMBOLS {
@@ -847,7 +922,8 @@ tokens: fn(source: String, language: Language) -> [Token] Never! {
             at += symbol_len(bytes, at)
         }
         text: if kind == .Text -> "" else -> String.from_bytes_lossy(bytes[start..<at])
-        out.push(Token{text: text, kind: kind, first: first, column: column})
+        inner: if kind == .Text -> interpolated(bytes, start, at, language) else -> ""
+        out.push(Token{text: text, kind: kind, first: first, column: column, inner: inner})
         first = false
     }
 }
@@ -877,11 +953,13 @@ language_of: fn(path: String, first_line: String) -> Language? Never! {
 
 // A program as the token and proxy bars measure it (SOURCE RULES): its file,
 // then each repository module it imports, transitively and once each, with
-// the token count of each file.
+// the token count of each file and the namespace imports of its files
+// (`namespace_aliases`).
 Program: struct {
     paths: [String]
     counts: [Int]
     tokens: [Token]
+    aliases: [String]
 }
 
 // `path` with its `.` and `..` segments resolved, or "" when it climbs out of
@@ -1073,19 +1151,19 @@ pattern_opens: fn(list: [Token], at: Int) -> Bool Never! {
     (list[at].first || ["==", "!=", "|"].contains(token_text(list, at - 1))) && capitalized(token_text(list, at + 1))
 }
 
-// The words a Jet file's tokens `list` bind: each word followed by `:` (a
-// declaration, local, parameter or field label), each `loop` variable, each
-// lambda parameter (after `(` or `,`, before `->`) and each binding of a
-// variant pattern (`pattern_opens`).
-bound_words: fn(list: [Token]) -> [String] Never! {
+// The words the Jet tokens `start..<end` of `list` bind: each word followed
+// by `:` (a declaration, local, parameter or field label), each `loop`
+// variable, each lambda parameter (after `(` or `,`, before `->`) and each
+// binding of a variant pattern (`pattern_opens`).
+bound_words: fn(list: [Token], start: Int, end: Int) -> [String] Never! {
     out := [String]{}
-    loop at in 0..<list.len() {
+    loop at in start..<end {
         token: list[at]
         after: token_text(list, at + 1)
         if token.kind == .Word && (after == ":" || (after == "->" && ["(", ","].contains(token_text(list, at - 1)))) -> out.push(token.text.copy())
         if token.kind == .Word && token.text == "loop" {
             head := at + 1
-            loop head < list.len() && !list[head].first && list[head].text != "in" && list[head].text != "{{" -> head += 1
+            loop head < end && !list[head].first && list[head].text != "in" && list[head].text != "{{" -> head += 1
             if token_text(list, head) == "in" {
                 loop bound in at + 1..<head {
                     if list[bound].kind == .Word -> out.push(list[bound].text.copy())
@@ -1095,7 +1173,7 @@ bound_words: fn(list: [Token]) -> [String] Never! {
         if pattern_opens(list, at) {
             depth := 0
             inner := at + 2
-            loop inner < list.len() {
+            loop inner < end {
                 text: token_text(list, inner)
                 if text == "(" -> depth += 1
                 if text == ")" -> depth -= 1
@@ -1108,14 +1186,26 @@ bound_words: fn(list: [Token]) -> [String] Never! {
     out
 }
 
-// The names a Jet file's tokens `list` refer to, once each: each word not
-// written after a `.` (a member, method or variant) that is called (followed
-// by `(`), is capitalized (a type or constant) or is not one of the words
-// the file binds (`bound_words`).
-references: fn(list: [Token]) -> [String] Never! {
-    bound: bound_words(list)
+// The tokens of the code the string literals among the tokens `start..<end`
+// of `list` interpolate, and of the code those interpolate in turn.
+interpolations: fn(list: [Token], start: Int, end: Int, language: Language) -> [Token] Never! {
+    out := [Token]{}
+    loop at in start..<end {
+        if list[at].inner == "" -> next
+        inner: tokens(list[at].inner, language)
+        nested: interpolations(inner, 0, inner.len(), language)
+        out.extend(inner)
+        out.extend(nested)
+    }
+    out
+}
+
+// The words of the Jet tokens `start..<end` of `list` not written after a
+// `.` (a member, method or variant) that are called (followed by `(`),
+// capitalized (a type or constant) or not among the words `bound`, once each.
+free_words: fn(list: [Token], start: Int, end: Int, bound: [String]) -> [String] Never! {
     out := [String]{}
-    loop at in 0..<list.len() {
+    loop at in start..<end {
         token: list[at]
         if token.kind != .Word || token_text(list, at - 1) == "." || out.contains(token.text) -> next
         if token_text(list, at + 1) == "(" || capitalized(token.text) || !bound.contains(token.text) -> out.push(token.text.copy())
@@ -1123,9 +1213,23 @@ references: fn(list: [Token]) -> [String] Never! {
     out
 }
 
+// The names the Jet tokens `start..<end` of `list` refer to, once each: their
+// `free_words` and those of `inner`, the code their string literals
+// interpolate (`interpolations`), against the words both bind
+// (`bound_words`).
+references: fn(list: [Token], start: Int, end: Int, inner: [Token]) -> [String] Never! {
+    bound := bound_words(list, start, end)
+    bound.extend(bound_words(inner, 0, inner.len()))
+    out := free_words(list, start, end, bound)
+    loop word in free_words(inner, 0, inner.len(), bound) {
+        if !out.contains(word) -> out.push(word)
+    }
+    out
+}
+
 // The program at `path` in `repo`, written in `language`.
 program: fn(repo: String, path: String, language: Language) -[FS]> Program Never! {
-    found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}}
+    found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}, aliases: [String]{}}
     // The package directory each path belongs to, "" for none.
     owners := [String]{""}
     index := 0
@@ -1134,9 +1238,10 @@ program: fn(repo: String, path: String, language: Language) -[FS]> Program Never
         text: files.read(files.join(repo, file)) ?? ""
         listed: tokens(text, language)
         counted: if language == .Jet -> without_tests(listed) else -> listed
-        words: if language == .Jet -> references(counted) else -> [String]{}
+        words: if language == .Jet -> references(counted, 0, counted.len(), interpolations(counted, 0, counted.len(), .Jet)) else -> [String]{}
         found.counts.push(counted.len())
         found.tokens.extend(counted)
+        found.aliases.extend(namespace_aliases(text, language))
         loop written in imports_of(text, language) {
             loop spec in written.split("\n").to_list() {
                 target: normalized("{files.dirname(file)}/{spec}")
@@ -1183,6 +1288,231 @@ program_files: fn(found: Program) -> String Never! {
     parts := [String]{}
     loop index in 0..<found.paths.len() -> parts.push("{found.paths[index]} {found.counts[index]}")
     parts.join(", ")
+}
+
+// The names a module `text` binds to a repository module it imports whole
+// (REACH RULES): Jet `use NS: "Module"`, JavaScript `import * as NS from
+// './…'` and Python `from . import NS` (`as` names the binding where it is
+// written).
+namespace_aliases: fn(text: String, language: Language) -> [String] Never! {
+    out := [String]{}
+    in_use_block := false
+    loop raw in text.split("\n").to_list() {
+        line: raw.trim()
+        if language == .Jet {
+            if line == "use {{" -> in_use_block = true
+            if in_use_block && line == "}}" -> in_use_block = false
+            split: line.removeprefix("use ").partition(":")
+            if (in_use_block || line.starts_with("use ")) && quoted(split.tail.trim()) != "" -> out.push(split.head.trim())
+        }
+        if language == .JavaScript && line.starts_with("import * as ") {
+            split: line.removeprefix("import * as ").partition(" from ")
+            spec: quoted(split.tail.trim())
+            if spec.starts_with("./") || spec.starts_with("../") -> out.push(split.head.trim())
+        }
+        if language == .Python && line.starts_with("from .") {
+            split: line.removeprefix("from ").partition(" import ")
+            if split.head.trim().replace(".", "") != "" -> next
+            loop name in split.tail.replace("(", "").replace(")", "").split(",").to_list() {
+                bound: name.trim().rpartition(" as ").tail.trim()
+                if bound != "" -> out.push(bound.copy())
+            }
+        }
+    }
+    out
+}
+
+// ---- reach ----
+
+// One top-level definition of file `file` of a program (REACH RULES): its
+// tokens `start..<end` of the program's, the name it declares ("" for code
+// that runs where it stands) and the type a Jet method or `impl` block
+// belongs to ("" for none); an import is `inert`, reaching nothing.
+Definition: struct {
+    file: Int
+    start: Int
+    end: Int
+    name: String
+    owner: String
+    inert: Bool
+}
+
+// The text of token `at` of `list` before `end`, "" elsewhere.
+text_before: fn(list: [Token], at: Int, end: Int) -> String Never! {
+    if at >= end -> return ""
+    token_text(list, at)
+}
+
+// The text of token `at` of `list` before `end` when it is a word, else "".
+word_at: fn(list: [Token], at: Int, end: Int) -> String Never! {
+    if at < 0 || at >= end || list[at].kind != .Word -> return ""
+    list[at].text.copy()
+}
+
+// The first capitalized word of `list` in `at..<end`: the type an `impl`
+// block belongs to.
+first_type: fn(list: [Token], at: Int, end: Int) -> String Never! {
+    loop index in at..<end {
+        if list[index].kind == .Word && capitalized(list[index].text) -> return list[index].text.copy()
+    }
+    ""
+}
+
+// The definition that the top-level tokens `start..<end` of `list`, in file
+// `file`, make.
+definition: fn(list: [Token], start: Int, end: Int, file: Int, language: Language) -> Definition Never! {
+    out := Definition{file: file, start: start, end: end, name: "", owner: "", inert: false}
+    // Past any Jet attribute or Python decorator lines.
+    at := start
+    loop at < end && (list[at].text == "#" || list[at].text == "@") {
+        at += 1
+        loop at < end && !list[at].first -> at += 1
+    }
+    lead: word_at(list, at, end)
+    if language == .Jet {
+        if {
+            lead == "use" -> out.inert = true
+            lead == "impl" -> out.owner = first_type(list, at + 1, end)
+            text_before(list, at + 1, end) == ":" -> out.name = lead.copy()
+            text_before(list, at + 1, end) == "." && text_before(list, at + 3, end) == ":" -> {
+                out.owner = lead.copy()
+                out.name = word_at(list, at + 2, end)
+            }
+        }
+    }
+    if language == .JavaScript {
+        skip := at
+        loop ["export", "default", "async"].contains(word_at(list, skip, end)) -> skip += 1
+        kind: word_at(list, skip, end)
+        if {
+            lead == "import" -> out.inert = true
+            skip > at && ["{{", "*"].contains(text_before(list, skip, end)) -> out.inert = true
+            kind == "function" -> out.name = word_at(list, if text_before(list, skip + 1, end) == "*" -> skip + 2 else -> skip + 1, end)
+            ["class", "const", "let", "var"].contains(kind) -> out.name = word_at(list, skip + 1, end)
+        }
+    }
+    if language == .Python {
+        kind: if lead == "async" -> word_at(list, at + 1, end) else -> lead.copy()
+        named: if lead == "async" -> at + 2 else -> at + 1
+        if {
+            kind == "import" || kind == "from" -> out.inert = true
+            kind == "def" || kind == "class" -> out.name = word_at(list, named, end)
+            !CONTROL_WORDS.contains(kind) && ["=", ":"].contains(text_before(list, named, end)) -> out.name = kind.copy()
+        }
+    }
+    out
+}
+
+// The top-level definitions of the tokens `start..<end` of `list`, file
+// `file`: one at each column-0 line but CONTINUATIONS and the line after an
+// attribute's `#` or a decorator's `@`; a shell file is one.
+definitions: fn(list: [Token], start: Int, end: Int, file: Int, language: Language) -> [Definition] Never! {
+    out := [Definition]{}
+    from := start
+    // The first token of the line before.
+    head := ""
+    loop at in start..<end {
+        token: list[at]
+        if !token.first -> next
+        opens: token.column == 0 && !CONTINUATIONS.contains(token.text) && head != "#" && head != "@"
+        if language != .Shell && at > from && opens {
+            out.push(definition(list, from, at, file, language))
+            from = at
+        }
+        head = token.text.copy()
+    }
+    if from < end -> out.push(definition(list, from, end, file, language))
+    out
+}
+
+// The words of the tokens `start..<end` of `list` that name a definition
+// besides Jet's `references`: in `language` but Jet each word not written
+// after a `.`, and in every language each `NS.word` of a namespace import NS
+// in `aliases`.
+plain_words: fn(list: [Token], start: Int, end: Int, language: Language, aliases: [String]) -> [String] Never! {
+    out := [String]{}
+    loop at in start..<end {
+        if list[at].kind != .Word -> next
+        member: [".", "?."].contains(token_text(list, at - 1))
+        if (language != .Jet && !member) || (member && aliases.contains(token_text(list, at - 2))) -> out.push(list[at].text.copy())
+    }
+    out
+}
+
+// The names definition `item` of `list` refers to (REACH RULES), with
+// `inner` the code its string literals interpolate: Jet's `references` and
+// the `plain_words` of both.
+referred: fn(list: [Token], item: Definition, inner: [Token], language: Language, aliases: [String]) -> [String] Never! {
+    out := if language == .Jet -> references(list, item.start, item.end, inner) else -> [String]{}
+    out.extend(plain_words(list, item.start, item.end, language, aliases))
+    out.extend(plain_words(inner, 0, inner.len(), language, aliases))
+    out
+}
+
+// Each word of the tokens `start..<end` of `list` written after a `.` into
+// `members`.
+note_members: fn(list: [Token], start: Int, end: Int, members: &[String: Bool]) Never! {
+    loop at in start..<end {
+        if list[at].kind == .Word && [".", "?."].contains(token_text(list, at - 1)) -> members[list[at].text.copy()] = true
+    }
+}
+
+// The tokens of the definitions `found`, written in `language`, reaches
+// (REACH RULES), in source order.
+reached_tokens: fn(found: Program, language: Language) -> [Token] Never! {
+    list: found.tokens
+    all := [Definition]{}
+    offset := 0
+    loop file in 0..<found.counts.len() {
+        end: offset + found.counts[file]
+        all.extend(definitions(list, offset, end, file, language))
+        offset = end
+    }
+    // "file\tname" for each name a file declares.
+    own := [String: Bool]{}
+    // Whether the program's own file declares one of JET_ENTRIES.
+    entered := false
+    loop item in all {
+        if item.name != "" && item.owner == "" -> own["{item.file}\t{item.name}"] = true
+        if item.file == 0 && item.owner == "" && JET_ENTRIES.contains(item.name) -> entered = true
+    }
+    // The names reached code writes: "file\tname" when that file declares
+    // the name, the bare name when it does not, and every bare name in
+    // `written`; `members` holds the words it writes after a `.`.
+    named := [String: Bool]{}
+    anywhere := [String: Bool]{}
+    written := [String: Bool]{}
+    members := [String: Bool]{}
+    // Whether each token is in a reached definition.
+    kept := [Bool]{}
+    loop kept.len() < list.len() -> kept.push(false)
+    grown := true
+    loop grown {
+        grown = false
+        loop item in all {
+            if kept[item.start] || item.inert -> next
+            runs: item.name == "" && item.owner == ""
+            entry: language == .Jet && item.file == 0 && item.owner == "" && (!entered || JET_ENTRIES.contains(item.name))
+            called: item.owner == "" && (named.has_key("{item.file}\t{item.name}") || anywhere.has_key(item.name))
+            method: item.owner != "" && written.has_key(item.owner) && (item.name == "" || members.has_key(item.name))
+            if !(runs || entry || called || method) -> next
+            grown = true
+            loop at in item.start..<item.end -> kept[at] = true
+            inner: interpolations(list, item.start, item.end, language)
+            note_members(list, item.start, item.end, members)
+            note_members(inner, 0, inner.len(), members)
+            loop word in referred(list, item, inner, language, found.aliases) {
+                key: "{item.file}\t{word}"
+                if own.has_key(key) -> named[key] = true else -> anywhere[word.copy()] = true
+                written[word.copy()] = true
+            }
+        }
+    }
+    out := [Token]{}
+    loop at in 0..<list.len() {
+        if kept[at] -> out.push(list[at].copy())
+    }
+    out
 }
 
 // ---- proxies ----
@@ -1758,13 +2088,15 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     original: program(repo, entry.original, language ?? .Shell)
     twin: program(repo, entry.twin, .Jet)
     record: "{entry.dir}/{REVIEW_FILE}"
-    report.bars.push(reasoning_bar(record, review_at(repo, record), proxies(original.tokens, language ?? .Shell), proxies(twin.tokens, .Jet), unmeasured))
+    original_proxies: proxies(reached_tokens(original, language ?? .Shell), language ?? .Shell)
+    report.bars.push(reasoning_bar(record, review_at(repo, record), original_proxies, proxies(reached_tokens(twin, .Jet), .Jet), unmeasured))
     report.bars.push(tokens_bar(original.tokens.len(), twin.tokens.len(), entry.token_gaps, unmeasured))
     report
 }
 
 // The `--measure` rows of entry `name`: for each side its tokens, branches,
-// control nesting depth and files (SOURCE RULES), without running a case.
+// control nesting depth (REACH RULES) and files (SOURCE RULES), without
+// running a case.
 measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     entry := read_entry(repo, name)
     jet_program: "{entry.dir}/jet/run.jet"
@@ -1781,7 +2113,7 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     languages: [Language]{language, .Jet}
     out := [String]{}
     loop side in 0..<2 {
-        measured: proxies(sides[side].tokens, languages[side])
+        measured: proxies(reached_tokens(sides[side], languages[side]), languages[side])
         out.push("{name}\t{SIDES[side]}\t{sides[side].tokens.len()}\t{measured.branches}\t{measured.depth}\t{program_files(sides[side])}")
     }
     out
@@ -1970,6 +2302,78 @@ run: fn() {
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[alpha]\n\nrun: fn() {{ print(alpha(None, 1)) }}\n")
     assert_eq(program(dir, "Tools/fx/twin/run.jet", .Jet).paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/theta.jet", "Tools/kit/Source/zeta.jet"])
     files.remove_all(dir) ?? ()
+}
+
+#Test("the proxies charge a twin the definitions it reaches: one kit leaf charges that leaf's closure, a kit call that reaches the gate charges the gate, and dead code charges nothing") {
+    dir: work_dir("reach") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
+    plant(dir, "Tools/kit/Source/Big.jet", "leaf: fn(a: Int) -> Int {{\n    if a > 0 -> twig(a) else -> 0\n}}\n\ntwig: fn(a: Int) -> Int {{\n    if a > 1 -> 1 else -> 2\n}}\n\nheavy: fn(a: Int) -> Int {{\n    loop i in 0..<a {{\n        if i > 2 && a > 3 || a > 4 -> return i\n    }}\n    gate(a)\n}}\n")
+    plant(dir, "Tools/kit/Source/Gate.jet", "gate: fn(a: Int) -> Int {{\n    if a > 0 && a < 9 -> 1 else -> 0\n}}\n")
+    plant(dir, "Tools/kit/Source/Shape.jet", "Box: struct {{\n    w: Int\n}}\n\nBox.area: fn(self) -> Int {{\n    if self.w > 0 -> self.w else -> 0\n}}\n\nBox.unused: fn(self) -> Int {{\n    if self.w > 1 -> 1 else -> 0\n}}\n")
+    package: "package: {{\n    name: \"fx\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\n"
+    plant(dir, "Tools/fx/leaf/run.jet", "{package}use kit.[leaf, Box]\n\nrun: fn() {{\n    print(leaf(1) + Box{{w: 2}}.area())\n}}\n\nspare: fn(a: Int) -> Int {{\n    if a > 0 && a < 2 -> 1 else -> 0\n}}\n")
+    plant(dir, "Tools/fx/gate/run.jet", "{package}use kit.[heavy]\n\nrun: fn() {{\n    print(heavy(3))\n}}\n")
+    leaf: program(dir, "Tools/fx/leaf/run.jet", .Jet)
+    assert_eq(leaf.paths, ["Tools/fx/leaf/run.jet", "Tools/kit/Source/Big.jet", "Tools/kit/Source/Shape.jet", "Tools/kit/Source/Gate.jet"])
+    assert_eq(proxies(leaf.tokens, .Jet), Proxies{branches: 12, depth: 1})
+    assert_eq(proxies(reached_tokens(leaf, .Jet), .Jet), Proxies{branches: 3, depth: 0})
+    gate: program(dir, "Tools/fx/gate/run.jet", .Jet)
+    assert_eq(proxies(reached_tokens(gate, .Jet), .Jet), Proxies{branches: 6, depth: 1})
+    files.remove_all(dir) ?? ()
+}
+
+#Test("the proxies charge an original the same way: its code that runs, what that names and what a namespace import's member names, never its dead definitions") {
+    dir: work_dir("reached") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/fo/main.mjs", "import * as util from './util.mjs';\nimport {{ used }} from './lib.mjs';\n\nfunction dead(x) {{\n  if (x) {{\n    return 1;\n  }}\n  return x ?? 2;\n}}\n\nfunction live(x) {{\n  return x ? 1 : 2;\n}}\n\nif (process.argv.length > 2) live(used(util.pick(1)));\n")
+    plant(dir, "Tools/fo/util.mjs", "export function pick(x) {{\n  return x || 0;\n}}\n\nexport function other(x) {{\n  return x && 1;\n}}\n")
+    plant(dir, "Tools/fo/lib.mjs", "export function used(x) {{\n  return x ?? 0;\n}}\n\nexport const spare = (y) => y ?? 1;\n")
+    javascript: program(dir, "Tools/fo/main.mjs", .JavaScript)
+    assert_eq(proxies(javascript.tokens, .JavaScript), Proxies{branches: 8, depth: 1})
+    assert_eq(proxies(reached_tokens(javascript, .JavaScript), .JavaScript), Proxies{branches: 4, depth: 0})
+    plant(dir, "Tools/fp/tool.py", "from . import helpers\nfrom .shared import used\n\n\ndef dead(x):\n    if x:\n        return 1\n\n\ndef main():\n    return helpers.pick(used(1))\n\n\nif __name__ == \"__main__\":\n    main()\n")
+    plant(dir, "Tools/fp/helpers.py", "def pick(x):\n    return x or 0\n\n\ndef other(x):\n    return x and 1\n")
+    plant(dir, "Tools/fp/shared.py", "def used(x):\n    if x:\n        return x\n    return 0\n")
+    python: program(dir, "Tools/fp/tool.py", .Python)
+    assert_eq(proxies(python.tokens, .Python), Proxies{branches: 5, depth: 1})
+    assert_eq(proxies(reached_tokens(python, .Python), .Python), Proxies{branches: 3, depth: 1})
+    assert_eq(namespace_aliases("import * as u from './u.mjs';\nimport * as fs from 'node:fs';\n", .JavaScript), ["u"])
+    assert_eq(namespace_aliases("from . import a, b as c\nfrom .x import y\n", .Python), ["a", "c"])
+    assert_eq(namespace_aliases("use {{\n    files: core.files\n    roots: \"Roots\"\n}}\nuse kv: \"Store/kv\"\n", .Jet), ["roots", "kv"])
+    plant(dir, "Tools/fj/run.jet", "use {{\n    util: \"Util\"\n}}\n\nrun: fn() {{\n    print(util.pick(1))\n}}\n")
+    plant(dir, "Tools/fj/Util.jet", "pick: fn(a: Int) -> Int {{\n    if a > 0 -> a else -> 0\n}}\n\nother: fn(a: Int) -> Int {{\n    if a > 1 -> a else -> 1\n}}\n")
+    assert_eq(proxies(reached_tokens(program(dir, "Tools/fj/run.jet", .Jet), .Jet), .Jet), Proxies{branches: 1, depth: 0})
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a name written in a string literal's interpolation reaches its definition on both sides") {
+    assert_eq(tokens("\"a{{b(c)}}d{{{{e{{f}}\"", .Jet)[0].inner, "b(c)\nf")
+    assert_eq(tokens("`a${{b}}` 'c${{d}}'", .JavaScript).map(item -> item.inner), ["b", ""])
+    assert_eq(tokens("f'{{a}}{{{{b}}}}' '{{c}}' \"\"\"{{d}}\"\"\"", .Python).map(item -> item.inner), ["a", "", ""])
+    dir: work_dir("interpolated") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
+    plant(dir, "Tools/kit/Source/Gate.jet", "gate: fn(a: Int) -> Int {{\n    if a > 0 && a < 9 -> 1 else -> 0\n}}\n")
+    plant(dir, "Tools/fx/said/run.jet", "package: {{\n    name: \"fx\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[gate]\n\nrun: fn() {{\n    print(\"{{gate(1)}}\")\n}}\n")
+    assert_eq(proxies(reached_tokens(program(dir, "Tools/fx/said/run.jet", .Jet), .Jet), .Jet), Proxies{branches: 2, depth: 0})
+    plant(dir, "Tools/fo/main.mjs", "import {{ used }} from './lib.mjs';\n\nconsole.log(`${{used(1)}}`);\n")
+    plant(dir, "Tools/fo/lib.mjs", "export function used(x) {{\n  return x ?? 0;\n}}\n")
+    assert_eq(proxies(reached_tokens(program(dir, "Tools/fo/main.mjs", .JavaScript), .JavaScript), .JavaScript), Proxies{branches: 1, depth: 0})
+    plant(dir, "Tools/fp/tool.py", "from .shared import used\n\nprint(f\"{{used(1)}}\")\n")
+    plant(dir, "Tools/fp/shared.py", "def used(x):\n    if x:\n        return x\n    return 0\n")
+    assert_eq(proxies(reached_tokens(program(dir, "Tools/fp/tool.py", .Python), .Python), .Python), Proxies{branches: 1, depth: 1})
+    files.remove_all(dir) ?? ()
+}
+
+// "owner.name/inert" of each top-level definition of `source` read as
+// `language`.
+defined: fn(source: String, language: Language) -> [String] Never! {
+    list: tokens(source, language)
+    definitions(list, 0, list.len(), 0, language).map(item -> "{item.owner}.{item.name}/{item.inert}")
+}
+
+#Test("a top-level definition starts at column 0, past closing brackets, a Python clause and the line after an attribute or decorator") {
+    assert_eq(defined("#Error\nE: struct {{\n    m: String\n}}\n\nuse {{\n    files: core.files\n}}\n\nf: fn() {{}}\n\nBox.g: fn(self) {{}}\n", .Jet), [".E/false", "./true", ".f/false", "Box.g/false"])
+    assert_eq(defined("import x from './x.mjs';\nconst t = {{\n  a: 1,\n}};\nexport async function g() {{\n}}\ntry {{\n  g();\n}} catch {{\n}}\n", .JavaScript), ["./true", ".t/false", ".g/false", "./false"])
+    assert_eq(defined("@dec\ndef f():\n    pass\n\ntry:\n    f()\nexcept E:\n    pass\nX = 1\n", .Python), [".f/false", "./false", ".X/false"])
 }
 
 #Test("a work directory is made under the scratch root, after a dead judge's leftover there is removed") {
