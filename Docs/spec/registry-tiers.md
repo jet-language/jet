@@ -5,7 +5,7 @@ packages. It covers receipts, names, signatures, maintainer liveness, and user
 projections. The executable publish/index paths are
 `Jetpack/Publication/Source/Tier.jet`, `Jetpack/Publication/Source/NamePolicy.jet`,
 `Jetpack/Publication/Source/Index.jet`, `Jetpack/Publication/Source/Policy.jet`,
-and `Compiler/JetCli/Commands/Supply.jet`.
+and `Compiler/JetCli/Source/Cli/Publish.jet`.
 
 ## Core tier
 
@@ -50,7 +50,7 @@ each version, with the fields `signature`, `audit`, `name`, `liveness`, and
 `passed`; `review` is `not-required` for Community. A blocked gate stops the
 publish before artifact or index mutation. The gate computation is in
 `Policy.jet::publication_community_gate_status`, and the publish ordering is
-in `Compiler/JetCli/Commands/Supply.jet`.
+in `Compiler/JetCli/Source/Cli/Publish.jet`.
 
 D-REGCURATE1=C is the owner-ratified Community trust model. The gate is
 fail-closed: a missing required feed, key, name result, or liveness result is
