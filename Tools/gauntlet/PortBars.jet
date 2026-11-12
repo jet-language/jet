@@ -6,7 +6,10 @@
 //   jet Tools/gauntlet/PortBars.jet --measure [--entry NAME] [--repo DIR]
 //
 // `--measure` runs no case: it prints each side's tokens, branches, control
-// nesting depth and files (with each file's tokens) under SOURCE RULES.
+// nesting depth and files (with each file's tokens) under SOURCE RULES. It
+// also measures a gauntlet program entry (no "mode": "tool"): its
+// jet/run.jet against its python/main.py, the pair the c14 token bar
+// compares there.
 //
 // Cases run in `port_bars_judge_<pid>_<ns>` under the scratch root
 // ($JET_SCRATCH_ROOT, else $JET_STATE_ROOT, else Jet's user cache), never on
@@ -1675,7 +1678,14 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
 // The `--measure` rows of entry `name`: for each side its tokens, branches,
 // control nesting depth and files (SOURCE RULES), without running a case.
 measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
-    entry: read_entry(repo, name)
+    entry := read_entry(repo, name)
+    jet_program: "{entry.dir}/jet/run.jet"
+    python_program: "{entry.dir}/python/main.py"
+    if entry.problems.any(problem -> problem.starts_with("it is not a tool entry")) && files.is_file(files.join(repo, jet_program)) && files.is_file(files.join(repo, python_program)) {
+        entry.original = python_program.copy()
+        entry.twin = jet_program.copy()
+        entry.problems = [String]{}
+    }
     if entry.problems.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {entry.problems.join("; ")}"}
     original_text: files.read(files.join(repo, entry.original)) ?? ""
     language: language_of(entry.original, first_line(original_text)) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
@@ -2015,6 +2025,17 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant(dir, "{ENTRIES_ROOT}/{name}/expected/three.out", "3\n")
     if check != "" -> plant(dir, "{ENTRIES_ROOT}/{name}/check.jet", check)
     if review != "" -> plant(dir, "{ENTRIES_ROOT}/{name}/{REVIEW_FILE}", review)
+}
+
+#Test("--measure gives a gauntlet program entry's rows: its jet/run.jet against its python/main.py") {
+    dir: work_dir("measured") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "{ENTRIES_ROOT}/sum/entry.json", "{{\"name\": \"sum\", \"languages\": [\"jet\", \"python\"]}}\n")
+    plant(dir, "{ENTRIES_ROOT}/sum/python/main.py", "print(1 + 2)\n")
+    plant(dir, "{ENTRIES_ROOT}/sum/jet/run.jet", "run: fn() {{ print(1 + 2) }}\n")
+    plant(dir, "{ENTRIES_ROOT}/lone/entry.json", "{{\"name\": \"lone\"}}\n")
+    assert_eq(measure_lines(dir, "sum").map(line -> line.split("\t").take(3).to_list().join(" ")), ["sum original 6", "sum jet 13"])
+    assert(measure_lines(dir, "lone")[0].contains("not a tool entry"))
+    files.remove_all(dir) ?? ()
 }
 
 #Test("a planted entry that wins every bar passes, as do a named token gap and a job its check proves, and each planted loss fails its bar alone") {
