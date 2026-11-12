@@ -48,6 +48,7 @@ use {
         sema_comptime_failure_closure_settle,
         check_pure_program_root,
         sema_check_comptime_item,
+        sema_comptime_body_unfoldable,
         sema_comptime_call_facts_impurity,
         sema_comptime_codec_methods,
         SemaCallSiteFact,
@@ -879,8 +880,9 @@ JetDriverComptimeFunctionClosure: struct {
     complete: Bool
     // Each incomplete reachable function's recorded causes (its function key).
     incomplete: [SemaTotalityRow]{[SemaTotalityRow]{}}
-    // Why the call sites of the reachable functions keep the evaluation from
-    // running while building (sema_comptime_call_facts_impurity), or None.
+    // Why the reachable functions keep the evaluation from running while
+    // building: an impure call site (sema_comptime_call_facts_impurity) or a
+    // body that can't be baked in (sema_comptime_body_unfoldable), or None.
     impurity: String?{None}
     // The foreign functions the closure reaches, which no check reads as Jet
     // (SemaComptimeFunctionResult.foreign): a call of one stops the run.
@@ -979,8 +981,13 @@ jet_driver_comptime_function_closure: fn(
     values: [SemaComptimeItemValue],
     checked_functions: &[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
-    // A module value's closure also records why it is impure, if it is.
+    // A module value's closure also records why it is impure, if it is: an
+    // impure call, or a body that takes a raw address or makes a pointer
+    // (sema_comptime_body_unfoldable).
     module_value: Bool,
+    // A local value's closure also refuses `#Unsafe` code: it falls back to
+    // run time quietly, where a refused module value fails the build.
+    local_value: Bool,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFunctionClosure {
     graph_option: program.registration_graph
@@ -1043,6 +1050,7 @@ jet_driver_comptime_function_closure: fn(
                     complete = false
                     next
                 }
+                if module_value && impurity == None -> impurity = sema_comptime_body_unfoldable(function, local_value)
                 defaults := [Int]{}
                 loop parameter in function.params {
                     if parameter.default == Val(value) -> defaults.push(value)
@@ -1378,9 +1386,10 @@ jet_driver_comptime_item_value: fn(source: SemaComptimeItemSource, value: TCompt
 // value (#4276). It is computed while building, and nothing computes it
 // later: no code runs before `run`. Effects never run while building: an
 // item whose own or closure call sites are impure
-// (sema_comptime_call_facts_impurity) is refused untried. So is one whose
-// check fails under compile-time execution, whose code the IR builder
-// refuses, or whose evaluation traps, fails or spends its budget
+// (sema_comptime_call_facts_impurity), or whose closure takes a raw address
+// or makes a pointer (sema_comptime_body_unfoldable), is refused untried. So
+// is one whose check fails under compile-time execution, whose code the IR
+// builder refuses, or whose evaluation traps, fails or spends its budget
 // (jet_driver_module_value_refused).
 
 // A module value refused while building, and why.
@@ -2315,7 +2324,7 @@ jet_driver_comptime_run: fn(
                 checked_mark := checked_functions.len()
                 closure_diagnostic_start: diagnostics.len()
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
-                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, diagnostics)
+                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
