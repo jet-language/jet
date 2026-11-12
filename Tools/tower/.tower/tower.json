@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6764,
-    "rev": 99853,
+    "rev": 99854,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55409,12 +55409,12 @@
         },
         {
           "n": 15,
-          "text": "First criterion for building D-CONTEXT-EFFECT1=F (ratified 2026-11-12): a dated cross-family adversarial review in Docs/audits attacks F's claims (determinism in arguments plus context, #Memo keying on reached context fields, the C-callback rule, and what dropping the package deny gives up) against code and probes, and ends with a holds verdict; every gap it finds is on a card.",
+          "text": "First criterion for building D-CONTEXT-EFFECT1=F (ratified 2026-11-12): a dated adversarial review in Docs/audits, by a reviewer other than F's author, attacks F's claims (determinism in arguments plus context, #Memo keying on reached context fields, the C-callback rule, and what dropping the package deny gives up) against code and probes, and ends with a holds verdict; every gap it finds is on a card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T02:21:37.559Z"
+          "at": "2026-11-12T07:23:47.976Z"
         }
       ],
       "refs": [
@@ -55432,7 +55432,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T02:21:38.396Z",
+      "updated": "2026-11-12T07:23:47.976Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -94926,96 +94926,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 3,
       "completedAt": "2026-11-10T01:33:15.249Z"
-    },
-    {
-      "id": "c0esaekb",
-      "num": 6691,
-      "title": "No C: a Jet DNS resolver replaces getaddrinfo",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nHostNetResolver.jet imports getaddrinfo, freeaddrinfo and gai_strerror. Replace them with a Jet resolver that reads /etc/hosts, /etc/resolv.conf (nameserver, search, ndots, timeout, attempts, rotate) and /etc/nsswitch.conf's hosts line, queries over UDP with TCP fallback on truncation, and orders A and AAAA answers by RFC 6724 the way getaddrinfo does. Go's pure resolver is the reference for scope.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Closing. All 3 criteria are met by LangLead-1/2 (e871c0dd31, c832044bb0), which landed in b6d. The batch ran the SUB tests with the b6d-built compiler and all passed: the 4 system_resolver/credentials cases, the imports.list check, and nm of jet_runtime_jet.o plus jet_runtime.pack.o showing no getaddrinfo/freeaddrinfo/gai_strerror/getnameinfo."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "SchedLead-6 (dev a796b483ee) landed the Jet resolver, and getaddrinfo is no longer used. Its cards file claims c1-c3; LangLead is hardening it (hostile packets, Go pure-resolver semantics). The criteria wait for that proof."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (Q14): Go resolver semantics, not exact musl getaddrinfo. Owner words: \"yes, go with go. We want pareto behavior, what is correct and the best method for the majority of situations. more advanced behavior and apis can be built for experts beyond that.\" c2 reworded."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 correction: musl never reads /etc/nsswitch.conf, so the keep-behavior criterion means the Jet resolver does not read it either. The body text \"nsswitch.conf hosts line\" was wrong. The resolver matches musl 1.2.6 getaddrinfo exactly: search-list failure aborts with EAI_AGAIN or EAI_NODATA, both A and AAAA must answer, the default nameserver is 127.0.0.1, results are RFC 6724 sorted. A switch to Go-style semantics (continue the search on a candidate failure, keep A answers when AAAA times out) is an owner question."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: SchedLead, after #6690."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "HostNetResolver.jet imports nothing from C, and the runtime object asks libc for no resolver symbol.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "c832044bb0 (LangLead-2). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47).",
-          "at": "2026-11-09T06:57:17.924Z"
-        },
-        {
-          "n": 2,
-          "text": "For localhost, names in /etc/hosts, numeric hosts, a local test DNS server (A, AAAA, CNAME, NXDOMAIN, SERVFAIL, truncation then TCP, timeout) and search domains, the Jet resolver follows Go pure-resolver semantics (owner ruling 2026-11-08): a failed search candidate (timeout, SERVFAIL, NODATA) moves on to the next candidate, and when A answers but AAAA fails or times out the A answers are returned. Addresses come back in RFC 6724 order with the error kinds core.net already defines; every difference from musl getaddrinfo is listed in the case file and case-tested.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "e871c0dd31 (LangLead-1). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47).",
-          "at": "2026-11-09T06:57:16.734Z"
-        },
-        {
-          "n": 3,
-          "text": "Resolution runs on the scheduler without blocking a carrier.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "c832044bb0 (LangLead-2). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47).",
-          "at": "2026-11-09T06:57:18.845Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:47:02.773Z",
-      "updated": "2026-11-09T07:22:48.306Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-09T07:22:48.306Z"
     },
     {
       "id": "c0hzvj2s",
@@ -199839,6 +199749,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T07:23:47.976Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#15: Owner ruling 2026-11-12: a review only needs a reviewer other than the author, not a different model family.; was: First criterion for building D-CONTEXT-EFFECT1=F (ratified 2026-11-12): a dated cross-family adversarial review in Docs/audits attacks F's claims (determinism in arguments plus context, #Memo keying o"
+    },
     {
       "at": "2026-11-12T07:22:33.474Z",
       "by": "Main",
