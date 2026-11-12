@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100075,
+    "rev": 100077,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62154,6 +62154,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "c2 items 1-4 are proved by G3Core-t1b (7dfa3007a5, PASS 1 each); item 5 (files.map(p).path ICE) is still open with G12Docs-4. c10 items b and c pass as fallback_break_keeps_later_locals_in_scope_on_every_tier and equality_with_a_constant_payload_compares_on_every_tier."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "G3Core-t1 (tests only, direct land) map from G12Docs-4. c2, the #4721 CliSeams1 items: 1 resource_returned_from_a_temporary_result_match_stays_open_on_every_tier; 2 advisory_lock_closes_through_a_moved_value_on_every_tier; 3 borrowed_file_writer_writes_through_a_fallible_function_on_every_tier; 4 optional_success_result_fallback_agrees_across_execution_tiers. Item 5 (MappedFile path field) still fails on seed-b13: files.map(p).path is an ICE, \"ir.build unlowered: field of core.files.MappedFile\", at O0/O1/O2, so c2 stays open until G12Docs-4 lands that fix. c3: the bare_none case covers a bare None returned from a T? E! function. `?? None` refused on T? E! is the spec rule (spec.md:1408-1412, ?? yields the innermost payload and its right side must be that payload), not this bug. c35 is covered by the recursion-stop case."
         },
         {
@@ -62572,11 +62577,11 @@
         {
           "n": 35,
           "text": "(was #1897 c1) The recursion probe prints a registered Jet stop that names the recursing function and source line, exit 70, on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: probe p1897_stack_overflow o0=70 o1=70 o2=70]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:14.772Z"
+          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13): jet test Compiler --profile cases --filter unbounded_recursion_stops_naming_the_function_and_line_on_every_tier PASS 1. The case runs the recursion probe on O0, O1 and O2 and asserts exit 70 and a registered stop naming the recursing function and its source line. 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
+          "at": "2026-11-12T20:06:54.711Z"
         },
         {
           "n": 37,
@@ -62614,7 +62619,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-12T20:06:53.222Z",
+      "updated": "2026-11-12T20:06:55.721Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -199912,6 +199917,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T20:06:55.721Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T20:06:54.711Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#35"
+    },
     {
       "at": "2026-11-12T20:06:53.222Z",
       "by": "Main",
