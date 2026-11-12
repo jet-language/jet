@@ -1,0 +1,14 @@
+// Box<T> is laid out at T = core.time Duration, a Core struct this source
+// never spells: the call result brings it, and its declaration comes along.
+use {
+    core.time
+}
+
+Box: struct<T> { value: T }
+
+wrap: fn<T>(value: T) -> Box<T> { {value: value} }
+
+run: fn() {
+    held: wrap(time.duration_seconds(90))
+    print(held.value)
+}

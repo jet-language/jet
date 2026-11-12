@@ -7,6 +7,25 @@ CORE_ENUM_ROWS: comptime { core_enum_rows(CORE_DECLARATIONS) }
 // Source-owned Core nominals (`source_module … types { … }`) in Core.jet order.
 CORE_SOURCE_OWNED_TYPES: comptime { core_source_owned_types(CORE_DECLARATIONS) }
 
+// One Core module a builtin record's layout needs loaded. A builtin record
+// (a CORE_RECORD_FIELD_ROWS owner) whose field names a Core struct is laid
+// out from that struct's declaration, so the struct's module (`module_name`)
+// loads whenever the record's owner does: `owner_module` is the Core module
+// that declares the owner, or "" for the compiler's own records (TypeInfo,
+// FieldInfo, …), which every program has. A Core enum needs no source (its
+// variants are CORE_ENUM_ROWS), and a function type holds no layout of its
+// parameters.
+CoreRecordSourceDemand: struct {
+    owner_module: String
+    type_name: String
+    module_name: String
+}
+
+// The Core modules builtin record layouts need, one row per owner module and
+// struct (`TypeInfo.location: SourceLocation?` makes {"", SourceLocation,
+// core.prelude}).
+CORE_RECORD_SOURCE_DEMANDS: comptime { core_record_source_demands(CORE_DECLARATIONS, CORE_RECORD_FIELD_ROWS) }
+
 core_enum_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
     rows := [CoreModuleTypeExport]{}
     seen := [String: String]{}
@@ -28,4 +47,72 @@ core_source_owned_types: fn(declared: CoreDeclarations) -> [CoreSourceOwnedType]
         loop owned in source.owned_types -> rows.push(CoreSourceOwnedType{path: source.path.copy(), name: owned.copy()})
     }
     rows
+}
+
+core_record_source_demands: fn(declared: CoreDeclarations, rows: [CoreRecordFieldRow]) -> [CoreRecordSourceDemand] Never! {
+    // Each Core type's declaring module: the source module that owns it, else
+    // the first module line that exports it. An enum maps to "".
+    modules := [String: String]{}
+    loop source in declared.source_rows {
+        loop owned in source.owned_types {
+            if modules.get(owned) == None -> modules[owned.copy()] = source.module_name.copy()
+        }
+    }
+    loop entry in declared.modules {
+        loop leaf in entry.types {
+            if leaf.generic_arity == 0 && leaf.variants.len() > 0 {
+                modules[leaf.name.copy()] = ""
+            } else if modules.get(leaf.name) == None {
+                modules[leaf.name.copy()] = entry.name.copy()
+            }
+        }
+    }
+    demands := [CoreRecordSourceDemand]{}
+    seen := [String: Bool]{}
+    loop row in rows {
+        owner_module: modules.get(row.owner) ?? ""
+        names := [String]{}
+        core_record_layout_names(row.ty, names)
+        loop name in names {
+            module_name: modules.get(name) ?? ""
+            key: "{owner_module} {name}"
+            if module_name == "" || module_name == owner_module || seen.get(key) != None -> next
+            seen[key] = true
+            demands.push(CoreRecordSourceDemand{owner_module: owner_module.copy(), type_name: name.copy(), module_name: module_name.copy()})
+        }
+    }
+    demands
+}
+
+// The nominal names a value of `ty` holds in its layout.
+core_record_layout_names: fn(ty: Type, names: &[String]) Never! {
+    if ty == {
+        .Named(name) -> names.push(name.copy())
+        .Apply(name, args) -> {
+            names.push(name.copy())
+            loop arg in args -> core_record_layout_names(arg, names)
+        }
+        .List(element) -> core_record_layout_names(element, names)
+        .Map(key, _, value) -> {
+            core_record_layout_names(key, names)
+            core_record_layout_names(value, names)
+        }
+        .Shared(inner) -> core_record_layout_names(inner, names)
+        .Option(inner) -> core_record_layout_names(inner, names)
+        .Result(ok, err) -> {
+            core_record_layout_names(ok, names)
+            core_record_layout_names(err, names)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> core_record_layout_names(field.ty, names)
+        }
+        .FixedList(elem, _) -> core_record_layout_names(elem, names)
+        .InlineRange(base, _, _) -> core_record_layout_names(base, names)
+        .Tagged(_, inner) -> core_record_layout_names(inner, names)
+        .Union(members) -> {
+            loop member in members -> core_record_layout_names(member, names)
+        }
+        .Quantity(base, _) -> core_record_layout_names(base, names)
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
 }

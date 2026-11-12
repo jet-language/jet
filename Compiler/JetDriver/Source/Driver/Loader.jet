@@ -11,6 +11,7 @@ use {
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
+        CORE_RECORD_SOURCE_DEMANDS,
         BOUNDARY_TYPED_HEADS,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -5075,6 +5076,26 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                         queued[index] = true
                         pending.push(index)
                     }
+                }
+            }
+        }
+        // A builtin record is laid out from the declaration of each Core
+        // struct its fields hold (CORE_RECORD_SOURCE_DEMANDS), so that
+        // struct's module loads with the record's owner, and the struct stays
+        // reached: the compiler's own records (TypeInfo's `location` is a
+        // SourceLocation) with every program, a Core module's records with
+        // that module.
+        record_owner: if is_core -> unit.module_name.copy() else -> ""
+        loop record_demand in CORE_RECORD_SOURCE_DEMANDS {
+            if record_demand.owner_module != record_owner -> next
+            record_word: jet_driver_reach_word(reach, record_demand.type_name)
+            jet_driver_reach_global(reach, record_word)
+            if !bare_modules.contains(record_demand.module_name) -> bare_modules.push(record_demand.module_name.copy())
+            record_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, record_demand.module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if record_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    pending.push(index)
                 }
             }
         }
