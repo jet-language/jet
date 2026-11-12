@@ -1,0 +1,23 @@
+# #4276 c68 (D-BUILD-IO1=A): compile-time IO answers to the same effect rows and package policy as
+# the running program. The package trusts by default (`trust: { default: allow }`) and denies Net;
+# one helper that reaches Net is refused in `run`, in `build: fn` and in itself with the same E0749,
+# and neither a command-line grant, `-A` nor an open impure gate lifts the deny.
+fixture: fixtures/trust_default_keeps_the_package_deny
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build
+exit: 1
+stderr: ~ "`build` reaches the `Net` effect, which the package denies with `authority: { deny: [Net] }`" # the build entry
+stderr: ~ "`run` reaches the `Net` effect, which the package denies with `authority: { deny: [Net] }`" # the running program, same words
+stderr: ~ "`port_is_free` reaches the `Net` effect, which the package denies with `authority: { deny: [Net] }`" # the shared helper
+stderr: ~ "3 problems found" # every refusal in one run
+step: jet build --allow=Net --gate impure=allow
+exit: 1
+stderr: ~ "`build` reaches the `Net` effect, which the package denies with `authority: { deny: [Net] }`" # a command-line grant and the impure gate keep the deny
+stderr: ~ "3 problems found" # every refusal in one run
+step: jet run -A app.jet
+exit: 1
+stdout: empty
+stderr: ~ "`run` reaches the `Net` effect, which the package denies with `authority: { deny: [Net] }`" # -A keeps the deny
+stderr: ~ "3 problems found" # every refusal in one run
+file: .jet/build/app absent
