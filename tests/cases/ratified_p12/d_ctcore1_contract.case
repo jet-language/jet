@@ -1,0 +1,34 @@
+# D-CTCORE1 (#4276 c2): what runs while compiling follows the effect model, not
+# a list of allowed functions. Pure code runs: a user function and Core text
+# methods. A recorded input runs: `embed_file` reads the file, at module level
+# or in a function, and the build locks each file's SHA-256. Code with an
+# effect runs only inside `#Impure` and only under `--gate impure=allow`;
+# outside `#Impure` the call is E3410, and without the gate it is E3411.
+fixture: d_ctcore1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step pure: jet build main.jet
+exit: 0
+file: .jet/lock ~ "[[comptime_inputs]]\npath = \"banner.txt\"\nhash = \"sha256:40807242b4039405bcaf2335ed972e318396aa11da07235040637a7a4f85a4d5\"\n" # sha256("recorded banner\n")
+file: .jet/lock ~ "[[comptime_inputs]]\npath = \"note.txt\"\nhash = \"sha256:43e6d0d1e00c7c989a85859d5cf3500b0b97d4a604c7adae1fa93764a7918f93\"\n" # sha256("read in a function\n")
+step: {work}/.jet/build/main
+exit: 0
+stdout: = "META! 3\nrecorded banner / read in a function\n"
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "META! 3\nrecorded banner / read in a function\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "META! 3\nrecorded banner / read in a function\n"
+step effect: jet check effect/main.jet
+exit: 1
+stderr: ~ "`greeting()` is a Tier-2 comptime effect" # the effect row refuses the helper
+stderr: ~ ":12:9" # at the call
+stderr: ~ "jet-lang.dev/e/E3410" # one registered code
+step closed: jet run impure/main.jet
+exit: 1
+stderr: ~ "but `--gate impure=allow` was not passed" # `#Impure` alone does not open the gate
+stderr: ~ "jet-lang.dev/e/E3411" # one registered code
+step open: jet run --gate impure=allow impure/main.jet
+exit: 0
+stdout: = "hello from the file\nhello from the file\n"

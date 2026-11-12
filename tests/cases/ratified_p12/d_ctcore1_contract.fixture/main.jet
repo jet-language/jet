@@ -1,0 +1,20 @@
+// D-CTCORE1: what runs while compiling follows the effect model, with no
+// list of allowed functions. Pure code runs: a user function and Core text
+// methods. A recorded input runs: `embed_file` reads the file and the build
+// locks its SHA-256.
+shout: fn(word: String) -> String {
+    "{word.to_upper()}!"
+}
+
+BANNER: #run { embed_file("banner.txt") }
+
+run: fn() {
+    pure: #run {
+        "{shout("meta")} {"meta,core,effects".split(",").len()}"
+    }
+    print(pure)
+    recorded: #run {
+        embed_file("note.txt").trim()
+    }
+    print("{BANNER.trim()} / {recorded}")
+}

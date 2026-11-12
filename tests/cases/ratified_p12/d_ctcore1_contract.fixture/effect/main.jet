@@ -1,0 +1,15 @@
+// D-CTCORE1: outside `#Impure`, the effect row decides. A helper that reads a
+// file is not eligible while compiling, and the refusal names the call.
+use files: core.files
+
+greeting: fn(path: String) -[FS.Read]> String {
+    text: files.read(path) ?? return "can't read {path}: {err}"
+    text.trim()
+}
+
+run: fn() {
+    read: #run {
+        greeting("greeting.txt")
+    }
+    print(read)
+}

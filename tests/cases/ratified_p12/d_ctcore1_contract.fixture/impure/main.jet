@@ -1,0 +1,19 @@
+// D-CTCORE1, the third tier: code with an effect runs while compiling only
+// inside `#Impure`, and only under `--gate impure=allow`. The helper is the
+// one the running program calls.
+use files: core.files
+
+greeting: fn(path: String) -[FS.Read]> String {
+    text: files.read(path) ?? return "can't read {path}: {err}"
+    text.trim()
+}
+
+run: fn() {
+    #Impure("read the greeting while building") {
+        read: #run {
+            greeting("greeting.txt")
+        }
+        print(read)
+    }
+    print(greeting("greeting.txt"))
+}
