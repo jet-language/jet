@@ -50,6 +50,7 @@ use {
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
         os_page_round,
+        x64_comptime_admit,
         x64_comptime_close,
         x64_comptime_code,
         x64_comptime_frame,
@@ -157,12 +158,14 @@ JetEvalIRState: struct {
     eval_entry: Bool
     // config.impure: a Tier-2 effect of an item inside `#Impure` is refused
     // for the missing invocation gate (E3411); config.impure_gate: the gate
-    // was opened.
+    // was opened, so the child admits the file calls the item makes
+    // (jet_eval_native_admit).
     impure: Bool
     impure_gate: Bool
-    // The `#Impure` Core calls of a build invocation now running (the host
-    // marks Impure.enter and Impure.leave, IRProgram.invocation): a system
-    // call refused inside one is refused as `impure` refuses it.
+    // The `#Impure` calls of a build invocation now running (the host marks
+    // Impure.enter and Impure.leave, IRProgram.invocation): the child admits
+    // their file calls under the gate, and a system call refused inside one
+    // is refused as `impure` refuses it.
     impure_sites: Int{0}
     // config.effect_call: the call a refused system call is named by.
     effect_call: String?{None}
@@ -618,7 +621,9 @@ jet_eval_native_call: fn(s: &JetEvalIRState, program: JetEvalNativeProgram, item
     operands.extend(words)
     s.child.budget = s.budget
     s.child.exhausted = false
-    if !jet_eval_native_command(s, X64_COMPTIME_CALL, operands, [U8]{}) {
+    // A stop above an admitted block left the child admitting: each call
+    // starts as its item admits.
+    if !jet_eval_native_admit(s) || !jet_eval_native_command(s, X64_COMPTIME_CALL, operands, [U8]{}) {
         jet_eval_native_ended(s)
         return None
     }
@@ -821,7 +826,7 @@ jet_eval_ir_effect_refused: fn(s: &JetEvalIRState, what: String, nondeterministi
     }
     impure: s.impure || s.impure_sites > 0
     if impure && s.impure_gate {
-        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect, which compile-time evaluation does not run", "`--gate impure=allow` opens the gate, but the compile-time evaluator performs no host effect", "keep the call at runtime"))
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect the compile-time child doesn't admit", "`--gate impure=allow` admits the file system calls of an `#Impure` block, which run natively as they do at run time; other host effects stay refused", "keep the call at runtime"))
         return
     }
     if impure {
@@ -1022,6 +1027,15 @@ jet_eval_ir_host_alloc: fn(s: &JetEvalIRState, bytes: Int) -> Int? {
 jet_eval_native_command: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payload: [U8]) -> Bool {
     jet_eval_native_forget(s)
     x64_comptime_send(s.child, x64_comptime_frame(kind, operands), payload)
+}
+
+// Opens the child's admission of file calls while the code it runs is an
+// `#Impure` item or block under `--gate impure=allow`, and closes it
+// otherwise: an admitted file call runs natively, as the same call does at
+// run time. Sema checked the block's authority, so a denied effect never
+// reaches the child. False once the child is gone.
+jet_eval_native_admit: fn(s: &JetEvalIRState) -> Bool {
+    x64_comptime_admit(s.child, open: s.impure_gate && !s.eval_entry && (s.impure || s.impure_sites > 0))
 }
 
 jet_eval_native_forget: fn(s: &JetEvalIRState) {

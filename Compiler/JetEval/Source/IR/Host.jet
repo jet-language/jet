@@ -73,18 +73,22 @@ jet_eval_ir_host_arguments: fn(s: &JetEvalIRState, params: [Int], args: [TCompti
 jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
     if args.len() < 4 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_host_method")
     member: jet_eval_ir_text(s, args[0]) ?? return None
-    // A build invocation's Core call inside an `#Impure` block runs between
-    // the marks Impure.enter and Impure.leave (IRProgram.invocation): a
-    // system call the child's filter refuses in between is that block's
-    // Tier-2 effect. Impure.refuse:<what> names one such effect that makes
-    // no system call, refused as it is reached. A compile-time value's call
-    // that reads ambient state with no system call is refused as it is
-    // reached too, by the item's effectful call (s.effect_call) when sema
-    // found one, else by what it reads: Comptime.refuse:<what> as a Tier-2
-    // effect, Comptime.nondeterministic:<what> as non-deterministic.
+    // A build invocation's call inside an `#Impure` block runs between the
+    // marks Impure.enter and Impure.leave (IRProgram.invocation): under
+    // `--gate impure=allow` the child admits its file calls in between
+    // (jet_eval_native_admit), and a system call the child's filter refuses
+    // there is that block's Tier-2 effect. Impure.refuse:<what> names one
+    // such effect that makes no system call, refused as it is reached. A
+    // compile-time value's call that reads ambient state with no system call
+    // is refused as it is reached too, by the item's effectful call
+    // (s.effect_call) when sema found one, else by what it reads:
+    // Comptime.refuse:<what> as a Tier-2 effect,
+    // Comptime.nondeterministic:<what> as non-deterministic.
     if member == "Impure.enter" || member == "Impure.leave" {
         s.impure_sites += if member == "Impure.enter" -> 1 else -> -1
-        return Val(0)
+        if jet_eval_native_admit(s) -> return Val(0)
+        jet_eval_native_ended(s)
+        return None
     }
     if member.starts_with("Impure.refuse:") {
         jet_eval_ir_effect_refused(s, member.removeprefix("Impure.refuse:"), false)

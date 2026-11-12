@@ -5376,7 +5376,8 @@ ir_reflect_literal: fn(p: IRProgram, b: IRBuilder, node: Int) -> String Never! {
 
 // A Core call: its checked arguments to the record's runtime route. In a
 // build invocation an `#Impure` block's Core call runs between the host marks
-// Impure.enter and Impure.leave (IRProgram.invocation).
+// Impure.enter and Impure.leave (IRProgram.invocation), as its function
+// calls do (ir_call_row_emit).
 ir_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     if !p.invocation || b.impure == 0 -> return ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, span)
     _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)

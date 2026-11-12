@@ -28,6 +28,12 @@ X64ComptimeChild: struct {
     // The wait status once the child ended, else -1.
     status: Int{-1}
     failure: String{""}
+    // The spawn's random cookie, which the child's refusal handler passes
+    // when it reissues a call of an admitted `#Impure` block
+    // (x64_comptime_admit_block), and whether the child admits them now
+    // (ADMIT).
+    cookie: Int{0}
+    admitted: Bool{false}
 }
 
 // Starts the static executable `image` (Image/Loader.jet) in a child and
@@ -97,11 +103,23 @@ x64_comptime_spawn: fn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChi
 }
 
 // The entry table's first word is the refusal handler. Installs the child's
-// seccomp program; `stdout` admits its standard output.
+// seccomp program; `stdout` admits its standard output. The program holds a
+// fresh random cookie the child keeps for its admitted calls.
 x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
-    program: x64_comptime_filter(stdout)
+    loop child.cookie == 0 {
+        filled := 0
+        #Unsafe("getrandom fills the first word of our scratch page") {
+            filled = os_syscall(OS_SYS_GETRANDOM, child.scratch, 8, 0, 0, 0, 0)
+        }
+        if filled != 8 {
+            child.failure = "the comptime child's cookie can't be drawn ({-filled})"
+            return false
+        }
+        #Unsafe("getrandom wrote the scratch page's first word") { child.cookie = os_load_word(child.scratch) }
+    }
+    program: x64_comptime_filter(stdout, child.cookie)
     handler: child.entries[0]
-    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len()}), program) -> return false
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len(), child.cookie}), program) -> return false
     done: x64_comptime_receive(child) ?? return false
     loop index in 1..<4 {
         result: x64_comptime_word(done, 8 * index)
@@ -111,6 +129,14 @@ x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
         }
     }
     true
+}
+
+// Opens (`open: true`) or closes the child's admission of the file calls an
+// `#Impure` block makes; the child answers nothing.
+x64_comptime_admit: fn(child: &X64ComptimeChild, open: Bool{false}) -> Bool {
+    if child.admitted == open -> return true
+    child.admitted = open
+    x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_ADMIT, [Int]{if open -> 1 else -> 0}), [U8]{})
 }
 
 // What the child left behind when it ended `when`.

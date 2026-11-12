@@ -168,7 +168,12 @@ run: fn() {
 A runtime-only statement inside `#Impure` is an ordinary runtime block; it does
 not exercise a Tier 2 compile-time effect and does not by itself require
 `--gate impure=allow`. The compile-time `fs.read` above requires both the
-source gate and `--gate impure=allow` (E3410, E3411). The `#Impure` marker is a
+source gate and `--gate impure=allow` (E3410, E3411). With both, the call runs
+natively in the compile-time child, as the same call runs in the program: the
+child admits the file system calls of the `#Impure` block and of the functions
+it calls, and every other host effect stays refused. The block's authority is
+checked first, so an effect the package or the row denies is E0749 at build
+and at run alike. The `#Impure` marker is a
 gate, not a blanket host permission. Keep declarations, grants, and resulting
 inputs in the package and lock records rather than relying on ambient process
 state. The executable policy is defined at the compiler boundary; the

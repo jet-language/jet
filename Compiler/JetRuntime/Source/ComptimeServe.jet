@@ -14,10 +14,12 @@
 // length) -> the raw bytes; 3 WRITE(address, length) + bytes; 4 ALLOC(size,
 // align) -> DONE(pointer); 5 TEXT(length) + bytes -> DONE(String);
 // 6 INT(length) + decimal bytes -> DONE(Int); 7 RETURN(word) answers the
-// innermost host request; 8 EXIT; 9 FILTER(handler, length) + BPF program
-// -> DONE(sigaction, prctl, seccomp results); 10 MAP(address, length) ->
-// DONE(mmap result): fresh read-write pages exactly there; 11
-// PROTECT(address, length, protection) -> DONE(mprotect result).
+// innermost host request; 8 EXIT; 9 FILTER(handler, length, cookie) + BPF
+// program -> DONE(sigaction, prctl, seccomp results); 10 MAP(address,
+// length) -> DONE(mmap result): fresh read-write pages exactly there; 11
+// PROTECT(address, length, protection) -> DONE(mprotect result); 12
+// ADMIT(flag): the refusal handler reissues a trapped call while the flag is
+// set (an admitted `#Impure` block), with no reply.
 // Replies: 0 HELLO(count) + count entry words; 1 DONE(words); 2 HOST(kind,
 // operands, count, result area); 3 STOP(kind, words); 4 REFUSED(system
 // call, first argument).
@@ -26,6 +28,14 @@
 comptime_serve_root := I64{0}
 
 comptime_serving: fn() -> Bool { comptime_serve_root != I64{0} }
+
+// The filter's cookie (FILTER), and whether the compiler admits the calls
+// the code now running makes (ADMIT): the refusal handler then reissues a
+// trapped call with the cookie as its sixth argument, which the filter
+// allows for a file call (JetBackend ComptimeWire.jet
+// x64_comptime_admit_block).
+comptime_serve_cookie := I64{0}
+comptime_serve_admitted := I64{0}
 
 comptime_serve_move: fn(fd: I64, number: I64, address: I64, count: I64) {
     at := I64{0}
@@ -74,15 +84,19 @@ comptime_serve_value: fn(kind: I64, length: I64) -> I64 {
 // Installs the SIGSYS handler `handler` (the object's
 // __jet_comptime_refused) and then the compiler's seccomp program of
 // `length` bytes: a refused system call traps to the handler instead of
-// reaching the host.
-comptime_serve_filter: fn(frame: I64, handler: I64, length: I64) {
+// reaching the host. `cookie` marks the handler's reissued calls.
+comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64) {
+    #Unsafe("the filter is installed once, on the image's only thread, before any call it traps") {
+        comptime_serve_cookie = cookie
+    }
     program: jet_rt_alloc(if (length < I64{8}) -> I64{8} else -> length, I64{8})
     comptime_serve_receive(program, length)
     action: jet_rt_alloc(I64{32}, I64{8})
-    // SA_SIGINFO | SA_RESTORER; the handler never returns, so its restorer never runs.
+    // SA_SIGINFO | SA_RESTORER; a handler that answered an admitted call
+    // returns through the runtime's rt_sigreturn rail.
     trap_store(action, handler)
     trap_store(wrapping(action + I64{8}), I64{67108868})
-    trap_store(wrapping(action + I64{16}), handler)
+    trap_store(wrapping(action + I64{16}), rt_process_signal_restore_address())
     trap_store(wrapping(action + I64{24}), I64{0})
     installed: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
     private: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -144,7 +158,7 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
         }
         if (kind == I64{7}) -> return a
         if (kind == I64{9}) {
-            comptime_serve_filter(frame, a, b)
+            comptime_serve_filter(frame, a, b, c)
             next
         }
         if (kind == I64{10}) {
@@ -154,6 +168,12 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
         }
         if (kind == I64{11}) {
             comptime_serve_reply(frame, I64{1}, trap_syscall(I64{10}, a, b, c, I64{0}, I64{0}, I64{0}), I64{0}, I64{0}, I64{0})
+            next
+        }
+        if (kind == I64{12}) {
+            #Unsafe("the compiler admits between calls of the one thread it drives; the handler only reads the flag") {
+                comptime_serve_admitted = a
+            }
             next
         }
         // EXIT, or a frame no compiler sends.
@@ -225,11 +245,21 @@ comptime_serve_stop_code := I64{0}
 }
 
 // The SIGSYS handler's body: system call `si_syscall` (siginfo + 24) with
-// first argument rdi (ucontext gregs[8], + 104) is refused. Allocation may
-// be mid-flight, so the frame is a fresh mapping.
+// its arguments in ucontext gregs (rdi + 104, rsi + 112, rdx + 136, r10 +
+// 56, r8 + 40) trapped. Inside an admitted `#Impure` block the handler
+// reissues it with the cookie; a file call the filter allows answers in rax
+// (+ 144) and the code resumes after its `syscall`. Any other call is
+// refused: allocation may be mid-flight, so the frame is a fresh mapping.
 #Export(c) jet_rt_comptime_refused: fn(info: I64, context: I64) {
     number: trap_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
     first: trap_word(wrapping(context + I64{104}))
+    if (comptime_serve_admitted != I64{0}) {
+        result: trap_syscall(number, first, trap_word(wrapping(context + I64{112})), trap_word(wrapping(context + I64{136})), trap_word(wrapping(context + I64{56})), trap_word(wrapping(context + I64{40})), comptime_serve_cookie)
+        if (result != I64{-4095}) {
+            trap_store(wrapping(context + I64{144}), result)
+            return
+        }
+    }
     frame: trap_syscall(I64{9}, I64{0}, I64{4096}, I64{3}, I64{34}, I64{-1}, I64{0})
     if (frame > I64{0}) -> comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0})
     trap_defect_exit(I64{0})

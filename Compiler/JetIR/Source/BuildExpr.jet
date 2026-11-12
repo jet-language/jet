@@ -3622,8 +3622,18 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
         // it borrows from its receiver or an argument (IRBuilder.lent).
         if p.functions[row].return_view_provenance != None -> b.lent[dst] = true
     }
+    // A build invocation's call inside an `#Impure` block runs between the
+    // host marks, as a Core call does (ir_core_call): the file calls it makes
+    // anywhere below are that block's.
+    bracketed: p.invocation && b.impure > 0
+    if bracketed {
+        _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
+    }
     start: ir_args(b.f, slots)
     ir_emit(b.f, IROp.Call, dst, callee, start, slots.len(), b.line)
+    if bracketed {
+        _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
+    }
     loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)
     loop (index, slot) in slots {

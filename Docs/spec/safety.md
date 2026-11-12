@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1419,
+  "total": 1423,
   "counts": {
-    "Compiler": 746,
+    "Compiler": 750,
     "Core": 171,
     "Docs": 8,
     "Examples": 41,
@@ -498,105 +498,119 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 126,
+      "line": 111,
+      "column": 9,
+      "reason": "getrandom fills the first word of our scratch page"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 118,
+      "column": 9,
+      "reason": "getrandom wrote the scratch page's first word"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
+      "line": 152,
       "column": 5,
       "reason": "pipe2 writes two descriptors into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 131,
+      "line": 157,
       "column": 5,
       "reason": "pipe2 wrote the scratch page's first word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 137,
+      "line": 163,
       "column": 9,
       "reason": "fcntl duplicates our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 149,
+      "line": 175,
       "column": 5,
       "reason": "closes our own descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 196,
+      "line": 222,
       "column": 9,
       "reason": "the poll set is our scratch page's first three entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 203,
+      "line": 229,
       "column": 9,
       "reason": "poll reads and writes the three entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 222,
+      "line": 248,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 251,
+      "line": 277,
       "column": 9,
       "reason": "the poll set is our scratch page's first two entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 256,
+      "line": 282,
       "column": 9,
       "reason": "poll reads and writes the two entries of our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 262,
+      "line": 288,
       "column": 9,
       "reason": "poll wrote the entries' returned events"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 299,
+      "line": 325,
       "column": 9,
       "reason": "the bytes lie in our scratch mapping, whose size is a multiple of eight"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 312,
+      "line": 338,
       "column": 5,
       "reason": "clock_gettime writes two words at scratch + 64, past the poll set"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 324,
+      "line": 350,
       "column": 9,
       "reason": "kills our own child"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 331,
+      "line": 357,
       "column": 9,
       "reason": "wait4 writes the status word into our scratch page"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetBackend/Source/Image/SessionHost.jet",
-      "line": 336,
+      "line": 362,
       "column": 5,
       "reason": "wait4 wrote the status word"
     },
@@ -1877,14 +1891,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 113,
+      "line": 89,
+      "column": 5,
+      "reason": "the filter is installed once, on the image's only thread, before any call it traps"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
+      "line": 127,
       "column": 13,
       "reason": "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
-      "line": 169,
+      "line": 174,
+      "column": 13,
+      "reason": "the compiler admits between calls of the one thread it drives; the handler only reads the flag"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/ComptimeServe.jet",
+      "line": 189,
       "column": 5,
       "reason": "the serve entry runs once, on the image's only thread, before it serves"
     },
@@ -10163,14 +10191,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 746 |
+| Compiler | 750 |
 | Core | 171 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 438 |
-| **total** | **1419** |
+| **total** | **1423** |
 
 ### Regions
 
@@ -10215,21 +10243,23 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1350:9 | "a kernel sigaction with handler SIG_IGN on a fresh page" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1368:9 | "a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page" |
 | Compiler | Compiler/JetBackend/Source/Image/Loader.jet | 1405:5 | "execve reads the NUL-terminated strings and the two NULL-ended arrays in the block; the empty signal set at the block's start" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 126:5 | "pipe2 writes two descriptors into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 131:5 | "pipe2 wrote the scratch page's first word" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 137:9 | "fcntl duplicates our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 149:5 | "closes our own descriptor" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 196:9 | "the poll set is our scratch page's first three entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 203:9 | "poll reads and writes the three entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 222:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 251:9 | "the poll set is our scratch page's first two entries" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 256:9 | "poll reads and writes the two entries of our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 262:9 | "poll wrote the entries' returned events" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 299:9 | "the bytes lie in our scratch mapping, whose size is a multiple of eight" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 312:5 | "clock_gettime writes two words at scratch + 64, past the poll set" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 324:9 | "kills our own child" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 331:9 | "wait4 writes the status word into our scratch page" |
-| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 336:5 | "wait4 wrote the status word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 111:9 | "getrandom fills the first word of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 118:9 | "getrandom wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 152:5 | "pipe2 writes two descriptors into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 157:5 | "pipe2 wrote the scratch page's first word" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 163:9 | "fcntl duplicates our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 175:5 | "closes our own descriptor" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 222:9 | "the poll set is our scratch page's first three entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 229:9 | "poll reads and writes the three entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 248:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 277:9 | "the poll set is our scratch page's first two entries" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 282:9 | "poll reads and writes the two entries of our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 288:9 | "poll wrote the entries' returned events" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 325:9 | "the bytes lie in our scratch mapping, whose size is a multiple of eight" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 338:5 | "clock_gettime writes two words at scratch + 64, past the poll set" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 350:9 | "kills our own child" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 357:9 | "wait4 writes the status word into our scratch page" |
+| Compiler | Compiler/JetBackend/Source/Image/SessionHost.jet | 362:5 | "wait4 wrote the status word" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 82:1 | "a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 110:5 | "the caller owns `count` writable bytes at `address`" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 117:5 | "the caller owns `count` readable bytes at `address`" |
@@ -10412,8 +10442,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 12:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 115:13 | "the owned readable file lends its descriptor; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 14:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 113:13 | "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes" |
-| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 169:5 | "the serve entry runs once, on the image's only thread, before it serves" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 89:5 | "the filter is installed once, on the image's only thread, before any call it traps" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 127:13 | "the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 174:13 | "the compiler admits between calls of the one thread it drives; the handler only reads the flag" |
+| Compiler | Compiler/JetRuntime/Source/ComptimeServe.jet | 189:5 | "the serve entry runs once, on the image's only thread, before it serves" |
 | Compiler | Compiler/JetRuntime/Source/CountMinSketch.jet | 8:5 | "caller holds this native CMS mutex and owns the initialized four-byte counter" |
 | Compiler | Compiler/JetRuntime/Source/Coverage.jet | 20:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoAes.jet | 23:5 | "runtime-init runs before any other thread exists" |

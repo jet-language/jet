@@ -440,10 +440,12 @@ IRProgram: struct {
     // reaches it (ir_comptime_ambient_refusal).
     comptime_values: Bool{false}
     // Whether this program is a build invocation (fn build, fn dev) the
-    // evaluator runs in its runtime child: each Core call inside an
-    // `#Impure` block is bracketed by the host routes `Impure.enter` and
-    // `Impure.leave` (ir_core_call), so a system call the child's filter
-    // refuses there is that block's Tier-2 effect, not an unsupported one.
+    // evaluator runs in its runtime child: each Core or function call inside
+    // an `#Impure` block is bracketed by the host routes `Impure.enter` and
+    // `Impure.leave` (ir_core_call, ir_call_row_emit), so under
+    // `--gate impure=allow` the child admits the file calls it makes, and a
+    // system call the child's filter refuses there is that block's Tier-2
+    // effect, not an unsupported one.
     invocation: Bool{false}
     // The program entry's function row (ir_build_program; -1: no entry): its
     // returns tell the runtime the process is ending (ir_emit_return).

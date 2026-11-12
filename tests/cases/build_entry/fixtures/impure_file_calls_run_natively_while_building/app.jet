@@ -1,0 +1,13 @@
+use files: core.files
+
+// One ordinary helper, called by the running program and by `build: fn`.
+greeting: fn(path: String) -[FS.Read]> String {
+    text: files.read(path) ?? return "can't read {path}: {err}"
+    text.trim()
+}
+
+greetings: fn() -[FS.Read]> String {
+    "{greeting("greeting.txt")}\n{greeting("missing.txt")}\n"
+}
+
+run: fn() { print(greetings().trim_end()) }

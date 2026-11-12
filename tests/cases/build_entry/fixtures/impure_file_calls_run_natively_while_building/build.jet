@@ -1,0 +1,11 @@
+use files: core.files
+
+// The build reads through the program's own helper and writes what it read
+// beside the package, so the case compares the bytes with the program's.
+build: fn(b: Build) -[FS, IO]> {
+    #Impure("record the greetings the program reads") {
+        files.write("build-read.txt", greetings())
+    }
+    app: b.add_executable("app", ["app.jet"], [])
+    b.default(app)
+}

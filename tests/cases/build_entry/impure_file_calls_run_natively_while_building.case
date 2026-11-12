@@ -1,0 +1,33 @@
+# #4276 c66: an ordinary effectful helper behaves the same in a permitted build as in the program.
+# Under `--gate impure=allow`, the `#Impure` block of `build: fn` calls the program's own helper,
+# whose `files.read` runs natively in the compile-time child; the build writes what it read, and
+# the built program prints what it reads, byte for byte the same, on every optimization level.
+# Without the gate the same read is refused with E3411 and nothing is written.
+fixture: fixtures/impure_file_calls_run_natively_while_building
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build
+exit: 1
+stderr: ~ "inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed" # the closed gate refuses the helper's read
+file: build-read.txt absent
+file: .jet/build/app absent
+step: jet build -O0 --gate impure=allow
+exit: 0
+file: build-read.txt = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n" # what the build read (O0)
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n"
+remove: build-read.txt
+step: jet build -O1 --gate impure=allow
+exit: 0
+file: build-read.txt = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n" # what the build read (O1)
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n"
+remove: build-read.txt
+step: jet build -O2 --gate impure=allow
+exit: 0
+file: build-read.txt = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n" # what the build read (O2)
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "hello from the file\ncan't read missing.txt: not found during read `missing.txt`: No such file or directory (os error 2)\n"
