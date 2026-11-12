@@ -1,0 +1,11 @@
+# #6516 c3: importing a package never turns its lints on. `quiet` imports
+# `lints` and calls `print`, but its build never enables the group, so
+# `jet build` reports nothing and the program runs.
+fixture: meta_lint_group_enabled_once.fixture
+env: NO_COLOR=1
+step: jet build quiet/main.jet
+exit: 0
+stderr: !~ "NoPrintInLib" # the imported group stays off
+stderr: !~ "build ran" # the dependency's build never runs on import
+step: {work}/quiet/.jet/build/app
+stdout: = "hello, jet\nquiet\n"

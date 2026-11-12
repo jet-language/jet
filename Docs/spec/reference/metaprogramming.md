@@ -695,6 +695,14 @@ build; a `.Tidy` one fails `jet build` but not `jet run`, `jet dev` or
 `jet test`; a `.Report` one is advice for lint alone and fails nothing. A
 value whose type has no `impl Diagnostic` is refused (E0905). Reporting
 needs no Meta effect, and the build refuses a value whose build has returned.
+A package's lint group is an ordinary function over the root build's
+`Compiler` value, such as `install: fn(meta: Compiler)`, whose body registers
+call watches and reports findings. A root enables the group once, from its
+own build: `lints.install(b.compiler(app))`. Importing the package never
+turns its lints on: only the root package's build makes a `Compiler` value,
+a dependency's `build: fn` never runs, and a call watch hears only the root
+package's own source. A root can also write the same watch and
+`meta.report` in its own build.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.

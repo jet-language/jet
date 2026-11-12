@@ -1,0 +1,16 @@
+# #6516 c3: a package's lint group is a function over the root build's
+# `Compiler` value. The root build enables it once (`lints.install(meta)`);
+# its call watch reports the `print` in the app's own source as the Tidy
+# finding `lints.NoPrintInLib`, which fails `jet build` and not `jet run`.
+# The dependency's own `print` is not heard, and its `build: fn` never runs.
+fixture: meta_lint_group_enabled_once.fixture
+env: NO_COLOR=1
+step: jet build app/main.jet
+exit: nonzero
+stderr: ~ "lints.NoPrintInLib" # the group's finding, by its package code
+stderr: ~ "main.jet:3" # at the print call in the app's `greet`
+stderr: !~ "lints.jet" # the dependency's own print is not the root package's source
+stderr: !~ "build ran" # a dependency's build never runs on import
+step: jet run app/main.jet
+exit: 0
+stdout: = "hello, jet\nquiet\n"

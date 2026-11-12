@@ -1,0 +1,27 @@
+// A package lint group: a root build enables it once with
+// `lints.install(meta)`, and it reports each `print` in the root package's
+// own source.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "lints.NoPrintInLib"
+        tier: .Tidy
+        what: fn(self) -> String { "library code prints to the terminal" }
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+        fix: fn(self) -> String { "log the message instead" }
+    }
+}
+
+install: fn(meta: Compiler) {
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+}
+
+// The package's own print is not the root package's source, so no root
+// build's watch hears it.
+shout: fn(text: String) { print(text) }
+
+// A dependency's build never runs when a package imports it.
+build: fn(b: Build) {
+    panic("the lints package's build ran")
+}
