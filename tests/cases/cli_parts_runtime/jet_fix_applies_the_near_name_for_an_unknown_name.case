@@ -1,0 +1,15 @@
+# E0107 names the near visible binding, and its rename edit is the safe fix
+# `jet fix` applies, after which the file checks clean.
+fixture: fixtures/near_name
+step: jet check run.jet
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "Fix: Did you mean `name`?" # the typo two edits from a local
+step: jet fix run.jet
+env: NO_COLOR=1
+exit: 0
+file: run.jet ~ "    print(name)" # the edit renames the unknown name
+file: run.jet !~ "nmae" # no other spelling of it is left
+step: jet check run.jet
+env: NO_COLOR=1
+exit: 0

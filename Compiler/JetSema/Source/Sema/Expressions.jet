@@ -5149,12 +5149,35 @@ sema_expr_simple_text_operand: fn(expr: Expr) -> String Never! {
     }
 }
 
+// One `+` operand as a piece of an interpolated string: a name or an Int or
+// Bool literal as `{…}`, a plain string literal as its text. None when the
+// operand has no short spelling, or its text needs escaping.
+sema_expr_text_piece: fn(expr: Expr) -> String? Never! {
+    if expr == .Paren(inner, _, _) -> return sema_expr_text_piece(inner)
+    name: sema_expr_simple_text_operand(expr)
+    if name != "" -> return Val("{{{name}}}")
+    if expr == .Int(value, _, _, _, _) -> return Val("{{{value}}}")
+    if expr == .Bool(value, _, _) -> return Val("{{{value}}}")
+    if expr == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(piece) -> text = "{text}{piece}" else -> return None
+        }
+        if text.contains("{{") || text.contains("}}") || text.contains("\"") || text.contains("\\") || text.contains("\n") -> return None
+        return Val(text)
+    }
+    None
+}
+
 // Text joined with `+` teaches interpolation (S8).
 sema_expr_text_plus: fn(left: Expr, right: Expr, span: Span) -> Diagnostic {
     left_name: sema_expr_simple_text_operand(left)
     right_name: sema_expr_simple_text_operand(right)
     if left_name != "" && right_name != "" {
         return sema_error("E0109", span, "text values `{left_name}` and `{right_name}` aren't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{{{left_name}}}{{{right_name}}}\"")
+    }
+    if sema_expr_text_piece(left) == .Val(left_piece) {
+        if sema_expr_text_piece(right) == .Val(right_piece) -> return sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{left_piece}{right_piece}\"")
     }
     sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one interpolated string (schematic: the checked operands are not simple names)")
 }

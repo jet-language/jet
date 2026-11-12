@@ -28,7 +28,10 @@ LINE_COMMENT: Regex{"//[^\n]*"}
 // starts with `}`. Matched against the text after a leading newline, so a
 // newline marks every line start.
 KEYWORD_TABLE: Regex{"\nLEXER_KEYWORDS: \[LexerKeyword\]\{{([\s\S]*?)\n\}}"}
-KEYWORD_ARM: Regex{"^(?:LexerKeyword)?\{{constant: \x22(\w+)\x22, kind: \x22(Kw\w+)\x22, tag: \x22(K_\w+)\x22\}},$"}
+KEYWORD_ARM: Regex{"^(?:LexerKeyword)?\{{constant: \x22(\w+)\x22, kind: \x22(Kw\w+)\x22, tag: \x22(K_\w+)\x22, retired: (true|false)\}},$"}
+// The JET_KEYWORD_LIST body in the Syntax folder (LSP completion and rename
+// validation), matched the same way: constant names, comma separated.
+KEYWORD_LIST: Regex{"\nJET_KEYWORD_LIST: \[String\]\{{([\s\S]*?)\n\}}"}
 // One line each: `NAME: "literal"` with an optional trailing comment, a
 // keyword token number, and a token tag.
 SYNTAX_CONSTANT: Regex{"^\s*(\w+)\s*:\s*(\x22(?:[^\x22\\]|\\.)*\x22)[^\S\n]*(?://[^\n]*)?$"}
@@ -96,6 +99,17 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
     spellings := [String]{}
     kinds := [String]{}
     mapped := [String]{}
+    listed := [String]{}
+    has_list := false
+    if KEYWORD_LIST.match("\n{LINE_COMMENT.replace(syntax, "")}") == .Val(list) {
+        has_list = true
+        loop line in list.groups[0].split("\n") {
+            loop entry in line.split(",") {
+                name: entry.trim()
+                if name != "" -> listed.push(name)
+            }
+        }
+    }
     loop raw in table.groups[0].split("\n") {
         line: raw.trim()
         if line == "" -> next
@@ -113,6 +127,10 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
         }
         if kind_tag(kind) != token_tag || !token_tags.contains(token_tag) || tag_count != 1 -> return Err(rows_fail("unresolved token kind {kind}/{token_tag}"))
         if spellings.contains(spelling) || kinds.contains(kind) || mapped.contains(token_tag) -> return Err(rows_fail("duplicate keyword spelling/kind {constant}/{kind}"))
+        if !has_list -> return Err(rows_fail("no JET_KEYWORD_LIST in the Syntax folder"))
+        retired: arm.groups[3] == "true"
+        if !retired && !listed.contains(constant) -> return Err(rows_fail("active keyword {constant} is missing from JET_KEYWORD_LIST"))
+        if retired && listed.contains(constant) -> return Err(rows_fail("retired keyword {constant} is in JET_KEYWORD_LIST"))
         spellings.push(spelling.copy())
         kinds.push(kind.copy())
         mapped.push(token_tag.copy())
@@ -228,8 +246,8 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
 }
 
 #Test("the keyword projection is byte checks and rejects incomplete authority") {
-    mapping: "LEXER_KEYWORDS: [LexerKeyword]{{\n    LexerKeyword{{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\"}},\n    LexerKeyword{{constant: \"KW_FOR\", kind: \"KwFor\", tag: \"K_FOR\"}},\n}}"
-    syntax: "KW_FN: \"fn\"\nKW_FOR: \"for\""
+    mapping: "LEXER_KEYWORDS: [LexerKeyword]{{\n    LexerKeyword{{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\", retired: false}},\n    LexerKeyword{{constant: \"KW_FOR\", kind: \"KwFor\", tag: \"K_FOR\", retired: false}},\n}}"
+    syntax: "KW_FN: \"fn\"\nKW_FOR: \"for\"\nJET_KEYWORD_LIST: [String]{{\n    KW_FN,\n    KW_FOR, // loops\n}}"
     tokens: "TOKEN_KW_FN: 57\nTOKEN_KW_FOR: 58\n"
     tags: "K_FN: 57\nK_FOR: 58\n"
     rows: keyword_rows(mapping, syntax, tokens, tags) ?? panic("the minimal table did not parse: {err.message}")
@@ -251,4 +269,9 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
     assert(keyword_rows_error(mapping, "KW_FN: OTHER\nKW_FOR: \"for\"", tokens, tags).contains("unresolved"))
     assert(keyword_rows_error(mapping, "KW_FN: \"fñ\"\nKW_FOR: \"for\"", tokens, tags).contains("unsupported keyword"))
     assert(keyword_rows_error(mapping, syntax, tokens, "").contains("unresolved token kind"))
+    assert(keyword_rows_error(mapping, "KW_FN: \"fn\"\nKW_FOR: \"for\"", tokens, tags).contains("no JET_KEYWORD_LIST"))
+    assert(keyword_rows_error(mapping, syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags).contains("active keyword KW_FOR is missing"))
+    retired: mapping.replace("\"K_FOR\", retired: false", "\"K_FOR\", retired: true")
+    assert(keyword_rows_error(retired, syntax, tokens, tags).contains("retired keyword KW_FOR is in"))
+    assert_eq(keyword_rows_error(retired, syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags), "")
 }

@@ -2091,27 +2091,37 @@ sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
     sema_scope_counted(table, compares, None)
 }
 
-// The visible binding name nearest `name`, for an unknown name's fix: at most
-// a third of its length away (one edit for short names), nearer frames first.
-sema_scope_closest_visible_name: fn(table: SemaScopeTable, name: String) -> String? {
-    limit: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
-    best := String?{None}
-    best_distance := limit + 1
+// The visible binding names nearest `name`, for an unknown name's fix: up to
+// three within two edits (one edit for a name of one or two bytes), the
+// nearest first and, among equals, nearer frames first.
+sema_scope_near_visible_names: fn(table: SemaScopeTable, name: String) -> [String] {
+    limit: if name.count_bytes() <= 2 -> 1 else -> 2
+    found := [String]{}
+    distances := [Int]{}
     frame := table.current
     loop frame >= 0 {
         loop index in 0..<table.bindings.len() {
             if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin -> next
             candidate: table.bindings[index].symbol.name
-            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") -> next
+            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") || found.contains(candidate) -> next
             distance: sema_taint_edit_distance(name, candidate)
-            if distance < best_distance {
-                best_distance = distance
-                best = Val(candidate.copy())
+            if distance > limit -> next
+            at := found.len()
+            loop at > 0 && distances[at - 1] > distance {
+                at -= 1
+            }
+            if at == 3 -> next
+            // copy: the name outlives the scope table it is read from.
+            found.insert(at, candidate.copy())
+            distances.insert(at, distance)
+            if found.len() > 3 {
+                _ := found.pop()
+                _ := distances.pop()
             }
         }
         frame = table.frames[frame].parent
     }
-    best
+    found
 }
 
 // The binding of `name` visible at `use_span`. Inside a body a binding is

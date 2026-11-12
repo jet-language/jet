@@ -312,14 +312,24 @@ sema_unknown_name_declare_fix: fn(name: String) -> String Never! {
 }
 
 // E0107 with the most useful fix: the Core import a module-style name
-// misses, a near visible name (with the rename as its edit, as E0102's near
-// function name carries one), or declaring it.
+// misses, up to three near visible names (the nearest as the rename edit, as
+// E0102's near function name carries one), or declaring it.
 sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     what: "nothing named `{name}` exists here"
     why: "a name must be declared before it's used"
     if core_module_for_alias(name) == .Val(owner) -> return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")
-    if sema_scope_closest_visible_name(scopes, name) == .Val(near) -> return diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean `{near}`?"), TextEdit{span: span, new_text: near})
-    sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
+    near: sema_scope_near_visible_names(scopes, name)
+    if near.len() == 0 -> return sema_error("E0107", span, what, why, sema_unknown_name_declare_fix(name))
+    names := ""
+    loop (index, candidate) in near {
+        names = if {
+            index == 0 -> "`{candidate}`"
+            index == near.len() - 1 -> "{names} or `{candidate}`"
+            else -> "{names}, `{candidate}`"
+        }
+    }
+    // copy: the edit keeps the nearest name past the candidate list.
+    diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean {names}?"), TextEdit{span: span, new_text: near[0].copy()})
 }
 
 // E0107 for a name an unresolved read or write spells in a function of an
