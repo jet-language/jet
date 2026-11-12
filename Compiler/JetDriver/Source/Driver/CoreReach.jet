@@ -12,7 +12,10 @@
 // source is reached by its member's name, and a precise family member by its
 // type's name as well. Every other declaration (traits, marked functions, the
 // functions the compiler calls by a name no program spells, and the whole of
-// a module the compiler demands) is reached with its module.
+// a module the compiler demands) is reached with its module. What a Core
+// module's source demands of another (a `.abs` receiver of core.math, a
+// `core.time.X` path of core.time) waits like a private import, until reached
+// code of the module spells the word that made it.
 //
 // Spellings are read from the unit's code tokens, a string's interpolations
 // included (its text is data), so reach is a superset of what the code
@@ -487,14 +490,15 @@ JetDriverReachItem: struct {
 // load's modules. An `open` module (user and generated source, the runtime
 // entry, a module the compiler demands) reaches every word it spells and
 // every declaration it has. `local` holds the names its reached code spells
-// bare, `heads` those it spells as a path head. A `routed` module leaves
-// every unreached lazy declaration.
+// bare, `dotted` those it spells after a `.`, `heads` those it spells as a
+// path head. A `routed` module leaves every unreached lazy declaration.
 JetDriverReachUnit: struct {
     loaded: Int
     module_name: String
     open: Bool
     routed: Bool
     local: [Bool]
+    dotted: [Bool]
     heads: [Bool]
 }
 
@@ -503,6 +507,22 @@ JetDriverReachEdge: struct {
     unit: Int
     scoped: JetDriverScopedImport
     alias: Int
+    followed: Bool
+}
+
+// What a Core module's source demands of another Core module
+// (JetDriverCoreIdentifierDemand: a `.abs` receiver loads core.math, a
+// `core.time.X` path core.time) waits, as a private import does, until
+// reached code of the demanding module spells the `word` that made it,
+// after a `.` when `dotted`. Then `module_name` loads, joining the load's
+// bare modules when `bare` and reached whole when `open`.
+JetDriverReachDemand: struct {
+    unit: Int
+    word: Int
+    dotted: Bool
+    module_name: String
+    bare: Bool
+    open: Bool
     followed: Bool
 }
 
@@ -519,12 +539,13 @@ JetDriverReach: struct {
     items: [JetDriverReachItem]
     by_name: [[Int]]
     edges: [JetDriverReachEdge]
+    demands: [JetDriverReachDemand]
     open_names: [String]
     stack: [Int]
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
-    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, members: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, edges: [JetDriverReachEdge]{}, open_names: [String]{}, stack: [Int]{}}
+    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, members: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
 }
 
 jet_driver_reach_has: fn(flags: [Bool], id: Int) -> Bool Never! {
@@ -558,7 +579,7 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 // method from it, so each name it spells after a `.` reaches such methods.
 jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
-    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, local: [Bool]{}, heads: [Bool]{}})
+    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, local: [Bool]{}, dotted: [Bool]{}, heads: [Bool]{}})
     ids := [Int]{}
     loop word in words.words -> ids.push(Int.from_u32(name_intern(reach.names, word).id))
     loop declaration in imports {
@@ -640,6 +661,70 @@ jet_driver_reach_wants: fn(reach: JetDriverReach, edge: Int) -> Bool Never! {
     jet_driver_reach_has(reach.units[reach.edges[edge].unit].heads, reach.edges[edge].alias)
 }
 
+// Defers what the source of the Core module at `unit` demands
+// (JetDriverReachDemand): each demand of `demand` that one word spells, and
+// each qualified path `path_words[n]` names, whose module is
+// `path_modules[n]`. An interpolation selector and a unit conversion load
+// their module with the demanding one (Loader.jet).
+jet_driver_reach_core_demands: fn(reach: &JetDriverReach, unit: Int, demand: JetDriverCoreIdentifierDemand, path_words: [String], path_modules: [String]) {
+    if demand.math_receiver {
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "abs"), dotted: true, module_name: "core.math", bare: true, open: false, followed: false})
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "pow"), dotted: true, module_name: "core.math", bare: true, open: false, followed: false})
+    }
+    loop module_name in demand.source_modules {
+        if module_name == "core.regex" -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "Regex"), dotted: false, module_name: module_name.copy(), bare: true, open: true, followed: false})
+        if module_name == "core.time" -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "timeout"), dotted: true, module_name: module_name.copy(), bare: true, open: true, followed: false})
+        loop row in BUILTIN_METHOD_ROWS {
+            if row.lowering == .CoreSource(owner, _) {
+                if owner == module_name -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, row.name), dotted: true, module_name: module_name.copy(), bare: true, open: true, followed: false})
+            }
+        }
+    }
+    if demand.test_suite {
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "suite"), dotted: true, module_name: "core.testing", bare: true, open: true, followed: false})
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "expect"), dotted: false, module_name: "core.testing", bare: true, open: true, followed: false})
+    }
+    if demand.stream_event_time -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "with_event_time"), dotted: true, module_name: "core.data", bare: true, open: true, followed: false})
+    if demand.codec_decode {
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "decode"), dotted: true, module_name: "core.encoding", bare: false, open: true, followed: false})
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "under"), dotted: true, module_name: "core.encoding", bare: false, open: true, followed: false})
+        reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "migration"), dotted: false, module_name: "core.encoding", bare: false, open: true, followed: false})
+    }
+    if demand.option_or_err -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "or_err"), dotted: false, module_name: "core.prelude", bare: false, open: true, followed: false})
+    loop at in 0..<path_words.len() -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, path_words[at]), dotted: true, module_name: path_modules[at].copy(), bare: false, open: false, followed: false})
+}
+
+// The id of `word` in the reach's name table.
+jet_driver_reach_word: fn(reach: &JetDriverReach, word: String) -> Int {
+    Int.from_u32(name_intern(reach.names, word).id)
+}
+
+// Whether reached code of the demanding module now spells the demand's word
+// (all of an open module is reached).
+jet_driver_reach_demand_wants: fn(reach: JetDriverReach, at: Int) -> Bool Never! {
+    if reach.demands[at].followed -> return false
+    unit: reach.demands[at].unit
+    word: reach.demands[at].word
+    reach.units[unit].open || jet_driver_reach_has(reach.units[unit].dotted, word) || (!reach.demands[at].dotted && jet_driver_reach_has(reach.units[unit].local, word))
+}
+
+// Marks followed demand `at` and every other demand of its module for the
+// same module, which now loads.
+jet_driver_reach_demand_follow: fn(reach: &JetDriverReach, at: Int) {
+    loop other in 0..<reach.demands.len() {
+        if reach.demands[other].unit == reach.demands[at].unit && reach.demands[other].module_name == reach.demands[at].module_name && reach.demands[other].open == reach.demands[at].open -> reach.demands[other].followed = true
+    }
+}
+
+// How many of the load's lazy Core declarations are reached.
+jet_driver_reach_items_reached: fn(reach: JetDriverReach) -> Int Never! {
+    count := 0
+    loop item in reach.items {
+        if item.live -> count += 1
+    }
+    count
+}
+
 jet_driver_reach_mark: fn(reach: &JetDriverReach, unit: Int, spell: Int) {
     id: spell >> 2
     kind: spell.bit_and(3)
@@ -647,6 +732,10 @@ jet_driver_reach_mark: fn(reach: &JetDriverReach, unit: Int, spell: Int) {
         jet_driver_reach_global(reach, id)
     } else {
         jet_driver_reach_local(reach, unit, id)
+    }
+    if kind.bit_and(1) == 1 {
+        loop reach.units[unit].dotted.len() <= id -> reach.units[unit].dotted.push(false)
+        reach.units[unit].dotted[id] = true
     }
     if kind == 2 {
         loop reach.units[unit].heads.len() <= id -> reach.units[unit].heads.push(false)
@@ -698,15 +787,23 @@ jet_driver_reach_drain: fn(reach: &JetDriverReach) {
 // unreached constant (so comptime evaluates only constants the program can
 // name) and each unreached lazy declaration of a routed module, then every
 // unreached declaration that spells a dropped import's alias as a path head,
-// or spells a dropped declaration (bare in the same module, after a `.`
-// anywhere), until no remaining declaration names a dropped one. A dropped
-// method leaves its type; its name stays, since other types may share it.
+// spells the word of a demand never followed (its module may not have
+// loaded), or spells a dropped declaration (bare in the same module, after a
+// `.` anywhere), until no remaining declaration names a dropped one. A
+// dropped method leaves its type; its name stays, since other types may
+// share it.
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModule]) {
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
+    // Per unit, the words of its demands never followed: after a `.`, and
+    // anywhere.
+    waiting_dotted := [[Bool]]{}
+    waiting_spelled := [[Bool]]{}
     loop _ in reach.units {
         dead.push([Bool]{})
         dead_imports.push([Span]{})
+        waiting_dotted.push([Bool]{})
+        waiting_spelled.push([Bool]{})
     }
     any := false
     loop edge in reach.edges {
@@ -715,6 +812,18 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         loop dead[edge.unit].len() <= edge.alias -> dead[edge.unit].push(false)
         dead[edge.unit][edge.alias] = true
         dead_imports[edge.unit].push(edge.scoped.declaration.span)
+    }
+    loop demand in reach.demands {
+        if demand.followed -> next
+        any = true
+        if demand.dotted {
+            loop waiting_dotted[demand.unit].len() <= demand.word -> waiting_dotted[demand.unit].push(false)
+            waiting_dotted[demand.unit][demand.word] = true
+        }
+        if !demand.dotted {
+            loop waiting_spelled[demand.unit].len() <= demand.word -> waiting_spelled[demand.unit].push(false)
+            waiting_spelled[demand.unit][demand.word] = true
+        }
     }
     gone := [Bool]{}
     loop _ in reach.items -> gone.push(false)
@@ -742,7 +851,8 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
                 kind: spell.bit_and(3)
                 if kind == 2 && jet_driver_reach_has(dead[unit], id) -> hit = true
                 if kind.bit_and(1) == 0 && jet_driver_reach_has(local_gone[unit], id) -> hit = true
-                if kind.bit_and(1) == 1 && jet_driver_reach_has(global_gone, id) -> hit = true
+                if kind.bit_and(1) == 1 && (jet_driver_reach_has(global_gone, id) || jet_driver_reach_has(waiting_dotted[unit], id)) -> hit = true
+                if jet_driver_reach_has(waiting_spelled[unit], id) -> hit = true
                 if hit -> break
             }
             if !hit -> next

@@ -4589,6 +4589,38 @@ jet_driver_core_unit: fn(
     Val(jet_driver_add_core_unit(source_units, queued, generated, module_name, "{module_name}.jet", -1, ""))
 }
 
+// Loads the module of each deferred Core demand that reached code now makes
+// (CoreReach.jet JetDriverReachDemand); true when any is followed.
+jet_driver_follow_core_demands: fn(
+    reach: &JetDriverReach,
+    source_units: &[JetDriverSourceUnit],
+    queued: &[Bool],
+    pending: &[Int],
+    generated: &[SourceFile],
+    core_sources: [JetDriverCoreSource],
+    entry_module: String,
+    entry_index: Int,
+    bare_modules: &[String],
+    diagnostics: &[Diagnostic],
+) -> Bool {
+    followed := false
+    loop at in 0..<reach.demands.len() {
+        if !jet_driver_reach_demand_wants(reach, at) -> next
+        jet_driver_reach_demand_follow(reach, at)
+        followed = true
+        // copy: reach_open may grow the reach while the name is read.
+        module_name: reach.demands[at].module_name.copy()
+        if reach.demands[at].bare && !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
+        if reach.demands[at].open -> jet_driver_reach_open(reach, module_name)
+        index: jet_driver_core_unit(source_units, queued, pending, generated, core_sources, module_name, true, entry_module, entry_index, Span{start: 0, end: 0}, diagnostics) ?? next
+        if !queued[index] {
+            queued[index] = true
+            pending.push(index)
+        }
+    }
+    followed
+}
+
 // The source unit of the compiler-private part whose catalog alias is
 // `alias` (`__core_text_collation_table`), cataloged once; None when no part
 // has it. Reserved parts have exact catalog identities, not a public Core
@@ -4936,6 +4968,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     pending.push(target_unit_index)
                 }
             }
+            // And load the module of each Core demand reached code now makes.
+            if jet_driver_follow_core_demands(reach, source_units, queued, pending, generated_records, request.core_sources, entry_module, entry_index ?? 0, bare_modules, diagnostics) -> followed = true
             if !followed -> break
             next
         }
@@ -5026,7 +5060,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
-        if demand.math_receiver || demand.unit_family {
+        // A Core module's demands that one word spells wait for reached code
+        // of it to spell that word (CoreReach.jet JetDriverReachDemand).
+        if demand.unit_family || (demand.math_receiver && !defers) {
             if !bare_modules.contains("core.math") -> bare_modules.push("core.math")
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if owner_index == .Val(index) {
@@ -5070,14 +5106,16 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // A checked `Regex{…}` literal is produced by the `core.regex.compile`
         // source and a CoreSource String method runs its source helper, even
         // when the caller has no explicit import of the helper's module.
-        loop module_name in demand.source_modules {
-            if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
-            jet_driver_reach_open(reach, module_name)
-            source_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
-            if source_index == .Val(index) {
-                if !queued[index] {
-                    queued[index] = true
-                    pending.push(index)
+        if !defers {
+            loop module_name in demand.source_modules {
+                if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
+                jet_driver_reach_open(reach, module_name)
+                source_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+                if source_index == .Val(index) {
+                    if !queued[index] {
+                        queued[index] = true
+                        pending.push(index)
+                    }
                 }
             }
         }
@@ -5100,7 +5138,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // `t.suite(…)` and `expect(value).snapshot()` run `core.testing`
         // source bodies, even when the caller has no explicit core.testing
         // import.
-        if demand.test_suite {
+        if demand.test_suite && !defers {
             if !bare_modules.contains("core.testing") -> bare_modules.push("core.testing")
             jet_driver_reach_open(reach, "core.testing")
             testing_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.testing", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -5114,7 +5152,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // `stream.with_event_time(…)` and its `.key_by`/`.window` stages run
         // their core.data source stages, even when the caller has no explicit
         // core.data import.
-        if demand.stream_event_time {
+        if demand.stream_event_time && !defers {
             if !bare_modules.contains("core.data") -> bare_modules.push("core.data")
             jet_driver_reach_open(reach, "core.data")
             data_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.data", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
@@ -5138,7 +5176,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
-        if demand.codec_decode {
+        if demand.codec_decode && !defers {
             jet_driver_reach_open(reach, "core.encoding")
             encoding_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if encoding_index == .Val(index) {
@@ -5150,7 +5188,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         // The optional-to-failure view calls the ordinary Core source body,
         // even when the caller has no explicit core.prelude import.
-        if demand.option_or_err {
+        if demand.option_or_err && !defers {
             jet_driver_reach_open(reach, "core.prelude")
             prelude_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if prelude_index == .Val(index) {
@@ -5259,6 +5297,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // Core source module that owns the called member; a chain whose head
         // aliases a Core module (`use core.encoding`, then
         // `encoding.json.parse`) names that module's submodule.
+        // A Core module's path waits for reached code of it to spell the
+        // path's last segment after a `.`.
+        path_words := [String]{}
+        path_modules := [String]{}
         if demand.core_paths.len() > 0 {
             root_aliases := [String]{}
             module_aliases := [String]{}
@@ -5303,6 +5345,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     if row.owner == "" && row.module_name == module_name && (!row.runtime || importer_core) -> sourced = true
                 }
                 if !sourced -> next
+                if defers {
+                    path_words.push(parts[parts.len() - 1].copy())
+                    path_modules.push(module_name.copy())
+                    next
+                }
                 path_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
                 if path_index == .Val(index) {
                     if !queued[index] {
@@ -5453,6 +5500,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             unit_words: words ?? JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, spells: [[Int]]{}, routed: false}
             reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
+            if defers {
+                jet_driver_reach_core_demands(reach, reach_unit, demand, path_words, path_modules)
+                _ := jet_driver_follow_core_demands(reach, source_units, queued, pending, generated_records, request.core_sources, entry_module, entry_index ?? 0, bare_modules, diagnostics)
+            }
         }
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
@@ -5462,7 +5513,19 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     // The unreached rest of each Core module leaves it (CoreReach.jet).
-    if reach.enabled -> jet_driver_reach_strip(reach, modules)
+    if reach.enabled {
+        jet_driver_reach_strip(reach, modules)
+        if request.trace_sink == .Val(sink) {
+            waiting := 0
+            loop row in reach.demands {
+                if !row.followed -> waiting += 1
+            }
+            sink.progress("counters.load.core_items_reached", jet_driver_reach_items_reached(reach), -1)
+            sink.progress("counters.load.core_items", reach.items.len(), -1)
+            sink.progress("counters.load.core_demands", reach.demands.len(), -1)
+            sink.progress("counters.load.core_demands_waiting", waiting, -1)
+        }
+    }
     // Each package's denied edges (E0619) and unused rules (L0619).
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {

@@ -154,6 +154,29 @@ reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     assert_eq(reach_test_constants(exact, "core.devtools"), [String]{})
 }
 
+// The load of `source` beside `core.devtools`, whose `magnitude` alone calls
+// `.abs` (a core.math receiver demand), and `core.math`.
+reach_test_load_demand: fn(source: String) -> JetDriverLoadResult {
+    request := reach_test_request(source)
+    owner: "plain: fn() -> Int Never! {{ 1 }}\n\nmagnitude: fn(x: Int) -> Int Never! {{ x.abs() }}\n"
+    request.core_sources = [JetDriverCoreSource]{
+        {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
+        {module_name: "core.math", alias: "core_math", path: "Core/math-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("two: fn() -> Int Never! {{ 2 }}\n")},
+    }
+    load: jet_driver_load(request)
+    assert(load.complete && !jet_driver_has_errors(load.diagnostics))
+    load
+}
+
+#Test("a Core module's demand of another loads it only once reached code makes it, and its only maker leaves until then") {
+    plain: reach_test_load_demand("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n")
+    assert(!reach_test_has_module(plain, "core.math"))
+    assert_eq(reach_test_functions(plain, "core.devtools"), [String]{"plain"})
+    magnitude: reach_test_load_demand("use tools: core.devtools\nrun: fn() {{ print(tools.magnitude(-3)) }}\n")
+    assert(reach_test_has_module(magnitude, "core.math"))
+    assert_eq(reach_test_functions(magnitude, "core.devtools"), [String]{"plain", "magnitude"})
+}
+
 // The load of `source` beside the one Core module `module_name`, whose text
 // is `text` and whose cutover members are `owned`.
 reach_test_load_module: fn(source: String, module_name: String, owned: [String], text: String) -> JetDriverLoadResult {
