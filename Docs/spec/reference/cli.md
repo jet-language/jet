@@ -1085,11 +1085,12 @@ never writes a file either; `--dry-run` is both; every word after `--` is a
 path, even one that starts with `-` (a missing one is a read failure); `-`
 formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
 the ratified rewrites. The retired-spelling status lines go to stderr unless
-`--quiet`. `package.jet` and `Config` record sources go through the typed
-Package formatter (the Jetpack Package model, referenced into the Compiler
-unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
-its E1215 manifest diagnostic, and a layout the model declines (authored
-comments) is left as written. `--changed` formats the `.jet` files git reports
+`--quiet`. `package.jet` goes through the typed Package formatter (the Jetpack
+Package model, referenced into the Compiler unit from `Jetpack/PackageModel`):
+an unreadable manifest stops the run with its E1215 manifest diagnostic, and a
+layout the model declines (authored comments) is left as written. Every other
+`.jet` file, a `Config` record source included, goes through the Jet formatter.
+`--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
 Ordinary-source formatting preserves declaration meaning: a raw
 `#Import(c) name: fn(args) -> T = "symbol"` retains its symbol assignment

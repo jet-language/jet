@@ -143,7 +143,7 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
                 // The measured members are the program modules; a manifest is
                 // not one.
                 loop file in held.files {
-                    if !file.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(file.path) || jet_cli_fmt_is_typed_package_source(file.source, file.path) -> next
+                    if !file.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(file.path) -> next
                     sources.push(JetCLIBudgetSource{path: file.path.removeprefix(prefix), sha256: budget_crypto.sha256(file.source.bytes()).hex()})
                 }
             }

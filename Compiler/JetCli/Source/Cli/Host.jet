@@ -2781,24 +2781,6 @@ jet_cli_fmt_walk: fn(directory: String, files: &[String]) {
     }
 }
 
-// `is_typed_package_source`: `package.jet`, or a source whose first binding is
-// a `Config` record.
-jet_cli_fmt_is_typed_package_source: fn(source: String, origin: String) -> Bool Never! {
-    if jet_cli_fmt_file_name(origin) == "package.jet" -> return true
-    trimmed: source.trim()
-    value := ""
-    if trimmed.starts_with("Config") {
-        value = trimmed.slice(6..<trimmed.len()).trim()
-    } else if trimmed.split_once(":") == .Val(parts) {
-        value = parts.after.trim()
-    } else {
-        return false
-    }
-    if !value.starts_with("Config") -> return false
-    rest: value.slice(6..<value.len()).trim()
-    rest.starts_with(".{{") || rest.starts_with("{{")
-}
-
 // `is_package_manifest_file` the one reserved Package root filename; its
 // `config.jet`/`env.jet` siblings are ordinary modules.
 jet_cli_fmt_is_package_manifest_file: fn(origin: String) -> Bool Never! {
@@ -2859,7 +2841,7 @@ jet_cli_fmt_explicit_copies: fn(source: String, origin: String, color: Bool) -> 
 jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: Bool, simplify: Bool, color: Bool) -> JetCLIFmtSource {
     if jet_cli_fmt_is_package_manifest_file(origin) -> return jet_cli_fmt_package_manifest(source, origin)
     marked := source
-    if explicit_copies && cli_files.is_file(origin) && !jet_cli_fmt_is_typed_package_source(source, origin) {
+    if explicit_copies && cli_files.is_file(origin) {
         copies: jet_cli_fmt_explicit_copies(source, origin, color)
         if copies.report != None || copies.diagnostics.len() > 0 -> return copies
         marked = copies.text
