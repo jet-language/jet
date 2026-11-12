@@ -9603,17 +9603,44 @@ sema_derive_waves: fn(owned: &&SemaRegistrationGraph, values: [SemaComptimeItemV
 // structure facts, for a caller that builds the names itself once it has
 // changed the modules (the driver's checked-text merge).
 sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, session: SemaIncrementalCache?, build_names: Bool, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+    bodies := sema_finalize_bodies_empty()
+    bodies.build_names = build_names
+    body_graph := sema_finalize_bodies(resolved, trail, stage, values, comptime_functions, host_hooks, threads, session, trace_sink, bodies)
+    sema_finalize_program(body_graph, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
+}
+
+// What the body half of a finalization (sema_finalize_bodies) hands its
+// whole-program half (sema_finalize_program): the checked modules, the pass
+// facts the Core demand waves read while the graph rows stay unchanged, the
+// stage's checked types, whether the graph and the stage were complete, and
+// whether the whole-program half builds the bundle's name facts
+// (sema_finalize_graph's `build_names`).
+SemaFinalizeBodies: struct {
+    modules: [SemaGraphModuleResult]
+    carried: [SemaPassFacts]
+    checked_types: [TTypeDef]
+    complete: Bool
+    build_names: Bool
+}
+
+// Bodies for sema_finalize_bodies to fill, with no name facts built.
+sema_finalize_bodies_empty: fn() -> SemaFinalizeBodies {
+    SemaFinalizeBodies{modules: [SemaGraphModuleResult]{}, carried: [SemaPassFacts]{}, checked_types: [TTypeDef]{}, complete: false, build_names: false}
+}
+
+// The body half of sema_finalize_graph: the body pass over every module and
+// the codec and derive waves it demands, into `bodies`. The graph moves in
+// and comes back with its edits on `trail`.
+sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, session: SemaIncrementalCache?, trace_sink: CompilerTraceSink?, bodies: &SemaFinalizeBodies) -> SemaRegistrationGraph {
     resolved_graph := resolved.move()
     // #4319 lookup counters are traced through `sema.check` only; counting
     // here would serialize the body-check threads on the shared counters.
     trail.entries.push(SemaGraphUndo.Counting{old: resolved_graph.counting})
     resolved_graph.counting = false
     hook_access: sema_host_hook_access(host_hooks)
-    diagnostics := stage.diagnostics
-    checked_types: sema_stage_checked_types(stage.modules)
-    complete := resolved_graph.complete && stage.complete
-    if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
-    if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
+    bodies.checked_types = sema_stage_checked_types(stage.modules)
+    bodies.complete = resolved_graph.complete && stage.complete
+    if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, bodies.checked_types)
     // Derived methods and deferred Core bodies are demanded afresh by this
     // pass's checks. A compile that checks every Core body (`jet check Core`)
     // demands every derived method too, so Core's derives get the checks a
@@ -9625,17 +9652,33 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     web_checks: sema_web_partition_active(resolved_graph)
     sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !resolved_graph.every_core_body && !incremental && !web_checks)
     all_modules: loop module_index in 0..<resolved_graph.modules.len() -> module_index
-    modules := [SemaGraphModuleResult]{}
     // The body pass's facts serve the codec and derive waves after it while
     // the graph rows they read stay unchanged (sema_finalize_check_modules).
-    carried := [SemaPassFacts]{}
-    body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, carried, modules)
+    body_graph := sema_finalize_check_modules(resolved_graph, values, comptime_functions, bodies.checked_types, all_modules, true, hook_access, threads, session, "sema.bodies", trace_sink, bodies.carried, bodies.modules)
     // Demand: only the generated codecs a requirement reached
     // get bodies, checked into their modules' results before the failure solve,
     // and only the derived methods of compiler-owned modules a check reached.
-    after_codec_graph := sema_codec_waves(body_graph, trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, carried, modules)
-    after_derive_graph := sema_derive_waves(after_codec_graph, values, comptime_functions, checked_types, hook_access, threads, trace_sink, carried, modules)
-    after_body_graph := sema_core_demand_waves(after_derive_graph, trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, carried, modules)
+    after_codec_graph := sema_codec_waves(body_graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
+    sema_derive_waves(after_codec_graph, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
+}
+
+// The whole-program half of sema_finalize_graph over the `bodies` of
+// sema_finalize_bodies: the Core demand waves, the failure solve and
+// recheck, and every whole-program pass after them. The graph moves in and
+// comes back as the result's `registration_graph`, with its edits on
+// `trail`. `values` and `comptime_functions` are the ones the bodies were
+// checked against.
+sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &&SemaFinalizeBodies) -> SemaGraphResult {
+    body_graph := owned.move()
+    held := bodies.move()
+    modules := held.modules.move()
+    carried := held.carried.move()
+    checked_types: held.checked_types.move()
+    complete := held.complete
+    hook_access: sema_host_hook_access(host_hooks)
+    diagnostics := stage.diagnostics
+    if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
+    after_body_graph := sema_core_demand_waves(body_graph, trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, carried, modules)
     carried = [SemaPassFacts]{}
     // Every body the program reaches is checked (a Core body no check
     // demanded stays unchecked and has no caller), so the failure solve finds
@@ -9910,10 +9953,9 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     loop fact in lifecycle.facts -> structure_facts.push(fact)
     loop fact in liveness.facts -> structure_facts.push(fact)
     names := sema_name_facts_empty()
-    if build_names {
-        final_graph = sema_name_build_facts_threads(final_graph, modules, structure_facts, threads, names)
-    } else {
-        names.structure_facts = structure_facts
+    if {
+        held.build_names -> final_graph = sema_name_build_facts_threads(final_graph, modules, structure_facts, threads, names)
+        else -> names.structure_facts = structure_facts
     }
     if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
     // Core modules are checked in the same bundle so their errors keep the
