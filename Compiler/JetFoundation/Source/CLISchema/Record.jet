@@ -18,7 +18,7 @@ CLI_SCHEMA_BYTE_3: U8{3}
 CLI_SCHEMA_BYTE_4: U8{4}
 
 #Error
-MetadataError: enum {
+RecordDecodeError: enum {
     UnknownFormat Missing Duplicate Malformed(why: String) UnsupportedVersion(version: U16)
 
     display: fn(self) -> String Never! {
@@ -35,33 +35,33 @@ CLIRecordCursor: struct {
     bytes: View<U8>
     at: Int
 
-    byte: fn(&self) -> U8 MetadataError! {
-        if self.at >= self.bytes.len() -> return Err(MetadataError.Malformed{why: "truncated payload"})
+    byte: fn(&self) -> U8 RecordDecodeError! {
+        if self.at >= self.bytes.len() -> return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         value: self.bytes[self.at]
         self.at += 1
         Ok(value)
     }
-    u32: fn(&self) -> Int MetadataError! {
-        if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 -> return Err(MetadataError.Malformed{why: "truncated payload"})
+    u32: fn(&self) -> Int RecordDecodeError! {
+        if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 -> return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         value := 0
         loop index in 0..<4 -> value = value.bit_or((Int.from_u8(self.bytes[self.at + index]) << (8 * index)))
         self.at += 4
         Ok(value)
     }
-    string: fn(&self) -> String MetadataError! {
+    string: fn(&self) -> String RecordDecodeError! {
         length: self.u32()
-        if length > CLI_SCHEMA_MAX_STRING_BYTES -> return Err(MetadataError.Malformed{why: "string too long"})
-        if self.at > self.bytes.len() || length > self.bytes.len() - self.at -> return Err(MetadataError.Malformed{why: "truncated string"})
+        if length > CLI_SCHEMA_MAX_STRING_BYTES -> return Err(RecordDecodeError.Malformed{why: "string too long"})
+        if self.at > self.bytes.len() || length > self.bytes.len() - self.at -> return Err(RecordDecodeError.Malformed{why: "truncated string"})
         end: self.at + length
         bytes: self.bytes[self.at..<end]
         self.at = end
-        Ok(String.from_bytes(bytes) ?? return Err(MetadataError.Malformed{why: "string is not UTF-8"}))
+        Ok(String.from_bytes(bytes) ?? return Err(RecordDecodeError.Malformed{why: "string is not UTF-8"}))
     }
-    optional_string: fn(&self) -> String? MetadataError! {
+    optional_string: fn(&self) -> String? RecordDecodeError! {
         if self.byte() == {
             CLI_SCHEMA_BYTE_0 -> Ok(None)
             CLI_SCHEMA_BYTE_1 -> Ok(Val(self.string()))
-            else -> Err(MetadataError.Malformed{why: "invalid optional string bit"})
+            else -> Err(RecordDecodeError.Malformed{why: "invalid optional string bit"})
         }
     }
 }
@@ -72,17 +72,17 @@ cli_schema_bytes_start: fn(bytes: View<U8>, prefix: [U8]) -> Bool Never! {
     }
     true
 }
-decode_record: fn(record: View<U8>) -> CLICommandSchema MetadataError! {
-    if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Malformed{why: "bad record header"})
+decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
+    if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) -> return Err(RecordDecodeError.Malformed{why: "bad record header"})
     version: U16{Int.from_u8(record[8]).bit_or((Int.from_u8(record[9]) << 8))}
-    if version != RECORD_VERSION -> return Err(MetadataError.UnsupportedVersion{version: version})
+    if version != RECORD_VERSION -> return Err(RecordDecodeError.UnsupportedVersion{version: version})
     length := 0
     loop index in 0..<4 -> length = length.bit_or((Int.from_u8(record[10 + index]) << (8 * index)))
-    if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length -> return Err(MetadataError.Malformed{why: "invalid record length"})
+    if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length -> return Err(RecordDecodeError.Malformed{why: "invalid record length"})
     payload: record[46..<record.len()]
     digest: sha256_bytes(payload)
     loop index in 0..<32 {
-        if digest[index] != record[14 + index] -> return Err(MetadataError.Malformed{why: "digest mismatch"})
+        if digest[index] != record[14 + index] -> return Err(RecordDecodeError.Malformed{why: "digest mismatch"})
     }
     cursor := CLIRecordCursor{bytes: payload, at: 0}
     entry_type: cursor.string()
@@ -90,37 +90,37 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema MetadataError! {
     standard: if cursor.byte() == {
         CLI_SCHEMA_BYTE_0 -> false
         CLI_SCHEMA_BYTE_1 -> true
-        else -> { return Err(MetadataError.Malformed{why: "invalid standard bit"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "invalid standard bit"}) }
     }
     version_text: cursor.optional_string()
     count: cursor.u32()
-    if count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many inputs"})
+    if count > CLI_SCHEMA_MAX_INPUTS -> return Err(RecordDecodeError.Malformed{why: "too many inputs"})
     inputs := [CLIInputSchema]{}
     inputs.try_reserve(count) ?? panic("CLI metadata input allocation failed")
     loop _ in 0..<count -> inputs.push(cli_schema_decode_input(cursor))
     command_count: cursor.u32()
-    if command_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many commands"})
+    if command_count > CLI_SCHEMA_MAX_INPUTS -> return Err(RecordDecodeError.Malformed{why: "too many commands"})
     commands := [CLISubcommandSchema]{}
     commands.try_reserve(command_count) ?? panic("CLI metadata command allocation failed")
     loop _ in 0..<command_count {
         name: cursor.string()
         command_description: cursor.optional_string()
         input_count: cursor.u32()
-        if input_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many command inputs"})
+        if input_count > CLI_SCHEMA_MAX_INPUTS -> return Err(RecordDecodeError.Malformed{why: "too many command inputs"})
         command_inputs := [CLIInputSchema]{}
         command_inputs.try_reserve(input_count) ?? panic("CLI metadata command input allocation failed")
         loop _ in 0..<input_count -> command_inputs.push(cli_schema_decode_input(cursor))
         commands.push(CLISubcommandSchema{name: name, description: command_description, inputs: command_inputs.move()})
     }
     job_count: cursor.u32()
-    if job_count > CLI_SCHEMA_MAX_JOBS -> return Err(MetadataError.Malformed{why: "too many jobs"})
+    if job_count > CLI_SCHEMA_MAX_JOBS -> return Err(RecordDecodeError.Malformed{why: "too many jobs"})
     jobs := [JobFact]{}
     jobs.try_reserve(job_count) ?? panic("CLI metadata job allocation failed")
     loop _ in 0..<job_count -> jobs.push(cli_schema_decode_job(cursor))
-    if cursor.at != cursor.bytes.len() -> return Err(MetadataError.Malformed{why: "trailing payload bytes"})
+    if cursor.at != cursor.bytes.len() -> return Err(RecordDecodeError.Malformed{why: "trailing payload bytes"})
     Ok(CLICommandSchema{entry_type: entry_type, description: description, inputs: inputs.move(), commands: commands.move(), jobs: jobs.move(), standard: standard, version: version_text})
 }
-cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema MetadataError! {
+cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema RecordDecodeError! {
     field: cursor.string()
     flag: cursor.string()
     short: cursor.optional_string()
@@ -136,49 +136,49 @@ cli_schema_decode_input: fn(cursor: &CLIRecordCursor) -> CLIInputSchema Metadata
                 CLI_SCHEMA_BYTE_2 -> CLIValueKind.Float
                 CLI_SCHEMA_BYTE_3 -> CLIValueKind.String
                 CLI_SCHEMA_BYTE_4 -> CLIValueKind.Path
-                else -> { return Err(MetadataError.Malformed{why: "unknown input kind"}) }
+                else -> { return Err(RecordDecodeError.Malformed{why: "unknown input kind"}) }
             }
             optional: if cursor.byte() == {
                 CLI_SCHEMA_BYTE_0 -> false
                 CLI_SCHEMA_BYTE_1 -> true
-                else -> { return Err(MetadataError.Malformed{why: "invalid optional bit"}) }
+                else -> { return Err(RecordDecodeError.Malformed{why: "invalid optional bit"}) }
             }
             default: if cursor.byte() == {
                 CLI_SCHEMA_BYTE_0 -> None
                 CLI_SCHEMA_BYTE_1 -> Val(CLIDefault.TypeDefault)
                 CLI_SCHEMA_BYTE_2 -> Val(CLIDefault.Recorded{value: cursor.string()})
-                else -> { return Err(MetadataError.Malformed{why: "unknown default kind"}) }
+                else -> { return Err(RecordDecodeError.Malformed{why: "unknown default kind"}) }
             }
             CLIInputShape.Value{kind: kind, optional: optional, default: default}
         }
-        else -> { return Err(MetadataError.Malformed{why: "unknown input shape"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "unknown input shape"}) }
     }
     positional: if cursor.byte() == {
         CLI_SCHEMA_BYTE_0 -> None
         CLI_SCHEMA_BYTE_1 -> {
             order: cursor.u32()
-            if order > 65535 -> return Err(MetadataError.Malformed{why: "positional order out of range"})
+            if order > 65535 -> return Err(RecordDecodeError.Malformed{why: "positional order out of range"})
             Val(U16{order})
         }
-        else -> { return Err(MetadataError.Malformed{why: "invalid positional bit"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "invalid positional bit"}) }
     }
     Ok(CLIInputSchema{field: field, flag: flag, short: short, env: env, help: help, metavar: metavar, shape: shape, positional: positional})
 }
-cli_schema_decode_strings: fn(cursor: &CLIRecordCursor, maximum: Int, refusal: String) -> [String] MetadataError! {
+cli_schema_decode_strings: fn(cursor: &CLIRecordCursor, maximum: Int, refusal: String) -> [String] RecordDecodeError! {
     count: cursor.u32()
-    if count > maximum -> return Err(MetadataError.Malformed{why: refusal})
+    if count > maximum -> return Err(RecordDecodeError.Malformed{why: refusal})
     values := [String]{}
     values.try_reserve(count) ?? panic("CLI metadata string allocation failed")
     loop _ in 0..<count -> values.push(cursor.string())
     Ok(values)
 }
-cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
+cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact RecordDecodeError! {
     name: cursor.string()
     scope: if cursor.byte() == {
         CLI_SCHEMA_BYTE_0 -> JobScope.Dev
         CLI_SCHEMA_BYTE_1 -> JobScope.Ship
         CLI_SCHEMA_BYTE_2 -> JobScope.Internal
-        else -> { return Err(MetadataError.Malformed{why: "unknown job scope"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "unknown job scope"}) }
     }
     doc: cursor.optional_string()
     schedule: cursor.optional_string()
@@ -186,9 +186,9 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
     inputs: cli_schema_decode_strings(cursor, CLI_SCHEMA_MAX_INPUTS, "too many job inputs")
     outputs: cli_schema_decode_strings(cursor, CLI_SCHEMA_MAX_INPUTS, "too many job outputs")
     parallel: cursor.u32()
-    if parallel == 0 -> return Err(MetadataError.Malformed{why: "job parallel bound must be positive"})
+    if parallel == 0 -> return Err(RecordDecodeError.Malformed{why: "job parallel bound must be positive"})
     argument_count: cursor.u32()
-    if argument_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job arguments"})
+    if argument_count > CLI_SCHEMA_MAX_INPUTS -> return Err(RecordDecodeError.Malformed{why: "too many job arguments"})
     arguments := [JobArgumentSchema]{}
     arguments.try_reserve(argument_count) ?? panic("CLI metadata job argument allocation failed")
     loop _ in 0..<argument_count {
@@ -198,19 +198,19 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
         required: if cursor.byte() == {
             CLI_SCHEMA_BYTE_0 -> false
             CLI_SCHEMA_BYTE_1 -> true
-            else -> { return Err(MetadataError.Malformed{why: "invalid job argument required bit"}) }
+            else -> { return Err(RecordDecodeError.Malformed{why: "invalid job argument required bit"}) }
         }
         default: cursor.optional_string()
         variadic: if cursor.byte() == {
             CLI_SCHEMA_BYTE_0 -> false
             CLI_SCHEMA_BYTE_1 -> true
-            else -> { return Err(MetadataError.Malformed{why: "invalid job argument variadic bit"}) }
+            else -> { return Err(RecordDecodeError.Malformed{why: "invalid job argument variadic bit"}) }
         }
         zone: if cursor.byte() == {
             CLI_SCHEMA_BYTE_0 -> ParamZone.PositionalOnly
             CLI_SCHEMA_BYTE_1 -> ParamZone.Either
             CLI_SCHEMA_BYTE_2 -> ParamZone.LabelOnly
-            else -> { return Err(MetadataError.Malformed{why: "unknown job argument zone"}) }
+            else -> { return Err(RecordDecodeError.Malformed{why: "unknown job argument zone"}) }
         }
         arguments.push(JobArgumentSchema{name: argument_name, label: label, ty: ty, required: required, default: default, variadic: variadic, zone: zone})
     }
@@ -220,16 +220,16 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact MetadataError! {
         CLI_SCHEMA_BYTE_0 -> None
         CLI_SCHEMA_BYTE_1 -> Val(JobSkip.Always{reason: cursor.string()})
         CLI_SCHEMA_BYTE_2 -> Val(JobSkip.UnlessPlatform{platform: cursor.string()})
-        else -> { return Err(MetadataError.Malformed{why: "unknown job skip rule"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "unknown job skip rule"}) }
     }
     cache: if cursor.byte() == {
         CLI_SCHEMA_BYTE_0 -> JobCachePolicy.Uncached
         CLI_SCHEMA_BYTE_1 -> JobCachePolicy.Local
         CLI_SCHEMA_BYTE_2 -> JobCachePolicy.Shared
-        else -> { return Err(MetadataError.Malformed{why: "unknown job cache policy"}) }
+        else -> { return Err(RecordDecodeError.Malformed{why: "unknown job cache policy"}) }
     }
     limit_count: cursor.u32()
-    if limit_count > CLI_SCHEMA_MAX_INPUTS -> return Err(MetadataError.Malformed{why: "too many job limits"})
+    if limit_count > CLI_SCHEMA_MAX_INPUTS -> return Err(RecordDecodeError.Malformed{why: "too many job limits"})
     limit_map := [String:String]{}
     loop _ in 0..<limit_count {
         key: cursor.string()

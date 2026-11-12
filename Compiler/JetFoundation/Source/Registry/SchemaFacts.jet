@@ -1,0 +1,47 @@
+// The toolchain's executable schema as fact rows: its marker rules
+// (MARKER_SOURCE) and its typed fact reads (FOUNDATION_FACT_READ_ROWS), in
+// that canonical order. This is the one reader of those registries for fact
+// queries: `compiler.schema()` (JetDriver ComptimeCompiler.jet) issues these
+// rows as a `core.compiler.SchemaSnapshot`, and `core.compiler.query` reads
+// that snapshot.
+
+// One schema row. `kind` is its `core.compiler.FactKind` variant.
+SchemaFactRow: struct {
+    kind: String
+    name: String
+    scope: [String]
+}
+
+SCHEMA_FACT_KIND_MARKER: "Marker"
+SCHEMA_FACT_KIND_READ: "Read"
+
+// The canonical keys of the `core.compiler` records `compiler.schema()`
+// answers with.
+CORE_COMPILER_SCHEMA_SNAPSHOT: "<corelib>/core.compiler::SchemaSnapshot"
+CORE_COMPILER_SCHEMA_FACT: "<corelib>/core.compiler::SchemaFact"
+CORE_COMPILER_FACT_KIND: "<corelib>/core.compiler::FactKind"
+CORE_COMPILER_SNAPSHOT_ID: "<corelib>/core.compiler::SnapshotID"
+
+// Every schema row in canonical order: each marker rule with its sites, then
+// each readable `$` member with its planes.
+schema_fact_rows: fn() -> [SchemaFactRow] Never! {
+    rows := [SchemaFactRow]{}
+    loop rule in marker_source_read(MARKER_SOURCE) -> rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
+    loop row in FOUNDATION_FACT_READ_ROWS {
+        if row.member == .Val(member) -> rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_READ, name: member.copy(), scope: row.planes.copy()})
+    }
+    rows
+}
+
+// The snapshot identity of `rows`: the digest of every row in order, so equal
+// schemas share an identity and any changed row changes it.
+schema_fact_digest: fn(rows: [SchemaFactRow]) -> String Never! {
+    fields := [String]{"jet-schema-facts-v1"}
+    loop row in rows {
+        fields.push(row.kind.copy())
+        fields.push(row.name.copy())
+        fields.push("{row.scope.len()}")
+        loop place in row.scope -> fields.push(place.copy())
+    }
+    record_key_digest(fields)
+}

@@ -7,16 +7,24 @@
 // generated-Rust markers `jet inspect compiler source-map` reads. These read
 // only their argument: no path, package or sibling source. The package views
 // (`manifest`, `package`, `lock`, `profiles`) read the compile's pinned
-// package root (ComptimePackageViews.jet).
+// package root (ComptimePackageViews.jet). `schema` answers the running
+// toolchain's executable schema (jet_driver_compiler_schema).
 use {
     jet_foundation.[
+        CORE_COMPILER_FACT_KIND,
+        CORE_COMPILER_SCHEMA_FACT,
+        CORE_COMPILER_SCHEMA_SNAPSHOT,
+        CORE_COMPILER_SNAPSHOT_ID,
         CompilerThreads,
         Span,
+        TComptimeEnumArg,
         TComptimeField,
         TComptimeReport,
         TComptimeValue,
         Type,
         diagnostic_from_registry,
+        schema_fact_digest,
+        schema_fact_rows,
     ]
     jet_eval.[
         JET_COMPILER_SERVICES_SCHEMA_VERSION,
@@ -78,6 +86,7 @@ JetDriverComptimeCompiler: struct {
                 permit: self.context.guard_read()
                 return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
             }
+            if query == "schema" -> return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_schema()})
             None
         }
     }
@@ -126,6 +135,29 @@ jet_driver_compiler_query_text: fn(args: [TComptimeValue]) -> String? {
 
 jet_driver_compiler_query_lost: fn(query: String, span: Span) -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.{query}` has no answer", "the compiler couldn't read the query's checked argument or project its result", "report this compiler bug")}
+}
+
+// `compiler.schema()`: the running toolchain's executable schema
+// (schema_fact_rows) as a `core.compiler.SchemaSnapshot`, identified by the
+// digest of its rows.
+jet_driver_compiler_schema: fn() -> TComptimeValue Never! {
+    rows: schema_fact_rows()
+    facts := [TComptimeValue]{}
+    loop row in rows {
+        scope: loop place in row.scope -> jet_eval_compiler_services_string(place)
+        facts.push(TComptimeValue.Struct{type_name: CORE_COMPILER_SCHEMA_FACT, fields: [TComptimeField]{
+            TComptimeField{name: "kind", value: TComptimeValue.Enum{type_name: CORE_COMPILER_FACT_KIND, variant: row.kind.copy(), args: [TComptimeEnumArg]{}}},
+            TComptimeField{name: "name", value: jet_eval_compiler_services_string(row.name)},
+            TComptimeField{name: "scope", value: TComptimeValue.List{values: scope}},
+        }})
+    }
+    identity: TComptimeValue.Struct{type_name: CORE_COMPILER_SNAPSHOT_ID, fields: [TComptimeField]{
+        TComptimeField{name: "digest", value: jet_eval_compiler_services_string(schema_fact_digest(rows))},
+    }}
+    TComptimeValue.Struct{type_name: CORE_COMPILER_SCHEMA_SNAPSHOT, fields: [TComptimeField]{
+        TComptimeField{name: "id", value: identity},
+        TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
+    }}
 }
 
 // `check(syntax)`: the check query over the syntax tree's source. A source

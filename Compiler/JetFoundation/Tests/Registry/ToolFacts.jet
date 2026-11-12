@@ -1,19 +1,12 @@
-// Compiler stages, producer statuses, callable policy display, identifier
-// classes and the typed compiler-fact reads.
+// Producer statuses, callable policy display, identifier classes and the
+// typed compiler-fact reads.
 use jet_foundation.[
-    COMPILER_STAGE_ALL, CallablePolicy, CompilerStage, Dimension, Exactness,
+    CallablePolicy, Dimension, Exactness,
     FOUNDATION_FACT_READ_ROWS, FactRead, IdentifierClass, Measure, MetadataProducerStatus, Name,
     UnitScaleProvenance, ViewProvenance, callable_policy_display, classify_identifier,
-    compiler_stage_as_str, fact_read_detail_field, fact_read_kind, fact_read_members,
+    fact_read_detail_field, fact_read_kind, fact_read_members,
     fact_read_public_read_type, fact_read_reflection_kind, fact_read_source_member,
 ]
-
-#Test("compiler stages preserve every availability stage in order") {
-    stages: COMPILER_STAGE_ALL
-    assert(stages == [CompilerStage]{CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed, CompilerStage.Prepared, CompilerStage.Emitted})
-    names: loop stage in stages -> compiler_stage_as_str(stage)
-    assert(names == [String]{"Parsed", "Resolved", "Typed", "Prepared", "Emitted"})
-}
 
 #Test("metadata producer statuses remain three distinct obligations") {
     statuses: [MetadataProducerStatus]{MetadataProducerStatus.ContractOnly, MetadataProducerStatus.NotImplemented, MetadataProducerStatus.ExistingCallableProducerNeedsExtension}

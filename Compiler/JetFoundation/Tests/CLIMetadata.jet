@@ -2,7 +2,7 @@
 use jet_foundation.[
     CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, CLIValueKind,
     JET_COMPILER_TARGET_USIZE_MAX, JobArgumentSchema, JobCachePolicy, JobFact, JobScope, JobSkip,
-    MetadataError, StringMapEntry, decode_record, encode_record, read_executable,
+    RecordDecodeError, StringMapEntry, decode_record, encode_record, read_executable,
 ]
 
 cli_metadata_require: fn(ok: Bool, why: String) Never! { if !ok -> panic("CLI metadata: {why}") }
@@ -126,7 +126,7 @@ cli_metadata_accept: fn(bytes: [U8], expected: CLICommandSchema) Never! {
     actual: read_executable(bytes[0..<bytes.len()], JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
     cli_metadata_require(actual == expected, "cross-format record round trip")
 }
-cli_metadata_refuse: fn(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
+cli_metadata_refuse: fn(bytes: [U8], expected: RecordDecodeError, maximum: U64) Never! {
     refused: if read_executable(bytes[0..<bytes.len()], maximum) == {
         .Err(error) -> error == expected
         .Ok(_) -> false
@@ -157,26 +157,26 @@ cli_metadata_refuse: fn(bytes: [U8], expected: MetadataError, maximum: U64) Neve
     cli_metadata_accept(cli_metadata_pe(record, 1, [U8]{0, 0}), schema)
     cli_metadata_accept(cli_metadata_wasm(record, 1), schema)
     max: JET_COMPILER_TARGET_USIZE_MAX
-    cli_metadata_refuse("not executable".bytes(), MetadataError.UnknownFormat, max)
-    cli_metadata_refuse([U8]{0, 97, 115, 109, 1, 0, 0, 0}, MetadataError.Missing, max)
-    cli_metadata_refuse(cli_metadata_pe(record, 2, [U8]{}), MetadataError.Duplicate, max)
-    cli_metadata_refuse(cli_metadata_pe(record, 1, record), MetadataError.Duplicate, max)
-    cli_metadata_refuse(cli_metadata_pe(record, 1, [U8]{0, 7}), MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}, max)
-    cli_metadata_refuse(cli_metadata_wasm(record, 2), MetadataError.Duplicate, max)
+    cli_metadata_refuse("not executable".bytes(), RecordDecodeError.UnknownFormat, max)
+    cli_metadata_refuse([U8]{0, 97, 115, 109, 1, 0, 0, 0}, RecordDecodeError.Missing, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 2, [U8]{}), RecordDecodeError.Duplicate, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 1, record), RecordDecodeError.Duplicate, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 1, [U8]{0, 7}), RecordDecodeError.Malformed{why: "nonzero bytes after PE metadata record"}, max)
+    cli_metadata_refuse(cli_metadata_wasm(record, 2), RecordDecodeError.Duplicate, max)
     nested: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(record, true), false, false)
-    cli_metadata_refuse(cli_metadata_fat(nested, nested, false, false), MetadataError.Malformed{why: "nested universal Mach-O slice"}, max)
+    cli_metadata_refuse(cli_metadata_fat(nested, nested, false, false), RecordDecodeError.Malformed{why: "nested universal Mach-O slice"}, max)
     unsupported := record.copy()
     unsupported[8] = U8{6}
-    cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), MetadataError.UnsupportedVersion{version: U16{6}}, max)
+    cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), RecordDecodeError.UnsupportedVersion{version: U16{6}}, max)
     corrupt := record.copy()
     corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1].bit_xor(U8{1})
-    cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), MetadataError.Malformed{why: "digest mismatch"}, max)
+    cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), RecordDecodeError.Malformed{why: "digest mismatch"}, max)
     disagreement: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
-    cli_metadata_refuse(disagreement, MetadataError.Malformed{why: "universal Mach-O slices disagree"}, max)
+    cli_metadata_refuse(disagreement, RecordDecodeError.Malformed{why: "universal Mach-O slices disagree"}, max)
     offset_overflow := cli_metadata_elf(record, true, true)
     cli_metadata_number(offset_overflow, 40, 8, U64{0x100000000}, true)
-    cli_metadata_refuse(offset_overflow, MetadataError.Malformed{why: "file offset overflow"}, U64{0xffffffff})
+    cli_metadata_refuse(offset_overflow, RecordDecodeError.Malformed{why: "file offset overflow"}, U64{0xffffffff})
     invalid_name := cli_metadata_pe(record, 1, [U8]{})
     invalid_name[0x80 + 24] = U8{255}
-    cli_metadata_refuse(invalid_name, MetadataError.Malformed{why: "section name is not UTF-8"}, max)
+    cli_metadata_refuse(invalid_name, RecordDecodeError.Malformed{why: "section name is not UTF-8"}, max)
 }

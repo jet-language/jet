@@ -415,6 +415,39 @@ use compiler: core.compiler
 @profiles: compiler.profiles() ?? panic("profiles")
 ```
 
+#### Fact queries
+
+`core.compiler` has one public typed fact query:
+`query(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit:
+Int?{None}) -> [Fact] MetadataError!` (D-META-REG2). It is an ordinary Core
+function over an immutable snapshot, so every caller reads the same rows
+through the same code.
+
+`schema() -> SchemaSnapshot` issues the running toolchain's executable schema,
+the store `FactSource.Schema(snapshot)` names. It has the same compile-time
+gate as the other compiler calls: a runtime call is E0956. Its facts are
+`SchemaFact { kind, name, scope }` rows in schema order: one `FactKind.Marker`
+row per Prelude marker (`scope` holds its sites), then one `FactKind.Read`
+row per readable `$` member (`scope` holds its planes).
+`snapshot.identity()` is a compiler-issued `SnapshotID`: the digest of the
+rows, equal for equal schemas.
+
+A query that can't answer completely fails; it never returns a shorter list.
+An empty list is a checked empty answer. `MetadataError { kind, query, source }`
+carries a `MetadataFailure`: `Unavailable(required_stage: CompilerStage,
+reason)`, `Unsupported(capability)`, `Stale(requested: SnapshotID, current:
+SnapshotID)`, `Invalid(diagnostics)`, `Denied(scope: ScopeID, reason)` or
+`Truncated(limit, observed)`. More matches than `limit` is `Truncated`, and a
+time view (`at`) of a schema snapshot is `Unsupported`. Identity types are
+spelled `SnapshotID` and `ScopeID`, following the acronym-casing rule.
+
+```jet
+use compiler: core.compiler
+
+SCHEMA: #run compiler.schema()
+MARKERS: #run (compiler.query(compiler.FactSource.Schema{snapshot: SCHEMA}, compiler.FactKind.Marker) ?? panic("schema")).len()
+```
+
 ### `core.meta` — module and package metadata
 
 Every module has a `Module` value and every package a `Package` value, and the
@@ -454,7 +487,6 @@ against that row. Code reads the built target's operating system as
 | `WindowsX64` | `x86_64-pc-windows-msvc` | none |
 | `Web` | `wasm32-unknown-unknown` | `!Exec`, `!FFI.C` |
 | `GPU` | `spirv64-unknown-unknown` | every host service, `!Panic` and `!Mem.Alloc` |
-
 ### `core.mod` — pinned library loading
 
 `core.mod.load` loads a project-contained compiled Jet library under an explicit

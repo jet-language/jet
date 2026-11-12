@@ -40,3 +40,121 @@ EXTENSION_POINTS: [ExtensionPoint]{
     ExtensionPoint{name: "Derive", entry: "Derive.expand(target: Target)", row: [String]{"Meta.Generate"}},
     ExtensionPoint{name: "Lint", entry: "Marker.expand(self, target: Target)", row: [String]{}},
 }
+
+/// The compiler stage that makes a checked fact available. This is not the
+/// language phase `#phase` reads.
+CompilerStage: enum { Parsed Resolved Typed Prepared Emitted }
+
+/// A compiler-issued snapshot identity. Source names and casts can't make
+/// one; only the compiler issues it, with the snapshot it names.
+SnapshotID: struct {
+    priv digest: String
+
+    text: fn(self) -> String Never! { self.digest.copy() }
+}
+
+/// A compiler-issued authorization scope, named by a `Denied` failure.
+ScopeID: struct {
+    priv name: String
+
+    text: fn(self) -> String Never! { self.name.copy() }
+}
+
+/// Why a metadata query has no complete answer. A missing fact is never an
+/// empty success: an empty list means the checked answer is empty.
+MetadataFailure: enum {
+    Unavailable(required_stage: CompilerStage, reason: String)
+    Unsupported(capability: String)
+    Stale(requested: SnapshotID, current: SnapshotID)
+    Invalid(diagnostics: [CompilerDiagnostic])
+    Denied(scope: ScopeID, reason: String)
+    Truncated(limit: Int, observed: Int)
+}
+
+/// A failed metadata query: the failure, the query's spelling and, when the
+/// query names a place in source, that place.
+#Error
+MetadataError: struct {
+    kind: MetadataFailure
+    query: String
+    source: SourceSpan?
+
+    impl Display {
+        display: fn(self) -> String {
+            if self.kind == {
+                .Unavailable(stage, reason) -> {
+                    needed: if stage == {
+                        .Parsed -> "parsing"
+                        .Resolved -> "resolution"
+                        .Typed -> "type checking"
+                        .Prepared -> "preparation"
+                        .Emitted -> "emission"
+                    }
+                    "{self.query}: unavailable before {needed}: {reason}"
+                }
+                .Unsupported(capability) -> "{self.query}: unsupported: {capability}"
+                .Stale(requested, current) -> "{self.query}: snapshot {requested.text()} is stale; the current one is {current.text()}"
+                .Invalid(diagnostics) -> "{self.query}: the snapshot did not check ({diagnostics.len()} diagnostics)"
+                .Denied(scope, reason) -> "{self.query}: denied in {scope.text()}: {reason}"
+                .Truncated(limit, observed) -> "{self.query}: {observed} rows match, over the limit of {limit}"
+            }
+        }
+    }
+}
+
+/// The kinds of fact the executable schema declares: its marker rules and
+/// its typed fact reads.
+FactKind: enum { Marker Read }
+
+/// One row of the toolchain's executable schema.
+SchemaFact: struct {
+    kind: FactKind
+    /// The row's canonical name: the marker or the read it declares.
+    name: String
+    /// Where the row applies: a marker rule's sites, a fact read's planes.
+    scope: [String]
+}
+
+/// The running toolchain's executable schema, as `compiler.schema()` issues
+/// it: an immutable snapshot that `query` reads.
+SchemaSnapshot: struct {
+    priv id: SnapshotID
+    priv facts: [SchemaFact]
+
+    identity: fn(self) -> SnapshotID Never! { self.id.copy() }
+}
+
+/// The immutable snapshot a query reads.
+FactSource: enum {
+    Schema(snapshot: SchemaSnapshot)
+}
+
+/// One fact a query returns, tagged by the store it comes from.
+Fact: enum {
+    Schema(fact: SchemaFact)
+}
+
+/// A point in a run's recorded timeline, in milliseconds from the run's
+/// start. A query without one reads the source's complete recorded view.
+QueryTime: struct {
+    elapsed_ms: Int
+}
+
+/// The facts of `kind` in `source`, in the source's canonical order. Facts a
+/// query can't answer completely are a `MetadataError`, never a shorter list:
+/// more matches than `limit` is `Truncated`.
+query: fn(source: FactSource, kind: FactKind, at: QueryTime?{None}, limit: Int?{None}) -> [Fact] MetadataError! {
+    rows := [Fact]{}
+    if source == {
+        .Schema(snapshot) -> {
+            if at != None -> return Err(MetadataError{kind: MetadataFailure.Unsupported{capability: "a time view of a schema snapshot"}, query: "query", source: None})
+            loop fact in snapshot.facts {
+                if fact.kind == kind -> rows.push(Fact.Schema{fact: fact.copy()})
+            }
+        }
+    }
+    if limit == .Val(most) {
+        if rows.len() > most -> return Err(MetadataError{kind: MetadataFailure.Truncated{limit: most, observed: rows.len()}, query: "query", source: None})
+    }
+    Ok(rows)
+}

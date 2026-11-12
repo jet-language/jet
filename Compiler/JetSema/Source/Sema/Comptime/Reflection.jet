@@ -550,7 +550,7 @@ sema_comptime_reflection_obligation: fn(value: FunctionObligations) -> TComptime
 }
 
 sema_comptime_reflection_fact_value: fn(kind: String, name: String, members: [String], range: TComptimeValue?, dimension: TComptimeValue?, detail_name: String, detail: TComptimeValue?) -> TComptimeValue Never! {
-    fact_kind: TComptimeValue.Enum{type_name: "FactKind", variant: kind, args: [TComptimeEnumArg]{}}
+    fact_kind: TComptimeValue.Enum{type_name: "ReflectionKind", variant: kind, args: [TComptimeEnumArg]{}}
     range_value: if range == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "range")
     dimension_value: if dimension == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "dimension")
     fields := [SemaComptimeReflectionField]{
@@ -571,7 +571,7 @@ sema_comptime_reflection_fact_value: fn(kind: String, name: String, members: [St
 
 sema_comptime_reflection_fact_info: fn(kind: String, name: String, path: String, value: TComptimeValue) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("FactInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "FactKind", variant: kind, args: [TComptimeEnumArg]{}}},
+        SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "ReflectionKind", variant: kind, args: [TComptimeEnumArg]{}}},
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "path", value: TComptimeValue.String{value: path}},
         SemaComptimeReflectionField{name: "value", value: value},

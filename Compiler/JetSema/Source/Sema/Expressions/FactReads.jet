@@ -102,12 +102,12 @@ sema_fact_optional: fn(name: String) -> Type Never! {
 }
 
 // Reflection fact kinds and their detail enums are closed,
-// compiler-owned menus (Rust `core_fact_kind_variants`). `FactKind` is the
+// compiler-owned menus (Rust `core_fact_kind_variants`). `ReflectionKind` is the
 // registered plane projection: `Effect`, `State`, `Tag`, then each value
 // plane's reflection kind in Prelude `Facts.jet` row order.
 sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
     if {
-        enum_name == "FactKind" -> Val([String]{"Effect", "State", "Tag", "Nominal", "Range", "Layout", "Measure", "Dimension", "Classification", "Exactness", "Obligation", "Flow", "Taint", "Duty", "Effects", "States", "Sendability", "ViewProvenance", "Movedness", "Attribution", "Origin", "UnitScaleProvenance", "Maturity"})
+        enum_name == "ReflectionKind" -> Val([String]{"Effect", "State", "Tag", "Nominal", "Range", "Layout", "Measure", "Dimension", "Classification", "Exactness", "Obligation", "Flow", "Taint", "Duty", "Effects", "States", "Sendability", "ViewProvenance", "Movedness", "Attribution", "Origin", "UnitScaleProvenance", "Maturity"})
         enum_name == "Maturity" -> Val([String]{"Experimental", "Tested", "Hardened"})
         enum_name == "ExactnessKind" -> Val([String]{"Exact", "Approximate", "Measured"})
         enum_name == "ParamZone" -> Val([String]{"PositionalOnly", "Either", "LabelOnly"})
@@ -316,7 +316,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "FactInfo" {
         return if {
-            field == "kind" -> Val(sema_fact_named("FactKind"))
+            field == "kind" -> Val(sema_fact_named("ReflectionKind"))
             field == "name" || field == "path" -> Val(string)
             field == "value" -> Val(sema_fact_named("FactValue"))
             else -> None
@@ -324,7 +324,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "FactValue" {
         return if {
-            field == "kind" -> Val(sema_fact_named("FactKind"))
+            field == "kind" -> Val(sema_fact_named("ReflectionKind"))
             field == "name" -> Val(string)
             field == "members" -> Val(Type.List{element: string})
             field == "range" -> Val(sema_fact_optional("Range"))

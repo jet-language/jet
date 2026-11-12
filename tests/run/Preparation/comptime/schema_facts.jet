@@ -1,0 +1,67 @@
+// The toolchain's executable schema, read while building through its one
+// typed query. `compiler.schema()` issues the snapshot and `compiler.query`
+// returns its facts of one kind in schema order. More facts than a limit is a
+// `Truncated` error and a time view of a schema is `Unsupported`: a query
+// never answers with a shorter list. A `MetadataError` prints its query, then
+// why, naming snapshots and scopes by their text.
+use compiler: core.compiler
+
+SCHEMA: #run compiler.schema()
+
+// The names of the snapshot's facts of `kind`.
+fact_names: fn(snapshot: compiler.SchemaSnapshot, kind: compiler.FactKind) -> [String] {
+    names := [String]{}
+    rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, kind) ?? return names
+    loop row in rows {
+        if row == .Schema(fact) -> names.push(fact.name.copy())
+    }
+    names
+}
+
+// A snapshot's identity, as text.
+identity_text: fn(snapshot: compiler.SchemaSnapshot) -> String { snapshot_text(snapshot.identity()) }
+
+snapshot_text: fn(id: compiler.SnapshotID) -> String { id.text() }
+
+// The scope a query was denied in, as text.
+scope_text: fn(scope: compiler.ScopeID) -> String { scope.text() }
+
+// A failed query's text: its `Display`.
+error_text: fn(error: compiler.MetadataError) -> String { error.display() }
+
+// How a marker query with `at` and `limit` ends.
+query_end: fn(snapshot: compiler.SchemaSnapshot, at: compiler.QueryTime?, limit: Int?) -> String {
+    rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, compiler.FactKind.Marker, at: at, limit: limit) ?? {
+        return if err.kind == {
+            .Truncated(most, observed) -> "Truncated: over the limit of {most}: {observed > most}"
+            .Unsupported(capability) -> "Unsupported: {capability}"
+            .Unavailable(_, reason) -> "Unavailable: {reason}"
+            .Stale(_, _) -> "Stale"
+            .Invalid(_) -> "Invalid"
+            .Denied(scope, reason) -> "Denied in {scope_text(scope)}: {reason}"
+        }
+    }
+    "{rows.len() > 0} rows"
+}
+
+MARKERS: #run fact_names(SCHEMA, compiler.FactKind.Marker)
+READS: #run fact_names(SCHEMA, compiler.FactKind.Read)
+TRUNCATED: #run query_end(SCHEMA, None, Val(1))
+UNSUPPORTED: #run query_end(SCHEMA, Val(compiler.QueryTime{elapsed_ms: 0}), None)
+COMPLETE: #run query_end(SCHEMA, None, None)
+ONE_IDENTITY: #run { identity_text(compiler.schema()) == identity_text(SCHEMA) }
+TRUNCATED_TEXT: #run error_text(compiler.MetadataError{kind: compiler.MetadataFailure.Truncated{limit: 1, observed: 3}, query: "query", source: None})
+STALE_TEXT: #run error_text(compiler.MetadataError{kind: compiler.MetadataFailure.Stale{requested: SCHEMA.identity(), current: compiler.schema().identity()}, query: "query", source: None})
+STALE_NAMES_BOTH: #run { STALE_TEXT == "query: snapshot {identity_text(SCHEMA)} is stale; the current one is {identity_text(SCHEMA)}" }
+
+run: fn() {
+    print("markers include Pre and Post: {MARKERS.contains("Pre") && MARKERS.contains("Post")}")
+    print("reads include $origin: {READS.contains("$origin")}")
+    print("no read is a marker: {!READS.any((name) -> MARKERS.contains(name))}")
+    print(TRUNCATED)
+    print(UNSUPPORTED)
+    print("no limit: {COMPLETE}")
+    print("one identity: {ONE_IDENTITY}")
+    print(TRUNCATED_TEXT)
+    print("a stale error names both snapshots: {STALE_NAMES_BOTH}")
+}
