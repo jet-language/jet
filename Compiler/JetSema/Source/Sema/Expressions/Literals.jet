@@ -17,6 +17,7 @@ use jet_foundation.[
     StrPart,
     SymbolKind,
     TBinaryOp,
+    TGenericParam,
     TIndexProof,
     TupleField,
     Type,
@@ -903,25 +904,36 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
         }
         .FixedList(element, len) -> {
             if !sema_expression_integer_index(checked_index, expr_span(index), diagnostics) -> return None
-            length: measure_literal_value(len) ?? {
-                diagnostics.push(sema_error("E0965", expr_span(index), "a fixed-list length is not a checked integer measure", "fixed indexing needs a concrete list length", "use a literal fixed-list length"))
-                return None
-            }
-            if index_bounds == {
-                .Val(bounds) -> {
-                    if bounds.lo < 0 || bounds.hi >= length {
-                        diagnostics.push(sema_error("E0965", expr_span(index), "index {if bounds.lo < 0 -> bounds.lo else -> bounds.hi} is out of range for a fixed-size list of {length} elements", "the valid indexes for `[T#N]` are 0 through N-1", "use an index between 0 and {length - 1}"))
-                        return None
-                    }
-                    resolved_kind = IndexKind.FixedListProof
-                    // The claim is the whole `base[index]`, as the source shows it.
-                    context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: bounds.lo, hi: bounds.hi, len: length})
+            // `[T#N]` with `N` a number parameter in scope (`Inline: struct<N:
+            // Int>`): each instance has its own length, so the read keeps the
+            // runtime bounds check that IR builds per instance.
+            if len == .Symbol(_, name) && sema_expression_number_param(context.generic_params, name) {
+                if index_bounds == .Val(bounds) && bounds.lo < 0 {
+                    diagnostics.push(sema_error("E0965", expr_span(index), "index {bounds.lo} is out of range for a fixed-size list", "the valid indexes for `[T#{name}]` are 0 through {name}-1", "use an index of 0 or more"))
+                    return None
                 }
-                .None -> {
-                    resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
-                    if derived_range == .Val(range) && range.lo >= 0 && range.hi < length {
+                resolved_kind = IndexKind.List
+            } else {
+                length: measure_literal_value(len) ?? {
+                    diagnostics.push(sema_error("E0965", expr_span(index), "a fixed-list length is not a checked integer measure", "fixed indexing needs a concrete list length", "use a literal fixed-list length"))
+                    return None
+                }
+                if index_bounds == {
+                    .Val(bounds) -> {
+                        if bounds.lo < 0 || bounds.hi >= length {
+                            diagnostics.push(sema_error("E0965", expr_span(index), "index {if bounds.lo < 0 -> bounds.lo else -> bounds.hi} is out of range for a fixed-size list of {length} elements", "the valid indexes for `[T#N]` are 0 through N-1", "use an index between 0 and {length - 1}"))
+                            return None
+                        }
                         resolved_kind = IndexKind.FixedListProof
-                        context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: range.lo, hi: range.hi, len: length})
+                        // The claim is the whole `base[index]`, as the source shows it.
+                        context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: bounds.lo, hi: bounds.hi, len: length})
+                    }
+                    .None -> {
+                        resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List
+                        if derived_range == .Val(range) && range.lo >= 0 && range.hi < length {
+                            resolved_kind = IndexKind.FixedListProof
+                            context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: range.lo, hi: range.hi, len: length})
+                        }
                     }
                 }
             }
@@ -985,6 +997,14 @@ sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Sp
     kind: sema_expression_index_kind(resolved_kind, base_ty)
     value: sema_tree_node(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// Whether `name` is a number parameter (`<N: Int>`) of the body being checked.
+sema_expression_number_param: fn(params: [TGenericParam], name: String) -> Bool {
+    loop parameter in params {
+        if parameter.number && parameter.name == name -> return true
+    }
+    false
 }
 
 // Rust `infer` Index arm: an index of the wrong type is reported for the

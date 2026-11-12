@@ -1,0 +1,17 @@
+# #3505 c19: a type with a number parameter, `Inline: struct<N: Int>`. An
+# `Inline<2>` calls its `Store` trait method and its own methods, meets a
+# `Store` bound, and a `<N: Int>` function calls them on an `Inline<N>` and
+# reads `N`. `self.items[i]` on `[Int#N]` keeps the runtime bounds check.
+# Each tier prints the same lines.
+fixture: number_param_type_methods_resolve_on_every_tier.fixture
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = number_param_type_methods_resolve_on_every_tier.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = number_param_type_methods_resolve_on_every_tier.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = number_param_type_methods_resolve_on_every_tier.out

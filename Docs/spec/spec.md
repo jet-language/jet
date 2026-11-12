@@ -1197,7 +1197,10 @@ number, not a type. Each number is its own instance: `Packet<4>` and
 `Packet<2>` are two types, laid out and named apart. An argument is an
 integer literal or a constant (`Packet<SIZE>`), or a number parameter in
 scope (`Packet<N>`). Inside the declaration, `[T#N]` takes the instance's
-length and `N` reads as an `Int`.
+length and `N` reads as an `Int`; an index into such a list is
+bounds-checked at run time, per instance. Methods and trait impls of the
+type resolve on every instance (`Inline<2>` meets a `Store` bound its
+`impl Store` declares).
 A call infers `N` from its arguments' types (D-CONSTGEN1, D-CONSTGEN2,
 D-META-SPELL1).
 
