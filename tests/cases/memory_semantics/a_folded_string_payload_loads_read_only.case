@@ -1,0 +1,20 @@
+# A build-time String's payload loads read-only. The compiler folds `big`
+# ("x" repeated 2000000 times), and its bytes are a text row, which no code
+# writes (JetIR IR.jet ir_intern_text). The object writer puts such a row in
+# `.rodata` (JetBackend Image/Object.jet), which the link maps in a PT_LOAD
+# without PF_W. Only the String header that points at the bytes stays in
+# writable `.data`.
+requires: os-name:linux
+fixture: a_folded_string_payload_loads_read_only.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --optimize=full main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: ~ "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n" # the program reads the folded bytes
+when tool node
+step: node {work}/segments.mjs {work}/.jet/build/main 2000000
+exit: 0
+stdout: = "payload: in a read-only PT_LOAD\n" # not the writable data segment
+end when

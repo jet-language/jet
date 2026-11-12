@@ -107,11 +107,15 @@ X64DataReloc: struct {
     addend: Int
 }
 
+// `read_only`: no code writes the object (a text row's bytes). The object
+// writer puts such an object in `.rodata`, which loads read-only, when it
+// holds no address word; every other object is writable `.data`.
 X64Data: struct {
     id: X64DataID
     bytes: [U8]
     align: Int
     relocs: [X64DataReloc]
+    read_only: Bool{false}
 }
 
 // The source facts of one compiled function: `file` is a row of

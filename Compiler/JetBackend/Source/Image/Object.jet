@@ -1,24 +1,28 @@
 // ELF64 relocatable object output for x86-64 Linux: the hosted image path.
 // The object holds the compiled functions in `.text`, the module data in
-// `.data`, and a global `main` that hands the entry function to the
-// compiled runtime's `jet_rt_main`, which sets up the runtime, runs the entry
-// and returns the exit status (or, for a program that owns its main, runs
-// the entry itself). Every runtime call stays an undefined global
+// `.data` and `.rodata`, and a global `main` that hands the entry function to
+// the compiled runtime's `jet_rt_main`, which sets up the runtime, runs the
+// entry and returns the exit status (or, for a program that owns its main,
+// runs the entry itself). Every runtime call stays an undefined global
 // symbol with an `R_X86_64_PLT32` relocation, so the system linker binds it to
 // the compiled runtime's C-ABI export of the same name:
 //
 //     cc program.o libjet_runtime_c.a -lpthread -ldl -lm -o program
 //
 // Calls between compiled functions are resolved inside `.text`; data
-// addresses are `R_X86_64_PC32` relocations against the `.data` section.
+// addresses are `R_X86_64_PC32` relocations against the `.data` or `.rodata`
+// section.
 // The address of a runtime data object (the runtime's process-ending flag)
 // is an `R_X86_64_PC32` relocation against an undefined global symbol, which
 // the link binds to the runtime object's data export of that name.
 // Pointer words in `.data` use R_X86_64_64 in `.rela.data` against the
-// same section symbol. The module data is writable: the entry function fills
-// the String slots of frozen statics with runtime handles before the program
-// runs, and the first fma caches the CPU's FMA3 probe in its byte (JetIR
-// X64Select.jet ir_x64_fma); nothing else writes it.
+// section symbol of their target. `.data` is writable: the entry function
+// fills the String slots of frozen statics with runtime handles before the
+// program runs, and the first fma caches the CPU's FMA3 probe in its byte
+// (JetIR X64Select.jet ir_x64_fma); nothing else writes it. `.rodata` holds
+// the objects no code writes and that hold no address word (X64Data
+// read_only: the text rows, however large a folded String is), so they load
+// read-only.
 // `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
 // function's frame, source lines and variables.
 //
@@ -41,7 +45,7 @@ ELF64_R_X86_64_PLT32: 4
 
 // Section indices of the object, in header order.
 ELF64_OBJECT_TEXT: 1
-ELF64_OBJECT_RODATA: 2
+ELF64_OBJECT_DATA: 2
 ELF64_OBJECT_SYMTAB: 4
 ELF64_OBJECT_STRTAB: 5
 ELF64_OBJECT_SHSTRTAB: 6
@@ -52,11 +56,12 @@ ELF64_OBJECT_DEBUG_LINE: 14
 ELF64_OBJECT_DEBUG_LOCLISTS: 16
 // The fault handler's location table (Dwarf.jet dwarf_jet_line).
 ELF64_OBJECT_DEBUG_JETLINE: 17
+ELF64_OBJECT_RODATA: 19
 // With a section per function and data object: the location lists'
 // relocations, then from ELF64_OBJECT_FIRST_OWN per function its section and
 // that section's relocations, then the same per data object.
-ELF64_OBJECT_DEBUG_LOCLISTS_RELA: 19
-ELF64_OBJECT_FIRST_OWN: 20
+ELF64_OBJECT_DEBUG_LOCLISTS_RELA: 20
+ELF64_OBJECT_FIRST_OWN: 21
 // The first index ELF reserves (SHN_LORESERVE): the object writes no
 // extended section numbering, so its sections stay below it.
 ELF64_OBJECT_SECTION_LIMIT: 0xff00
@@ -67,7 +72,8 @@ ELF64_OBJECT_SYMBOL_DATA: 2
 ELF64_OBJECT_SYMBOL_ABBREV: 3
 ELF64_OBJECT_SYMBOL_LINE: 4
 ELF64_OBJECT_SYMBOL_LOCLISTS: 5
-ELF64_OBJECT_SYMBOL_FIRST_OWN: 6
+ELF64_OBJECT_SYMBOL_RODATA: 6
+ELF64_OBJECT_SYMBOL_FIRST_OWN: 7
 
 X64ObjectRela: struct { at: Int, symbol: Int, kind: Int, addend: Int }
 
@@ -196,9 +202,9 @@ X64_OBJECT_MIN_WEIGHT_PER_THREAD: 20000
 
 // The `.text` threads' inputs, read only: the functions, each one's place in
 // `.text`, per function id + 1 the first function row of that id (-1: none;
-// the entry stub `main` is id -1) and each data object's place in `.data`.
-// With own sections, per function and per data object the symbol of its
-// section (empty otherwise), and every place is 0.
+// the entry stub `main` is id -1), and per data object its place in its
+// section and that section's symbol. With own sections, per function the
+// symbol of its section (empty otherwise), and every place is 0.
 X64ObjectTextShared: struct {
     functions: [X64CompiledFunction]
     offsets: [Int]
@@ -298,10 +304,10 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                 .Runtime(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
                 .RuntimeData(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
                 .Data(id) -> {
-                    if {
-                        id.value < 0 || id.value >= data_offsets.len() -> errors.push("{function.name}: data {id.value} is not in the module")
-                        own -> x64_object_rela_put(relas, at, data_symbols[id.value], ELF64_R_X86_64_PC32, -4)
-                        else -> x64_object_rela_put(relas, at, ELF64_OBJECT_SYMBOL_DATA, ELF64_R_X86_64_PC32, data_offsets[id.value] - 4)
+                    if id.value < 0 || id.value >= data_offsets.len() {
+                        errors.push("{function.name}: data {id.value} is not in the module")
+                    } else {
+                        x64_object_rela_put(relas, at, data_symbols[id.value], ELF64_R_X86_64_PC32, data_offsets[id.value] - 4)
                     }
                 }
             }
@@ -355,9 +361,16 @@ x64_object_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
+// Whether data object `object` goes in `.rodata`: no code writes it and it
+// holds no address word, so it needs no relocation.
+x64_object_read_only: fn(object: X64Data) -> Bool Never! {
+    object.read_only && object.relocs.len() == 0
+}
+
 // Appends data object `row` to `order` unless it is placed already or not an
 // object of `data`, then, depth first in relocation order, every object its
-// relocations reach (x64_object_functions_threads lays `.data` out so).
+// relocations reach (x64_object_functions_threads lays `.data` and `.rodata`
+// out so).
 x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[Int]) Never! {
     pending := [Int]{row}
     loop pending.len() > 0 {
@@ -479,14 +492,16 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     // Calls between functions are patched below as rel32 without per-site
     // checks: every distance inside `.text` is below its length.
     if !x64_fits_i32(text_size) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
-    // `.data` holds each object where the text first reaches it: in function
-    // order, each function's objects in relocation order with the objects
-    // their relocations reach right after them, then every object nothing
-    // reaches, in data order. With the hot functions first
+    // `.data` and `.rodata` hold each object where the text first reaches it:
+    // in function order, each function's objects in relocation order with
+    // the objects their relocations reach right after them, then every object
+    // nothing reaches, in data order. With the hot functions first
     // (ir_x64_hot_order) a short run then reads its data from few pages.
+    data := [U8]{}
+    data_align := 1
     rodata := [U8]{}
-    data_offsets := [Int]{}
     rodata_align := 1
+    data_offsets := [Int]{}
     loop _ in program.data -> data_offsets.push(0)
     if !own_sections {
         placed := [Bool]{}
@@ -500,19 +515,28 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         loop index in 0..<program.data.len() -> x64_object_data_place(program.data, index, placed, order)
         loop index in order {
             object: program.data[index]
-            elf64_pad(rodata, object.align)
-            if object.align > rodata_align -> rodata_align = object.align
-            data_offsets[index] = rodata.len()
-            rodata.extend(object.bytes)
+            if x64_object_read_only(object) {
+                elf64_pad(rodata, object.align)
+                if object.align > rodata_align -> rodata_align = object.align
+                data_offsets[index] = rodata.len()
+                rodata.extend(object.bytes)
+            } else {
+                elf64_pad(data, object.align)
+                if object.align > data_align -> data_align = object.align
+                data_offsets[index] = data.len()
+                data.extend(object.bytes)
+            }
         }
     }
-    // With own sections: per function, then per data object, its section's
+    // Per function with own sections, and per data object, its section's
     // symbol.
     function_symbols := [Int]{}
     data_symbols := [Int]{}
     if own_sections {
         loop index in 0..<functions.len() -> function_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + index)
         loop index in 0..<program.data.len() -> data_symbols.push(ELF64_OBJECT_SYMBOL_FIRST_OWN + functions.len() + index)
+    } else {
+        loop object in program.data -> data_symbols.push(if x64_object_read_only(object) -> ELF64_OBJECT_SYMBOL_RODATA else -> ELF64_OBJECT_SYMBOL_DATA)
     }
     // The data relocations in data order; with own sections each object's
     // end in them is in `data_rela_ends`.
@@ -529,8 +553,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
                 data_errors.push("data {index}: relocation target {reloc.target.value} is not in the object")
                 next
             }
-            symbol: if own_sections -> data_symbols[reloc.target.value] else -> ELF64_OBJECT_SYMBOL_DATA
-            data_relas.push(X64ObjectRela{at: data_offsets[index] + reloc.offset, symbol: symbol, kind: ELF64_R_X86_64_64, addend: data_offsets[reloc.target.value] + reloc.addend})
+            data_relas.push(X64ObjectRela{at: data_offsets[index] + reloc.offset, symbol: data_symbols[reloc.target.value], kind: ELF64_R_X86_64_64, addend: data_offsets[reloc.target.value] + reloc.addend})
         }
         if own_sections -> data_rela_ends.push(data_relas.len())
     }
@@ -542,10 +565,11 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     symbols := [X64ObjectSymbol]{
         {name: "", info: 0, section: 0, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
-        {name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_DATA, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_DEBUG_ABBREV, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
+        {name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
     }
     if own_sections {
         loop index in 0..<functions.len() -> symbols.push(X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_FIRST_OWN + 2 * index, value: 0, size: 0})
@@ -561,7 +585,11 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     }
     loop (index, entry_row) in data_exports {
         row: data_rows[index]
-        section: if own_sections -> ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + row) else -> ELF64_OBJECT_RODATA
+        section: if {
+            own_sections -> ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + row)
+            x64_object_read_only(program.data[row]) -> ELF64_OBJECT_RODATA
+            else -> ELF64_OBJECT_DATA
+        }
         symbols.push(X64ObjectSymbol{name: entry_row.symbol, info: 0x11, section: section, value: data_offsets[row], size: program.data[row].bytes.len()})
     }
     // `.text` and `.rela.text`: consecutive function ranges on the threads
@@ -650,7 +678,8 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
         rela_from := 0
         loop (index, object) in program.data {
             target: ELF64_OBJECT_FIRST_OWN + own.len()
-            own.push(X64ObjectSection{name: ".data", kind: 1, flags: 3, bytes: object.bytes, link: 0, info: 0, align: object.align, entry_size: 0})
+            read_only: x64_object_read_only(object)
+            own.push(X64ObjectSection{name: if read_only -> ".rodata" else -> ".data", kind: 1, flags: if read_only -> 2 else -> 3, bytes: object.bytes, link: 0, info: 0, align: object.align, entry_size: 0})
             relas := [X64ObjectRela]{}
             loop at in rela_from..<data_rela_ends[index] -> relas.push(data_relas[at])
             own.push(x64_object_rela_section(".rela.data", relas, target))
@@ -682,7 +711,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     files := [[U8]]{}
     task.group x64_object_release_group {
         dropped: task x64_object_release(released)
-        files.push(x64_object_file(dwarf, text, text_align, rodata, rodata_align, rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, own))
+        files.push(x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, own))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     X64ExecutableResult{bytes: files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
@@ -738,13 +767,13 @@ x64_object_release_programs: fn(released: Shared<X64ObjectReleased>) -> [X64Obje
 // ELF header, the section contents and the section header table. `own`
 // holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none);
 // `guard_sections` per export the header indices of its hook's guards.
-x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, rodata: [U8], rodata_align: Int, rela_text: &&[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
+x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, data: [U8], data_align: Int, rodata: [U8], rodata_align: Int, rela_text: &&[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: &&[X64ObjectSection]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
         {name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: text_align, entry_size: 0},
         // .data: PROGBITS, WRITE + ALLOC
-        {name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
+        {name: ".data", kind: 1, flags: 3, bytes: data, link: 0, info: 0, align: data_align, entry_size: 0},
         x64_object_rela_bytes_section(".rela.text", rela_text, ELF64_OBJECT_TEXT),
         // .symtab: names in .strtab, locals before `first_global`
         {name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
@@ -752,8 +781,9 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, rodata
         {name: ".shstrtab", kind: 3, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
         // .note.GNU-stack: empty, no flags: the stack is not executable.
         {name: ".note.GNU-stack", kind: 1, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
-        // .rela.data: absolute pointer words against the .data section symbol.
-        x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_RODATA),
+        // .rela.data: absolute pointer words against their targets' section
+        // symbols.
+        x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_DATA),
         // .eh_frame: PROGBITS, ALLOC
         {name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
         x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME),
@@ -765,6 +795,8 @@ x64_object_file: fn(dwarf: X64DwarfSections, text: [U8], text_align: Int, rodata
         x64_object_debug_section(".debug_loclists", dwarf.loclists),
         x64_object_debug_section(".debug_jetline", dwarf.jet_line),
         x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE),
+        // .rodata: PROGBITS, ALLOC: no address word, so no relocations.
+        {name: ".rodata", kind: 1, flags: 2, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
     }
     if own.len() > 0 {
         sections.push(x64_object_rela_section(".rela.debug_loclists", dwarf.loclists_relas, ELF64_OBJECT_DEBUG_LOCLISTS))

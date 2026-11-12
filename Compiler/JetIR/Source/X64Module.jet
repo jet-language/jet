@@ -78,7 +78,7 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
     id: tables.data.len()
     bytes: text.bytes()
     tables.lengths.push(bytes.len())
-    tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}})
+    tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}, read_only: true})
     tables.texts[text] = id
     id
 }
@@ -166,9 +166,11 @@ ir_x64_debug_type: fn(ty: IRType) -> X64DebugType Never! {
 ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
     tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}, fma: -1, logged: [Bool]{}}
     loop (row, bytes) in m.data {
-        // A static object (BuildStatic.jet) holds words; a text row is bytes.
-        align: if m.data_relocs.get(row) != None -> 8 else -> 1
-        tables.data.push(X64Data{id: X64DataID{value: row}, bytes: bytes, align: align, relocs: [X64DataReloc]{}})
+        // A static object (BuildStatic.jet) holds words, which the program
+        // may write; a text row is read-only bytes (IR.jet ir_intern_text).
+        object: m.data_relocs.get(row) != None
+        align: if object -> 8 else -> 1
+        tables.data.push(X64Data{id: X64DataID{value: row}, bytes: bytes, align: align, relocs: [X64DataReloc]{}, read_only: !object})
         tables.lengths.push(bytes.len())
         tables.headers.push(-1)
     }
