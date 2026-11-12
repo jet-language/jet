@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6756,
-    "rev": 99700,
+    "rev": 99711,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70675,7 +70675,7 @@
       "track": "epoch",
       "epoch": "e16",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -71414,11 +71414,12 @@
         {
           "n": 66,
           "text": "The E3413 UI snapshot passes, rather than staying KNOWN-FAILING under #6419. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap E1): c38 says the E3410-E3413 tests pass unchanged, but the a0.0.44 receipt keeps E3413 KNOWN-FAILING, and dev now has an E3413 emitter (BuildAdapter.jet:513), so the receipt's no-emit-site explanation is stale. Proof: jet test Compiler --profile ui --filter E3413 passes on a train compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:43.194Z"
+          "evidence": "Moved to #6755 c2 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:29.740Z",
+          "closure": "duplicate"
         },
         {
           "n": 67,
@@ -71432,38 +71433,42 @@
         {
           "n": 68,
           "text": "An effectful lambda publishes its effect row: calling a local lambda that performs IO from a function declared -[IO]> is accepted with that row, not rejected as E0740 with the maximal row (probe: a: fn() -[IO]> Int { step: () -> { print(\"x\") }; step(); 1 }). Cases on O0/O1/O2 and a UI snapshot for the over-row case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T19:39:22.947Z"
+          "evidence": "Moved to #6755 c3 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:30.808Z",
+          "closure": "duplicate"
         },
         {
           "n": 69,
           "text": "A call of a local lambda from inside another lambda's body publishes the callee's effect row, as a direct call does since c68: a nested call is no longer treated as maximal. Cases on O0/O1/O2, and the spec's stated limit is removed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T19:51:19.438Z"
+          "evidence": "Moved to #6755 c4 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:31.901Z",
+          "closure": "duplicate"
         },
         {
           "n": 70,
           "text": "Compile-time input calls publish their effects: net.fetch(url, sha256:) carries Net, and embed_file/find carry FS.Read, so a function declared -[!Net]> or without FS.Read is refused (tests/ui/build_io_net_denied and an FS.Read denial snapshot), and jet explain effects lists them. Found by G6Meta-2 on dev b181be688c, 2026-11-11: dev's net.fetch and embed_file record no effect.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T20:20:51.501Z"
+          "evidence": "Moved to #6755 c5 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:33.010Z",
+          "closure": "duplicate"
         },
         {
           "n": 71,
           "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). Denials are truthful beyond TLS. An inventory lists every host read that runtime or Core code performs under an effect other than its own: resolver reads such as /etc/hosts, pure runtime clock access, FFI and loader boundaries. Each one is classified (declared, ruled exempt by an owner decision, or fixed). No doc or diagnostic claims universal truthful denial until the inventory is complete. This does not wait on D-NET-HOSTREADS1's TLS fix.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T21:49:48.758Z"
+          "evidence": "Moved to #6755 c6 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:34.126Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -71474,9 +71479,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-12T01:52:28.259Z",
+      "updated": "2026-11-12T01:52:39.000Z",
       "updatedBy": "Main",
-      "criteriaLastN": 71
+      "criteriaLastN": 71,
+      "completedAt": "2026-11-12T01:52:39.000Z"
     },
     {
       "id": "c0q31aks",
@@ -86640,7 +86646,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -86697,20 +86703,22 @@
         {
           "n": 4,
           "text": "jet explain effects shows an instantiated generic module's cap in its ladder and in --caps, and never prints a compiler-generated name such as __jet_counter_dbump. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R4, medium; c2 and c3): ExplainEffects.jet:366 descends through GenericModule without adding nested.cap, and the report prints the lowered function.name. Repair the shared source and fact projection, not a label for one example. Proof: probes/generic.jet shows the #FX(IO,!FS) cap at the generic module's rung and in --caps, under its source name, with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:45.744Z"
+          "evidence": "Moved to #6755 c7 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:35.340Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
           "text": "jet explain effects reports every effect a site reaches, including the deny-only ones (Panic, Mem, Time.Wait), as the ratified command contract promises. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R5, medium): ExplainEffects.jet:456 drops deny-only authorities in jet_cli_effects_reach_add. Proof: probes/panic.jet lists Panic in its reaches line, with a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T17:47:46.973Z"
+          "evidence": "Moved to #6755 c8 when G8 closed (owner order, 2026-11-11). The work continues there under G5.",
+          "at": "2026-11-12T01:52:36.484Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
@@ -86733,9 +86741,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-03T12:02:19.438Z",
-      "updated": "2026-11-11T20:22:10.631Z",
+      "updated": "2026-11-12T01:52:40.701Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-12T01:52:40.700Z"
     },
     {
       "id": "c0vxf4u0",
@@ -199149,6 +199158,83 @@
   ],
   "events": [
     {
+      "at": "2026-11-12T01:52:42.675Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G8",
+      "note": "status"
+    },
+    {
+      "at": "2026-11-12T01:52:41.686Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G8",
+      "note": "Owner order 2026-11-11: G8 closes. Its eight open criteria ("
+    },
+    {
+      "at": "2026-11-12T01:52:40.701Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tbm7r0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-12T01:52:39.000Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09kjhit",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-12T01:52:36.484Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tbm7r0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-12T01:52:35.340Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tbm7r0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-12T01:52:34.126Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#71"
+    },
+    {
+      "at": "2026-11-12T01:52:33.010Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#70"
+    },
+    {
+      "at": "2026-11-12T01:52:31.902Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#69"
+    },
+    {
+      "at": "2026-11-12T01:52:30.808Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-12T01:52:29.740Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09kjhit",
+      "note": "#66"
+    },
+    {
       "at": "2026-11-12T01:52:28.259Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -204733,8 +204819,13 @@
       "id": "G8",
       "title": "Effects on types",
       "body": "Packages, targets, modules and the compiler as effect-typed types, with every effect limit checked (including the 2026-11-04 soundness defects on #6129) and one effect vocabulary. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is third.",
-      "status": "active",
+      "status": "achieved",
       "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Owner order 2026-11-11: G8 closes. Its eight open criteria (#6129 c64, c66, c68, c69, c70, c71 and #6551 c4, c5) moved verbatim to #6755 under G5, and the source cards are done."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -204767,7 +204858,7 @@
         }
       ],
       "created": "2026-11-04T18:09:25.258Z",
-      "updated": "2026-11-11T17:48:16.829Z",
+      "updated": "2026-11-12T01:52:42.674Z",
       "updatedBy": "Main"
     },
     {
