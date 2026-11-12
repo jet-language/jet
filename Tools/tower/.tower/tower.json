@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6760,
-    "rev": 99803,
+    "nextNum": 6761,
+    "rev": 99805,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98964,6 +98964,47 @@
       "updated": "2026-11-12T04:08:33.414Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0on083p",
+      "num": 6760,
+      "title": "EncodingCause as an error type ICEs: runtime routes name a mangled handle-drop and record-get symbol the runtime does not export",
+      "body": "Found by Lander5 in the b10 merged cases run, 2026-11-11: 36 case rows end in ERROR, an internal compiler error with exit 101. Every encoding stream case is hit (corelib cbor, csv, xml, json and jsonl streams, corelib_parts_encoding_streams, corelib_parts_encoding_surface xml, encoding_hostile_io, encoding_parity, encoding_cause_is_a_failure_domain). The fault: runtime route jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dencoding_c_c_encoding_cause, and jet_rt_record_get_..._encoding_cause_kind, which the Jet runtime does not export (it exports jet_rt_handle_drop_encoding_cause). Bisect: jet build of the text_and_file_readers_keep_distinct_checked_layouts fixture gives rc 0 on seed-b7 and seed-b8 (776b3d1191), and rc 101 on seed-b9 (c805093fd9) and seed-b10. The only b8..b9 commit touching EncodingCause is 892727fd3a (TlsLead #6615 S13: EncodingCause becomes an error type, with #[Error, Equatable] and a JET_CORE_ERROR_TYPES row). Its own deferred lines were rc 1 on b9 and b10. A backend rejection of checked code is an I2 internal error.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A Core type that becomes an error type keeps one runtime symbol for each of its handle and record routes: codegen and the runtime derive the name from the same source (the runtime's export table, or one mangling function used by both), so no route names a symbol the runtime does not export. Proof: the 36 encoding case rows from b10 pass on the next batch compiler, TlsLead-6615s13b-h's deferred lines pass, and a #Test or case declares a second Core error type and builds a program that drops and reads it on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T04:55:22.537Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T04:55:11.076Z",
+      "updated": "2026-11-12T04:55:22.537Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -199427,6 +199468,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T04:55:22.537Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0on083p",
+      "note": "#1 A Core type that becomes an error type keeps one runtime sym"
+    },
+    {
+      "at": "2026-11-12T04:55:11.076Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0on083p",
+      "note": "EncodingCause as an error type ICEs: runtime routes name a mangled handle-drop and record-get symbol the runtime does not export"
+    },
     {
       "at": "2026-11-12T04:52:41.991Z",
       "by": "Main",
