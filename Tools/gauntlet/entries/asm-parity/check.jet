@@ -1,0 +1,117 @@
+// What an asm-parity case produced (PortBars.jet and the gauntlet harness run
+// this in the case directory with the file holding the program's output), with
+// the case directory written as `<case>`. The printed text comes first: a gate
+// run's table as is; a gains run's Markdown with `~` for each time, RSS and
+// time or RSS change (they vary run to run) and every other cell as is. Then
+// out/results.json, or out/gains.json without its timings and RSS: per row
+// its mode, cell, args, wrong variants and each variant's bytes and run exit
+// codes. Then whether out/table.tsv is the printed table. Objects print their
+// fields sorted by name; numbers print as integers or with six decimals.
+use {
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+}
+
+// The Markdown columns a gains run prints the same every time.
+STEADY: [String]{"program", "base bytes", "candidate bytes", "ceiling bytes", "output"}
+
+run: fn() {
+    here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
+    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    keep := [Bool]{}
+    loop line in printed.lines() {
+        text: line.replace(here, "<case>")
+        if text.starts_with("| program |") -> keep = steady_columns(text)
+        if !text.starts_with("| ") || text.starts_with("| program |") || text.starts_with("| ---") || keep.len() == 0 {
+            print(text)
+            next
+        }
+        cells: text.removeprefix("| ").removesuffix(" |").split(" | ").to_list()
+        shown := [String]{}
+        loop (i, cell) in cells -> shown.push(if i < keep.len() && !keep[i] -> "~" else -> cell.copy())  // copy: the row is rebuilt
+        print("| {shown.join(" | ")} |")
+    }
+    results: files.join(here, "out/results.json")
+    gains: files.join(here, "out/gains.json")
+    if {
+        files.exists(gains) -> print_gains(read_json(gains), here)
+        files.exists(results) -> print_results(read_json(results), here)
+    }
+    table: files.join(here, "out/table.tsv")
+    if files.exists(table) && !files.exists(gains) {
+        same: (files.read(table) ?? "") == printed
+        print("table.tsv is the printed table: {if same -> "yes" else -> "no"}")
+    }
+}
+
+// gains.json without its timings and RSS.
+print_gains: fn(report: Dyn, here: String) -[IO, Time.Wait]> {
+    loop key in ["best_of", "interleaved", "cpu", "compilers"] -> print("{key}: {show(field(report, key), here)}")
+    loop row in list(field(report, "rows")) {
+        print("== row")
+        if row == .Object(entries) {
+            loop entry in entries {
+                if entry.value == .Object(_) {
+                    codes := [String]{}
+                    loop run in list(field(entry.value, "runs")) -> codes.push(show(field(run, "code"), here))
+                    print("{entry.key}: bytes {show(field(entry.value, "bytes"), here)}, codes [{codes.join(",")}]")
+                    next
+                }
+                print("{entry.key}: {show(entry.value, here)}")
+            }
+        }
+    }
+}
+
+print_results: fn(report: Dyn, here: String) -[IO, Time.Wait]> {
+    loop key in ["runs", "interleaved", "statistic", "cpu", "gates"] -> print("{key}: {show(field(report, key), here)}")
+    loop row in list(field(report, "rows")) -> print("row: {show(row, here)}")
+}
+
+// Per column of a gains table, whether it prints the same every run: the
+// program, the bytes, the bytes change and the output.
+steady_columns: fn(header: String) -> [Bool] Never! {
+    names: header.removeprefix("| ").removesuffix(" |").split(" | ").to_list()
+    keep := [Bool]{}
+    loop (i, name) in names {
+        keep.push(STEADY.contains(name) || (name == "change" && i > 0 && names[i - 1] == "candidate bytes"))
+    }
+    keep
+}
+
+read_json: fn(path: String) -[Exec, FS, IO]> Dyn {
+    text: files.read(path) ?? process.fail(1, "{err}")
+    json.parse(text) ?? process.fail(1, err.display_text())
+}
+
+field: fn(value: Dyn, key: String) -> Dyn Never! { value.get(key) ?? Dyn.Null }
+
+list: fn(value: Dyn) -> [Dyn] Never! {
+    if value == .Array(items) -> return items.copy()  // copy: the caller keeps the items
+    [Dyn]{}
+}
+
+show: fn(value: Dyn, here: String) -> String Never! {
+    if value == .Object(entries) {
+        shown := [String]{}
+        loop entry in entries -> shown.push("{entry.key}: {show(entry.value, here)}")
+        shown.sort()
+        return "{{{shown.join(", ")}}}"
+    }
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()  // copy: the fallback is the text as is
+        .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
+        .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
+        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+    }
+}
+
+number: fn(value: Float) -> String Never! {
+    if math.is_integer(value) -> return "{math.round(value)}"
+    fmt.decimal(value, 6)
+}

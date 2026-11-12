@@ -1,0 +1,28 @@
+{
+  "name": "asm-parity",
+  "mode": "tool",
+  "description": "Tools/perf/asm-parity/asm-parity.mjs and its Jet twin asm-parity/run.jet, the Jet-against-hand-written-assembly gate and its codegen gains mode, over the hello cell of cells.json. fake-jet stands in for `jet build`: it assembles hello.S (or bye.S, the wrong output) into .jet/build/run; the reference is the cell's own ref.S through `as` and `objcopy`. In the gate runs fake-perf stands in for `perf stat`, with fixed counts above the reference's, so the table, its size and cycles gates, results.json and table.tsv are the same every run: as is, with --gate (a missed gate exits 1), with the wrong output (exit 1) and with no cell selected. The gains runs (best of 1, release mode, launch.S reading each run's peak RSS) compare base, candidate, control and ceiling, also with --older and --gains, and with the wrong output (exit 1). Every refusal of the options exits 1 before anything runs. The check prints the printed text with the case directory as <case> and `~` for the gains tables' times, RSS and their changes, then the results.json or gains.json fields that do not vary run to run, and whether table.tsv is the printed table.",
+  "tool": {
+    "original": "Tools/perf/asm-parity/asm-parity.mjs",
+    "jet": "Tools/perf/asm-parity/asm-parity/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--jet", "./fake-jet", "--perf", "../../fake-perf", "--cpu", "0", "--cells", "hello", "--out", "out"], "exit": 0, "check": "check.jet", "expected": "expected/table.out"},
+      {"args": ["--jet", "./fake-jet", "--perf", "../../fake-perf", "--cpu", "0", "--cells", "hello", "--out", "out", "--gate"], "exit": 1, "check": "check.jet", "expected": "expected/table.out"},
+      {"args": ["--jet", "./fake-jet", "--perf", "../../fake-perf", "--cpu", "0", "--cells", "hello", "--out", "out"], "env": {"FAKE_JET_PROGRAM": "bye.S"}, "exit": 1, "check": "check.jet", "expected": "expected/wrong.out"},
+      {"args": ["--jet", "./fake-jet", "--cells", "none-such", "--out", "out"], "exit": 0, "check": "check.jet", "expected": "expected/no-cells.out"},
+      {"args": ["--jet", "./fake-jet", "--candidate", "./fake-jet", "--best", "1", "--modes", "release", "--cpu", "0", "--cells", "hello", "--out", "out"], "exit": 0, "check": "check.jet", "expected": "expected/gains.out"},
+      {"args": ["--jet", "./fake-jet", "--candidate", "./fake-jet", "--older", "./fake-jet", "--gains", "gains.md", "--best", "1", "--modes", "release", "--cpu", "0", "--cells", "hello", "--out", "out"], "exit": 0, "check": "check.jet", "expected": "expected/gains-older.out"},
+      {"args": ["--jet", "./fake-jet", "--candidate", "./fake-jet", "--best", "1", "--modes", "release", "--cpu", "0", "--cells", "hello", "--out", "out"], "env": {"FAKE_JET_PROGRAM": "bye.S"}, "exit": 1, "check": "check.jet", "expected": "expected/gains-wrong.out"},
+      {"args": [], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--runs", "20"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--runs", "many"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--modes", "default,fast"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--older", "./fake-jet"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--gains", "gains.md"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--candidate", "./fake-jet", "--best", "0"], "exit": 1, "expected": "expected/refused.out"},
+      {"args": ["--jet", "./fake-jet", "--frobnicate"], "exit": 1, "expected": "expected/refused.out"}
+    ]
+  }
+}

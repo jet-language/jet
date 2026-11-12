@@ -1,0 +1,25 @@
+# Codegen gains: base against candidate (#6414)
+
+Base: `<case>/fake-jet`. Candidate: `<case>/fake-jet`.
+Wall time is the best of 1 runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU 0. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (asm-parity cells only). Change is candidate against base; negative is better.
+
+## release
+
+| program | base ms | candidate ms | change | control ms | control vs base | ceiling ms | candidate / ceiling | base RSS KiB | candidate RSS KiB | change | ceiling RSS KiB | base bytes | candidate bytes | change | ceiling bytes | output |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| hello | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | 8248 | 8248 | +0.0% | 504 | WRONG: base, candidate, control |
+| **total** | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | 8248 | 8248 | +0.0% |  |  |
+| **geometric mean** | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |  |  | +0.0% |  |  |
+best_of: 1
+interleaved: true
+cpu: "0"
+compilers: {base: "<case>/fake-jet", candidate: "<case>/fake-jet"}
+== row
+mode: "release"
+cell: "hello"
+args: ""
+wrong: ["base", "candidate", "control"]
+ceiling: bytes 504, codes [0]
+base: bytes 8248, codes [0]
+candidate: bytes 8248, codes [0]
+control: bytes 8248, codes [0]

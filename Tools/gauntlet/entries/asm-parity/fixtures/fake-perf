@@ -1,0 +1,11 @@
+#!/bin/sh
+# A stand-in for `perf stat -x, -e cycles:u,instructions:u EXE ARGS...`: it
+# runs EXE and reports fixed counts, the reference's (an EXE named ref) below
+# the Jet binaries', so the table and its gates are the same every run.
+shift 4
+exe=$1
+"$@" > /dev/null
+case "$exe" in
+*/ref) printf '1000,,cycles:u,1000,100.00,,\n2000,,instructions:u,1000,100.00,2.00,insn per cycle\n' >&2 ;;
+*) printf '1250,,cycles:u,1000,100.00,,\n2100,,instructions:u,1000,100.00,1.68,insn per cycle\n' >&2 ;;
+esac
