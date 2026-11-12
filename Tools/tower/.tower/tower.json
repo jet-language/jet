@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6775,
-    "rev": 100043,
+    "nextNum": 6776,
+    "rev": 100046,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99122,6 +99122,54 @@
       "updatedBy": "Main",
       "criteriaLastN": 1,
       "completedAt": "2026-11-12T10:46:32.218Z"
+    },
+    {
+      "id": "c0wcqb47",
+      "num": 6775,
+      "title": "A string or byte literal body after an effect row lexes as a typed head, so escapes and holes are wrong",
+      "body": "Found by G12Docs-4 (G12Docs-69) on seed-b13: h: fn() -[]> String { \"a\\nb\" } prints a literal backslash-n. Compiler/JetLexer/Source/Lexer/Payload.jet string_head_modes reads Ident { followed by a string as a typed head (raw text, holes, undecoded escapes), and its only exemption for a return type, returned_type_at, recognizes just ) -> before the type. After an effect arrow -[E]> the body String { ... } becomes the typed head String{...}: \\n stays raw, \\u{41} becomes \\u plus a hole, and interpolation breaks. The [U8] { byte head has the same gap. char literals, return, parenthesized and if bodies are unaffected. It is wrong output with no diagnostic.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A function body that is a string, byte or interpolated literal lexes as a body after every return-type form: -> T, an effect arrow -[E]> T with one or several effects, generic, list, map, optional, fallible and qualified return types. Its escapes decode and its holes interpolate exactly as in the same body after -> T. A case covers each literal kind (escapes, \\u{...}, interpolation, byte strings) with and without an effect row, at O0, O1 and O2, and a real typed head written as a body expression still lexes as a typed head.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T13:29:49.282Z"
+        },
+        {
+          "n": 2,
+          "text": "The typed-head decision is made in one place from the parser's knowledge of the return-type position, not from a lexer token-pattern guess that each new return-type spelling must extend. The tests/ and Examples corpus show no output change other than the fixed cases, by the golden profile at O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T13:29:50.359Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T13:29:40.493Z",
+      "updated": "2026-11-12T13:29:50.359Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -200168,6 +200216,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T13:29:50.359Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wcqb47",
+      "note": "#2 The typed-head decision is made in one place from the parser"
+    },
+    {
+      "at": "2026-11-12T13:29:49.282Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wcqb47",
+      "note": "#1 A function body that is a string, byte or interpolated liter"
+    },
+    {
+      "at": "2026-11-12T13:29:40.493Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0wcqb47",
+      "note": "A string or byte literal body after an effect row lexes as a typed head, so escapes and holes are wrong"
+    },
     {
       "at": "2026-11-12T13:21:23.201Z",
       "by": "Main",
