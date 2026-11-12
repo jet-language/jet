@@ -576,7 +576,7 @@ parser_parse_import_row: fn(state: &JetParserState, start: Span) -> ImportDecl {
     }
     token: parser_current(state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
-        path: parser_bump(state)
+        path: parser_take_text(state, false)
         alias := parser_path_basename(parser_value(state, path))
         alias_span := path.span
         if named == .Val(name) {
@@ -1360,7 +1360,7 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
             parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` takes one plain string scope", "an effect argument names a folder, a host or a device as fixed text", "write `{name}(\"templates/\")`")
             return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
         }
-        parser_bump(state)
+        _ := parser_take_text(state, false)
         scope: parser_value(state, token)
         if !effect_scope_argument_valid(scope) {
             parser_add_fatal_code(state, "E0119", token.span, "`{name}(…)` needs a non-empty scope without quotes or backslashes", "a scope is a folder, a host or a device name", "write `{name}(\"templates/\")`")
@@ -1533,7 +1533,7 @@ parser_parse_inline_foreign_body: fn(state: &JetParserState, markers: [Marker]) 
     parser_skip_semicolons(state)
     source: parser_current(state)
     plain: source.kind == TOKEN_RAW_STRING || (source.kind == TOKEN_STRING && parser_interpolations(state, source) == 0)
-    if source.kind == TOKEN_STRING || source.kind == TOKEN_RAW_STRING -> parser_bump(state)
+    if source.kind == TOKEN_STRING || source.kind == TOKEN_RAW_STRING -> _ := parser_take_text(state, false)
     if !plain {
         error_span: if source.kind == TOKEN_STRING -> source.span else -> ffi.span
         parser_add_fatal_code(state, "E0064", error_span, "a `#FFI({lang})` function body must be one string of {lang} source", "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract", "write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation")

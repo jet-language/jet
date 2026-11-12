@@ -1,7 +1,7 @@
 // Syntax-only expansion into the ordinary marker reader.
 // Sema owns declaration validity and lexical declaration identities.
 use {
-    jet_foundation.[Diagnostic, Span, name_intern, name_text]
+    jet_foundation.[Diagnostic, Span, name_empty, name_intern, name_text]
     jet_lexer.[Token, TokenLiteral, TokenTables, StringPart, token_tables, token_decoded, TOKEN_IDENT, TOKEN_DOT, TOKEN_COLON, TOKEN_HASH, TOKEN_BANG, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_EOF, TOKEN_SEMI, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
 }
 
@@ -197,7 +197,18 @@ marker_group_rebase_token: fn(token: Token, source: TokenTables, tables: &TokenT
         loop inner in part.tokens -> nested.push(marker_group_rebase_token(inner, source, tables))
         parts.push(StringPart{kind: part.kind, span: part.span, text: name_intern(tables.names, name_text(source.names, part.text)), byte: part.byte, tokens: nested.move()})
     }
-    tables.literals.push(TokenLiteral{integer: literal.integer, decimal: literal.decimal, suffix: name_intern(tables.names, name_text(source.names, literal.suffix)), interpolations: literal.interpolations, string_parts: parts.move()})
+    // The typed-head reading, rebased the same way as a token of its own.
+    head := -1
+    head_decoded := name_empty()
+    if literal.head >= 0 {
+        reading := token
+        reading.literal = literal.head
+        reading.decoded = literal.head_decoded
+        rebased: marker_group_rebase_token(reading, source, tables)
+        head = rebased.literal
+        head_decoded = rebased.decoded
+    }
+    tables.literals.push(TokenLiteral{integer: literal.integer, decimal: literal.decimal, suffix: name_intern(tables.names, name_text(source.names, literal.suffix)), interpolations: literal.interpolations, string_parts: parts.move(), head: head, head_decoded: head_decoded, deferred: literal.deferred.copy()})
     value.literal = tables.literals.len() - 1
     value
 }

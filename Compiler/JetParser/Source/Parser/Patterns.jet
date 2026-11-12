@@ -117,7 +117,7 @@ parser_try_take_pattern_body: fn(state: &JetParserState, depth: Int) -> ParsedTa
         state.pending_type_gt_span = saved_pending_gt_span
         return None
     }
-    text: parser_bump(state)
+    text: parser_take_text(state, true)
     if parser_current_kind(state) != TOKEN_RBRACE {
         state.position = saved_position
         loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
@@ -361,7 +361,7 @@ parser_parse_take_pattern_literal: fn(state: &JetParserState, depth: Int) -> Par
     }
     token: parser_current(state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
-        parser_bump(state)
+        _ := parser_take_text(state, false)
         token_parts: parser_string_parts(state, token)
         parts := parser_take_pattern_text_parts(state, token_parts)
         return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span, id: parser_node_id(state)}, span: token.span}
@@ -456,7 +456,7 @@ parser_typed_pattern_ahead: fn(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(state, offset) == TOKEN_DOT -> offset += 1
     if parser_kind_at(state, offset) != TOKEN_LBRACE || parser_kind_at(state, offset + 2) != TOKEN_RBRACE -> return false
     literal: parser_lookahead(state, offset + 1)
-    if literal.kind == TOKEN_STRING && (!text || parser_string_pattern_ahead(state, literal)) -> return true
+    if literal.kind == TOKEN_STRING && (!text || parser_string_pattern_ahead(state, parser_text_reading(state, literal, true))) -> return true
     literal.kind == TOKEN_RAW_STRING && !text
 }
 
@@ -796,7 +796,7 @@ parser_parse_struct_field_nested_pattern: fn(state: &JetParserState, depth: Int)
 }
 
 parser_parse_string_pattern: fn(state: &JetParserState) -> ParsedPattern {
-    token: parser_bump(state)
+    token: parser_take_text(state, false)
     token_parts: parser_string_parts(state, token)
     parts := parser_take_pattern_text_parts(state, token_parts)
     if parser_string_part_count(state, token) == 0 -> parts.push(StrMatchPart.Lit{text: parser_value(state, token)})

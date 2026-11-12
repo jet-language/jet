@@ -1,0 +1,74 @@
+# A function body that is one string, interpolated or byte literal reads as a
+# body after every return-type form: `-> T`, `-[]>`, one or several effects,
+# and generic, list, map, optional, fallible and qualified types. Escapes
+# decode and holes interpolate as after `-> String`, while `Regex{"\d+"}` and
+# `[U8]{"\x41\n"}` written as the body still read as typed heads. `\u{41}` is
+# no escape of quoted text, so it is E0001 after every form alike. A body
+# right after `Name {` or `[U8] {` could open a typed head, so the parser
+# reports its E0001 and the lexer reports the other forms'; a lexer error ends
+# the frontend first, so the two groups sit in files of their own.
+fixture: literal_body_reads_as_a_body_after_every_return_type_form.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none run.jet
+exit: 0
+stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = literal_body_reads_as_a_body_after_every_return_type_form.out
+step o0_unknown_escape: jet run --optimize=none unknown_escape.jet
+exit: nonzero
+stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\u{41}` of the body after `-> String`
+stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\u{41}` of the body after `-[]> String`
+stderr: ~ "unknown_escape.jet:9:43" # E0001 at the `\u{41}` of the body after `-[IO]> String`
+stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\u{41}` of the body after `-[IO, FS]> String`
+stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\u{41}` of the body after a generic function's `-[IO]> String`
+stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\u{41}` of the body after `-[IO]> [U8]`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
+step o0_unknown_escape_other_forms: jet run --optimize=none unknown_escape_other_forms.jet
+exit: nonzero
+stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\u{41}` of the body after `-[IO]> names.Text<Int>`
+stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\u{41}` of the body after `-[IO]> Holder<String>`
+stderr: ~ "unknown_escape_other_forms.jet:19:40" # E0001 at the `\u{41}` of the body after `-[IO]> [String]`
+stderr: ~ "unknown_escape_other_forms.jet:20:52" # E0001 at the `\u{41}` of the body after `-[IO]> [String: String]`
+stderr: ~ "unknown_escape_other_forms.jet:21:46" # E0001 at the `\u{41}` of the body after `-[IO]> String?`
+stderr: ~ "unknown_escape_other_forms.jet:22:49" # E0001 at the `\u{41}` of the body after `-[IO]> String Bad!`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
+step o1_unknown_escape: jet run --optimize=basic unknown_escape.jet
+exit: nonzero
+stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\u{41}` of the body after `-> String`
+stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\u{41}` of the body after `-[]> String`
+stderr: ~ "unknown_escape.jet:9:43" # E0001 at the `\u{41}` of the body after `-[IO]> String`
+stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\u{41}` of the body after `-[IO, FS]> String`
+stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\u{41}` of the body after a generic function's `-[IO]> String`
+stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\u{41}` of the body after `-[IO]> [U8]`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
+step o1_unknown_escape_other_forms: jet run --optimize=basic unknown_escape_other_forms.jet
+exit: nonzero
+stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\u{41}` of the body after `-[IO]> names.Text<Int>`
+stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\u{41}` of the body after `-[IO]> Holder<String>`
+stderr: ~ "unknown_escape_other_forms.jet:19:40" # E0001 at the `\u{41}` of the body after `-[IO]> [String]`
+stderr: ~ "unknown_escape_other_forms.jet:20:52" # E0001 at the `\u{41}` of the body after `-[IO]> [String: String]`
+stderr: ~ "unknown_escape_other_forms.jet:21:46" # E0001 at the `\u{41}` of the body after `-[IO]> String?`
+stderr: ~ "unknown_escape_other_forms.jet:22:49" # E0001 at the `\u{41}` of the body after `-[IO]> String Bad!`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
+step o2_unknown_escape: jet run --optimize=full unknown_escape.jet
+exit: nonzero
+stderr: ~ "unknown_escape.jet:7:34" # E0001 at the `\u{41}` of the body after `-> String`
+stderr: ~ "unknown_escape.jet:8:40" # E0001 at the `\u{41}` of the body after `-[]> String`
+stderr: ~ "unknown_escape.jet:9:43" # E0001 at the `\u{41}` of the body after `-[IO]> String`
+stderr: ~ "unknown_escape.jet:10:44" # E0001 at the `\u{41}` of the body after `-[IO, FS]> String`
+stderr: ~ "unknown_escape.jet:11:50" # E0001 at the `\u{41}` of the body after a generic function's `-[IO]> String`
+stderr: ~ "unknown_escape.jet:12:36" # E0001 at the `\u{41}` of the body after `-[IO]> [U8]`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated
+step o2_unknown_escape_other_forms: jet run --optimize=full unknown_escape_other_forms.jet
+exit: nonzero
+stderr: ~ "unknown_escape_other_forms.jet:17:51" # E0001 at the `\u{41}` of the body after `-[IO]> names.Text<Int>`
+stderr: ~ "unknown_escape_other_forms.jet:18:70" # E0001 at the `\u{41}` of the body after `-[IO]> Holder<String>`
+stderr: ~ "unknown_escape_other_forms.jet:19:40" # E0001 at the `\u{41}` of the body after `-[IO]> [String]`
+stderr: ~ "unknown_escape_other_forms.jet:20:52" # E0001 at the `\u{41}` of the body after `-[IO]> [String: String]`
+stderr: ~ "unknown_escape_other_forms.jet:21:46" # E0001 at the `\u{41}` of the body after `-[IO]> String?`
+stderr: ~ "unknown_escape_other_forms.jet:22:49" # E0001 at the `\u{41}` of the body after `-[IO]> String Bad!`
+stderr: ~ "6 problems found" # one E0001 per return-type form, none deduplicated

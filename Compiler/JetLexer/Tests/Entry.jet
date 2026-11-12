@@ -4,7 +4,7 @@
 // scoped-driver/unwind, mutation injection and cross-tier orchestration:197-386
 // stay outside this source-lexer suite.
 use {
-    jet_foundation.[Name, Span, name_empty, name_text]
+    jet_foundation.[Diagnostic, Name, Span, name_empty, name_text]
     jet_lexer.[
         Lexed,
         STRING_PART_BYTE,
@@ -46,16 +46,41 @@ lexer_test_name: fn(lexed: Lexed, name: Name) -> String Never! { name_text(lexed
 
 // The literal facts of `token`; a token without a literal row has none.
 lexer_test_literal: fn(lexed: Lexed, token: Token) -> TokenLiteral Never! {
-    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}}
+    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
     lexed.tables.literals[token.literal].copy()
 }
 
+// Each string's plain reading.
 lexer_test_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
     strings := [[StringPart]]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_STRING -> strings.push(lexer_test_literal(lexed, token).string_parts)
     }
     strings
+}
+
+// Each string's typed-head reading where a typed head may take it, else its
+// plain reading.
+lexer_test_head_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
+    strings := [[StringPart]]{}
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_STRING -> next
+        literal: lexer_test_literal(lexed, token)
+        strings.push(if literal.head >= 0 -> lexed.tables.literals[literal.head].string_parts else -> literal.string_parts)
+    }
+    strings
+}
+
+// The lexer's diagnostics and those each string's plain reading keeps for
+// the parser.
+lexer_test_reported: fn(lexed: Lexed) -> [Diagnostic] Never! {
+    reported := lexed.diagnostics.copy()
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_STRING {
+            loop diagnostic in lexer_test_literal(lexed, token).deferred -> reported.push(diagnostic.copy())
+        }
+    }
+    reported
 }
 
 lexer_test_text: fn(lexed: Lexed, parts: [StringPart], expected: String) -> Bool Never! {
@@ -79,6 +104,16 @@ lexer_test_first_string: fn(source: String) -> String Never! {
     lexer_test_name(lexed, parts[0].text)
 }
 
+lexer_test_first_head_string: fn(source: String) -> String Never! {
+    lexed: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    strings: lexer_test_head_strings(lexed)
+    assert(strings.len() > 0)
+    parts: strings[0]
+    assert(parts.len() == 1 && parts[0].kind == STRING_PART_TEXT)
+    lexer_test_name(lexed, parts[0].text)
+}
+
 #Test("spaceship_is_one_longest_match_before_le") {
     lexed: lex("a <=> b <= c".bytes())
     assert(lexed.diagnostics.is_empty())
@@ -90,34 +125,55 @@ lexer_test_first_string: fn(source: String) -> String Never! {
 }
 
 #Test("typed_head_keeps_backslash_literal") {
-    assert_eq(lexer_test_first_string(`Regex.{"\d+"}`), `\d+`)
-    assert_eq(lexer_test_first_string(`Regex.{"a\nb"}`), `a\nb`)
-    assert_eq(lexer_test_first_string(`"a\nb"`), "a\nb")
+    assert_eq(lexer_test_first_head_string(`Regex.{"\d+"}`), `\d+`)
+    assert_eq(lexer_test_first_head_string(`Regex.{"a\nb"}`), `a\nb`)
+    assert_eq(lexer_test_first_head_string(`"a\nb"`), "a\nb")
 }
 
 #Test("typed_head_quote_stays_in_body_when_slashed") {
-    assert_eq(lexer_test_first_string(`Regex.{"a\"b"}`), `a\"b`)
+    assert_eq(lexer_test_first_head_string(`Regex.{"a\"b"}`), `a\"b`)
+    assert_eq(lexer_test_first_head_string(`Regex.{"a\\"}`), `a\\`)
 }
 
-// A function's return type before its body is no typed head: the body's
-// leading string decodes its escapes.
-#Test("return_type_before_body_is_no_typed_head") {
+// Text after `String {` may open a function body after its return type or
+// be a typed head's body: the token's own row is the plain reading, and the
+// head's reading waits beside it for the parser to pick.
+#Test("text_after_a_capital_brace_reads_both_ways") {
     assert_eq(lexer_test_first_string(`quote: fn(s: String) -> String { "a\"b" }`), "a\"b")
-    assert_eq(lexer_test_first_string(`size: fn<T>(s: T) -> Int { "a\tb".len() }`), "a\tb")
+    assert_eq(lexer_test_first_head_string(`quote: fn(s: String) -> String { "a\"b" }`), `a\"b`)
+    assert_eq(lexer_test_first_string(`size: fn<T>(s: T) -[IO]> Int { "a\tb".len() }`), "a\tb")
     assert_eq(lexer_test_first_string(`Box.name: fn(self) -> core.Text { "a\nb" }`), "a\nb")
-    assert_eq(lexer_test_first_string(`f: fn(s: String) -> String { "a\\b" }`), "a\\b")
-    assert_eq(lexer_test_first_string(`x: Regex{"\d+"}`), `\d+`)
-    assert_eq(lexer_test_first_string(`if ok(x) -> Regex{"\d+"}`), `\d+`)
+    assert_eq(lexer_test_first_string(`f: fn(s: String) -> String { "a\\" }`), "a\\")
+    assert_eq(lexer_test_first_head_string(`f: fn(s: String) -> String { "a\\" }`), `a\\`)
+    assert_eq(lexer_test_first_head_string(`x: Regex{"\d+"}`), `\d+`)
+    assert_eq(lexer_test_first_head_string(`if ok(x) -> Regex{"\d+"}`), `\d+`)
+}
+
+// Each reading keeps its own diagnostics for the parser: `\d` is no escape
+// of plain text, while a typed head's body keeps it as written.
+#Test("each_reading_defers_its_own_diagnostics") {
+    lexed: lexer_test_raw(`x: Regex{"\d+"}`)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_STRING -> next
+        literal: lexer_test_literal(lexed, token)
+        assert(literal.head >= 0)
+        assert(literal.deferred.len() == 1 && literal.deferred[0].what.contains("isn't an escape"))
+        assert(lexed.tables.literals[literal.head].deferred.is_empty())
+        found = true
+    }
+    assert(found)
 }
 
 #Test("typed_head_doubled_braces_stay_literal") {
-    assert_eq(lexer_test_first_string(`Regex.{"\d{{2}}"}`), `\d{2}`)
+    assert_eq(lexer_test_first_head_string(`Regex.{"\d{{2}}"}`), `\d{2}`)
 }
 
 #Test("typed_head_holes_still_split_interpolation") {
     lexed: lex(`URL.{"https://x/{name}"}`.bytes())
     assert(lexed.diagnostics.is_empty())
-    strings: lexer_test_strings(lexed)
+    strings: lexer_test_head_strings(lexed)
     assert_eq(strings.len(), 1)
     parts: strings[0]
     assert(parts.len() == 2 && parts[0].kind == STRING_PART_TEXT && parts[1].kind == STRING_PART_INTERPOLATION && lexer_test_name(lexed, parts[0].text) == "https://x/")
@@ -167,8 +223,9 @@ lexer_test_delimiter_cases: fn() -> [LexerTestDelimiterCase] Never! {
 #Test("triple_delimiter_text_has_exact_run_spans_and_keeps_recovery_text") {
     loop row in lexer_test_delimiter_cases() {
         lexed: lexer_test_raw(row.source)
-        assert_eq(lexed.diagnostics.len(), row.runs.len())
-        loop (index, diagnostic) in lexed.diagnostics {
+        reported: lexer_test_reported(lexed)
+        assert_eq(reported.len(), row.runs.len())
+        loop (index, diagnostic) in reported {
             assert_eq(diagnostic.code, "E0084")
             assert_eq(diagnostic.span, Val(row.runs[index]))
             assert(diagnostic.fix.contains("ordinary string"))
@@ -258,7 +315,7 @@ multiline: Path.{"""
 """}`
     lexed: lexer_test_raw(source)
     assert(lexed.diagnostics.is_empty())
-    strings: lexer_test_strings(lexed)
+    strings: lexer_test_head_strings(lexed)
     assert_eq(strings.len(), 3)
     assert(lexer_test_text(lexed, strings[0], "\n"))
     assert(strings[1].len() == 2 && strings[1][0].kind == STRING_PART_TEXT && lexer_test_name(lexed, strings[1][0].text) == `\n{literal}-`)
@@ -284,7 +341,7 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
 `
     lexed: lexer_test_raw("{source}{tail}")
     assert(lexed.diagnostics.is_empty())
-    strings: lexer_test_strings(lexed)
+    strings: lexer_test_head_strings(lexed)
     assert_eq(strings.len(), prefix_count + 7)
     assert(lexer_test_text(lexed, strings[prefix_count], "\n"))
     assert(lexer_test_text(lexed, strings[prefix_count + 1], `\n`))
@@ -386,8 +443,9 @@ lexer_test_triple_parity: fn(source: String, starts: [Int], ends: [Int], kinds: 
         assert_eq(lexer_test_name(result, token.text), expected_raw)
         if token.kind == 3 -> assert_eq(lexer_test_name(result, token.decoded), decoded)
     }
-    assert_eq(result.diagnostics.len(), runs.len())
-    loop (index, diagnostic) in result.diagnostics {
+    reported: lexer_test_reported(result)
+    assert_eq(reported.len(), runs.len())
+    loop (index, diagnostic) in reported {
         assert_eq(diagnostic.code, "E0084")
         assert_eq(diagnostic.span, Val(runs[index]))
         assert_eq(diagnostic.what, "Text {positions[index]} `\"\"\"` is not allowed")

@@ -321,6 +321,8 @@ lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     lexer_remap_tokens(output.tokens, map, base)
     loop row in 0..<output.tables.literals.len() {
         output.tables.literals[row].suffix = lexer_remap_name(output.tables.literals[row].suffix, map)
+        output.tables.literals[row].head_decoded = lexer_remap_name(output.tables.literals[row].head_decoded, map)
+        if output.tables.literals[row].head >= 0 -> output.tables.literals[row].head = output.tables.literals[row].head + base
         loop part_index in 0..<output.tables.literals[row].string_parts.len() {
             output.tables.literals[row].string_parts[part_index].text = lexer_remap_name(output.tables.literals[row].string_parts[part_index].text, map)
             lexer_remap_tokens(output.tables.literals[row].string_parts[part_index].tokens, map, base)

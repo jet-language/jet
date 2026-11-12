@@ -476,7 +476,7 @@ parser_unit_plain_string: fn(state: &JetParserState, context: String) -> String 
         if token.kind != TOKEN_EOF -> parser_bump(state)
         return ""
     }
-    parser_bump(state)
+    _ := parser_take_text(state, false)
     if parser_interpolations(state, token) > 0 {
         parser_add_error(state, token.span, "unit provenance strings cannot interpolate", "conversion provenance must be stable source text", "write a plain string")
     }

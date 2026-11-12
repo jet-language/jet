@@ -155,6 +155,9 @@ JetParserState: struct {
     pipe_owner_depths: [Int]{[Int]{}}
     pipe_step_names: [String]{[String]{}}
     pipe_step_reads: [Int]{[Int]{}}
+    // Where the body of the typed literal being read starts
+    // (parser_mark_head_body); quoted text there is the head's body.
+    head_text_at: Int{-1}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
@@ -226,6 +229,40 @@ parser_string_parts: fn(state: JetParserState, token: Token) -> [StringPart] Nev
 
 parser_part_text: fn(state: JetParserState, part: StringPart) -> String Never! {
     name_text(state.tables[0].names, part.text)
+}
+
+// The reading of quoted text `token` takes. The lexer can't tell a typed
+// head's body (`Regex{"\d+"}`) from a block's first line (`-> String { "a\n" }`),
+// so text after `Name{`, `.{` or `[U8]{` comes with both readings. `head` picks
+// the typed head's, which keeps backslashes as written or reads `\xNN` as a
+// byte; only a typed literal's, default's or pattern's body asks for it.
+parser_text_reading: fn(state: JetParserState, token: Token, head: Bool) -> Token Never! {
+    if !head || token.literal < 0 -> return token.copy()
+    row: state.tables[0].literals[token.literal].head
+    if row < 0 -> return token.copy()
+    reading := token.copy()
+    reading.literal = row
+    reading.decoded = state.tables[0].literals[token.literal].head_decoded
+    reading
+}
+
+// Consumes the current quoted text in the reading `head` picks
+// (parser_text_reading) and reports the diagnostics the lexer kept for it.
+parser_take_text: fn(state: &JetParserState, head: Bool) -> Token Never! {
+    bumped: parser_bump(state)
+    token: parser_text_reading(state, bumped, head)
+    if token.literal < 0 -> return token
+    row: token.literal
+    loop index in 0..<state.tables[0].literals[row].deferred.len() -> state.diagnostics.push(state.tables[0].literals[row].deferred[index].copy())
+    token
+}
+
+// Marks the current token as the start of a typed literal's body and returns
+// the mark to restore once the body is read.
+parser_mark_head_body: fn(state: &JetParserState) -> Int Never! {
+    saved: state.head_text_at
+    state.head_text_at = state.position
+    saved
 }
 
 // A nested state parses with its parent's tables and numbers its nodes on

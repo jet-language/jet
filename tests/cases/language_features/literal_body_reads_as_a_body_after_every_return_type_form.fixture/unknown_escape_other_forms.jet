@@ -1,0 +1,26 @@
+// `\u{…}` is no escape of quoted text, so a function body that writes one
+// is E0001 after the qualified, generic, list, map, optional and fallible
+// return-type forms, exactly as after `-> String`.
+#Error
+Bad: enum {
+    Broke
+}
+
+names: module {
+    Text<T>: String
+}
+
+Holder: struct<T> {
+    value: T
+}
+
+unicode_qualified: fn() -[IO]> names.Text<Int> { "\u{41}" }
+unicode_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "\u{41}"} }
+unicode_list: fn() -[IO]> [String] { ["\u{41}"] }
+unicode_map: fn() -[IO]> [String: String] { ["k": "\u{41}"] }
+unicode_optional: fn() -[IO]> String? { Val("\u{41}") }
+unicode_fallible: fn() -[IO]> String Bad! { Ok("\u{41}") }
+
+run: fn() {
+    print("other forms")
+}

@@ -675,8 +675,10 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         span := parser_cover(start, close.span)
         return ParsedExpr{expr: Expr.TypedLit{head: head, body: TypedLitBody.Empty, span: span, id: parser_node_id(state)}, span: span}
     }
+    saved_head: parser_mark_head_body(state)
     if parser_typed_literal_byte_head(head) && (parser_current_kind(state) == TOKEN_STRING || parser_current_kind(state) == TOKEN_RAW_STRING) && parser_kind_at(state, 1) == TOKEN_RBRACE {
         text := parser_parse_string(state, depth + 1)
+        state.head_text_at = saved_head
         parts := [ByteTextPart]{}
         interpolated := false
         if text.expr == {
@@ -742,6 +744,7 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         }
         else -> TypedLitBody.Value{value: first.expr.move()}
     }
+    state.head_text_at = saved_head
     parser_literal_close_terminators(state)
     close := parser_expect(state, TOKEN_RBRACE, "`}}` to close a typed literal")
     span := parser_cover(start, close.span)
@@ -760,7 +763,9 @@ parser_parse_declared_default: fn(state: &JetParserState, ty: Type, ty_span: Spa
         return ParsedExpr{expr: Expr.TypedLit{head: Val(ty), body: TypedLitBody.Empty, span: span, id: parser_node_id(state)}, span: span}
     }
     parser_bump(state)
+    saved_head: parser_mark_head_body(state)
     parsed := parser_parse_expression(state, 1, 0)
+    state.head_text_at = saved_head
     close := parser_expect(state, TOKEN_RBRACE, closer)
     ParsedExpr{expr: parsed.expr.move(), span: parser_cover(ty_span, close.span)}
 }
@@ -1111,8 +1116,10 @@ parser_parse_marker_value: fn(state: &JetParserState, depth: Int, allow_struct_l
     ParsedExpr{expr: Expr.Tainted{value: inner.expr, tag: Val(name), span: span, id: parser_node_id(state)}, span: span}
 }
 
+// Quoted text as a value. Text that starts a typed literal's body takes the
+// head's reading (parser_mark_head_body); any other text reads plain.
 parser_parse_string: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
-    token: parser_bump(state)
+    token: parser_take_text(state, state.position == state.head_text_at)
     parts := [StrPart]{}
     index := 0
     token_parts: parser_string_parts(state, token)
@@ -1322,7 +1329,7 @@ parser_parse_selector_integer: fn(state: &JetParserState, head: String, paramete
 // The quoted fill of `:Pad(n, "fill")`: fixed text, never a second
 // interpolation.
 parser_parse_selector_fill: fn(state: &JetParserState, head: String) -> String {
-    token: parser_bump(state)
+    token: parser_take_text(state, false)
     if token.kind == TOKEN_RAW_STRING -> return parser_value(state, token)
     if token.kind != TOKEN_STRING {
         parser_add_error(state, token.span, "expected a literal fill string inside `{head}( )`", "`{head}(n, fill)` takes a quoted fill string", "write a fill such as `{head}(8, \"0\")`")

@@ -1,0 +1,97 @@
+// A function body that is one literal reads as a body after every
+// return-type form, with or without an effect row: escapes decode and holes
+// interpolate as after `-> String`. A typed head written as the body
+// expression still reads as its head.
+use re: core.regex
+
+#Error
+Bad: enum {
+    Broke
+}
+
+names: module {
+    // A qualified alias over String.
+    Text<T>: String
+}
+
+Holder: struct<T> {
+    value: T
+
+    // A method body after an effect row.
+    label: fn(self) -[IO]> String { "holder\t{1 + 1}\n" }
+}
+
+// Escapes: `\n`, `\t`, `\"`, `\\`.
+escape_plain: fn() -> String { "a\n\t\"\\b" }
+escape_empty_row: fn() -[]> String { "a\n\t\"\\b" }
+escape_one_effect: fn() -[IO]> String { "a\n\t\"\\b" }
+escape_effects: fn() -[IO, FS]> String { "a\n\t\"\\b" }
+escape_qualified: fn() -[IO]> names.Text<Int> { "a\n\t\"\\b" }
+escape_generic_fn: fn<T>(x: T) -[IO]> String { "a\n\t\"\\b" }
+escape_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "a\n\t\"\\b"} }
+escape_list: fn() -[IO]> [String] { ["a\n\t\"\\b"] }
+escape_map: fn() -[IO]> [String: String] { ["k": "a\n\t\"\\b"] }
+escape_optional: fn() -[IO]> String? { Val("a\n\t\"\\b") }
+escape_fallible: fn() -[IO]> String Bad! { Ok("a\n\t\"\\b") }
+
+// Interpolation, with an escape after the hole.
+hole_plain: fn(n: Int) -> String { "<{n}>\n" }
+hole_empty_row: fn(n: Int) -[]> String { "<{n}>\n" }
+hole_one_effect: fn(n: Int) -[IO]> String { "<{n}>\n" }
+hole_effects: fn(n: Int) -[IO, FS]> String { "<{n}>\n" }
+hole_qualified: fn(n: Int) -[IO]> names.Text<Int> { "<{n}>\n" }
+hole_generic_fn: fn<T>(n: Int, x: T) -[IO]> String { "<{n}>\n" }
+hole_generic: fn(n: Int) -[IO]> Holder<String> { Holder<String>{value: "<{n}>\n"} }
+hole_list: fn(n: Int) -[IO]> [String] { ["<{n}>\n"] }
+hole_map: fn(n: Int) -[IO]> [String: String] { ["k": "<{n}>\n"] }
+hole_optional: fn(n: Int) -[IO]> String? { Val("<{n}>\n") }
+hole_fallible: fn(n: Int) -[IO]> String Bad! { Ok("<{n}>\n") }
+
+// Char escapes.
+char_plain: fn() -> Char { '\n' }
+char_one_effect: fn() -[IO]> Char { '\t' }
+
+// Byte strings: the text after `[U8] {` is a body, and `[U8]{"…"}` in the
+// body is a byte head.
+bytes_text_plain: fn(n: Int) -> [U8] { "A\n{n}".bytes() }
+bytes_text_effect: fn(n: Int) -[IO]> [U8] { "A\n{n}".bytes() }
+bytes_head_plain: fn() -> [U8] { [U8]{"\x41\n"} }
+bytes_head_effect: fn() -[IO, FS]> [U8] { [U8]{"\x41\n"} }
+
+// Real typed heads as body expressions keep backslashes as written.
+regex_plain: fn() -> Regex { Regex{"\d+"} }
+regex_effect: fn() -[IO]> Regex { Regex{"\d+"} }
+
+show: fn(name: String, value: String) {
+    print("{name} {value.len()} {value.bytes()}")
+}
+
+run: fn() {
+    show("escape", escape_plain())
+    show("escape -[]>", escape_empty_row())
+    show("escape -[IO]>", escape_one_effect())
+    show("escape -[IO, FS]>", escape_effects())
+    show("escape qualified", escape_qualified())
+    show("escape generic fn", escape_generic_fn(1))
+    show("escape generic", escape_generic().value)
+    show("escape list", escape_list()[0])
+    show("escape map", escape_map()["k"])
+    show("escape optional", escape_optional() ?? "missing")
+    show("escape fallible", escape_fallible() ?? "failed")
+    show("hole", hole_plain(7))
+    show("hole -[]>", hole_empty_row(7))
+    show("hole -[IO]>", hole_one_effect(7))
+    show("hole -[IO, FS]>", hole_effects(7))
+    show("hole qualified", hole_qualified(7))
+    show("hole generic fn", hole_generic_fn(7, 1))
+    show("hole generic", hole_generic(7).value)
+    show("hole list", hole_list(7)[0])
+    show("hole map", hole_map(7)["k"])
+    show("hole optional", hole_optional(7) ?? "missing")
+    show("hole fallible", hole_fallible(7) ?? "failed")
+    print("char {char_plain() == '\n'} {"{char_plain()}".bytes()} {char_one_effect() == '\t'} {"{char_one_effect()}".bytes()}")
+    print("bytes text {bytes_text_plain(7)} {bytes_text_effect(7)}")
+    print("bytes head {bytes_head_plain()} {bytes_head_effect()}")
+    print("regex {re.is_match(regex_plain(), "id=42")} {re.is_match(regex_effect(), "id=42")}")
+    show("method", Holder<Int>{value: 7}.label())
+}

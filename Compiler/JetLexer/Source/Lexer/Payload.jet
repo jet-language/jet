@@ -60,11 +60,11 @@ literal_row: fn(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
 }
 
 number_literal: fn(integer: Int?, decimal: Float?, suffix: Name) -> TokenLiteral Never! {
-    TokenLiteral{integer: integer, decimal: decimal, suffix: suffix, interpolations: 0, string_parts: [StringPart]{}}
+    TokenLiteral{integer: integer, decimal: decimal, suffix: suffix, interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
 }
 
 text_literal: fn(interpolations: Int, parts: [StringPart]) -> TokenLiteral Never! {
-    TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: interpolations, string_parts: parts}
+    TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: interpolations, string_parts: parts, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
 }
 
 add_diagnostic: fn(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
@@ -204,16 +204,18 @@ fact_text: fn(source: [U8], facts: [Int], index: Int) -> String Never! {
     slice_text(source, facts[index * 4 + 1], facts[index * 4 + 2])
 }
 
+// Whether the quoted text at fact `index` can be a typed head's body: it
+// follows a `{` after a name whose first character is an ASCII capital (as
+// Rust's lexer reads it; non-ASCII capitals do not count), after `.`, or after
+// `[U8]` or `[U8#N]`. Such text gets its typed-head reading beside the plain
+// one; whether a head takes it is the parser's call, since the same
+// `String {` opens a function body after a return type.
 string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) Never! {
     open: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (byte_head: false, raw_head: false)
     before_open: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
-    // A typed head is a name whose first character is an
-    // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
-    // A function's return type before its body (`-> String {`, `-> a.B {`)
-    // is none.
-    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT && !returned_type_at(facts, qualified_start(facts, before_open)) {
+    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
         first: byte_at(source, facts[before_open * 4 + 1])
         if first >= 65 && first <= 90 -> raw = true
     }
@@ -223,7 +225,7 @@ string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool
         if {
             before_close >= 0 && kind_at(facts, before_close) == K_IDENT && fact_text(source, facts, before_close) == "U8" -> {
                 before_type: previous_code_index(facts, before_close)
-                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET && !returned_type_at(facts, before_type)
+                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET
             }
             else -> {
                 if before_close >= 0 {
@@ -232,7 +234,7 @@ string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool
                         u8: previous_code_index(facts, hash)
                         if u8 >= 0 && kind_at(facts, u8) == K_IDENT && fact_text(source, facts, u8) == "U8" {
                             bracket: previous_code_index(facts, u8)
-                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET && !returned_type_at(facts, bracket)
+                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET
                         }
                     }
                 }
@@ -240,37 +242,6 @@ string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool
         }
     }
     (byte_head: byte, raw_head: raw)
-}
-
-// Whether the type whose first token is at `first` is a function's return
-// type: `name: fn(...) -> ` (or `name: fn<...>(...) -> `, `Owner.name: fn(...) -> `,
-// `fn(...) -> `) before it.
-returned_type_at: fn(facts: [Int], first: Int) -> Bool Never! {
-    arrow: previous_code_index(facts, first)
-    if arrow < 0 || kind_at(facts, arrow) != K_UNIFIED_ARROW -> return false
-    close: previous_code_index(facts, arrow)
-    if close < 0 || kind_at(facts, close) != K_RPAREN -> return false
-    paren: matching_open(facts, close, K_LPAREN, K_RPAREN)
-    if paren < 0 -> return false
-    cursor := previous_code_index(facts, paren)
-    if cursor >= 0 && kind_at(facts, cursor) == K_GT {
-        angle: matching_open(facts, cursor, K_LT, K_GT)
-        cursor = if angle < 0 -> -1 else -> previous_code_index(facts, angle)
-    }
-    if cursor >= 0 && kind_at(facts, cursor) == K_IDENT -> cursor = previous_code_index(facts, qualified_start(facts, cursor))
-    cursor >= 0 && kind_at(facts, cursor) == K_FN
-}
-
-// The first name of the dotted path `a.b.c` ending at the name at `last`.
-qualified_start: fn(facts: [Int], last: Int) -> Int Never! {
-    start := last
-    loop {
-        dot: previous_code_index(facts, start)
-        name: if dot >= 0 && kind_at(facts, dot) == K_DOT -> previous_code_index(facts, dot) else -> -1
-        if name < 0 || kind_at(facts, name) != K_IDENT -> break
-        start = name
-    }
-    start
 }
 
 group_has_ffi_marker: fn(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
@@ -650,13 +621,16 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             next
         }
         if value == 92 {
+            // A typed head's body keeps each backslash as written. `\"` and
+            // `\\` stay pairs, so the text ends where plain text would.
             if raw_head {
                 literal.push(U8{92})
                 decoded.push(U8{92})
+                paired: byte_at(source, cursor + 1)
                 if {
-                    byte_at(source, cursor + 1) == 34 -> {
-                        literal.push(U8{34})
-                        decoded.push(U8{34})
+                    paired == 34 || paired == 92 -> {
+                        literal.push(U8{paired})
+                        decoded.push(U8{paired})
                         cursor += 2
                     }
                     else -> {
@@ -832,17 +806,11 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
     add_diagnostic(diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
 }
 
-decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+// The reading of the string `source[start..<end]`: plain text decodes its
+// escapes, a typed head's body (`raw_head`) keeps its backslashes as written,
+// and a byte head's body (`byte_head`) decodes them and reads `\xNN` as a byte.
+decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
-    if triple && raw_foreign_body_at(source, facts, index) {
-        body_start := start + 3
-        body_end := end - 3
-        body: slice_text(source, body_start, body_end)
-        parts := [StringPart]{}
-        append_text_part(parts, body_start, body_end, name_intern(tables.names, body))
-        return (decoded: body, interpolations: 0, parts: parts, valid: true)
-    }
-    modes: string_head_modes(source, facts, index)
     content_start := start + 1
     content_end := end - 1
     indent := 0
@@ -866,7 +834,7 @@ decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, 
         if content_end > content_start && byte_at(source, content_end - 1) == 10 -> content_end -= 1
         if content_end < content_start -> content_end = content_start
     }
-    decode_string_content(source, content_start, content_end, triple, indent, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+    decode_string_content(source, content_start, content_end, triple, indent, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
 }
 
 decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
@@ -1045,6 +1013,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             // As in Rust's lexer, an unclosed string still reports what its
             // body teaches (escapes, lone braces, holes) up to the line end;
             // an unclosed `{` hole is then its one error, else the quote is.
+            // Text a typed head may take reports as that head's body.
             modes: string_head_modes(source, facts, index)
             scanned: scan_plain_string_end(source, cursor, modes.raw_head)
             stop: if scanned < 0 -> -scanned - 1 else -> scanned
@@ -1098,7 +1067,16 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         return (decoded: number.decoded, keep: true, literal: number.literal)
     }
     if kind == K_STR {
-        decoded: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        triple: byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
+        if triple && raw_foreign_body_at(source, facts, index) {
+            body: slice_text(source, start + 3, end - 3)
+            parts := [StringPart]{}
+            append_text_part(parts, start + 3, end - 3, name_intern(tables.names, body))
+            return (decoded: name_intern(tables.names, body), keep: true, literal: literal_row(tables, text_literal(0, parts)))
+        }
+        modes: string_head_modes(source, facts, index)
+        if modes.raw_head || modes.byte_head -> return string_readings_payload(source, start, end, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        decoded: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
         if !decoded.valid -> return (decoded: name_empty(), keep: false, literal: -1)
         return (decoded: name_intern(tables.names, decoded.decoded), keep: true, literal: literal_row(tables, text_literal(decoded.interpolations, decoded.parts)))
     }
@@ -1111,6 +1089,28 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         add_diagnostic(diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
     }
     (decoded: text, keep: true, literal: -1)
+}
+
+// Text a typed head may take, read both ways: the plain reading is the
+// token's row and the head's reading its `head` row, each with its own
+// diagnostics deferred until the parser picks one. Text that doesn't close
+// as plain text fails as any string does.
+string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: Name, literal: Int, keep: Bool) {
+    plain_diagnostics := [Diagnostic]{}
+    plain: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, plain_diagnostics)
+    if !plain.valid {
+        loop diagnostic in plain_diagnostics.move() -> diagnostics.push(diagnostic.move())
+        return (decoded: name_empty(), keep: false, literal: -1)
+    }
+    head_diagnostics := [Diagnostic]{}
+    head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics)
+    head_literal := text_literal(head.interpolations, head.parts)
+    head_literal.deferred = head_diagnostics.move()
+    literal := text_literal(plain.interpolations, plain.parts)
+    literal.head = literal_row(tables, head_literal)
+    literal.head_decoded = name_intern(tables.names, head.decoded)
+    literal.deferred = plain_diagnostics.move()
+    (decoded: name_intern(tables.names, plain.decoded), keep: true, literal: literal_row(tables, literal))
 }
 
 lexed_from: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {

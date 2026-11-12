@@ -45,7 +45,7 @@ parser_foreign_plain_string: fn(state: &JetParserState, context: String) -> Name
         if token.kind != TOKEN_EOF -> parser_bump(state)
         return NamedSpan{name: "", span: token.span}
     }
-    parser_bump(state)
+    _ := parser_take_text(state, false)
     if parser_interpolations(state, token) > 0 {
         parser_add_error(state, token.span, "foreign strings cannot interpolate", "FFI paths must be known before semantic checking", "write a plain string literal")
     }

@@ -21,13 +21,23 @@ Token: struct {
     literal: Int
 }
 
-// Number and string facts of one literal token.
+// Number and string facts of one literal token. Quoted text right after
+// `Name{`, `.{` or `[U8]{` may be a typed head's body, which the lexer can't
+// tell from a block's first line, so it gets two readings: this row decodes
+// its escapes, and the row `head` (with spelling `head_decoded`) keeps its
+// backslashes as written or reads its `\xNN` escapes as bytes. The parser
+// picks one (parser_text_reading); each reading holds its own diagnostics in
+// `deferred`, which the parser reports for the reading it picks.
 TokenLiteral: struct {
     integer: Int?
     decimal: Float?
     suffix: Name
     interpolations: Int
     string_parts: [StringPart]
+    // The typed-head reading's row, or -1 when no typed head can take the text.
+    head: Int
+    head_decoded: Name
+    deferred: [Diagnostic]
 }
 
 StringPart: struct {
@@ -118,8 +128,12 @@ shifted_token_span: fn(span: Span, offset: Int) -> Span Never! {
 // Moves a token, its literal's string parts and their tokens by `offset`.
 token_shift_spans: fn(token: &Token, offset: Int, literals: &[TokenLiteral]) Never! {
     token.span = shifted_token_span(token.span, offset)
-    if token.literal < 0 -> return
-    row: token.literal
+    if token.literal >= 0 -> literal_shift_spans(token.literal, offset, literals)
+}
+
+// Moves a literal row's string parts, their tokens, its deferred diagnostics
+// and its typed-head reading by `offset`.
+literal_shift_spans: fn(row: Int, offset: Int, literals: &[TokenLiteral]) Never! {
     loop part_index in 0..<literals[row].string_parts.len() {
         literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
         loop nested_index in 0..<literals[row].string_parts[part_index].tokens.len() {
@@ -128,6 +142,12 @@ token_shift_spans: fn(token: &Token, offset: Int, literals: &[TokenLiteral]) Nev
             literals[row].string_parts[part_index].tokens[nested_index] = nested
         }
     }
+    loop index in 0..<literals[row].deferred.len() {
+        diagnostic := literals[row].deferred[index]
+        shifted_diagnostic(diagnostic, offset)
+        literals[row].deferred[index] = diagnostic
+    }
+    if literals[row].head >= 0 -> literal_shift_spans(literals[row].head, offset, literals)
 }
 
 // These numeric tags are stable at the Jet parser boundary and align with the
