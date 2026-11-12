@@ -1,0 +1,34 @@
+// A number parameter's struct keeps its trait methods: `Inline<2>` calls
+// `count` through `Store`, a method reads `N` itself, and generic code over
+// `Inline<N>` or over `T: Store` finds the same method. This is the shared
+// program of D-COMPUTED-ALIAS1 without the computed alias.
+Store: trait { count: fn(self) -> Int }
+
+Inline: struct<N: Int> {
+    items: [Int#N]
+    impl Store { count: fn(self) -> Int { self.items.len() } }
+    capacity: fn(self) -> Int { N }
+}
+
+Heap: struct {
+    items: [Int]
+    impl Store { count: fn(self) -> Int { self.items.len() } }
+}
+
+filled: fn<N: Int>(store: Inline<N>) -> Int {
+    store.count() + N
+}
+
+stored: fn<T: Store>(store: T) -> Int {
+    store.count()
+}
+
+run: fn() {
+    small: Inline<2>{items: [1, 2]}
+    big: Heap{items: [1, 2, 3]}
+    print(small.count())
+    print(big.count())
+    print(small.capacity())
+    print(filled(small))
+    print(stored(big))
+}
