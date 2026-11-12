@@ -489,21 +489,21 @@
       "basis": "Owner direction 2026-10-02 on #4308/#4310: ~300k lines in under 2 s, nonincremental, all cores by default, explicit single-threaded option; D-EXEC1=A (jet build defaults to O1)",
       "metric": "clean_build_wall_ns",
       "command": ["jet", "build", "{entry}"],
-      "harness": "Tools/perf/throughput/harness.mjs",
+      "harness": "Tools/perf/compile-throughput/Throughput.jet",
       "artifact_discovery": "from the compiler receipt (efficiency note, section 6), never by file mtime",
       "programs": [
         {
           "id": "bench300k",
-          "generator": "node Tools/perf/scaling/generate.mjs mixed --code-lines 300000 --seed 1 {dir}",
-          "source_sha256": "985144c1fd5863fb155dd4d60b04ad7a863e60437b4446a02fdd2bc69bd738a9",
+          "generator": "jet run Tools/perf/scaling/generate/run.jet -- mixed --code-lines 300000 --seed 1 {dir}",
+          "source_sha256": "0699db0af096eedb71963f210ae04ad2d80c093203df848cfc2442fe3286ecb5",
           "loc_contract": {"nonblank_noncomment_lines_min": 300000, "record": ["physical_lines", "code_lines", "bytes", "functions", "types", "comptime_items"]},
-          "shape": "shaped after L5 (25.6 lines per function, 53 bytes per line, 4.7% comptime items): 22.6 lines per function, 45 bytes per line, 4.8% comptime items; structs/enums with payloads/traits through trait values/generic functions/closures/value and variant matches/maps/strings/interpolation; one source file of 308 sections until both compilers build one multi-file package (Tools/perf/scaling/mixed.mjs)",
+          "shape": "shaped after L5 (25.6 lines per function, 53 bytes per line, 4.7% comptime items): 22.6 lines per function, 45 bytes per line, 4.8% comptime items; structs/enums with payloads/traits through trait values/generic functions/closures/value and variant matches/maps/strings/interpolation; one source file of 308 sections until both compilers build one multi-file package (Tools/perf/scaling/corpora/Source/Mixed.jet)",
           "expected_output": "mixed checksum 828630 sections 308\n",
           "threshold": {"arm": "default", "wall_ns_lt": 2000000000, "statistic": "median_and_max"}
         },
         {
           "id": "selfhost",
-          "source": "the compiler package graph (Compiler/package.jet; `jet build Compiler`)",
+          "source": "the compiler corpus: the compiler's package graph and Core (Compiler/package.jet; `jet build Compiler`); its lines are their physical lines",
           "expected_output": "canonical-stage2-probes",
           "threshold": {"arm": "default", "lines_per_second_min": 150000, "statistic": "median_and_min"}
         }
@@ -516,7 +516,7 @@
       "samples": 5,
       "warmups": 1,
       "machine": {"record": ["cpu_model", "cores", "threads", "memory_bytes", "governor", "kernel"], "reference": "AMD Ryzen 9 7950X3D 16C/32T, 61 GiB"},
-      "record": ["wall_ns", "cpu_user_ns", "cpu_sys_ns", "peak_rss_bytes", "threads_used", "per_phase_wall_ns", "per_phase_cpu_ns", "phase_counters", "artifact_sha256", "diagnostic_sha256", "compiler_sha256", "compiler_build_profile"],
+      "record": ["wall_ns", "cpu_user_ns", "cpu_sys_ns", "peak_rss_bytes", "parallelism_pct", "per_phase_wall_ns", "per_phase_cpu_ns", "phase_counters", "artifact_sha256", "diagnostic_sha256", "compiler_sha256", "compiler_build_profile"],
       "gates": {
         "determinism": "default and single arms produce byte-identical artifacts and diagnostics",
         "memory": {"selfhost_peak_rss_bytes_max": 805306368, "bench300k_peak_rss_bytes_max": 1073741824},
@@ -526,7 +526,7 @@
       "comparator": "absolute thresholds; strict (equality fails); no averaging across programs, arms, or lanes",
       "lanes": {
         "full": "both programs, both arms, 5 samples: at every speed-card close and at milestones",
-        "quick": "bench30k (same generator, --code-lines 30000) frontend phases with JET_TRACE_FILE, 3 samples: every compiler-touching change, regression budget 15% per phase (Tools/perf/baseline.json budgets) against Tools/perf/throughput/quick-baseline.json"
+        "quick": "bench30k (same generator, --code-lines 30000) phases with JET_TRACE_FILE, 3 samples: every compiler-touching change, regression budget 15% per phase (Tools/perf/baseline.json budgets) against Tools/perf/throughput/quick-baseline.json"
       },
       "implementation_pairs": [
         {

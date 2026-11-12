@@ -859,7 +859,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   const bench300k = throughput.programs.find((program) => program.id === "bench300k");
   assert.equal(bench300k.source_sha256, pins.programs.bench300k.source_sha256);
   assert.equal(bench300k.expected_output, pins.programs.bench300k.expected_output);
-  assert.equal(bench300k.generator, `node Tools/perf/scaling/generate.mjs mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
+  assert.equal(bench300k.generator, `jet run Tools/perf/scaling/generate/run.jet -- mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
   assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
   assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
   const budgets = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/scaling/phase-budgets.json"), "utf8"));

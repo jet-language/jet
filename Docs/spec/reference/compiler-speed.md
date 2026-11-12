@@ -140,6 +140,21 @@ cover: the package's build steps around the compile. `--budget COLUMN` holds
 every phase, and `outside`, to that column of
 `Tools/perf/budget/budget.json` (#5479).
 
+`--lane quick|full` runs the gauntlet's `compile_throughput` cell
+(`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
+builds the generated `bench300k` program and the compiler corpus (`selfhost`);
+the quick lane builds `bench30k`. Each program is built in two arms, the
+default thread count and `--threads 1`, each after a warmup. Generated programs
+come from `Tools/perf/scaling/generate/run.jet`, are pinned in
+`Tools/perf/throughput/bench.json`, and each artifact's stdout must
+match the pinned golden byte for byte. Artifacts and diagnostics must be
+identical across every sample and arm. The full lane adds the manifest's
+memory, wall or lines-per-second, and phase-budget
+(`Tools/perf/scaling/phase-budgets.json`) gates. The quick lane
+compares wall, peak memory and each phase with
+`Tools/perf/throughput/quick-baseline.json`, within the regression
+budgets of `Tools/perf/baseline.json`. Every run writes a JSON receipt.
+
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every

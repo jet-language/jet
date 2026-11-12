@@ -1,20 +1,35 @@
 #!/usr/bin/env jet
-// Compile-throughput cell (#5479 c1): live, cold, uncached compiles of the
-// compiler corpus (the compiler's packages and Core) by the compiler JET
-// names, and per mode their lines per second, wall, CPU, peak memory and
-// per-phase seconds from the compiler's own trace.
+// Compile-throughput cell (#5479 c1; the gauntlet's axes.compile_throughput):
+// live, cold, uncached compiles by the compiler JET names, with their lines
+// per second, wall, CPU, peak memory and per-phase seconds from the
+// compiler's own trace. Two forms:
 //
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR]
 //       [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE]
 //       [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]
 //       [--budget COLUMN] [--runs N]
+//   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full
+//       [--programs LIST] [--arms default,single] [--samples N] [--warmups N]
+//       [--receipt FILE] [--baseline FILE] [--write-baseline FILE]
+//       [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE]
+//       [--timeout SECONDS] [--work DIR] [--tool PATH]
 //
-// DIR is the source tree (default: the working directory). Each mode compiles
-// in a fresh toolchain tree copied from DIR (every file of `Compiler/` and
-// `Core/` but their `.jet` folders, and the other
-// Tools/agent/CompilerPackages.jet `inputs`), which is the compile's
-// JET_TOOLCHAIN_ROOT, with an empty JET_STORE_DIR and XDG_CACHE_HOME, so no
-// compile cache serves it (AGENTS.md: measure live). The modes:
+// DIR is the source tree (default: the working directory). The compiler
+// corpus is the compiler's member sources (Tools/agent/CompilerPackages.jet
+// `sources`) and every `.jet` file of Core; its lines are their physical
+// lines. A compile of it runs in a fresh toolchain tree copied from DIR
+// (every file of `Compiler/` and `Core/` but their `.jet` folders, and the
+// other CompilerPackages.jet `inputs`), which is the compile's
+// JET_TOOLCHAIN_ROOT. Every compile has an empty JET_STORE_DIR and
+// XDG_CACHE_HOME, so no compile cache serves it (AGENTS.md: measure live),
+// runs pinned to --cpus (default: every CPU) in a --memory scope (default
+// 16G, no swap), and is killed after --timeout seconds (default 1200).
+// JET_COMPILER_IDENTITY is the IDENTITY file beside JET when there is one.
+// --tool is the jet that runs CompilerPackages.jet, the generator and the
+// budget checker (default: JET).
+//
+// The first form compiles the corpus in each mode --runs times (default 3),
+// one after another, each in its own <work>/<mode>.<n> directory:
 //
 //   check    jet check Compiler
 //   O0       jet build --threads N --optimize=none Compiler
@@ -23,24 +38,16 @@
 //   release  jet build --threads N --release Compiler
 //   default  jet build --threads N Compiler
 //
-// Each compile runs pinned to --cpus (default: every CPU) with --threads
-// (default 12), in a --memory scope (default 16G, no swap), killed after
-// --timeout seconds (default 1200). JET_COMPILER_IDENTITY is the IDENTITY file
-// beside JET when there is one. --tool is the jet that runs
-// CompilerPackages.jet and the budget checker (default: JET). Each mode
-// compiles --runs times (default 3), one after another, each in its own
-// <work>/<mode>.<n> directory.
-//
-// Per compile it prints one row: lines (the `.jet` lines of the compiler's
-// member sources and of Core), lines/s (lines over wall), wall, CPU (user +
-// system of the compile and every process it waited for), CPU ns per line,
-// average parallelism (CPU over wall), peak memory (the scope's), the trace's
-// parsed lines (parse.user_lines + core_lines), `traced` (the opening lane's
-// first span start to its last span end) and `outside` (wall minus traced:
-// the build steps around the compile, such as source generators and the
-// runtime pack); then per mode the median compile by wall, and its top-level
-// phases of the opening lane with their wall seconds and process CPU seconds
-// (the `proc_cpu_ns` each span's end carries: every thread, over the span).
+// with --threads N (default 12). Per compile it prints one row: lines,
+// lines/s (lines over wall), wall, CPU (user + system of the compile and
+// every process it waited for), CPU ns per line, average parallelism (CPU
+// over wall), peak memory (the scope's), the trace's parsed lines
+// (parse.user_lines + core_lines), `traced` (the opening lane's first span
+// start to its last span end) and `outside` (wall minus traced: the build
+// steps around the compile, such as source generators and the runtime pack);
+// then per mode the median compile by wall, and its top-level phases of the
+// opening lane with their wall seconds and process CPU seconds (the
+// `proc_cpu_ns` each span's end carries: every thread, over the span).
 // --out FILE appends the same as tab-separated rows (one `run` row per
 // compile, one `phase` row per phase).
 //
@@ -53,9 +60,42 @@
 // OVER (the phases), OUTSIDE (the build steps around the compile) or
 // `error N` (the checker's exit code).
 //
-// Exit: 0 every mode compiled (and, with --budget, is within it); 1 a compile
-// failed, timed out or wrote no trace, or a budget is over; 64 usage.
+// The second form is the gauntlet cell, axes.compile_throughput of
+// Tools/gauntlet/measurement-manifest.json. Its programs: `bench300k` and
+// `bench30k`, written by `jet run Tools/perf/scaling/generate/run.jet --
+// mixed --code-lines N --seed S` and pinned (digest and golden stdout) by
+// Tools/perf/throughput/bench.json, and `selfhost`, `jet build Compiler` of the
+// compiler corpus. The quick lane runs bench30k, 3 samples; the full lane
+// bench300k and selfhost, 5 samples. Each program compiles in the arms
+// `default` (`jet build ENTRY`) and `single` (`jet build --threads 1 ENTRY`),
+// after --warmups unmeasured compiles per arm (default 1), each sample in a
+// fresh copy of the program at one fixed path. Per sample the receipt holds
+// wall, user and system CPU, peak memory, parallelism (CPU over wall, in
+// percent), startup (spawn to the first phase span), per phase kind (spans
+// named their kind, every lane) the union wall, summed span time, process
+// CPU (per union interval, the largest `proc_cpu_ns` of its spans) and
+// count, the trace's `counters.*` events, and the artifact's and the
+// normalized diagnostics' digests; a program with a golden runs its artifact
+// and checks stdout byte for byte. A failed, timed-out or traceless compile,
+// a wrong golden, artifacts or diagnostics that differ across samples and
+// arms, and a missing sample fail the run. The full lane also applies the
+// manifest's gates: peak memory, the wall or lines/s threshold, and each
+// Tools/perf/scaling/phase-budgets.json phase budget (scaled by code lines over
+// 300,000, naming its owning cards). The quick lane compares wall, peak
+// memory and each phase's median with a baseline (default
+// Tools/perf/throughput/quick-baseline.json)
+// within Tools/perf/baseline.json's regression budgets, skipping baseline
+// values under 100 ms or 64 MiB; --write-baseline FILE records a passing
+// run's baseline instead. The receipt (JSON, default <work>/receipt.json)
+// also records the machine, the load and every other process above 1 GiB,
+// the commit, and the compiler's digest, identity and build profile
+// (--profile, default its IDENTITY).
+//
+// Exit: 0 every compile succeeded (and, with --budget or --lane, every check
+// passed); 1 a compile failed, timed out or wrote no trace, or a check
+// failed; 64 usage.
 use {
+    crypto: core.crypto
     files: core.files
     json: core.encoding.json
     process: core.process
@@ -65,7 +105,19 @@ use {
 }
 
 MODES: [String]{"check", "O0", "O1", "O2", "release", "default"}
+PROGRAMS: [String]{"bench300k", "bench30k", "selfhost"}
+ARMS: [String]{"default", "single"}
 GIB: 1073741824
+RECEIPT_SCHEMA: "jet.compile-throughput.receipt/v2"
+BASELINE_SCHEMA: "jet.compile-throughput.quick-baseline/v2"
+// The cell's pins (bench.json) and quick baseline (quick-baseline.json), and
+// the phase budgets the full lane checks.
+PIN_DIR: "Tools/perf/throughput"
+PHASE_BUDGETS_FILE: "Tools/perf/scaling/phase-budgets.json"
+// Baseline values below these floors are under the scheduler's and the
+// allocator's resolution; the quick lane's budgets apply at or above them.
+QUICK_TIME_FLOOR_NS: 100000000
+QUICK_MEMORY_FLOOR_BYTES: 67108864
 
 Options: struct {
     tree: String
@@ -79,12 +131,21 @@ Options: struct {
     tool: String
     budget: String
     runs: Int
+    lane: String
+    programs: [String]
+    arms: [String]
+    samples: Int
+    warmups: Int
+    receipt: String
+    baseline: String
+    write_baseline: String
+    profile: String
 }
 
 OutsideTrace: struct { budget: [String: Float] }
 BudgetFile: struct { outside_trace: OutsideTrace? }
 
-TraceArgs: struct { proc_cpu_ns: Int?, value: Int? }
+TraceArgs: struct { proc_cpu_ns: Int?, value: Int?, items: Int?, unix_ms: Int? }
 TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: TraceArgs? }
 OpenSpan: struct { kind: String, ts: Int }
 Phase: struct { kind: String, wall_ns: Int{0}, cpu_ns: Int{0}, count: Int{0} }
@@ -114,6 +175,7 @@ Run: struct {
 usage: fn(message: String) -> Never {
     term.eprint("Throughput.jet: {message}")
     term.eprint("usage: JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
+    term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
     process.exit(64)
 }
 
@@ -143,8 +205,11 @@ parse_cpus: fn(text: String) -> [Int] {
     cpus
 }
 
+// A comma list, trimmed.
+parse_list: fn(text: String) -> [String] { text.split(",").map(m -> m.trim()).to_list() }
+
 parse_options: fn(args: [String]) -> Options {
-    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3}
+    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: ""}
     index := 0
     loop index < args.len() {
         flag: args[index]
@@ -153,7 +218,7 @@ parse_options: fn(args: [String]) -> Options {
         index += 2
         if {
             flag == "--tree" -> options.tree = value
-            flag == "--modes" -> options.modes = value.split(",").map(m -> m.trim()).to_list()
+            flag == "--modes" -> options.modes = parse_list(value)
             flag == "--cpus" -> options.cpus = parse_cpus(value)
             flag == "--threads" -> options.threads = Int.parse(value) ?? usage("--threads takes a count")
             flag == "--memory" -> options.memory = memory_bytes(value) ?? usage("--memory takes a size such as 16G")
@@ -163,6 +228,15 @@ parse_options: fn(args: [String]) -> Options {
             flag == "--tool" -> options.tool = value
             flag == "--budget" -> options.budget = value
             flag == "--runs" -> options.runs = Int.parse(value) ?? usage("--runs takes a count")
+            flag == "--lane" -> options.lane = value
+            flag == "--programs" -> options.programs = parse_list(value)
+            flag == "--arms" -> options.arms = parse_list(value)
+            flag == "--samples" -> options.samples = Int.parse(value) ?? usage("--samples takes a count")
+            flag == "--warmups" -> options.warmups = Int.parse(value) ?? usage("--warmups takes a count")
+            flag == "--receipt" -> options.receipt = value
+            flag == "--baseline" -> options.baseline = value
+            flag == "--write-baseline" -> options.write_baseline = value
+            flag == "--profile" -> options.profile = value
             else -> usage("unknown option {flag}")
         }
     }
@@ -170,6 +244,19 @@ parse_options: fn(args: [String]) -> Options {
     loop mode in options.modes {
         if !MODES.contains(mode) -> usage("unknown mode {mode}; the modes are {MODES.join(", ")}")
     }
+    if options.lane == "" -> return options
+    if options.lane != "quick" && options.lane != "full" -> usage("--lane is quick or full")
+    if options.programs.len() == 0 -> options.programs = if options.lane == "quick" -> [String]{"bench30k"} else -> [String]{"bench300k", "selfhost"}
+    loop program in options.programs {
+        if !PROGRAMS.contains(program) -> usage("unknown program {program}; the programs are {PROGRAMS.join(", ")}")
+    }
+    if options.arms.len() == 0 -> usage("--arms takes default and/or single")
+    loop arm in options.arms {
+        if !ARMS.contains(arm) -> usage("unknown arm {arm}; the arms are {ARMS.join(", ")}")
+    }
+    if options.samples == 0 -> options.samples = if options.lane == "quick" -> 3 else -> 5
+    if options.samples < 1 -> usage("--samples takes a count of at least 1")
+    if options.warmups < 0 -> usage("--warmups takes a count of at least 0")
     options
 }
 
@@ -187,6 +274,19 @@ mode_args: fn(mode: String, threads: Int) -> [String] {
     build
 }
 
+// The trace's events, in order; a partial last line of a killed compile is
+// skipped.
+trace_events: fn(text: String) -> [TraceEvent] {
+    events := [TraceEvent]{}
+    loop raw in text.split("\n") {
+        line: raw.trim().remove_suffix(",")
+        if line == "" || line == "[" || line == "]" -> next
+        event: json.decode<TraceEvent>(line) ?? next
+        events.push(event)
+    }
+    events
+}
+
 // The compiler's own trace (JET_TRACE_FILE). The opening lane is the lane of
 // the first span (lane 1 of the native jet). Per top-level span kind on it:
 // its wall time and the process CPU its ends carry (`proc_cpu_ns`, every
@@ -196,11 +296,7 @@ read_trace: fn(text: String) -> Trace {
     at := [String: Int]{}
     stack := [OpenSpan]{}
     lane := -1
-    loop raw in text.split("\n") {
-        line: raw.trim().remove_suffix(",")
-        if line == "" || line == "[" || line == "]" -> next
-        // A partial last line of a killed compile is skipped.
-        event: json.decode<TraceEvent>(line) ?? next
+    loop event in trace_events(text) {
         if event.ph == "C" {
             value: event.args?.value ?? 0
             if event.name == "parse.user_lines" -> trace.user_lines += value
@@ -243,6 +339,38 @@ count_lines: fn(text: String) -> Int {
     count
 }
 
+// Code lines: those neither blank nor a `//` comment (Tools/perf/scaling's
+// count).
+code_lines: fn(text: String) -> Int {
+    count := 0
+    loop raw in text.split("\n") {
+        line: raw.trim()
+        if line != "" && !line.starts_with("//") -> count += 1
+    }
+    count
+}
+
+// Function declarations: lines whose first word, a name, declares a `fn`.
+function_count: fn(text: String) -> Int {
+    count := 0
+    loop raw in text.split("\n") {
+        head: raw.trim().remove_prefix("pub ").partition(": fn")
+        if head.sep != "" && is_name(head.head) -> count += 1
+    }
+    count
+}
+
+// Letters, digits and underscores, at least one.
+is_name: fn(text: String) -> Bool {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        letter: (byte >= U8{97} && byte <= U8{122}) || (byte >= U8{65} && byte <= U8{90})
+        digit: byte >= U8{48} && byte <= U8{57}
+        if !letter && !digit && byte != 95 -> return false
+    }
+    true
+}
+
 // One CompilerPackages.jet listing of the tree.
 packages: fn(options: Options, verb: String) -> [String] {
     tool: files.join(options.tree, "Tools/agent/CompilerPackages.jet")
@@ -258,19 +386,49 @@ packages: fn(options: Options, verb: String) -> [String] {
     receipt.output.split("\n").filter(row -> row != "").to_list()
 }
 
-// The corpus lines: each member source of the compiler's packages and each
-// `.jet` file of Core.
-corpus_lines: fn(options: Options, inputs: [String]) -> Int {
-    total := 0
+// Where a program's sources come from and their shape. A count that does not
+// apply is 0.
+#Codable
+Source: struct {
+    kind: String
+    generator: String
+    sha256: String
+    physical_lines: Int
+    code_lines: Int
+    bytes: Int
+    functions: Int
+    types: Int
+    comptime_items: Int
+    sections: Int
+    files: Int
+}
+
+// The compiler corpus: each member source of the compiler's packages and
+// each `.jet` file of Core, in that order. Its digest hashes each file's
+// path, length and text.
+corpus_source: fn(options: Options, inputs: [String]) -> Source {
+    paths := [String]{}
     loop row in packages(options, "sources") {
         cells: row.split("\t").to_list()
-        if cells.len() < 3 -> next
-        total += count_lines(files.read(files.join(options.tree, cells[2])) ?? "")
+        if cells.len() >= 3 -> paths.push(cells[2].copy())
     }
     loop input in inputs {
-        if input.starts_with("Core/") && input.ends_with(".jet") -> total += count_lines(files.read(files.join(options.tree, input)) ?? "")
+        if input.starts_with("Core/") && input.ends_with(".jet") -> paths.push(input.copy())
     }
-    total
+    source := Source{kind: "corpus", generator: "", sha256: "", physical_lines: 0, code_lines: 0, bytes: 0, functions: 0, types: 0, comptime_items: 0, sections: 0, files: 0}
+    hashed := [String]{}
+    nul: String.from_bytes_lossy([U8]{U8{0}})
+    loop path in paths {
+        text: files.read(files.join(options.tree, path)) ?? ""
+        source.physical_lines += count_lines(text)
+        source.code_lines += code_lines(text)
+        source.bytes += text.bytes().len()
+        source.functions += function_count(text)
+        source.files += 1
+        hashed.push("{path}{nul}{text.bytes().len()}{nul}{text}")
+    }
+    source.sha256 = crypto.sha256(hashed.join("").bytes()).hex()
+    source
 }
 
 // A fresh toolchain tree under `project`: every file of `Compiler/` and of
@@ -454,18 +612,10 @@ first_line: fn(argv: [String], cwd: String) -> String {
     receipt.output.trim()
 }
 
-run: fn() {
-    options := parse_options(process.args())
-    jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
-    if !files.is_file(jet) -> usage("JET={jet} is not a file")
-    options.tree = files.absolute(options.tree) ?? usage("cannot resolve --tree {options.tree}")
-    if options.tool == "" -> options.tool = jet
-    if options.work == "" -> options.work = files.join(sys.temp_dir(), "jet-throughput-{time.now().to_unix_ms()}")
-    files.create_dir_all(options.work) ?? usage("cannot create the work directory {options.work}: {err}")
-    identity_file: files.join(files.dirname(jet), "IDENTITY")
-    identity: if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim() else -> ""
+// The first form: the corpus in each mode. Returns the exit code.
+run_modes: fn(options: Options, jet: String, identity: String) -> Int {
     inputs: packages(options, "inputs")
-    lines: corpus_lines(options, inputs)
+    lines: corpus_source(options, inputs).physical_lines
     commit: first_line([String]{"git", "rev-parse", "HEAD"}, options.tree)
     runs := [Run]{}
     loop mode in options.modes {
@@ -486,7 +636,797 @@ run: fn() {
     loop line in report(runs, options.modes) -> print(line)
     print("traces: {options.work}/<mode>.<run>/trace.jsonl")
     failed: runs.filter(r -> r.rc != 0 || r.trace == None || (r.budget != "" && r.budget != "ok"))
-    process.exit(if failed.len() > 0 -> 1 else -> 0)
+    if failed.len() > 0 -> 1 else -> 0
+}
+
+// ---- The gauntlet cell (--lane) ----
+
+// bench.json: each generated program's pin. phase-budgets.json: the phase
+// budgets.
+BenchPin: struct { code_lines: Int, seed: Int, source_sha256: String, expected_output: String }
+BudgetPin: struct { row: Int, phase: String, measure: String, kinds: [String]?, wall_budget_s: Float, owners: [String] }
+BenchFile: struct { programs: [String: BenchPin] }
+PhaseBudgetFile: struct { phase_budgets: [BudgetPin] }
+
+// The manifest's cell: what the full lane gates on.
+CellThreshold: struct { arm: String, wall_ns_lt: Int?, lines_per_second_min: Int? }
+CellProgram: struct { id: String, threshold: CellThreshold }
+CellGates: struct { memory: [String: Int] }
+AxisCell: struct { cache_lane: String, programs: [CellProgram], gates: CellGates }
+ManifestAxes: struct { compile_throughput: AxisCell }
+Manifest: struct { axes: ManifestAxes }
+
+// Tools/perf/baseline.json's regression budgets.
+PerfBudgets: struct { latency_regression_pct: Int, memory_regression_pct: Int }
+PerfBaseline: struct { budgets: PerfBudgets }
+
+// generate/run.jet's line for a `mixed` program.
+GeneratedStats: struct { physical_lines: Int, code_lines: Int, bytes: Int, functions: Int, types: Int, comptime_items: Int, sections: Int }
+Generated: struct { entry: String, source_sha256: String, expected: String, stats: GeneratedStats }
+
+// One phase kind of a sample: the union wall of its spans over every lane,
+// their summed duration, the process CPU over the union (per union interval
+// the largest `proc_cpu_ns` of its spans), the span count, and the items
+// they report (-1: none).
+#Codable
+PhaseRow: struct { kind: String, wall_ns: Int, span_ns: Int, cpu_ns: Int, count: Int, items: Int }
+
+#Codable
+Counter: struct { name: String, value: Int }
+
+// One compile of a program. `startup_ns` is spawn to the first phase span
+// (-1: no trace), `run_exit` the artifact's exit (-1: not run).
+#Codable
+Sample: struct {
+    label: String
+    wall_ns: Int
+    cpu_user_ns: Int
+    cpu_sys_ns: Int
+    peak_rss_bytes: Int
+    parallelism_pct: Int
+    startup_ns: Int
+    phases: [PhaseRow]
+    counters: [Counter]
+    artifact_sha256: String
+    diagnostic_sha256: String
+    run_exit: Int
+    stdout_sha256: String
+    problems: [String]
+}
+
+#Codable
+Stat: struct { median: Int, min: Int, max: Int }
+
+#Codable
+PhaseSummary: struct { kind: String, wall_ns: Int, cpu_ns: Int, samples: Int }
+
+#Codable
+Summary: struct {
+    wall_ns: Stat
+    cpu_user_ns: Stat
+    cpu_sys_ns: Stat
+    peak_rss_bytes: Stat
+    parallelism_pct: Stat
+    startup_ns: Int
+    phases: [PhaseSummary]
+}
+
+#Codable
+Arm: struct { id: String, threads: String, samples: [Sample], summary: Summary? }
+
+#Codable
+Program: struct { id: String, entry: String, expected: String, golden: Bool, source: Source, arms: [Arm] }
+
+// One bench.json phase budget row against a summary (`actual_ns` -1:
+// unmeasured).
+#Codable
+BudgetRow: struct { row: Int, phase: String, budget_ns: Int, actual_ns: Int, status: String, owners: [String] }
+
+#Codable
+BudgetCheck: struct { scale: Float, rows: [BudgetRow], over: [String] }
+
+// A program's full-lane gates: pass, fail or "-" (not gated).
+#Codable
+Gate: struct { program: String, determinism: String, memory: String, threshold: String, lines_per_second_median: Int, lines_per_second_min: Int, phase_budgets: BudgetCheck? }
+
+#Codable
+Comparison: struct { program: String, arm: String, metric: String, baseline: Int, current: Int, limit: Int, status: String }
+
+#Codable
+Quick: struct { baseline: String, latency_regression_pct: Int, memory_regression_pct: Int, time_floor_ns: Int, memory_floor_bytes: Int, comparisons: [Comparison] }
+
+#Codable
+Machine: struct { cpu_model: String, cores: Int, threads: Int, memory_bytes: Int, governor: String, kernel: String, hostname: String }
+
+#Codable
+Heavy: struct { pid: Int, name: String, rss_bytes: Int }
+
+#Codable
+Contention: struct { load1: String, heavy_processes: [Heavy] }
+
+#Codable
+Commit: struct { head: String, dirty: Bool }
+
+#Codable
+Compiler: struct { path: String, sha256: String, identity: String, build_profile: String }
+
+#Codable
+Receipt: struct {
+    schema: String
+    lane: String
+    started_unix_ms: Int
+    finished_unix_ms: Int
+    root: String
+    commit: Commit
+    machine: Machine
+    contention_start: Contention
+    contention_end: Contention
+    compiler: Compiler
+    cache_lane: String
+    samples: Int
+    warmups: Int
+    programs: [Program]
+    gates: [Gate]
+    quick: Quick?
+    failures: [String]
+    passed: Bool
+}
+
+#Codable
+PhaseWall: struct { kind: String, wall_ns: Int }
+
+#Codable
+BaselineArm: struct { arm: String, wall_ns: Int, peak_rss_bytes: Int, phases: [PhaseWall] }
+
+#Codable
+BaselineProgram: struct { program: String, source_sha256: String, arms: [BaselineArm] }
+
+// The quick lane's baseline: per program and arm, the median wall, peak
+// memory and phase walls of a passing run.
+#Codable
+Baseline: struct { schema: String, recorded_from: Compiler, commit: Commit, machine: Machine, programs: [BaselineProgram] }
+
+// The phase spans of a trace (spans named their kind), on every lane.
+SpanTime: struct { start_us: Int, end_us: Int, cpu_ns: Int, items: Int? }
+OpenPhase: struct { lane: Int, kind: String, start_us: Int, closed: Bool }
+CellTrace: struct {
+    phases: [PhaseRow]
+    // The first phase span's start, microseconds of trace time (-1: none).
+    first_us: Int
+    unclosed: [String]
+    counters: [Counter]
+    // trace.start's wall clock (-1: none).
+    start_unix_ms: Int
+}
+
+read_cell_trace: fn(text: String) -> CellTrace {
+    spans := [String: [SpanTime]]{}
+    kinds := [String]{}
+    open := [OpenPhase]{}
+    counters := [Counter]{}
+    counter_at := [String: Int]{}
+    first := -1
+    start_unix_ms := -1
+    loop event in trace_events(text) {
+        if event.name == "trace.start" {
+            start_unix_ms = event.args?.unix_ms ?? -1
+            next
+        }
+        if event.ph == "C" {
+            if !event.name.starts_with("counters.") -> next
+            name: event.name.remove_prefix("counters.")
+            at: counter_at.get(name) ?? {
+                counter_at[name] = counters.len()
+                counters.push(Counter{name: name.copy(), value: 0})
+                counters.len() - 1
+            }
+            counters[at].value += event.args?.value ?? 0
+            next
+        }
+        if event.ph != "B" && event.ph != "E" -> next
+        kind: event.cat ?? next
+        if kind != event.name -> next
+        ts: event.ts ?? next
+        if event.ph == "B" {
+            if first < 0 || ts < first -> first = ts
+            open.push(OpenPhase{lane: event.tid, kind: kind.copy(), start_us: ts, closed: false})
+            next
+        }
+        // The innermost open span of this kind on this lane.
+        at := open.len() - 1
+        loop at >= 0 && (open[at].closed || open[at].lane != event.tid || open[at].kind != kind) -> at -= 1
+        if at < 0 -> next
+        open[at].closed = true
+        begun: open[at].start_us
+        if !spans.has_key(kind) {
+            kinds.push(kind.copy())
+            spans[kind] = [SpanTime]{}
+        }
+        spans[kind].push(SpanTime{start_us: begun, end_us: ts, cpu_ns: event.args?.proc_cpu_ns ?? 0, items: event.args?.items})
+    }
+    kinds.sort()
+    rows := [PhaseRow]{}
+    loop kind in kinds -> rows.push(phase_row(kind, spans[kind]))
+    unclosed := [String]{}
+    loop phase in open {
+        if !phase.closed && !unclosed.contains(phase.kind) -> unclosed.push(phase.kind.copy())
+    }
+    CellTrace{phases: rows, first_us: first, unclosed, counters, start_unix_ms}
+}
+
+// One kind's spans as its PhaseRow.
+phase_row: fn(kind: String, spans: [SpanTime]) -> PhaseRow {
+    sorted := spans.copy()
+    sorted.sort_by(s -> s.start_us)
+    row := PhaseRow{kind: kind.copy(), wall_ns: 0, span_ns: 0, cpu_ns: 0, count: sorted.len(), items: -1}
+    union_start := 0
+    union_end := -1
+    union_cpu := 0
+    loop span in sorted {
+        row.span_ns += (span.end_us - span.start_us) * 1000
+        if span.items == .Val(n) -> row.items = if row.items < 0 -> n else -> row.items + n
+        if union_end >= 0 && span.start_us <= union_end {
+            if span.end_us > union_end -> union_end = span.end_us
+            if span.cpu_ns > union_cpu -> union_cpu = span.cpu_ns
+            next
+        }
+        if union_end >= 0 {
+            row.wall_ns += (union_end - union_start) * 1000
+            row.cpu_ns += union_cpu
+        }
+        union_start = span.start_us
+        union_end = span.end_us
+        union_cpu = span.cpu_ns
+    }
+    if union_end >= 0 {
+        row.wall_ns += (union_end - union_start) * 1000
+        row.cpu_ns += union_cpu
+    }
+    row
+}
+
+// The median (the mean of the middle two of an even count), smallest and
+// largest of `values`.
+stat_of: fn(values: [Int]) -> Stat {
+    if values.len() == 0 -> return Stat{median: 0, min: 0, max: 0}
+    sorted := values.copy()
+    sorted.sort()
+    middle: sorted.len() /% 2
+    median: if sorted.len() % 2 == 1 -> sorted[middle] else -> (sorted[middle - 1] + sorted[middle]) /% 2
+    Stat{median, min: sorted[0], max: sorted[sorted.len() - 1]}
+}
+
+summarize: fn(samples: [Sample]) -> Summary {
+    kinds := [String]{}
+    loop sample in samples {
+        loop phase in sample.phases {
+            if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
+        }
+    }
+    kinds.sort()
+    phases := [PhaseSummary]{}
+    loop kind in kinds {
+        walls := [Int]{}
+        cpus := [Int]{}
+        loop sample in samples {
+            loop phase in sample.phases {
+                if phase.kind != kind -> next
+                walls.push(phase.wall_ns)
+                cpus.push(phase.cpu_ns)
+            }
+        }
+        phases.push(PhaseSummary{kind: kind.copy(), wall_ns: stat_of(walls).median, cpu_ns: stat_of(cpus).median, samples: walls.len()})
+    }
+    Summary{
+        wall_ns: stat_of(samples.map(s -> s.wall_ns)),
+        cpu_user_ns: stat_of(samples.map(s -> s.cpu_user_ns)),
+        cpu_sys_ns: stat_of(samples.map(s -> s.cpu_sys_ns)),
+        peak_rss_bytes: stat_of(samples.map(s -> s.peak_rss_bytes)),
+        parallelism_pct: stat_of(samples.map(s -> s.parallelism_pct)),
+        startup_ns: stat_of(samples.map(s -> s.startup_ns)).median,
+        phases,
+    }
+}
+
+summary_phase_wall: fn(summary: Summary, kind: String) -> Int {
+    loop phase in summary.phases {
+        if phase.kind == kind -> return phase.wall_ns
+    }
+    0
+}
+
+// The phase budgets against the default arm's summary, scaled by
+// `code_lines` / 300,000. The glue row is the wall outside every other row.
+phase_budget_check: fn(pins: [BudgetPin], summary: Summary, code_lines: Int) -> BudgetCheck {
+    scale: Float.from_int(code_lines) / 300000.0
+    rows := [BudgetRow]{}
+    named := 0
+    loop pin in pins {
+        actual := -1
+        if pin.measure == "startup" -> actual = summary.startup_ns
+        if pin.kinds == .Val(kinds) {
+            actual = 0
+            loop kind in kinds -> actual += summary_phase_wall(summary, kind)
+            named += actual
+        }
+        budget: nearest(pin.wall_budget_s * 1e9 * scale)
+        rows.push(BudgetRow{row: pin.row, phase: pin.phase.copy(), budget_ns: budget, actual_ns: actual, status: "", owners: pin.owners.copy()})
+    }
+    startup: if summary.startup_ns > 0 -> summary.startup_ns else -> 0
+    over := [String]{}
+    loop at in 0..<rows.len() {
+        if pins[at].measure == "glue" {
+            glue: summary.wall_ns.median - named - startup
+            rows[at].actual_ns = if glue > 0 -> glue else -> 0
+        }
+        rows[at].status = if {
+            rows[at].actual_ns < 0 -> "unmeasured"
+            rows[at].actual_ns < rows[at].budget_ns -> "within"
+            else -> "over"
+        }
+        if rows[at].status != "within" -> over.push("{rows[at].phase}: {rows[at].actual_ns} ns vs {rows[at].budget_ns} ns budget (owners {rows[at].owners.join(", ")})")
+    }
+    BudgetCheck{scale, rows, over}
+}
+
+// The distinct artifact and diagnostics digests over every sample of every
+// arm.
+digest_count: fn(program: Program) -> Int {
+    seen := [String]{}
+    loop arm in program.arms {
+        loop sample in arm.samples {
+            digest: "{sample.artifact_sha256}/{sample.diagnostic_sha256}"
+            if !seen.contains(digest) -> seen.push(digest)
+        }
+    }
+    seen.len()
+}
+
+// The full lane's gates of one complete program; failures go to `failures`.
+cell_gate: fn(cell: AxisCell, pins: [BudgetPin], program: Program, failures: &[String]) -> Gate {
+    gate := Gate{program: program.id.copy(), determinism: "pass", memory: "-", threshold: "-", lines_per_second_median: 0, lines_per_second_min: 0, phase_budgets: None}
+    distinct: digest_count(program)
+    if distinct != 1 {
+        gate.determinism = "fail"
+        failures.push("{program.id}: artifacts or diagnostics differ across samples and arms ({distinct} distinct)")
+    }
+    arm: program.arms.find(a -> a.id == "default") ?? return gate
+    summary: arm.summary ?? return gate
+    if cell.gates.memory.get("{program.id}_peak_rss_bytes_max") == .Val(limit) {
+        peak: summary.peak_rss_bytes.max
+        gate.memory = if peak <= limit -> "pass" else -> "fail"
+        if peak > limit -> failures.push("{program.id}: peak RSS {peak} B > {limit} B")
+    }
+    contract: cell.programs.find(p -> p.id == program.id) ?? return gate
+    wall: summary.wall_ns
+    if contract.threshold.wall_ns_lt == .Val(limit) {
+        passed: wall.median < limit && wall.max < limit
+        gate.threshold = if passed -> "pass" else -> "fail"
+        if !passed -> failures.push("{program.id}: wall median {wall.median} ns / max {wall.max} ns, threshold < {limit} ns")
+    }
+    if contract.threshold.lines_per_second_min == .Val(floor) {
+        gate.lines_per_second_median = rate(program.source.physical_lines, wall.median)
+        gate.lines_per_second_min = rate(program.source.physical_lines, wall.max)
+        passed: gate.lines_per_second_median >= floor && gate.lines_per_second_min >= floor
+        gate.threshold = if passed -> "pass" else -> "fail"
+        if !passed -> failures.push("{program.id}: {gate.lines_per_second_median} lines/s median, {gate.lines_per_second_min} min, threshold >= {floor}")
+    }
+    budgets: phase_budget_check(pins, summary, program.source.code_lines)
+    loop over in budgets.over -> failures.push("{program.id}: phase over budget: {over}")
+    gate.phase_budgets = Val(budgets)
+    gate
+}
+
+rate: fn(lines: Int, ns: Int) -> Int {
+    if ns <= 0 -> return 0
+    nearest(Float.from_int(lines) * 1e9 / Float.from_int(ns))
+}
+
+// A nonnegative value to the nearest whole number.
+nearest: fn(value: Float) -> Int { Int.from_float(value + 0.5) }
+
+// One quick-lane comparison; a regression or a missing value fails.
+compare: fn(out: &[Comparison], failures: &[String], program: String, arm: String, metric: String, previous: Int, current: Int, pct: Int, floor: Int) {
+    limit: previous + previous * pct /% 100
+    status: if {
+        previous < floor -> "below-floor"
+        current < 0 -> "missing"
+        current <= limit -> "within"
+        else -> "regressed"
+    }
+    out.push(Comparison{program: program.copy(), arm: arm.copy(), metric: metric.copy(), baseline: previous, current, limit, status: status.copy()})
+    if status == "missing" || status == "regressed" -> failures.push("{program}/{arm} {metric}: {current} vs baseline {previous} (budget +{pct}%)")
+}
+
+// The quick lane: each complete arm's median wall, peak memory and phase
+// walls against the baseline's.
+quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], budgets: PerfBudgets) -> (failures: [String], comparisons: [Comparison]) {
+    failures := [String]{}
+    comparisons := [Comparison]{}
+    base: baseline ?? return (failures: [String]{"quick-lane baseline is missing or unreadable"}, comparisons: comparisons)
+    if base.schema != BASELINE_SCHEMA -> return (failures: [String]{"quick-lane baseline has schema {base.schema}, not {BASELINE_SCHEMA}"}, comparisons: comparisons)
+    if base.machine.cpu_model != machine.cpu_model -> failures.push("baseline machine cpu_model {base.machine.cpu_model} differs from {machine.cpu_model}")
+    if base.machine.threads != machine.threads -> failures.push("baseline machine threads {base.machine.threads} differs from {machine.threads}")
+    if base.machine.memory_bytes != machine.memory_bytes -> failures.push("baseline machine memory_bytes {base.machine.memory_bytes} differs from {machine.memory_bytes}")
+    loop program in programs {
+        id: program.id.copy()
+        recorded: base.programs.find(p -> p.program == id) ?? {
+            failures.push("baseline has no {program.id}")
+            next
+        }
+        if recorded.source_sha256 != program.source.sha256 {
+            failures.push("{program.id}: baseline source {recorded.source_sha256} differs from {program.source.sha256}")
+            next
+        }
+        loop arm in program.arms {
+            summary: arm.summary ?? next
+            arm_id: arm.id.copy()
+            previous: recorded.arms.find(a -> a.arm == arm_id) ?? {
+                failures.push("baseline has no {program.id}/{arm.id}")
+                next
+            }
+            compare(comparisons, failures, program.id, arm.id, "wall_ns", previous.wall_ns, summary.wall_ns.median, budgets.latency_regression_pct, QUICK_TIME_FLOOR_NS)
+            compare(comparisons, failures, program.id, arm.id, "peak_rss_bytes", previous.peak_rss_bytes, summary.peak_rss_bytes.median, budgets.memory_regression_pct, QUICK_MEMORY_FLOOR_BYTES)
+            loop phase in previous.phases {
+                kind: phase.kind.copy()
+                current: summary.phases.find(p -> p.kind == kind).map(p -> p.wall_ns) ?? -1
+                compare(comparisons, failures, program.id, arm.id, "phase {phase.kind}", phase.wall_ns, current, budgets.latency_regression_pct, QUICK_TIME_FLOOR_NS)
+            }
+        }
+    }
+    (failures: failures, comparisons: comparisons)
+}
+
+quick_baseline: fn(receipt: Receipt) -> Baseline {
+    programs := [BaselineProgram]{}
+    loop program in receipt.programs {
+        arms := [BaselineArm]{}
+        loop arm in program.arms {
+            summary: arm.summary ?? next
+            arms.push(BaselineArm{arm: arm.id.copy(), wall_ns: summary.wall_ns.median, peak_rss_bytes: summary.peak_rss_bytes.median, phases: summary.phases.map(p -> PhaseWall{kind: p.kind.copy(), wall_ns: p.wall_ns})})
+        }
+        programs.push(BaselineProgram{program: program.id.copy(), source_sha256: program.source.sha256.copy(), arms})
+    }
+    Baseline{schema: BASELINE_SCHEMA, recorded_from: receipt.compiler.copy(), commit: receipt.commit.copy(), machine: receipt.machine.copy(), programs}
+}
+
+// The first `key : value` of /proc/cpuinfo-style text.
+info_value: fn(text: String, key: String) -> String {
+    loop line in text.split("\n") {
+        cells: line.partition(":")
+        if cells.head.trim() == key -> return cells.tail.trim()
+    }
+    ""
+}
+
+read_trimmed: fn(path: String) -> String { (files.read(path) ?? "").trim() }
+
+machine: fn() -> Machine {
+    cpuinfo: files.read("/proc/cpuinfo") ?? ""
+    cores := [String]{}
+    threads := 0
+    physical := ""
+    loop line in cpuinfo.split("\n") {
+        cells: line.partition(":")
+        key: cells.head.trim()
+        if key == {
+            "processor" -> threads += 1
+            "physical id" -> physical = cells.tail.trim()
+            "core id" -> {
+                core: "{physical}:{cells.tail.trim()}"
+                if !cores.contains(core) -> cores.push(core)
+            }
+            else -> {}
+        }
+    }
+    total_kb: Int.parse(info_value(files.read("/proc/meminfo") ?? "", "MemTotal").remove_suffix(" kB").trim()) ?? 0
+    Machine{
+        cpu_model: info_value(cpuinfo, "model name"),
+        cores: cores.len(),
+        threads,
+        memory_bytes: total_kb * 1024,
+        governor: read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+        kernel: read_trimmed("/proc/sys/kernel/osrelease"),
+        hostname: read_trimmed("/proc/sys/kernel/hostname"),
+    }
+}
+
+// The load and every other process above 1 GiB resident, so a receipt taken
+// on a busy machine says so.
+contention: fn() -> Contention {
+    heavy := [Heavy]{}
+    me: process.current_pid()
+    entries: files.list_dir("/proc") ?? [files.DirEntry]{}
+    loop entry in entries {
+        pid: Int.parse(entry.name) ?? next
+        if pid == me -> next
+        status: files.read("/proc/{pid}/status") ?? next
+        rss_kb: Int.parse(info_value(status, "VmRSS").remove_suffix(" kB").trim()) ?? 0
+        if rss_kb * 1024 >= GIB -> heavy.push(Heavy{pid, name: info_value(status, "Name"), rss_bytes: rss_kb * 1024})
+    }
+    Contention{load1: (files.read("/proc/loadavg") ?? "-").partition(" ").head.copy(), heavy_processes: heavy}
+}
+
+commit_of: fn(tree: String) -> Commit {
+    status: process.cmd([String]{"git", "status", "--porcelain", "--untracked-files=no"}).cwd(tree).run() ?? return Commit{head: "-", dirty: false}
+    dirty: status.output.trim() != ""
+    Commit{head: first_line([String]{"git", "rev-parse", "HEAD"}, tree), dirty}
+}
+
+// A program ready to compile: its sources under `project` (a generated
+// program's) or the corpus (selfhost's, copied per sample), its entry, its
+// build folder and its golden.
+Prepared: struct {
+    program: Program
+    project: String
+    build_dir: String
+    selfhost: Bool
+    failures: [String]
+}
+
+prepare_bench: fn(options: Options, pins: BenchFile, id: String, dir: String) -> Prepared {
+    project: files.join(dir, "project")
+    source := Source{kind: "generated", generator: "", sha256: "", physical_lines: 0, code_lines: 0, bytes: 0, functions: 0, types: 0, comptime_items: 0, sections: 0, files: 1}
+    prepared := Prepared{program: Program{id: id.copy(), entry: "main.jet", expected: "", golden: true, source: source.copy(), arms: [Arm]{}}, project, build_dir: ".jet/build", selfhost: false, failures: [String]{}}
+    pin: pins.programs.get(id) ?? {
+        prepared.failures.push("bench.json has no pin for {id}")
+        return prepared
+    }
+    prepared.program.expected = pin.expected_output.copy()
+    files.remove_all(dir) ?? ()
+    files.create_dir_all(dir) ?? ()
+    generator: [String]{"jet", "run", "Tools/perf/scaling/generate/run.jet", "--", "mixed", "--code-lines", "{pin.code_lines}", "--seed", "{pin.seed}"}
+    argv := [String]{options.tool, "run", files.join(options.tree, "Tools/perf/scaling/generate/run.jet"), "--", "mixed", "--code-lines", "{pin.code_lines}", "--seed", "{pin.seed}", project}
+    receipt: process.cmd(argv).cwd(options.tree).output_limit(GIB).run() ?? {
+        prepared.failures.push("{id}: cannot run the generator: {err}")
+        return prepared
+    }
+    if receipt.code != 0 {
+        prepared.failures.push("{id}: the generator exited {receipt.code}: {receipt.errors.trim()}")
+        return prepared
+    }
+    generated: json.decode<Generated>(receipt.output.trim()) ?? {
+        prepared.failures.push("{id}: the generator printed no description")
+        return prepared
+    }
+    stats: generated.stats
+    prepared.program.source = Source{kind: "generated", generator: generator.join(" "), sha256: generated.source_sha256.copy(), physical_lines: stats.physical_lines, code_lines: stats.code_lines, bytes: stats.bytes, functions: stats.functions, types: stats.types, comptime_items: stats.comptime_items, sections: stats.sections, files: 1}
+    if generated.source_sha256 != pin.source_sha256 -> prepared.failures.push("{id}: generated source {generated.source_sha256} differs from the pinned {pin.source_sha256}")
+    if generated.expected != pin.expected_output -> prepared.failures.push("{id}: generated golden \"{generated.expected}\" differs from the pinned \"{pin.expected_output}\"")
+    if stats.code_lines < pin.code_lines -> prepared.failures.push("{id}: {stats.code_lines} code lines < {pin.code_lines}")
+    prepared
+}
+
+prepare_selfhost: fn(options: Options, inputs: [String]) -> Prepared {
+    program: Program{id: "selfhost", entry: "Compiler", expected: "", golden: false, source: corpus_source(options, inputs), arms: [Arm]{}}
+    Prepared{program, project: "", build_dir: "Compiler/JetCli/.jet/build", selfhost: true, failures: [String]{}}
+}
+
+// Copies every file under `from` to the same place under `to`.
+copy_tree: fn(from: String, to: String) -> String? {
+    entries: files.walk_files(from).list() ?? return Val("cannot list {from}: {err}")
+    loop entry in entries {
+        if copy_input(from, to, entry.relative) == .Val(problem) -> return Val(problem)
+    }
+    None
+}
+
+// The one executable a build left in `dir`.
+executables: fn(dir: String) -> [String] {
+    found := [String]{}
+    entries: files.list_dir(dir) ?? return found
+    loop entry in entries {
+        if entry.is_dir -> next
+        info: files.stat(entry.path) ?? next
+        mode: info.mode
+        if info.is_file && (mode % 2 == 1 || (mode /% 8) % 2 == 1 || (mode /% 64) % 2 == 1) -> found.push(entry.path.copy())
+    }
+    found
+}
+
+// One compile of `prepared` in `arm`, in `dir`; its project is the fixed
+// path `project`, fresh for each compile.
+cell_sample: fn(options: Options, inputs: [String], jet: String, identity: String, prepared: Prepared, arm: String, project: String, dir: String, label: String) -> Sample {
+    sample := Sample{label: label.copy(), wall_ns: 0, cpu_user_ns: 0, cpu_sys_ns: 0, peak_rss_bytes: 0, parallelism_pct: 0, startup_ns: -1, phases: [PhaseRow]{}, counters: [Counter]{}, artifact_sha256: "", diagnostic_sha256: "", run_exit: -1, stdout_sha256: "", problems: [String]{}}
+    files.remove_all(dir) ?? ()
+    files.remove_all(project) ?? ()
+    store: files.join(dir, "store")
+    cache: files.join(dir, "cache")
+    trace_file: files.join(dir, "trace.jsonl")
+    loop path in ([String]{project, store, cache}) {
+        files.create_dir_all(path) ?? {
+            sample.problems.push("cannot create {path}: {err}")
+            return sample
+        }
+    }
+    copied: if prepared.selfhost -> copy_project(options, inputs, project) else -> copy_tree(prepared.project, project)
+    if copied == .Val(problem) {
+        sample.problems.push(problem)
+        return sample
+    }
+    argv := [String]{jet, "build", "--color=never"}
+    if arm == "single" -> argv.extend([String]{"--threads", "1"})
+    argv.push(prepared.program.entry.copy())
+    spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache).env("NO_COLOR", "1").env("TMPDIR", dir)
+    if prepared.selfhost -> spec = spec.env("JET_TOOLCHAIN_ROOT", project)
+    if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
+    spec = spec.memory_scope(options.memory).timeout(time.duration_seconds(options.timeout)).output_limit(GIB)
+    if options.cpus.len() > 0 -> spec = spec.cpu_affinity(options.cpus.copy())
+    spawned_ms: time.now().to_unix_ms()
+    started: time.unix_ns()
+    receipt: spec.run() ?? {
+        sample.problems.push("cannot run {jet}: {err}")
+        return sample
+    }
+    sample.wall_ns = time.unix_ns() - started
+    files.write(files.join(dir, "compile.stdout"), receipt.output) ?? ()
+    files.write(files.join(dir, "compile.stderr"), receipt.errors) ?? ()
+    sample.cpu_user_ns = receipt.user_cpu_ns ?? 0
+    sample.cpu_sys_ns = receipt.system_cpu_ns ?? 0
+    sample.peak_rss_bytes = receipt.peak_memory_bytes ?? 0
+    if sample.wall_ns > 0 -> sample.parallelism_pct = (sample.cpu_user_ns + sample.cpu_sys_ns) * 100 /% sample.wall_ns
+    if {
+        receipt.timed_out -> sample.problems.push("timed out after {options.timeout} s")
+        receipt.signal == .Val(number) -> sample.problems.push("compiler killed by signal {number}")
+        receipt.code != 0 -> sample.problems.push("compiler exited {receipt.code}")
+        else -> {}
+    }
+    text: files.read(trace_file) ?? ""
+    if text == "" -> sample.problems.push("no JET_TRACE_FILE trace")
+    trace: read_cell_trace(text)
+    sample.phases = trace.phases
+    sample.counters = trace.counters
+    if trace.first_us >= 0 && trace.start_unix_ms >= 0 -> sample.startup_ns = (trace.start_unix_ms - spawned_ms) * 1000000 + trace.first_us * 1000
+    if trace.unclosed.len() > 0 -> sample.problems.push("trace spans left open: {trace.unclosed.join(", ")}")
+    sample.diagnostic_sha256 = crypto.sha256(receipt.errors.replace(project, "<project>").bytes()).hex()
+    built: executables(files.join(project, prepared.build_dir))
+    if receipt.code == 0 && built.len() != 1 -> sample.problems.push("{prepared.build_dir} holds {built.len()} executables, expected 1")
+    if built.len() != 1 -> return sample
+    bytes: files.read_bytes(built[0]) ?? {
+        sample.problems.push("cannot read {built[0]}: {err}")
+        return sample
+    }
+    sample.artifact_sha256 = crypto.sha256(bytes).hex()
+    if !prepared.program.golden || sample.problems.len() > 0 -> return sample
+    ran: process.cmd([String]{built[0].copy()}).cwd(dir).env("NO_COLOR", "1").timeout(time.duration_seconds(120)).output_limit(GIB).run() ?? {
+        sample.problems.push("cannot run the artifact: {err}")
+        return sample
+    }
+    sample.run_exit = ran.code
+    sample.stdout_sha256 = crypto.sha256(ran.output.bytes()).hex()
+    if ran.code != 0 -> sample.problems.push("artifact exited {ran.code}")
+    if ran.output != prepared.program.expected -> sample.problems.push("artifact stdout \"{ran.output.slice(0, min(ran.output.len(), 200))}\" differs from the golden \"{prepared.program.expected}\"")
+    sample
+}
+
+read_baseline: fn(path: String) -> Baseline? {
+    text: files.read(path) ?? return None
+    Val(json.decode<Baseline>(text) ?? return None)
+}
+
+// The quick lane's checks: determinism, then the baseline comparison
+// (skipped when --write-baseline records one).
+quick_checks: fn(options: Options, pin_dir: String, complete: [Program], receipt: &Receipt) {
+    loop program in complete {
+        distinct: digest_count(program)
+        if distinct != 1 -> receipt.failures.push("{program.id}: artifacts or diagnostics differ across samples and arms ({distinct} distinct)")
+    }
+    if options.write_baseline != "" -> return
+    budgets: json.decode<PerfBaseline>(files.read(files.join(options.tree, "Tools/perf/baseline.json")) ?? "") ?? usage("cannot read Tools/perf/baseline.json")
+    baseline_file: if options.baseline != "" -> options.baseline.copy() else -> files.join(pin_dir, "quick-baseline.json")
+    compared: quick_compare(read_baseline(baseline_file), receipt.machine, complete, budgets.budgets)
+    receipt.failures.extend(compared.failures)
+    receipt.quick = Val(Quick{baseline: baseline_file, latency_regression_pct: budgets.budgets.latency_regression_pct, memory_regression_pct: budgets.budgets.memory_regression_pct, time_floor_ns: QUICK_TIME_FLOOR_NS, memory_floor_bytes: QUICK_MEMORY_FLOOR_BYTES, comparisons: compared.comparisons})
+}
+
+// The second form: the gauntlet cell. Returns the exit code.
+run_lane: fn(options: Options, jet: String, identity: String) -> Int {
+    pin_dir: files.join(options.tree, PIN_DIR)
+    pins: json.decode<BenchFile>(files.read(files.join(pin_dir, "bench.json")) ?? "") ?? usage("cannot read {pin_dir}/bench.json")
+    budgets: json.decode<PhaseBudgetFile>(files.read(files.join(options.tree, PHASE_BUDGETS_FILE)) ?? "") ?? usage("cannot read {PHASE_BUDGETS_FILE}")
+    manifest: json.decode<Manifest>(files.read(files.join(options.tree, "Tools/gauntlet/measurement-manifest.json")) ?? "") ?? usage("cannot read Tools/gauntlet/measurement-manifest.json")
+    cell: manifest.axes.compile_throughput
+    compiler_bytes: files.read_bytes(jet) ?? usage("cannot read JET={jet}: {err}")
+    profile: if options.profile != "" -> options.profile.copy() else -> if identity != "" -> "IDENTITY {identity}" else -> usage("JET has no IDENTITY beside it; pass --profile")
+    receipt := Receipt{
+        schema: RECEIPT_SCHEMA,
+        lane: options.lane.copy(),
+        started_unix_ms: time.now().to_unix_ms(),
+        finished_unix_ms: 0,
+        root: options.work.copy(),
+        commit: commit_of(options.tree),
+        machine: machine(),
+        contention_start: contention(),
+        contention_end: Contention{load1: "", heavy_processes: [Heavy]{}},
+        compiler: Compiler{path: jet.copy(), sha256: crypto.sha256(compiler_bytes).hex(), identity: identity.copy(), build_profile: profile},
+        cache_lane: cell.cache_lane.copy(),
+        samples: options.samples,
+        warmups: options.warmups,
+        programs: [Program]{},
+        gates: [Gate]{},
+        quick: None,
+        failures: [String]{},
+        passed: false,
+    }
+    inputs: if options.programs.contains("selfhost") -> packages(options, "inputs") else -> [String]{}
+    loop id in options.programs {
+        program_dir: files.join(options.work, id)
+        prepared := if id == "selfhost" -> prepare_selfhost(options, inputs) else -> prepare_bench(options, pins, id, files.join(program_dir, "prepare"))
+        receipt.failures.extend(prepared.failures)
+        if prepared.failures.len() > 0 {
+            receipt.programs.push(prepared.program.copy())
+            next
+        }
+        project: files.join(program_dir, "project")
+        loop arm_id in options.arms {
+            arm := Arm{id: arm_id.copy(), threads: if arm_id == "single" -> "1" else -> "default", samples: [Sample]{}, summary: None}
+            loop index in 0..<(options.warmups + options.samples) {
+                label: if index < options.warmups -> "warmup{index + 1}" else -> "sample{index - options.warmups + 1}"
+                term.eprint("throughput: {id}/{arm_id}/{label} ...")
+                sample: cell_sample(options, inputs, jet, identity, prepared, arm_id, project, files.join(program_dir, "{arm_id}.{label}"), label)
+                failed: if sample.problems.len() > 0 -> ", FAILED: {sample.problems.join("; ")}" else -> ""
+                term.eprint("throughput: {id}/{arm_id}/{label}: {seconds(sample.wall_ns)} s, {sample.peak_rss_bytes /% 1048576} MiB{failed}")
+                if sample.problems.len() > 0 -> receipt.failures.push("{id}/{arm_id}/{label}: {sample.problems.join("; ")}")
+                if index >= options.warmups -> arm.samples.push(sample)
+            }
+            files.remove_all(project) ?? ()
+            good: arm.samples.filter(s -> s.problems.len() == 0).len()
+            arm.summary = if good == options.samples -> Val(summarize(arm.samples)) else -> None
+            if good != options.samples -> receipt.failures.push("{id}/{arm_id}: {options.samples - good} of {options.samples} samples missing or failed")
+            prepared.program.arms.push(arm)
+        }
+        receipt.programs.push(prepared.program.copy())
+    }
+    complete: receipt.programs.filter(p -> p.arms.len() > 0 && p.arms.all(a -> a.summary != None))
+    if options.lane == "full" -> loop program in complete -> receipt.gates.push(cell_gate(cell, budgets.phase_budgets, program, receipt.failures))
+    if options.lane == "quick" -> quick_checks(options, pin_dir, complete, receipt)
+    receipt.contention_end = contention()
+    receipt.finished_unix_ms = time.now().to_unix_ms()
+    receipt.passed = receipt.failures.len() == 0
+    if options.lane == "quick" && options.write_baseline != "" && receipt.passed {
+        text: json.to_string_pretty(quick_baseline(receipt)) ?? usage("cannot encode the baseline: {err.reason}")
+        files.write(options.write_baseline, "{text}\n") ?? usage("cannot write {options.write_baseline}: {err}")
+    }
+    receipt_file: if options.receipt != "" -> options.receipt.copy() else -> files.join(options.work, "receipt.json")
+    files.create_dir_all(files.dirname(receipt_file)) ?? ()
+    text: json.to_string_pretty(receipt) ?? usage("cannot encode the receipt: {err.reason}")
+    files.write(receipt_file, "{text}\n") ?? usage("cannot write {receipt_file}: {err}")
+    loop line in lane_report(receipt) -> print(line)
+    print("receipt: {receipt_file}")
+    loop failure in receipt.failures -> term.eprint("FAIL {failure}")
+    if receipt.passed -> 0 else -> 1
+}
+
+lane_report: fn(receipt: Receipt) -> [String] {
+    out := [String]{}
+    loop program in receipt.programs {
+        loop arm in program.arms {
+            summary: arm.summary ?? {
+                out.push("{program.id}/{arm.id}: incomplete")
+                next
+            }
+            wall: summary.wall_ns
+            out.push("{program.id}/{arm.id}: wall {seconds(wall.median)} s median ({seconds(wall.min)}..{seconds(wall.max)}), cpu {seconds(summary.cpu_user_ns.median + summary.cpu_sys_ns.median)} s, peak {summary.peak_rss_bytes.max /% 1048576} MiB, parallelism {summary.parallelism_pct.median}%, {rate(program.source.physical_lines, wall.median)} lines/s")
+            loop phase in summary.phases {
+                if phase.wall_ns < 10000000 && phase.cpu_ns < 10000000 -> next
+                out.push("  {phase.kind.pad_end(28, " ")} {seconds(phase.wall_ns):PadLeft(8)} {seconds(phase.cpu_ns):PadLeft(8)}")
+            }
+        }
+    }
+    out
+}
+
+run: fn() {
+    options := parse_options(process.args())
+    jet: sys.get("JET") ?? usage("set JET to the compiler to measure")
+    if !files.is_file(jet) -> usage("JET={jet} is not a file")
+    options.tree = files.absolute(options.tree) ?? usage("cannot resolve --tree {options.tree}")
+    if options.tool == "" -> options.tool = jet
+    if options.work == "" -> options.work = files.join(sys.temp_dir(), "jet-throughput-{time.now().to_unix_ms()}")
+    files.create_dir_all(options.work) ?? usage("cannot create the work directory {options.work}: {err}")
+    identity_file: files.join(files.dirname(jet), "IDENTITY")
+    identity: if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim() else -> ""
+    process.exit(if options.lane != "" -> run_lane(options, jet, identity) else -> run_modes(options, jet, identity))
 }
 
 test_trace: fn() -> String {
@@ -557,7 +1497,98 @@ test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
     assert_eq(count_lines("a\nb\n"), 2)
     assert_eq(count_lines("a\nb"), 2)
     assert_eq(count_lines(""), 0)
+    assert_eq(code_lines("a\n\n  // note\nb: fn() {{}}\n"), 2)
+    assert_eq(function_count("x: fn() {{\npub y: fn<T>(v: T) {{\n    z: fn(a) -> a\n    print(\"q: fn(\")\n"), 3)
     assert_eq(memory_bytes("16G") ?? 0, 16 * GIB)
     assert_eq(memory_bytes("512M") ?? 0, 512 * 1048576)
     assert_eq(parse_cpus("20-23,30").len(), 5)
+}
+
+#Test("a phase kind's wall is the union of its spans on every lane, its CPU the largest close per union interval") {
+    text: [String]{
+        "[",
+        "{{\"name\":\"trace.start\",\"ph\":\"i\",\"ts\":0,\"pid\":1,\"tid\":0,\"args\":{{\"unix_ms\":5000}}}},",
+        "{{\"name\":\"load\",\"cat\":\"load\",\"ph\":\"B\",\"ts\":0,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"load\",\"cat\":\"load\",\"ph\":\"E\",\"ts\":500000,\"pid\":1,\"tid\":1,\"args\":{{\"items\":2,\"proc_cpu_ns\":500000000}}}},",
+        "{{\"name\":\"lower\",\"cat\":\"lower\",\"ph\":\"B\",\"ts\":1000000,\"pid\":1,\"tid\":1}},",
+        "{{\"name\":\"lower\",\"cat\":\"lower\",\"ph\":\"B\",\"ts\":1200000,\"pid\":1,\"tid\":2}},",
+        "{{\"name\":\"f\",\"cat\":\"lower.function\",\"ph\":\"B\",\"ts\":1300000,\"pid\":1,\"tid\":2}},",
+        "{{\"name\":\"f\",\"cat\":\"lower.function\",\"ph\":\"E\",\"ts\":1400000,\"pid\":1,\"tid\":2}},",
+        "{{\"name\":\"counters.load.name_lookups\",\"ph\":\"C\",\"ts\":1450000,\"pid\":1,\"tid\":2,\"args\":{{\"value\":7}}}},",
+        "{{\"name\":\"lower\",\"cat\":\"lower\",\"ph\":\"E\",\"ts\":1600000,\"pid\":1,\"tid\":2,\"args\":{{\"proc_cpu_ns\":800000000}}}},",
+        "{{\"name\":\"lower\",\"cat\":\"lower\",\"ph\":\"E\",\"ts\":2000000,\"pid\":1,\"tid\":1,\"args\":{{\"proc_cpu_ns\":2000000000}}}},",
+        "{{\"name\":\"counters.load.name_lookups\",\"ph\":\"C\",\"ts\":2000000,\"pid\":1,\"tid\":1,\"args\":{{\"value\":3}}}},",
+        "{{\"name\":\"emit\",\"cat\":\"emit\",\"ph\":\"B\",\"ts\":2000000,\"pid\":1,\"tid\":1}},",
+    }.join("\n")
+    trace: read_cell_trace(text)
+    assert_eq(trace.first_us, 0)
+    assert_eq(trace.start_unix_ms, 5000)
+    assert_eq(trace.unclosed.join(","), "emit")
+    assert_eq(trace.counters.len(), 1)
+    assert_eq(trace.counters[0].name, "load.name_lookups")
+    assert_eq(trace.counters[0].value, 10)
+    assert_eq(trace.phases.len(), 2)
+    load: trace.phases[0]
+    assert_eq(load.kind, "load")
+    assert_eq(load.wall_ns, 500000000)
+    assert_eq(load.cpu_ns, 500000000)
+    assert_eq(load.items, 2)
+    lower: trace.phases[1]
+    assert_eq(lower.kind, "lower")
+    assert_eq(lower.wall_ns, 1000000000)
+    assert_eq(lower.span_ns, 1400000000)
+    assert_eq(lower.cpu_ns, 2000000000)
+    assert_eq(lower.count, 2)
+    assert_eq(lower.items, -1)
+}
+
+test_sample: fn(wall: Int, digest: String) -> Sample {
+    Sample{label: "sample1", wall_ns: wall, cpu_user_ns: wall, cpu_sys_ns: 0, peak_rss_bytes: 1, parallelism_pct: 100, startup_ns: 1, phases: [PhaseRow]{PhaseRow{kind: "load", wall_ns: wall /% 2, span_ns: wall /% 2, cpu_ns: wall /% 2, count: 1, items: -1}}, counters: [Counter]{}, artifact_sha256: digest.copy(), diagnostic_sha256: "d", run_exit: 0, stdout_sha256: "", problems: [String]{}}
+}
+
+test_program: fn(id: String, default_wall: Int, single_digest: String) -> Program {
+    source: Source{kind: "generated", generator: "", sha256: "s", physical_lines: 320000, code_lines: 300000, bytes: 0, functions: 0, types: 0, comptime_items: 0, sections: 0, files: 1}
+    default_samples: [Sample]{test_sample(default_wall, "a")}
+    single_samples: [Sample]{test_sample(default_wall * 3, single_digest)}
+    arms: [Arm]{
+        Arm{id: "default", threads: "default", samples: default_samples.copy(), summary: Val(summarize(default_samples))},
+        Arm{id: "single", threads: "1", samples: single_samples.copy(), summary: Val(summarize(single_samples))},
+    }
+    Program{id: id.copy(), entry: "main.jet", expected: "", golden: true, source, arms}
+}
+
+#Test("the full lane's gates and phase budgets fail closed") {
+    pins: json.decode<PhaseBudgetFile>("{{\"phase_budgets\":[{{\"row\":1,\"phase\":\"startup\",\"measure\":\"startup\",\"kinds\":null,\"wall_budget_s\":0.03,\"owners\":[\"A\"]}},{{\"row\":2,\"phase\":\"read, lex, parse\",\"measure\":\"kinds\",\"kinds\":[\"load\"],\"wall_budget_s\":0.08,\"owners\":[\"B\"]}},{{\"row\":3,\"phase\":\"glue\",\"measure\":\"glue\",\"kinds\":null,\"wall_budget_s\":0.02,\"owners\":[\"C\"]}}]}}") ?? panic("pins")
+    cell: json.decode<AxisCell>("{{\"cache_lane\":\"clean\",\"programs\":[{{\"id\":\"bench300k\",\"threshold\":{{\"arm\":\"default\",\"wall_ns_lt\":2000000000}}}}],\"gates\":{{\"memory\":{{\"bench300k_peak_rss_bytes_max\":1073741824}}}}}}") ?? panic("cell")
+    failures := [String]{}
+    gate: cell_gate(cell, pins.phase_budgets, test_program("bench300k", 1000000000, "b"), failures)
+    assert_eq(gate.determinism, "fail")
+    assert_eq(gate.memory, "pass")
+    assert_eq(gate.threshold, "pass")
+    assert(failures.any(f -> f.contains("phase over budget: read, lex, parse")))
+    assert(failures.any(f -> f.contains("differ across samples and arms (2 distinct)")))
+    budgets: phase_budget_check(pins.phase_budgets, (test_program("bench30k", 1000000000, "a").arms[0].summary ?? panic("summary")), 30000)
+    assert_eq(budgets.scale, 0.1)
+    assert_eq(budgets.rows[1].budget_ns, 8000000)
+    assert_eq(budgets.rows[2].actual_ns, 1000000000 - 500000000 - 1)
+    slow: cell_gate(cell, pins.phase_budgets, test_program("bench300k", 3000000000, "a"), failures)
+    assert_eq(slow.determinism, "pass")
+    assert_eq(slow.threshold, "fail")
+}
+
+#Test("the quick lane compares medians with the baseline and fails closed") {
+    machine: Machine{cpu_model: "x", cores: 1, threads: 2, memory_bytes: 1, governor: "", kernel: "", hostname: ""}
+    program := test_program("bench30k", 2000000000, "a")
+    arms: [BaselineArm]{BaselineArm{arm: "default", wall_ns: 1800000000, peak_rss_bytes: 1, phases: [PhaseWall]{PhaseWall{kind: "load", wall_ns: 800000000}, PhaseWall{kind: "tiny", wall_ns: 1000000}, PhaseWall{kind: "gone", wall_ns: 900000000}}}}
+    compiler: Compiler{path: "", sha256: "", identity: "", build_profile: ""}
+    baseline: Baseline{schema: BASELINE_SCHEMA, recorded_from: compiler, commit: Commit{head: "", dirty: false}, machine: machine.copy(), programs: [BaselineProgram]{BaselineProgram{program: "bench30k", source_sha256: "s", arms}}}
+    budgets: PerfBudgets{latency_regression_pct: 15, memory_regression_pct: 15}
+    compared: quick_compare(Val(baseline.copy()), machine, [Program]{program.copy()}, budgets)
+    assert_eq(compared.failures.join("|"), "bench30k/default phase load: 1000000000 vs baseline 800000000 (budget +15%)|bench30k/default phase gone: -1 vs baseline 900000000 (budget +15%)|baseline has no bench30k/single")
+    assert_eq((compared.comparisons.find(c -> c.metric == "peak_rss_bytes") ?? panic("rss")).status, "below-floor")
+    assert_eq((compared.comparisons.find(c -> c.metric == "phase tiny") ?? panic("tiny")).status, "below-floor")
+    assert(quick_compare(None, machine, [Program]{program.copy()}, budgets).failures[0].contains("missing"))
+    other := baseline.copy()
+    other.programs[0].source_sha256 = "other"
+    assert(quick_compare(Val(other), machine, [Program]{program.copy()}, budgets).failures[0].contains("baseline source"))
 }
