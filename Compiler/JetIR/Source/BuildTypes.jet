@@ -356,7 +356,7 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     if ir_priority_queue_element(ty) == .Val(element) {
         // The List header over the queue (len at 0, cap at 8, element data
         // at 16) and its order word at 24: 0 for the element's native order
-        // (a binary max-heap), else the key constructor's `before` function
+        // (a binary min-heap), else the key constructor's `before` function
         // value (pop order, BuildPriorityQueues.jet).
         _: ir_value_type_in(m, p, element, laying) ?? return None
         interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 32, 8, IRClass.Pointer, false, 64, ""))
