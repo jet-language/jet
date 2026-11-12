@@ -134,12 +134,10 @@ counted_run: fn(gdb: String, binary: String, scratch: String, label: String) -> 
     facts: regex.match(Regex{"ALLOCATOR-FACTS mode=1 allocations=(\d+) high_water=(\d+)"}, result.output) ?? fail("no counting-policy facts from gdb:\n{result.output}{result.errors}")
     errors: files.read(err_file) ?? fail("{err_file}: {err}")
     reads: regex.match(Regex{"reads=(\d+)"}, errors) ?? fail("no reads= line in stderr: {errors}")
-    allocations: int(facts.groups[0])
-    count: int(reads.groups[0])
-    Counted{allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: int(facts.groups[1])}
+    allocations: facts.group_int(1) ?? fail("the allocation count is out of Int range")
+    count: reads.group_int(1) ?? fail("the read count is out of Int range")
+    Counted{allocations, reads: count, allocations_per_read: Float.from_int(allocations) / Float.from_int(count), peak_live_heap_bytes: facts.group_int(2) ?? fail("the high-water mark is out of Int range")}
 }
-
-int: fn(digits: String) -> Int { Int.parse(digits) ?? fail("{digits} is out of Int range") }
 
 peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
     lines: run_program([String]{"python3", files.join(repo, TIMER), "--", binary}).output.trim().split("\n").to_list()
@@ -149,11 +147,6 @@ peak_rss: fn(repo: String, binary: String, expected: String) -> Int {
     if printed != expected -> fail("{binary} printed {json.to_string(printed) ?? "?"}")
     sample.peak_rss_kb
 }
-
-// The upper middle value, as the shared harness takes it (Core's median_high).
-// The counts are Int, and every count is below 2^53, so the Float round trip
-// is exact.
-median: fn(values: [Int]) -> Int { Int.from_float(stats.median_high(values.map(value -> Float.from_int(value))) ?? fail("no samples")) }
 
 // The shared harness's paired index bootstrap of median(surface) /
 // median(plain): a 32-bit linear congruential draw seeded with
@@ -170,7 +163,9 @@ paired_bootstrap: fn(surface: [Int], plain: [Int]) -> Interval {
             picked_surface.push(surface[selected])
             picked_plain.push(plain[selected])
         }
-        ratios.push(Float.from_int(median(picked_surface)) / Float.from_int(median(picked_plain)))
+        surface_median: stats.median_high_int(picked_surface) ?? fail("no samples")
+        plain_median: stats.median_high_int(picked_plain) ?? fail("no samples")
+        ratios.push(Float.from_int(surface_median) / Float.from_int(plain_median))
     }
     ratios.sort()
     Interval{lower: ratios[BOOTSTRAP_LOWER_RANK - 1], upper: ratios[BOOTSTRAP_UPPER_RANK - 1]}
@@ -194,8 +189,6 @@ cpu_model: fn() -> String? {
     Val(found.groups[0].copy())
 }
 
-sha256: fn(text: String) -> String { crypto.sha256(text.bytes()).hex() }
-
 measure: fn(repo: String, argv: [String]) -> Evidence {
     jet: files.absolute(argument(argv, "--artifact", process.env_get_or("JET", "jet"))) ?? fail("--artifact: {err}")
     gdb: argument(argv, "--gdb", "gdb")
@@ -217,20 +210,21 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
         if index %% 2 == 1 -> surface_rss.push(peak_rss(repo, surface_plain, row.expected_output))
     }
     files.remove_all(scratch) ?? ()
+    // Each metric's upper middle value, as the shared harness takes it.
     per_read_surface: stats.median_high(runs.surface.map(sample -> sample.allocations_per_read)) ?? fail("no counted runs")
     per_read_plain: stats.median_high(runs.plain.map(sample -> sample.allocations_per_read)) ?? fail("no counted runs")
-    heap_surface: median(runs.surface.map(sample -> sample.peak_live_heap_bytes))
-    heap_plain: median(runs.plain.map(sample -> sample.peak_live_heap_bytes))
-    peak_surface: median(surface_rss)
-    peak_plain: median(plain_rss)
+    heap_surface: stats.median_high_int(runs.surface.map(sample -> sample.peak_live_heap_bytes)) ?? fail("no counted runs")
+    heap_plain: stats.median_high_int(runs.plain.map(sample -> sample.peak_live_heap_bytes)) ?? fail("no counted runs")
+    peak_surface: stats.median_high_int(surface_rss) ?? fail("no RSS samples")
+    peak_plain: stats.median_high_int(plain_rss) ?? fail("no RSS samples")
     ratio: Float.from_int(peak_surface) / Float.from_int(peak_plain)
     interval: paired_bootstrap(surface_rss, plain_rss)
     artifact: files.read_bytes(jet) ?? fail("{jet}: {err}")
     Evidence{
         schema: "jet.gauntlet.performance-surface-memory.v1",
         id: PAIR,
-        surface_source_sha256: sha256(row.surface_source),
-        plain_source_sha256: sha256(row.plain_source),
+        surface_source_sha256: crypto.sha256(row.surface_source).hex(),
+        plain_source_sha256: crypto.sha256(row.plain_source).hex(),
         expected_output: row.expected_output.copy(),
         target: "jet build --optimize=full",
         artifact_sha256: crypto.sha256(artifact).hex(),

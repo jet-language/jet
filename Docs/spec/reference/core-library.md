@@ -3163,6 +3163,19 @@ run: fn() {
 }
 ```
 
+### `core.math.stats` — descriptive statistics
+
+`core.math.stats` follows Python's `statistics` module over `[Float]`. A
+scalar statistic returns `None` for an empty, non-finite or undefined sample.
+The order statistics also come in an exact `[Int]` form, which sorts a copy
+and never converts through `Float`.
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `median(xs: [Float])` | `?Float` | The middle value, or the mean of the two middle values. |
+| `median_low(xs: [Float])` / `median_high(xs: [Float])` | `?Float` | The lower or upper of the two middle values; the middle value of an odd sample. |
+| `median_low_int(xs: [Int])` / `median_high_int(xs: [Int])` | `?Int` | The same order statistics of an `Int` sample, exact. |
+
 ### `core.compute.solve` — dense linear solves
 
 `core.compute.solve` contains checked CPU linear solvers over
@@ -4455,6 +4468,7 @@ match with what `replacer` returns for it. Methods on `Match`:
 | `group_start(n: Int) -> ?Int` | position | Character position where group `n` starts. |
 | `group_end(n: Int) -> ?Int` | position | Character position where group `n` ends. |
 | `group_int(n: Int) -> ?Int` | number | Group `n` read as an Int, as `Int.parse` reads it; none when `group` is none or the text is not an Int. |
+| `group_float(n: Int) -> ?Float` | number | Group `n` read as a Float, as `Float.parse` reads it; none when `group` is none or the text is not a Float. |
 
 | Signature | Result | Description |
 |---|---|---|

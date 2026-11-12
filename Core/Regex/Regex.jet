@@ -192,6 +192,13 @@ Match: struct {
         text: self.group(n) ?? return None
         Val(Int.parse(text) ?? return None)
     }
+
+    /// Group `n` read as a Float, as `Float.parse` reads it; None when `group`
+    /// reports none or the text is not a Float.
+    group_float: fn(self, n: Int) -> Float? Never! {
+        text: self.group(n) ?? return None
+        Val(Float.parse(text) ?? return None)
+    }
 }
 
 flags: fn(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags Never! {

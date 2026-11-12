@@ -12,222 +12,94 @@
 //   comptime.eval     running the item
 // and per-pass spans without an item: comptime.precheck (the pass's
 // threaded item checks) and comptime.apply (landing values in the graph).
-// Wall and CPU are summed per row; CPU is the span thread's `cpu_ns`. The
-// trace is read the way JavaScript reads it (Tools/perf/kit).
+// Wall and CPU are summed per row; CPU is the span thread's `cpu_ns`.
+//
+// The trace is read as the compiler's trace writer (JetCli Request.jet:
+// jet_cli_trace_head, begin_item, jet_cli_trace_close_line) writes it: a
+// field of another JSON type is refused, naming its path and the type it
+// needs.
 //
 //   jet Tools/perf/comptime-items TRACE [--top N] [--json]
 package: {
     name: "comptime_items"
     version: "0.0.1"
-    deps: {
-        jet_perf_kit: ../kit,
-    }
 }
 
 use {
     files: core.files
-    jet_perf_kit.[field, is_text, items, js_add, js_number, js_string, js_trim, json_stringify, map_key, number_from_text, present, same, text_of, to_fixed, to_number]
     json: core.encoding.json
-    math: core.math
     process: core.process
     term: core.term
 }
 
 STEPS: [String]{"check", "closure", "stage", "build", "eval"}
 USAGE: "usage: jet Tools/perf/comptime-items TRACE [--top N] [--json]"
-ZERO: Float{0.0}
-MILLION: Float{1000000.0}
-BILLION: Float{1000000000.0}
+// A --top count: decimal digits, so no sign, fraction, exponent or base prefix.
+COUNT: Regex{"[0-9]+"}
+
+#Error
+Refusal: struct {
+    message: String
+}
 
 Options: struct {
     trace: String
-    top: Float
+    top: Int
     json: Bool
 }
 
-// A closed span: its kind (`cat`, else `name`), the begin's name and args,
-// wall µs and the end's CPU ns, each as JavaScript holds it.
-Span: struct {
-    kind: Dyn?
-    label: Dyn?
-    args: Dyn?
-    wall: Float
-    cpu: Dyn?
+// The event fields this report reads; the writer's others are not read.
+#Decode
+Args: struct {
+    file: String?
+    item: String?
+    cpu_ns: Int?
 }
 
+#Decode
+Event: struct {
+    name: String?
+    cat: String?
+    ph: String
+    // 0 where the writer leaves it out: only its metadata (`M`) events.
+    ts: Int{0}
+    // A lane is the exact JSON value: 1 and "1" are two.
+    tid: Dyn
+    args: Args?
+}
+
+// An open span: its kind (`cat`, else `name`), the begin's name, args and ts.
+Open: struct {
+    kind: String?
+    label: String?
+    args: Args?
+    ts: Int
+}
+
+// A closed span: wall µs and the end's CPU ns.
+Span: struct {
+    kind: String
+    label: String?
+    args: Args?
+    wall: Int
+    cpu: Int
+}
+
+#Encode
 Kind: struct {
     kind: String
-    count: Int
-    wall: Float
-    cpu: Dyn
+    count: Int{0}
+    wall: Int{0}
+    cpu: Int{0}
 }
 
-// A per-file or per-item row: `id` is its Map key, `steps` the wall per STEPS.
+// A per-file or per-item row; `steps` is its wall per STEPS.
 Row: struct {
-    key: Dyn
-    id: String
-    count: Int
-    wall: Float
-    cpu: Float
-    steps: [Float]
-}
-
-usage: fn(message: String) -[Exec, IO]> Never {
-    if message != "" -> term.eprint("comptime-items: {message}")
-    term.eprint(USAGE)
-    process.exit(2)
-}
-
-// An uncaught JavaScript error: the message on stderr and exit 1.
-crash: fn(message: String) -[Exec, IO]> Never {
-    term.eprint(message)
-    process.exit(1)
-}
-
-parse_args: fn(argv: [String]) -[Exec, IO]> Options {
-    options := Options{trace: "", top: Float{30.0}, json: false}
-    has_trace := false
-    index := 0
-    loop index < argv.len() {
-        arg: argv[index]
-        if {
-            arg == "--json" -> options.json = true
-            arg == "--top" -> {
-                options.top = if index + 1 < argv.len() -> number_from_text(argv[index + 1]) else -> math.NAN
-                index += 1
-                // Number.isInteger and not negative.
-                if !math.is_finite(options.top) || math.floor(options.top) < options.top || options.top < ZERO -> usage("--top takes a count")
-            }
-            arg == "--help" || arg == "-h" -> usage("")
-            has_trace -> usage("unexpected argument {arg}")
-            else -> {
-                options.trace = arg.copy()  // copy: the options outlive the arguments
-                has_trace = true
-            }
-        }
-        index += 1
-    }
-    if !has_trace -> usage("no trace file")
-    options
-}
-
-// The trace is a JSON array the compiler streams, possibly unterminated.
-read_events: fn(path: String) -[Exec, FS, IO]> [Dyn?] {
-    text := js_trim(files.read(path) ?? crash("{err}"))
-    if text.ends_with(",") -> text = text.removesuffix(",")
-    body: if text.ends_with("]") -> text else -> "{text}]"
-    events: json.parse(body) ?? crash("SyntaxError: {err}")
-    if events == {
-        .Array(_) -> items(Val(events))
-        // A string iterates its characters, none of which is an event.
-        .Text(_) -> [Dyn?]{}
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> crash("TypeError: events is not iterable")
-    }
-}
-
-kind_of: fn(event: Dyn?) -> Dyn? {
-    cat: field(event, "cat")
-    if present(cat) -> cat else -> field(event, "name")
-}
-
-// Closed spans: each `E` closes the innermost open `B` of its kind on its
-// thread (`tid`, a Map key), dropping the ones opened after it.
-closed_spans: fn(events: [Dyn?]) -[Exec, IO]> [Span] {
-    keys := [String]{}
-    open := [(slot: Int, event: Int)]{}
-    spans := [Span]{}
-    loop index in 0..<events.len() {
-        event: events[index]
-        if !present(event) -> crash("TypeError: Cannot read properties of null (reading 'ph')")
-        begins: is_text(field(event, "ph"), "B")
-        if !begins && !is_text(field(event, "ph"), "E") -> next
-        key: map_key(field(event, "tid"), index)
-        slot := -1
-        loop i in 0..<keys.len() {
-            if keys[i] == key -> slot = i
-        }
-        if slot < 0 {
-            keys.push(key)
-            slot = keys.len() - 1
-        }
-        if begins {
-            open.push((slot: slot, event: index))
-            next
-        }
-        kind: kind_of(event)
-        found := -1
-        at := open.len() - 1
-        loop at >= 0 && found < 0 {
-            if open[at].slot == slot && same(kind_of(events[open[at].event]), kind) -> found = at
-            at -= 1
-        }
-        if found < 0 -> next
-        begin: events[open[found].event]
-        kept := [(slot: Int, event: Int)]{}
-        loop i in 0..<open.len() {
-            if i < found || open[i].slot != slot -> kept.push(open[i])
-        }
-        open = kept
-        args: field(begin, "args")
-        cpu: field(field(event, "args"), "cpu_ns")
-        spans.push(Span{
-            kind: kind
-            label: field(begin, "name")
-            args: if present(args) -> args else -> Val(Dyn.Object([]))
-            wall: to_number(field(event, "ts")) - to_number(field(begin, "ts"))
-            cpu: if present(cpu) -> cpu else -> Val(Dyn.Float(ZERO))
-        })
-    }
-    spans
-}
-
-// `item.split(", ")`.
-split_items: fn(item: String) -> [String] {
-    names := [String]{}
-    rest := item
-    loop rest.contains(", ") {
-        parts: rest.partition(", ")
-        names.push(parts.head.copy())  // copy: the names outlive the rest
-        rest = parts.tail.copy()  // copy: the tail outlives its parts
-    }
-    names.push(rest)
-    names
-}
-
-row_at: fn(rows: [Row], id: String) -> Int {
-    loop i in 0..<rows.len() {
-        if rows[i].id == id -> return i
-    }
-    -1
-}
-
-// Stable descending order of wall time (`b.wall - a.wall`).
-rows_by_wall: fn(rows: [Row]) -> [Row] {
-    out := rows
-    loop i in 1..<out.len() {
-        j := i
-        loop j > 0 && out[j].wall > out[j - 1].wall {
-            moved: out[j]
-            out[j] = out[j - 1]
-            out[j - 1] = moved
-            j -= 1
-        }
-    }
-    out
-}
-
-kinds_by_wall: fn(kinds: [Kind]) -> [Kind] {
-    out := kinds
-    loop i in 1..<out.len() {
-        j := i
-        loop j > 0 && out[j].wall > out[j - 1].wall {
-            moved: out[j]
-            out[j] = out[j - 1]
-            out[j - 1] = moved
-            j -= 1
-        }
-    }
-    out
+    key: String
+    count: Int{0}
+    wall: Float{0.0}
+    cpu: Float{0.0}
+    steps: [Float]{[0.0, 0.0, 0.0, 0.0, 0.0]}
 }
 
 Summary: struct {
@@ -237,117 +109,203 @@ Summary: struct {
     items: [Row]
 }
 
-summarize: fn(spans: [Span]) -[Exec, IO]> Summary {
-    phase := Span?{None}
-    loop span in spans {
-        if phase == None && is_text(span.kind, "comptime") && is_text(span.label, "comptime") -> phase = Val(span)
+#Encode
+Report: struct {
+    phase: Dyn
+    kinds: [Kind]
+    files: [Dyn]
+    items: [Dyn]
+}
+
+usage: fn(message: String) -[Exec, IO]> Never {
+    if message != "" -> term.eprint("comptime-items: {message}")
+    term.eprint(USAGE)
+    process.exit(2)
+}
+
+// The arguments; `--help` is a refusal without a message.
+parse_args: fn(argv: [String]) -> Options Refusal! {
+    trace := String?{None}
+    top := 30
+    as_json := false
+    index := 0
+    loop index < argv.len() {
+        arg: argv[index]
+        if arg == "--top" {
+            top = COUNT.match_full(argv.get(index + 1) ?? "")?.group_int(0) ?? return Err(Refusal{message: "--top takes a decimal count"})
+            index += 2
+            next
+        }
+        if {
+            arg == "--json" -> as_json = true
+            arg == "--help" || arg == "-h" -> return Err(Refusal{message: ""})
+            trace != None -> return Err(Refusal{message: "unexpected argument {arg}"})
+            else -> trace = Val(arg.copy())  // copy: the options outlive the arguments
+        }
+        index += 1
     }
+    Ok(Options{trace: trace ?? return Err(Refusal{message: "no trace file"}), top: top, json: as_json})
+}
+
+// The trace is a JSON array the compiler streams, possibly unterminated.
+events_from: fn(text: String) -> [Event] [FieldError]! {
+    body: text.trim().removesuffix(",")
+    json.decode<[Event]>(if body.ends_with("]") -> body else -> "{body}]")
+}
+
+// Closed spans: each `E` closes the innermost open `B` of its kind on its
+// lane, dropping the ones opened after it.
+closed_spans: fn(events: [Event]) -[Exec, IO]> [Span] {
+    lanes := [Dyn]{}
+    open := [[Open]]{}
+    spans := [Span]{}
+    loop event in events {
+        if !["B", "E"].contains(event.ph) -> next
+        lane: lanes.index_of(event.tid) ?? {
+            lanes.push(event.tid.copy())
+            open.push([Open]{})
+            lanes.len() - 1
+        }
+        kind: if event.cat == .Val(cat) -> Val(cat) else -> event.name
+        if event.ph == "B" {
+            open[lane].push(Open{kind: kind, label: event.name, args: event.args, ts: event.ts})
+            next
+        }
+        at := open[lane].len() - 1
+        loop at >= 0 && open[lane][at].kind != kind -> at -= 1
+        if at < 0 -> next
+        begin: open[lane][at].copy()  // copy: the span outlives the dropped stack
+        open[lane] = open[lane].slice(0, at)
+        spans.push(Span{
+            kind: begin.kind ?? process.fail(1, "comptime-items: a span has neither cat nor name")
+            label: begin.label
+            args: begin.args
+            wall: event.ts - begin.ts
+            cpu: event.args?.cpu_ns ?? 0
+        })
+    }
+    spans
+}
+
+// Adds a share of a span to the row `key` of `table` (`at` its index).
+add: fn(table: &[Row], at: &[String: Int], key: String, step: Int, wall: Float, cpu: Float, count: Int) {
+    entry: at.get(key) ?? {
+        at[key] = table.len()
+        table.push(Row{key: key.copy()})
+        table.len() - 1
+    }
+    table[entry].count += count
+    table[entry].wall += wall
+    table[entry].cpu += cpu
+    table[entry].steps[step] = table[entry].steps[step] + wall
+}
+
+summarize: fn(spans: [Span]) -> Summary {
     kinds := [Kind]{}
+    kind_at := [String: Int]{}
     by_file := [Row]{}
+    file_at := [String: Int]{}
     by_item := [Row]{}
-    loop index in 0..<spans.len() {
-        span: spans[index]
-        name: text_of(span.kind) ?? crash("TypeError: span.kind.startsWith is not a function")
-        if !name.starts_with("comptime.") -> next
-        at := -1
-        loop i in 0..<kinds.len() {
-            if kinds[i].kind == name -> at = i
+    item_at := [String: Int]{}
+    loop span in spans {
+        if !span.kind.starts_with("comptime.") -> next
+        k: kind_at.get(span.kind) ?? {
+            kind_at[span.kind] = kinds.len()
+            kinds.push(Kind{kind: span.kind.copy()})
+            kinds.len() - 1
         }
-        if at < 0 {
-            kinds.push(Kind{kind: name, count: 0, wall: ZERO, cpu: Dyn.Float(ZERO)})
-            at = kinds.len() - 1
-        }
-        kinds[at].count += 1
-        kinds[at].wall += span.wall
-        kinds[at].cpu = js_add(kinds[at].cpu, span.cpu)
-        step: name.removeprefix("comptime.")
-        step_at := -1
-        loop i in 0..<STEPS.len() {
-            if STEPS[i] == step -> step_at = i
-        }
-        item: text_of(field(span.args, "item")) ?? next
-        if step_at < 0 -> next
-        given: field(span.args, "file")
-        file: if present(given) -> given ?? Dyn.Null else -> Dyn.Text("")
-        names: if step == "build" -> split_items(item) else -> [String]{item}
+        kinds[k].count += 1
+        kinds[k].wall += span.wall
+        kinds[k].cpu += span.cpu
+        step: STEPS.index_of(span.kind.removeprefix("comptime.")) ?? next
+        item: span.args?.item ?? next
+        file: span.args?.file ?? ""
+        names: if STEPS[step] == "build" -> item.split(", ").to_list() else -> [String]{item}
         share: Float.from_int(names.len())
-        wall: span.wall / share
-        cpu: to_number(span.cpu) / share
-        counted: if step == "check" -> 1 else -> 0
-        file_id: map_key(Val(file), index)
-        loop name_index in 0..<names.len() {
-            row := row_at(by_file, file_id)
-            if row < 0 {
-                by_file.push(Row{key: file, id: file_id, count: 0, wall: ZERO, cpu: ZERO, steps: [ZERO, ZERO, ZERO, ZERO, ZERO]})
-                row = by_file.len() - 1
-            }
-            by_file[row].count += counted
-            by_file[row].wall += wall
-            by_file[row].cpu += cpu
-            by_file[row].steps[step_at] = by_file[row].steps[step_at] + wall
-            label: "{js_string(Val(file))} {names[name_index]}"
-            row = row_at(by_item, label)
-            if row < 0 {
-                by_item.push(Row{key: Dyn.Text(label), id: label, count: 0, wall: ZERO, cpu: ZERO, steps: [ZERO, ZERO, ZERO, ZERO, ZERO]})
-                row = by_item.len() - 1
-            }
-            by_item[row].count += counted
-            by_item[row].wall += wall
-            by_item[row].cpu += cpu
-            by_item[row].steps[step_at] = by_item[row].steps[step_at] + wall
+        counted: if STEPS[step] == "check" -> 1 else -> 0
+        loop name in names {
+            add(by_file, file_at, file, step, Float.from_int(span.wall) / share, Float.from_int(span.cpu) / share, counted)
+            add(by_item, item_at, "{file} {name}", step, Float.from_int(span.wall) / share, Float.from_int(span.cpu) / share, counted)
         }
     }
-    Summary{phase: phase, kinds: kinds_by_wall(kinds), files: rows_by_wall(by_file), items: rows_by_wall(by_item)}
+    kinds.sort_by_desc(kind -> kind.wall)
+    by_file.sort_by((a, b) -> b.wall.compare(a.wall))
+    by_item.sort_by((a, b) -> b.wall.compare(a.wall))
+    Summary{phase: spans.find(span -> span.kind == "comptime" && span.label == Val("comptime")), kinds: kinds, files: by_file, items: by_item}
 }
 
 // ---- Output --------------------------------------------------------------------
 
-pad: fn(text: String, width: Int) -> String {
-    gap: width - text.bytes().len()
-    if gap > 0 -> "{" ".repeat(gap)}{text}" else -> text
-}
+seconds: fn(us: Float) -> String { "{us / 1e6:Fixed(2)}" }
 
-seconds: fn(us: Float) -> String { pad(to_fixed(us / MILLION, 2), 7) }
+cpu_seconds: fn(ns: Float) -> String { "{ns / 1e9:Fixed(2)}" }
 
-cpu_seconds: fn(ns: Float) -> String { pad(to_fixed(ns / BILLION, 2), 7) }
-
-print_table: fn(title: String, rows: [Row], top: Float) {
+print_table: fn(title: String, rows: [Row], top: Int) {
     print("\n{title}")
-    print("{pad("count", 6)} {pad("wall s", 7)} {pad("cpu s", 7)} {STEPS.map(step -> pad(step, 7)).join(" ")}  name")
-    shown: if Float.from_int(rows.len()) > top -> Int.from_float(top) ?? 0 else -> rows.len()
-    loop index in 0..<shown {
-        entry: rows[index]
-        print("{pad("{entry.count}", 6)} {seconds(entry.wall)} {cpu_seconds(entry.cpu)} {entry.steps.map(wall -> seconds(wall)).join(" ")}  {js_string(Val(entry.key))}")
+    print("{"count":PadLeft(6)} {"wall s":PadLeft(7)} {"cpu s":PadLeft(7)} {STEPS.map(step -> step.pad_start(7, " ")).join(" ")}  name")
+    loop entry in rows.take(top) {
+        print("{"{entry.count}":PadLeft(6)} {seconds(entry.wall):PadLeft(7)} {cpu_seconds(entry.cpu):PadLeft(7)} {entry.steps.map(wall -> seconds(wall).pad_start(7, " ")).join(" ")}  {entry.key}")
     }
-    if Float.from_int(rows.len()) > top -> print("  ... {js_number(Float.from_int(rows.len()) - top)} more")
+    if rows.len() > top -> print("  ... {rows.len() - top} more")
 }
 
 row_json: fn(row: Row) -> Dyn {
-    entries := [(key: String, value: Dyn)]{(key: "key", value: row.key), (key: "count", value: Dyn.Int(row.count)), (key: "wall", value: Dyn.Float(row.wall)), (key: "cpu", value: Dyn.Float(row.cpu))}
-    loop i in 0..<STEPS.len() -> entries.push((key: STEPS[i], value: Dyn.Float(row.steps[i])))
-    Dyn.Object(entries)
+    fields := [(key: String, value: Dyn)]{(key: "key", value: Dyn.Text(row.key.copy())), (key: "count", value: Dyn.Int(row.count)), (key: "wall", value: Dyn.Float(row.wall)), (key: "cpu", value: Dyn.Float(row.cpu))}
+    loop (i, step) in STEPS -> fields.push((key: step.copy(), value: Dyn.Float(row.steps[i])))
+    Dyn.Object(fields)
 }
 
-summary_json: fn(summary: Summary) -> Dyn {
-    phase: if summary.phase == {
-        .Val(span) -> Dyn.Object([(key: "wall", value: Dyn.Float(span.wall)), (key: "cpu", value: span.cpu ?? Dyn.Null)])
-        .None -> Dyn.Null
-    }
-    // copy: the JSON value outlives the summary's kind name
-    kinds: summary.kinds.map(kind -> Dyn.Object([(key: "kind", value: Dyn.Text(kind.kind.copy())), (key: "count", value: Dyn.Int(kind.count)), (key: "wall", value: Dyn.Float(kind.wall)), (key: "cpu", value: kind.cpu)]))
-    Dyn.Object([(key: "phase", value: phase), (key: "kinds", value: Dyn.Array(kinds)), (key: "files", value: Dyn.Array(summary.files.map(row -> row_json(row)))), (key: "items", value: Dyn.Array(summary.items.map(row -> row_json(row))))])
+report: fn(summary: Summary) -> Report {
+    phase: if summary.phase == .Val(span) -> Dyn.Object([(key: "wall", value: Dyn.Int(span.wall)), (key: "cpu", value: Dyn.Int(span.cpu))]) else -> Dyn.Null
+    Report{phase: phase, kinds: summary.kinds.copy(), files: summary.files.map(row -> row_json(row)), items: summary.items.map(row -> row_json(row))}
 }
 
 run: fn() {
-    options: parse_args(process.args())
-    summary: summarize(closed_spans(read_events(options.trace)))
+    options: parse_args(process.args()) ?? usage(err.message)
+    text: files.read(options.trace) ?? process.fail(1, "comptime-items: {err}")
+    events: events_from(text) ?? process.fail(1, "comptime-items: {options.trace}: {err}")
+    summary: summarize(closed_spans(events))
     if options.json {
-        print(json_stringify(summary_json(summary), 2))
+        print(json.stringify(report(summary), 2))
         return
     }
-    if summary.phase == .Val(span) -> print("comptime phase {js_trim(seconds(span.wall))} s wall, {js_trim(cpu_seconds(to_number(span.cpu)))} s cpu")
-    print("\n{pad("count", 6)} {pad("wall s", 7)} {pad("cpu s", 7)}  span")
-    loop kind in summary.kinds -> print("{pad("{kind.count}", 6)} {seconds(kind.wall)} {cpu_seconds(to_number(Val(kind.cpu)))}  {kind.kind}")
+    if summary.phase == .Val(span) -> print("comptime phase {seconds(Float.from_int(span.wall))} s wall, {cpu_seconds(Float.from_int(span.cpu))} s cpu")
+    print("\n{"count":PadLeft(6)} {"wall s":PadLeft(7)} {"cpu s":PadLeft(7)}  span")
+    loop kind in summary.kinds -> print("{"{kind.count}":PadLeft(6)} {seconds(Float.from_int(kind.wall)):PadLeft(7)} {cpu_seconds(Float.from_int(kind.cpu)):PadLeft(7)}  {kind.kind}")
     print_table("per file (count = items checked)", summary.files, options.top)
     print_table("per item", summary.items, options.top)
+}
+
+#Test("an ill-typed trace field is refused with its path and the type it needs") {
+    if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"B\",\"tid\":1,\"ts\":\"1000\"}}]") == {
+        .Ok(_) -> panic("a text ts decoded")
+        .Err(errors) -> assert("{errors}".contains("`[0].ts`: expected Int, found text \"1000\""))
+    }
+    if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"E\",\"tid\":1,\"ts\":5,\"args\":{{\"cpu_ns\":\"12\"}}}}]") == {
+        .Ok(_) -> panic("a text cpu_ns decoded")
+        .Err(errors) -> assert("{errors}".contains("`[0].args.cpu_ns`: expected Int"))
+    }
+    if events_from("[{{\"cat\":\"comptime.check\",\"ph\":\"B\",\"tid\":1,\"ts\":0,\"args\":{{\"file\":{{\"x\":1}},\"item\":\"a\"}}}}]") == {
+        .Ok(_) -> panic("an object file decoded")
+        .Err(errors) -> assert("{errors}".contains("`[0].args.file`"))
+    }
+}
+
+#Test("an unterminated trace reads as its closed array, its metadata events without a ts") {
+    events: events_from("[\n{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1,\"tid\":1,\"args\":{{\"name\":\"jet\"}}}},\n{{\"name\":\"load\",\"ph\":\"B\",\"tid\":1,\"ts\":7}},\n") ?? panic("{err}")
+    assert(events.len() == 2 && events[0].ts == 0 && events[1].name == Val("load") && events[1].ts == 7)
+}
+
+#Test("--top takes only a non-negative decimal count") {
+    assert((parse_args(["t.trace", "--top", "2"]) ?? panic(err.message)).top == 2)
+    loop given in ["0x2", "1.5", "-1", "1e1", ""] {
+        if parse_args(["t.trace", "--top", given]) == {
+            .Ok(_) -> panic("--top {given} was accepted")
+            .Err(refusal) -> assert(refusal.message == "--top takes a decimal count")
+        }
+    }
+    if parse_args(["t.trace", "--top"]) == {
+        .Ok(_) -> panic("a missing --top count was accepted")
+        .Err(refusal) -> assert(refusal.message == "--top takes a decimal count")
+    }
 }

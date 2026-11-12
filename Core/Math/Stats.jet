@@ -357,6 +357,22 @@ median_high: fn(xs: [Float]) -> Float? Never! {
     Val(s[s.len() /% 2])
 }
 
+// The lower and upper middle values of an Int sample, exact: no Float round
+// trip, so every Int sample keeps its own value.
+median_low_int: fn(xs: [Int]) -> Int? Never! {
+    if xs.len() == 0 -> return None
+    s := xs.copy()
+    s.sort()
+    Val(s[(s.len() - 1) /% 2])
+}
+
+median_high_int: fn(xs: [Int]) -> Int? Never! {
+    if xs.len() == 0 -> return None
+    s := xs.copy()
+    s.sort()
+    Val(s[s.len() /% 2])
+}
+
 quantile: fn(xs: [Float], p: Float) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     quantile_sorted(sorted(xs), p)

@@ -1,0 +1,12 @@
+// core-conformance: core.regex.Match.group_float
+use re: core.regex
+
+seconds: fn(found: re.Match) -> Float { found.group_float(1) ?? -1.0 }
+
+run: fn() {
+    pattern: Regex{"wall (\d+(?:\.\d+)?)s"}
+    if pattern.match("took wall 03.25s") == {
+        .Val(found) -> print(seconds(found))
+        .None -> print("none")
+    }
+}

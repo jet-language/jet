@@ -298,8 +298,10 @@ Completed: struct {
 safe: fn(value: Int) -> Bool Never! { value >= -MAX_SAFE_INTEGER && value <= MAX_SAFE_INTEGER }
 
 // Number.isSafeInteger(value): the integer it holds.
-safe_integer: fn(value: Dyn?) -> Int? Never! {
-    number: as_number(value) ?? return None
+safe_integer: fn(value: Dyn?) -> Int? Never! { safe_number(as_number(value) ?? return None) }
+
+// Number.isSafeInteger(number): the integer it holds.
+safe_number: fn(number: Float) -> Int? Never! {
     if !math.is_finite(number) || math.abs(number - math.floor(number)) > KIT_ZERO || math.abs(number) > Float.from_int(MAX_SAFE_INTEGER) -> return None
     Val(Int.from_float(number) ?? return None)
 }
