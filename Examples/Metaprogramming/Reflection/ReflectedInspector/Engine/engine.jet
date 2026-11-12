@@ -1,0 +1,173 @@
+// An editor library written in plain Jet, after the 2017 Jai editor demo.
+// `#Engine.Entity(version: N)` on a struct writes everything the editor needs
+// from the struct's own field metadata, so adding or renaming a field needs no
+// registry edit:
+// - `inspect` lists each field's name, type and value, leaves out fields
+//   marked `#Engine.Hidden` and greys a field equal to the default-built value;
+// - an `Edit` impl sets a field by name from text, parsed into its type;
+// - `diff` records what changed as a `Patch`, which `redo` and `undo` replay
+//   through `Edit`;
+// - `save` writes one text file, the values in field order under a header with
+//   the entity's version, and `load` decodes it by position. A field marked
+//   `#Engine.Since(version: N)` is not in a file older than N, so `load`
+//   leaves it at its default: that is the migration.
+// Hidden is editor policy only; `save` still writes a hidden field.
+Hidden: struct {
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+Since: struct {
+    version: Int
+
+    impl Marker {
+        sites: [.Field]
+    }
+}
+
+Edit: trait {
+    // Sets `field` from `text`; false when no field has that name or the text
+    // does not parse as the field's type.
+    set: fn(&self, field: String, text: String) -> Bool Never!
+}
+
+Inspect: trait {
+    // One row per field the editor shows.
+    inspect: fn(self) -> [Row] Never!
+}
+
+Row: struct {
+    name: String
+    type: String
+    value: String
+    grey: Bool
+}
+
+Change: struct {
+    field: String
+    before: String
+    after: String
+}
+
+Patch: struct {
+    changes: [Change]
+}
+
+redo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
+    loop change in patch.changes {
+        if !entity.set(change.field, change.after) -> return false
+    }
+    true
+}
+
+undo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
+    loop change in patch.changes {
+        if !entity.set(change.field, change.before) -> return false
+    }
+    true
+}
+
+Entity: struct {
+    version: Int
+
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            current: self.version
+            impl #{tname} {
+                diff: fn(self, after: #{tname}) -> engine.Patch {
+                    changes := [engine.Change]{}
+                    #loop f in target.fields {
+                        if self.#{f} != after.#{f} {
+                            changes.push(engine.Change{field: f.name, before: "{self.#{f}}", after: "{after.#{f}}"})
+                        }
+                    }
+                    engine.Patch{changes: changes}
+                }
+
+                save: fn(self) -> String {
+                    lines := ["{tname} {current}"]
+                    #loop f in target.fields {
+                        lines.push("{self.#{f}}")
+                    }
+                    lines.join("\n")
+                }
+
+                load: fn(text: String) -> #{tname}? {
+                    lines: text.split("\n").to_list()
+                    if lines.len() == 0 -> return None
+                    head: lines[0].split(" ").to_list()
+                    if head.len() != 2 || head[0] != "{tname}" -> return None
+                    file_version: engine.parse_int(head[1]) ?? return None
+                    if file_version > #{current} -> return None
+                    out := #{tname}{}
+                    at := 1
+                    #loop f in target.fields {
+                        if file_version >= (f.marker(Since)?.version ?? 1) {
+                            if at >= lines.len() -> return None
+                            if !out.set(f.name, lines[at]) -> return None
+                            at = at + 1
+                        }
+                    }
+                    if at != lines.len() -> return None
+                    Val(out)
+                }
+            }
+
+            impl #{tname}.engine.Inspect {
+                inspect: fn(self) -> [engine.Row] Never! {
+                    fresh: #{tname}{}
+                    rows := [engine.Row]{}
+                    #loop f in target.fields {
+                        #if f.marker(Hidden) == None {
+                            rows.push(engine.Row{name: f.name, type: f.type, value: "{self.#{f}}", grey: self.#{f} == fresh.#{f}})
+                        }
+                    }
+                    rows
+                }
+            }
+
+            impl #{tname}.engine.Edit {
+                set: fn(&self, field: String, text: String) -> Bool Never! {
+                    #loop f in target.fields {
+                        if field == f.name {
+                            #if f.type == "String" {
+                                self.#{f} = text
+                            }
+                            #if f.type == "Int" {
+                                self.#{f} = engine.parse_int(text) ?? return false
+                            }
+                            #if f.type == "Float" {
+                                self.#{f} = engine.parse_float(text) ?? return false
+                            }
+                            #if f.type == "Bool" {
+                                self.#{f} = engine.parse_bool(text) ?? return false
+                            }
+                            return true
+                        }
+                    }
+                    false
+                }
+            }
+        }
+    }
+}
+
+parse_int: fn(text: String) -> Int? {
+    value: Int.parse(text) ?? return None
+    Val(value)
+}
+
+parse_float: fn(text: String) -> Float? {
+    value: Float.parse(text) ?? return None
+    Val(value)
+}
+
+parse_bool: fn(text: String) -> Bool? {
+    if text == "true" -> return Val(true)
+    if text == "false" -> return Val(false)
+    None
+}

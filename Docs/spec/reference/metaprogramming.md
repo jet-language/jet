@@ -418,6 +418,17 @@ parses. Only the marked type's own methods become commands, so importing a
 package that declares commands adds none. A string hole in a template reads
 a reflected fact, such as `{m.params[1].name}` or
 `{m.marker(Command)?.help ?? ""}`, as that fact's literal.
+[`ReflectedInspector`](../../../Examples/Metaprogramming/Reflection/ReflectedInspector/run.jet)
+is the editor demo the same way: `#Engine.Entity(version: N)` writes a
+struct's inspector rows, an `Edit` impl that sets a field by name from text,
+`diff` into a `Patch` that undo and redo replay through `Edit`, and a
+positional text `save` and `load`, all from the struct's field rows. The
+inspector leaves out a field marked `#Engine.Hidden` and greys a field equal
+to the default-built value; `save` still writes a hidden field, so editor and
+file policy stay apart. `load` skips a field marked
+`#Engine.Since(version: N)` in a file older than N, which keeps it at its
+default. A `value ?? fallback` expression in a template body over a reflected
+fact, such as `f.marker(Since)?.version ?? 1`, is that fact's literal.
 
 `M.reflect().uses` lists every use of the marker struct `M` in the whole
 program, a library's uses in the app build included. Each entry is a

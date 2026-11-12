@@ -83,5 +83,6 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [Reflect](Reflection/Reflect.jet) — Aggregate reflection and the typed `@` reader consume the same registered fact carriers.
 - [ReflectNested](Reflection/ReflectNested.jet) — `reflect.of(x)` reflects a nested value all the way down: a struct field's `Value` lists that struct's own fields.
 - [ReflectValue](Reflection/ReflectValue.jet) — `reflect.of(x)` — the runtime reflection floor.
+- [ReflectedInspector](Reflection/ReflectedInspector/) — An entity editor driven by field metadata: inspector, edits, undo, and versioned text files.
 - [ReflectionRungs](Reflection/ReflectionRungs/) — Every rung reads a declaration the same way: a marker body, a marker that adds a method to the type it marks, a comptime constant and fn build each read the type's name, kind, identity, module, field and marker counts, and the typed `marker(Label)` argument, and each prints the same line.
 - [UserRuleBody](Reflection/UserRuleBody.jet) — A source rule with a body adds an ordinary method.

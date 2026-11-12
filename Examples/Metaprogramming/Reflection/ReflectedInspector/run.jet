@@ -1,0 +1,75 @@
+// A reflected inspector: the editor in `engine` knows nothing about `Rock` or
+// `Door`. `#Engine.Entity` writes each one's inspector rows, its `Edit` impl,
+// `diff`, `save` and `load` from the struct's fields, so a new field shows up
+// in the inspector, the patches and the files with no registry edit.
+use engine
+use {
+    fs: core.files
+}
+
+#Engine.Entity(version: 2)
+Rock: struct {
+    name: String {"rock"}
+    size: Float {Float{1.5}}
+    // Editor policy: the inspector leaves `cache` out; `save` still writes it.
+    #Engine.Hidden
+    cache: Int {0}
+    // Added in version 2: a version-1 file has no `glow` line.
+    #Engine.Since(version: 2)
+    glow: Bool {false}
+}
+
+#Engine.Entity(version: 1)
+Door: struct {
+    label: String {"door"}
+    open: Bool {false}
+}
+
+// Lists the fields of any entity the marker covers; a greyed row still has
+// its default-built value.
+show: fn<T: engine.Inspect>(title: String, entity: T) {
+    print("[{title}]")
+    loop row in entity.inspect() {
+        grey: if row.grey -> " (default)" else -> ""
+        print("  {row.name}: {row.type} = {row.value}{grey}")
+    }
+}
+
+run: fn() {
+    rock := Rock{}
+    show("new rock", rock)
+
+    before: rock.copy() // copy: `before` keeps the pre-edit value for the diff
+    print("set size 2.5: {rock.set("size", "2.5")}")
+    print("set name boulder: {rock.set("name", "boulder")}")
+    print("set cache 7: {rock.set("cache", "7")}")
+    print("set size big: {rock.set("size", "big")}")
+    print("set weight 3: {rock.set("weight", "3")}")
+    show("edited rock", rock)
+
+    patch: before.diff(rock)
+    loop change in patch.changes -> print("patch {change.field}: {change.before} -> {change.after}")
+    print("undo: {engine.undo(rock, patch)}")
+    show("after undo", rock)
+    print("redo: {engine.redo(rock, patch)}")
+    show("after redo", rock)
+
+    path: Path.from("/tmp").join("jet_reflected_inspector_rock.txt").to_string()
+    _: fs.write(path, rock.save())
+    text: fs.read(path) ?? ""
+    print("file:")
+    loop line in text.split("\n") -> print("  {line}")
+    loaded: Rock.load(text) ?? Rock{}
+    print("round trip: {loaded.save() == text}")
+
+    // A version-1 file: the values by position, with no `glow`.
+    old: Rock.load("Rock 1\npebble\n0.5\n3") ?? Rock{}
+    show("version 1 file", old)
+    print("cache from version 1 file: {old.cache}")
+    short: Rock.load("Rock 2\npebble") ?? Rock{name: "refused"}
+    print("file with too few lines: {short.name}")
+
+    door := Door{}
+    print("open door: {door.set("open", "true")}")
+    show("door", door)
+}

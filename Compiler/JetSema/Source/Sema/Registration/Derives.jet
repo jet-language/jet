@@ -1056,7 +1056,14 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
         .Err(value, span, node) -> return Expr.Err{value: sema_derive_expand_expr(expansion, value), span: span, id: node}
         // copy: `conversion` is a payload of read parameter `expression`, which keeps the original; field `conversion` of the new Expr.Try owns this one
         .Try(value, span, conversion, context, node) -> return Expr.Try{value: sema_derive_expand_expr(expansion, value), span: span, conversion: conversion.copy(), context: sema_derive_expand_optional_expr(expansion, context), id: node}
-        .OrFallback(value, fallback, is_option, span, node) -> return Expr.OrFallback{value: sema_derive_expand_expr(expansion, value), fallback: sema_derive_expand_or_fallback(expansion, fallback), is_option: is_option, span: span, id: node}
+        .OrFallback(value, fallback, is_option, span, node) -> {
+            // `f.marker(Since)?.version ?? 1` over a reflected fact is that
+            // fact's literal.
+            if sema_derive_static_value(expansion, expression) == .Val(known) {
+                if sema_derive_literal_expr(known, span) == .Val(literal) -> return literal
+            }
+            return Expr.OrFallback{value: sema_derive_expand_expr(expansion, value), fallback: sema_derive_expand_or_fallback(expansion, fallback), is_option: is_option, span: span, id: node}
+        }
         .If(cond, then_body, then_value, else_body, else_value, span, node) -> return Expr.If{cond: sema_derive_expand_expr(expansion, cond), then_body: sema_derive_expand_stmts(expansion, then_body), then_value: sema_derive_expand_expr(expansion, then_value), else_body: sema_derive_expand_stmts(expansion, else_body), else_value: sema_derive_expand_expr(expansion, else_value), span: span, id: node}
         .TupleLit(fields, span, ty, node) -> {
             expanded := [TupleField]{}
