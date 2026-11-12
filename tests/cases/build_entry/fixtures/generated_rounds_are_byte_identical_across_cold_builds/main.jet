@@ -1,0 +1,11 @@
+build: fn(b: Build) {
+    b.generate("first") {
+        first_value: fn() -> Int { 40 }
+    }
+    b.generate("second") {
+        second_value: fn() -> Int { first_value() + 2 }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/first.jet", ".jet/generated/main/second.jet"], [])
+    b.default(app)
+}
+run: fn() { print("{second_value()}") }

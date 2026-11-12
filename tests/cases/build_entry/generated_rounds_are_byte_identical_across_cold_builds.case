@@ -1,0 +1,22 @@
+# Claim: generation is deterministic and source-provenanced: two cold builds write byte-identical generated sources, round by round (`second` reads what `first` generated), and lock the same source identity for each (#4276 c28)
+fixture: fixtures/generated_rounds_are_byte_identical_across_cold_builds
+artifact: app
+env: NO_COLOR=1
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/first.jet = "first_value: fn() -> Int { 40 }\n"
+file: .jet/generated/main/second.jet = "second_value: fn() -> Int { first_value() + 2 }\n"
+file: .jet/lock ~ "path = \".jet/generated/main/first.jet\"\nhash = \"sha256:55dfac9efe91edbc97f45f3fc90dc7a22f418caee0ba67a3afd0b8f570de0172\"" # the lock records the first round's source identity
+file: .jet/lock ~ "path = \".jet/generated/main/second.jet\"\nhash = \"sha256:20a3a521c36ecd8bb5006277887dcf7e6febe1893aa835d3c057bb19067f6a39\"" # and the second round's
+copy: .jet/generated/main/first.jet first.before
+copy: .jet/generated/main/second.jet second.before
+remove: .jet
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/first.jet == first.before # the cold rebuild writes the same bytes
+file: .jet/generated/main/second.jet == second.before
+file: .jet/lock ~ "hash = \"sha256:55dfac9efe91edbc97f45f3fc90dc7a22f418caee0ba67a3afd0b8f570de0172\"" # the cold rebuild locks the same first-round identity
+file: .jet/lock ~ "hash = \"sha256:20a3a521c36ecd8bb5006277887dcf7e6febe1893aa835d3c057bb19067f6a39\"" # and the same second-round identity
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"
