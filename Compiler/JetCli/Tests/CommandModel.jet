@@ -149,7 +149,7 @@ command_model_line_form: fn(text: String) -> String Never! {
 // n10: the usage page, man and fish completions show only ported forms.
 command_model_shown_forms: fn() -> [String] Never! {
     problems := [String]{}
-    loop line in jet_cli_usage_page("frequency").split("\n").to_list() {
+    loop line in jet_cli_usage_page("frequency", "a0.0.43-dev+29517f5447").split("\n").to_list() {
         if !line.starts_with("  jet ") -> next
         form: command_model_line_form(line.slice(6..<line.len()))
         if command_model_shown_problem(form, "help") == .Val(problem) -> problems.push(problem)

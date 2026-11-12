@@ -2537,7 +2537,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         if jet_cli_any_help_flag(jet_argv) {
             order: jet_cli_help_order(jet_argv)
             if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
-            return jet_cli_renderable(jet_cli_usage_page(order), json)
+            return jet_cli_renderable(jet_cli_usage_page(order, pkg_jet_build().version), json)
         }
         return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
     }
@@ -2677,7 +2677,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     if command == {
         "help" -> {
             bespoke: if args.len() > 1 -> jet_cli_structural_help(args[1]) else -> String?{None}
-            return jet_cli_help(jet_argv, args, bespoke, color, json)
+            return jet_cli_help(jet_argv, args, bespoke, color, json, pkg_jet_build().version)
         }
         "version" -> return jet_cli_version(json)
         "man" -> return jet_cli_renderable(jet_cli_man_page(), json)

@@ -524,9 +524,11 @@ jet_cli_command_listed: fn(name: String) -> Bool Never! {
 }
 
 // `jet help`: every listed command, each group's ported actions, then every
-// flag with its ported scopes.
-jet_cli_usage_page: fn(order: String) -> String Never! {
-    out := "Welcome to {JET_CLI_LANG_NAME}! ({JET_VERSION})\n\nUsage:\n"
+// flag with its ported scopes. `version` is the running build's version, as
+// `jet --version` spells it (`a0.0.43-dev+29517f5447`, or `a0.0.43` for a
+// release).
+jet_cli_usage_page: fn(order: String, version: String) -> String Never! {
+    out := "Welcome to {JET_CLI_LANG_NAME}! ({version})\n\nUsage:\n"
     commands: jet_cli_commands_in(order)
     loop index in commands {
         command: JET_CLI_COMMANDS[index]

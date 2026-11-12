@@ -111,7 +111,7 @@ case_law_sources: fn() -> [CaseLawSource] {
         if command.actions.len() > 0 -> case_law_push(sources, "CLI {command.name} group label", jet_cli_group_label(command.name), "title")
     }
     loop flag in JET_CLI_FLAGS -> case_law_push(sources, "CLI {flag.long} help", flag.help, "sentence")
-    loop (index, raw) in jet_cli_usage_page("frequency").split("\n").to_list() {
+    loop (index, raw) in jet_cli_usage_page("frequency", "a0.0.43-dev+29517f5447").split("\n").to_list() {
         line: raw.trim().copy()
         if index == 0 {
             case_law_push(sources, "CLI usage greeting", line, "sentence")

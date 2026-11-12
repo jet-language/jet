@@ -47,7 +47,7 @@ cli_front_fixture_engine: fn(plan: JetCLIPlan, verb: String, argv: [String]) Nev
     cli_front_fixture_done(jet_cli_plan([String]{"help", "--json"}), "", "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"--version", "--json"}), pkg_version_json(pkg_jet_build()), "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"help", "diff"}), jet_cli_structural_help("diff") ?? panic("diff help"), "", 0)
-    invalid: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true)
+    invalid: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true, pkg_jet_build().version)
     if invalid == {
         .Refused(report, _, code, _) -> {
             if report.code != "E2104" || code != 2 -> panic("machine mode never hides invalid help ordering")

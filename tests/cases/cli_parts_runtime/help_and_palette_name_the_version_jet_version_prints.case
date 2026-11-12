@@ -1,22 +1,22 @@
 # `jet --help`, `jet help` and bare `jet` name the version `jet --version`
-# prints: {jet-semver} is the JET_VERSION of the `jet --version` banner of the
-# jet under test (`a0.0.43` of `jet a0.0.43-dev+<commit10>`).
+# prints: `version` is the word after `jet ` on its first line
+# (`a0.0.43-dev+29517f5447` for a dev build, `a0.0.43` for a release, whose
+# line goes on with ` (<commit10>, <date>, alpha)`), and `line` is that whole
+# line.
 step: jet --version
-normalize: replace {jet-semver} "VERSION"
 exit: 0
-stdout: ^= "jet VERSION" # a release adds ` (<commit10>, <date>, alpha)`, a dev build `-dev+<commit10>`
+stdout: ^= "jet " # the first line is `jet <version>`
+capture: version = text stdout.line(0).strip_prefix("jet ").first_words
+capture: line = text stdout.line(0)
 step: jet --help
 env: NO_COLOR=1
-normalize: replace {jet-semver} "VERSION"
 exit: 0
-stdout: ^= "Welcome to Jet! (VERSION)\n" # the banner names the version; the command list is help_lists_commands_by_frequency_rank's claim
+stdout: ^= "Welcome to Jet! ({cap:version})\n" # the banner names the build's version, `-dev+<commit10>` included; the command list is help_lists_commands_by_frequency_rank's claim
 step: jet help
 env: NO_COLOR=1
-normalize: replace {jet-semver} "VERSION"
 exit: 0
-stdout: ^= "Welcome to Jet! (VERSION)\n" # the banner names the version; the command list is help_lists_commands_by_frequency_rank's claim
+stdout: ^= "Welcome to Jet! ({cap:version})\n" # the banner names the build's version, `-dev+<commit10>` included; the command list is help_lists_commands_by_frequency_rank's claim
 step: jet
 env: NO_COLOR=1
-normalize: replace {jet-semver} "VERSION"
 exit: 0
-stdout: ^= "Jet command palette\njet VERSION" # the palette's second line is the `jet --version` line; the command list is bare_jet_prints_the_command_palette's claim
+stdout: ^= "Jet command palette\n{cap:line}\n" # the palette's second line is the `jet --version` line; the command list is bare_jet_prints_the_command_palette's claim
