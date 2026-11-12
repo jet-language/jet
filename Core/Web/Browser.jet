@@ -144,6 +144,27 @@ __BrowserState: struct {
     trace_bytes: Int
     events: [BrowserEvent]
     engine: __BrowserEngine?
+
+    // The last copy of a Browser that was never closed ends its session as
+    // `close` does, best effort: it sends `session.end` and waits for its
+    // reply, skipping events, until the session's timeout. A gone peer needs
+    // no end. The engine, if any, stops after this, when its field drops.
+    impl Close {
+        close: fn(&&self) {
+            if self.closed || !self.session_started -> return
+            id: self.next_id
+            core.web.browser.__ws_set_timeout(self.conn, self.timeout_ms) ?? return
+            self.conn.send_text("{{\"id\":{id},\"method\":\"session.end\",\"params\":{{}}}}") ?? return
+            loop _ in 0..<C_EVENT_LIMIT {
+                message: self.conn.recv() ?? return
+                body: message.text() ?? return
+                value: json.parse(body) ?? return
+                if browser_id(value) == .Val(got) {
+                    if got == id -> return
+                }
+            }
+        }
+    }
 }
 
 // The engine process and throwaway profile that `launch` started. The
