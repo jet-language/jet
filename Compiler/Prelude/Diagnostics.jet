@@ -2656,25 +2656,6 @@ UnknownDevtoolsField: struct {
     }
 }
 
-DevtoolsValueMismatch: struct {
-    package: String
-    module_name: String
-    panel: String
-    field: String
-    actual: String
-    expected: String
-
-    impl Diagnostic {
-        code: "E1413"
-        meaning: "Devtools publication value type differs from its panel state field"
-        detail: true
-        fix_next: "Publish a value of the declared state-field type, or change that field type."
-        what: fn(self) -> String { "Published value for `{self.package}::{self.module_name}::{self.panel}::{self.field}` has type `{self.actual}`" }
-        why: fn(self) -> String { "The panel state field has type `{self.expected}`" }
-        fix: fn(self) -> String { "Publish a value with type `{self.expected}` or change the state field" }
-    }
-}
-
 UnpublishedDevtoolsField: struct {
     panel: String
     field: String
@@ -3108,18 +3089,6 @@ RetiredNamespaceTeaching: struct {
         what: fn(self) -> String { "*Retired* (was: old first-party namespace teaching)" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Follow the guidance for E0341" }
-    }
-}
-
-SwitchOffOnItem: struct {
-    impl Diagnostic {
-        code: "E0342"
-        stage: [.Parse]
-        meaning: "`#Off` written on an item instead of a statement"
-        detail: true
-        what: fn(self) -> String { "`#Off` belongs before a statement." }
-        why: fn(self) -> String { "Statement switch attributes control code inside a function body, not top-level declarations." }
-        fix: fn(self) -> String { "Move it inside a function, or remove it from the declaration." }
     }
 }
 
@@ -4674,54 +4643,6 @@ RawMultilineHtml: struct {
         what: fn(self) -> String { "This multiline HTML fragment is still a plain `String`" }
         why: fn(self) -> String { "Plain String interpolation cannot distinguish trusted HTML fragments from text that must be escaped" }
         fix: fn(self) -> String { "Wrap the literal in `HTML{{…}}` and type any trusted fragment holes as `HTML`" }
-    }
-}
-
-UnreachableAfterLoop: struct {
-    impl Diagnostic {
-        code: "L0525"
-        severity: .Lint
-        lint_name: "unreachable_after_loop"
-        meaning: "Statement is unreachable after an unconditional loop"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .NeedsReview
-        what: fn(self) -> String { "An unconditional loop with no reachable `break` leaves no path to the following statement" }
-        why: fn(self) -> String { "A loop with no reachable `break` cannot continue to the following statement, so the statement is unreachable." }
-        fix: fn(self) -> String { "Remove the unreachable statement, or add a reachable `break`" }
-    }
-}
-
-ConstantLoopCondition: struct {
-    impl Diagnostic {
-        code: "L0526"
-        severity: .Lint
-        lint_name: "constant_loop_condition"
-        meaning: "Loop condition is constant"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .Formatting
-        what: fn(self) -> String { "A constant `true` condition never exits without a `break`; a constant `false` condition never enters the body" }
-        why: fn(self) -> String { "A constant loop condition either never exits or never runs; the condition is not dynamic." }
-        fix: fn(self) -> String { "For `true`, write `loop {{ … }}`; for `false`, remove the loop or change the condition" }
-    }
-}
-
-DiscardedExpression: struct {
-    impl Diagnostic {
-        code: "L0527"
-        severity: .Lint
-        lint_name: "discarded_expression"
-        meaning: "Expression value is discarded"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .Formatting
-        what: fn(self) -> String { "A comparison, arithmetic expression, or bare name computes a value but has no statement effect" }
-        why: fn(self) -> String { "The expression computes a value but has no statement effect." }
-        fix: fn(self) -> String { "Use the value, bind it with `:`, or remove the expression" }
     }
 }
 
@@ -6981,20 +6902,6 @@ SocketOperationNotOnTarget: struct {
     }
 }
 
-PluginImportNotOnTarget: struct {
-    module_name: String
-    target: String
-
-    impl Diagnostic {
-        code: "E3306"
-        meaning: "Selected web target does not provide the Component Model host boundary for a reachable Core plugin import"
-        detail: true
-        what: fn(self) -> String { "`{self.module_name}` is not available for target `{self.target}`." }
-        why: fn(self) -> String { "The browser Web backend has no host-import boundary for `core.plugin`; plugin authority and component imports must stay on a native or server host. A `jet build` or `jet run` run reports this target-support diagnostic." }
-        fix: fn(self) -> String { "Build for a native target or `wasm32-wasip2`, or move plugin work behind a native/server boundary." }
-    }
-}
-
 RuntimeLayerNotOnTarget: struct {
     api: String
     required: String
@@ -7152,19 +7059,6 @@ FetchFailed: struct {
         what: fn(self) -> String { "Fetch failed / bad argument / non-UTF-8 content (message varies)." }
         why: fn(self) -> String { "Common causes: unsupported URL scheme (only `file://`, `http://`, `https://`), unreachable host, missing `sha256:` argument, or binary content (use `embed_bytes` for that). HTTPS TLS failures use E4201–E4203." }
         fix: fn(self) -> String { "Check the URL and arguments; use `file://` for local test paths." }
-    }
-}
-
-InvalidBuildSignature: struct {
-    impl Diagnostic {
-        code: "E3501"
-        stage: [.Build]
-        meaning: "Selected root `build: fn` has the wrong signature"
-        detail: true
-        no_fix: .Ambiguous
-        what: fn(self) -> String { "`build: fn` takes one `Build` and returns nothing." }
-        why: fn(self) -> String { "Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP." }
-        fix: fn(self) -> String { "Write `build: fn(b: Build) {{ … }}`." }
     }
 }
 
@@ -7429,19 +7323,6 @@ NondeterminismInPureEval: struct {
         what: fn(self) -> String { "`{self.what_text}` is non-deterministic and cannot appear in a pure evaluation." }
         why: fn(self) -> String { "Pure evaluation must produce the same result on every machine." }
         fix: fn(self) -> String { "Remove this call, or remove the enclosing function's explicit empty effect bound." }
-    }
-}
-
-NondeterministicWorldEffect: struct {
-    call: String
-
-    impl Diagnostic {
-        code: "E3404"
-        meaning: "Uncontrolled effect inside a deterministic world"
-        detail: true
-        what: fn(self) -> String { "`{self.call}` has no deterministic world provider." }
-        why: fn(self) -> String { "`testing.world` controls virtual time, scheduling, and seeded pseudo-randomness; external effects cannot be replayed." }
-        fix: fn(self) -> String { "Move the call outside `testing.world`, or use a world-supported provider." }
     }
 }
 
@@ -7814,15 +7695,6 @@ MissingDisplay: struct {
         what: fn(self) -> String { "Bare `{self.value}` on a type without `Display`" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Implement `Display` for the type or use an explicit formatter." }
-    }
-}
-
-DebugDeriveBlocked: struct {
-    impl Diagnostic {
-        code: "E0916"
-        what: fn(self) -> String { "Auto-derived `Debug` blocked by a non-debuggable field — *defined, not yet emitted*" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Implement `Debug` for the field or provide a redacting formatter." }
     }
 }
 
@@ -9115,17 +8987,6 @@ ColumnarMethodNotSupported: struct {
     }
 }
 
-PartialColumnarLayout: struct {
-    impl Diagnostic {
-        code: "E1109"
-        meaning: "Partial `#Layout(columnar: …)` is deferred — whole-struct only in v1"
-        detail: true
-        what: fn(self) -> String { "A partial columnar annotation `#Layout(columnar: f, g)` was written." }
-        why: fn(self) -> String { "v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (deferred)." }
-        fix: fn(self) -> String { "Write `#Layout(columnar)` to convert the whole struct." }
-    }
-}
-
 TaskOutsideGroup: struct {
     impl Diagnostic {
         code: "E1110"
@@ -10044,22 +9905,6 @@ MissingRustToolchain: struct {
     }
 }
 
-MissingCoreArtifact: struct {
-    ring: String
-
-    impl Diagnostic {
-        code: "E1241"
-        stage: [.Jet]
-        meaning: "A staged `core.<ring>` artifact is missing for the active platform"
-        detail: true
-        no_fix: .Behavior
-        fix_next: "Use the embedded core artifact, or realize a toolchain object built for this platform."
-        what: fn(self) -> String { "The staged `core.{self.ring}` artifact is missing for this platform." }
-        why: fn(self) -> String { "The active toolchain object carries prebuilt ring artifacts, but none for `core.{self.ring}` on this platform. A `jet build` run reports this toolchain error." }
-        fix: fn(self) -> String { "The build falls back to the compiler-embedded `core.{self.ring}`; to ship the staged artifact, realize a toolchain object built for this platform (`jet update jet`)." }
-    }
-}
-
 UnknownFleetSystem: struct {
     fleet: String
     host: String
@@ -10502,22 +10347,6 @@ OutsideProjectEnvironment: struct {
         what: fn(self) -> String { "This project declares {self.environment}; `{self.command}` is not running inside its verified environment." }
         why: fn(self) -> String { "Jetpack preparation is disabled for this command. `jet run` delegates the declared environment unless `--no-prepare` is supplied; other verbs must be invoked through the existing Jetpack environment boundary." }
         fix: fn(self) -> String { "For `jet run`, remove `--no-prepare` and retry `{self.command}`; for another verb, run `jetpack env -- {self.command}`." }
-    }
-}
-
-EnvironmentPreparationFailed: struct {
-    command: String
-    reason: String
-
-    impl Diagnostic {
-        code: "E1356"
-        stage: [.Jet]
-        meaning: "Jet could not delegate project environment preparation"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "The declared project environment could not be prepared for `{self.command}`: {self.reason}." }
-        why: fn(self) -> String { "Jet delegates project environment resolution and realization to the matching Jetpack engine before `{self.command}` runs; this delegation failed before the program started. A `jet run` run reports this environment-delegation error." }
-        fix: fn(self) -> String { "Resolve the Jetpack installation or environment problem, then retry `{self.command}`." }
     }
 }
 
@@ -12004,21 +11833,6 @@ MissingErrorConversion: struct {
     }
 }
 
-UnknownFieldPun: struct {
-    name: String
-    type: String
-
-    impl Diagnostic {
-        code: "E2403"
-        stage: [.Compile]
-        detail: true
-        no_fix: .Ambiguous
-        what: fn(self) -> String { "Field-pun name `{self.name}` is not in scope (or is not a field of `{self.type}`)." }
-        why: fn(self) -> String { "`Type {{ name }}` is shorthand for `Type {{ name: name }}` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous." }
-        fix: fn(self) -> String { "Introduce a local `name: …;` before the struct literal, or write the long form `Type {{ field_name: value }}`." }
-    }
-}
-
 ErrorNotPropagatable: struct {
     callee: String
     source: String
@@ -12787,48 +12601,6 @@ RetiredDeriveTraitSpelling: struct {
     }
 }
 
-NetworkOperationFailed: struct {
-    operation: String
-    address: String
-    detail: String
-
-    impl Diagnostic {
-        code: "E2801"
-        detail: true
-        no_fix: .Ambiguous
-        what: fn(self) -> String { "{self.operation} on `{self.address}` failed: {self.detail}." }
-        why: fn(self) -> String { "A socket bind, listen, connect, or accept call returned an OS error. The address and operation are named so you can act on the specific failure." }
-        fix: fn(self) -> String { "Check that the address is reachable and the port is not already in use. For `bind`, try a different port. For `connect`, verify the server is running." }
-    }
-}
-
-ServerTlsHandshakeFailed: struct {
-    host: String
-    detail: String
-
-    impl Diagnostic {
-        code: "E2802"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "TLS handshake with `{self.host}` failed: {self.detail}." }
-        why: fn(self) -> String { "The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store." }
-        fix: fn(self) -> String { "Verify the server's certificate, ensure the system trust store is up-to-date, or use `core.net.tls.insecure_skip_verify()` in a test environment only." }
-    }
-}
-
-RequestBodyTooLarge: struct {
-    limit: String
-
-    impl Diagnostic {
-        code: "E2803"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "Request body exceeds the {self.limit}-byte limit." }
-        why: fn(self) -> String { "The server's configured `max_body` cap was reached. Allowing unbounded bodies risks memory exhaustion." }
-        fix: fn(self) -> String { "Raise the `max_body` option passed to `http.serve`, or reject the request in your handler before reading the body." }
-    }
-}
-
 AmbiguousRoute: struct {
     method: String
     pattern: String
@@ -12959,21 +12731,6 @@ DoctestMismatch: struct {
         what: fn(self) -> String { "Doctest output mismatch. Expected: `{self.expected}` Got: `{self.actual}`" }
         why: fn(self) -> String { "The example in the doc comment claims a different result from what the code produces. Docs cannot lie." }
         fix: fn(self) -> String { "Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output." }
-    }
-}
-
-TodoInDoctest: struct {
-    file: String
-    line: String
-    type: String
-
-    impl Diagnostic {
-        code: "E2902"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "`#Todo` at `{self.file}:{self.line}` — expected `{self.type}`" }
-        why: fn(self) -> String { "A `#Todo` typed goal was reached at runtime. The goal compiles anywhere and type-checks, but panics when executed." }
-        fix: fn(self) -> String { "Replace `#Todo` with a real implementation." }
     }
 }
 

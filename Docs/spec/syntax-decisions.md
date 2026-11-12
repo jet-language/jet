@@ -2677,8 +2677,9 @@ copies it into use sites.
 type-checks the statement, then emits no code in every build. `#Off(.Release) <stmt>`
 (D-OFF-RELEASE1=A, which retires `#DebugOnly`) parses and type-checks the
 statement in every build, emits in debug/dev builds, and is erased in release
-builds. Both attach to statements only; item position is E0342, expression
-position is E0343, and two `#Off` forms on one statement are E0344.
+builds. Both attach to statements only; item position is E0355 (the marker's
+registered sites are `Statement` and `Block`), expression position is E0343,
+and two `#Off` forms on one statement are E0344.
 Names introduced inside the marker body do not escape. Bare `#build.profile` is
 not a user-typeable comptime value; the registered fact spelling is
 `$build.profile` (D-BUILD-FACT3=A).
@@ -4174,8 +4175,9 @@ default. A fallible result remains must-use, so E0402 rejects an ignored
 
 **D-SOA1 / D-SOA2A–D — Columnar layout**: `#Layout(columnar)` on a struct;
 a `[S]` of it lowers to a struct-of-arrays with a logical-Vec API
-(index-read gathers, field-read hits the column). Whole-struct only (partial
-E1109); `columnar [T]` type-position reserved (E1107); deferred surface ops
+(index-read gathers, field-read hits the column). Whole-struct only (a field
+list is E0930: `#Layout` takes no field arguments); `columnar [T]`
+type-position reserved (E1107); deferred surface ops
 E1108; serialization-transparent. **D-REPRC1**: `#Layout(c)` = C repr in the
 same family (growable field under it = compile error).
 **D-PLACE1=A — Layout alignment and lock-free scalar cells** *(ratified)*:
