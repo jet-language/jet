@@ -455,7 +455,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "CaptureInfo" {
         return if {
-            field == "name" || field == "type" -> Val(string)
+            field == "name" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
             field == "mode" -> Val(sema_fact_named("CaptureMode"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             else -> None
@@ -517,7 +518,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "CallableSignature" {
         return if {
             field == "params" -> Val(sema_fact_list_of("ParamInfo"))
-            field == "return_type" -> Val(Type.Option{inner: string})
+            field == "return_type" -> Val(Type.Option{inner: sema_fact_named("TypeId")})
             field == "effects" -> Val(sema_fact_named("EffectInfo"))
             field == "calling_convention" -> Val(sema_fact_named("CallingConvention"))
             field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
@@ -567,7 +568,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "DefaultInfo" -> return sema_fact_field_when(field == "source", sema_fact_named("SourceSpan"))
     if type_name == "ParamInfo" {
         return if {
-            field == "name" || field == "label" || field == "type" -> Val(string)
+            field == "name" || field == "label" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
             field == "zone" -> Val(sema_fact_named("ParamZone"))
             field == "access" -> Val(sema_fact_named("ParamAccess"))
             field == "default" -> Val(Type.Option{inner: sema_fact_named("DefaultInfo")})
@@ -591,7 +593,13 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
-    if type_name == "AssociatedTypeInfo" || type_name == "GenericBindingInfo" -> return sema_fact_field_when(field == "name" || field == "type", string)
+    if type_name == "AssociatedTypeInfo" || type_name == "GenericBindingInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
+            else -> None
+        }
+    }
     if type_name == "NumericInfo" {
         return if {
             field == "signed" || field == "is_float" -> Val(Type.Bool)
@@ -601,7 +609,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "ConstantInfo" {
         return if {
-            field == "name" || field == "trait_name" || field == "type" -> Val(string)
+            field == "name" || field == "trait_name" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
             field == "value" -> Val(Type.Option{inner: string})
             else -> None
         }
@@ -1134,8 +1143,8 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: 
         }
         markers: sema_comptime_reflection_written_markers(graph, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
         identity: "{registered_module.module_name}::{registered.declaration.name}"
-        if bindings.len() == 0 -> return Val(sema_comptime_reflection_function_info(registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
-        return Val(sema_comptime_reflection_function_info(sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
+        if bindings.len() == 0 -> return Val(sema_comptime_reflection_function_info(graph, index, registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
+        return Val(sema_comptime_reflection_function_info(graph, index, sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
     }
     None
 }

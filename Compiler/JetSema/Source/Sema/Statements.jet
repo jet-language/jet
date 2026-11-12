@@ -5573,7 +5573,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if !binding.mutable && init.kind == .Lambda(reflected_lambda) {
         closure_function: scopes.location_function ?? environment.function_name
         closure_location: sema_comptime_reflection_location(environment.source_segments, sema_site_module(environment, closure_function), Val(binding.name_span))
-        sema_scope_mark_closure(scopes, binding.name, sema_comptime_reflection_closure_info(binding.name, binding.name_span, reflected_lambda, closure_location, environment.source_file))
+        sema_scope_mark_closure(scopes, binding.name, sema_comptime_reflection_closure_info(program.registration_graph, environment.module_identity, binding.name, binding.name_span, reflected_lambda, closure_location, environment.source_file))
     }
     if binding.init == .Lambda(captured_lambda, _) {
         if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(state, symbol.id.key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)

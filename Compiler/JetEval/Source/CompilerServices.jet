@@ -567,10 +567,12 @@ jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> J
 }
 
 // `package` is the identity of the package that declares the function, as
-// the loader gives it. `markers` are the function's written MarkerInfo rows
+// the loader gives it; `module_index` is the row of its module in
+// `registration`. `markers` are the function's written MarkerInfo rows
 // (sema_comptime_reflection_written_markers); `source` is its module's text,
 // read for the function's documentation.
-jet_eval_compiler_services_function_info: fn(function: Func, registration_module: SemaRegistrationModule, source: SemaComptimeReflectionSource, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
+jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph, module_index: Int, function: Func, source: SemaComptimeReflectionSource, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
+    registration_module: registration.modules[module_index]
     // The solved row, when the check solved this function (a failed check
     // leaves it None, read as not yet inferred).
     solved_effects := [String]?{None}
@@ -594,7 +596,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
         TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
         TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
-        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(function, solved_effects, registration_module.source_file)},
+        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(registration, module_index, function, solved_effects, registration_module.source_file)},
         TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span, registration_module.source_file)},
         TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
@@ -623,7 +625,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
     functions := [TComptimeValue]{}
     effects := [TComptimeValue]{}
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
-    loop registration_module in input.registration.modules {
+    loop (module_index, registration_module) in input.registration.modules {
         module_text: sema_comptime_reflection_doc_source(registration_module.source, registration_module.source_file)
         checked_module := SemaGraphModuleResult?{None}
         loop candidate in input.graph.modules {
@@ -638,7 +640,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
                 // marker registry; like the failed-check FunctionInfo
                 // (JetDriver ComptimeCompiler.jet), its markers then read empty.
                 markers: sema_comptime_reflection_written_markers(input.registration, registration_module.module_identity, registration_module.program, catalog, function.markers, registry) ?? [TComptimeValue]{}
-                functions.push(jet_eval_compiler_services_function_info(function, registration_module, module_text, checked_module, function_key, markers))
+                functions.push(jet_eval_compiler_services_function_info(input.registration, module_index, function, module_text, checked_module, function_key, markers))
             }
         }
         if checked_module == .Val(checked) {
@@ -696,7 +698,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     functions := [TComptimeValue]{}
     packages := [JetCompilerServicesPackageRows]{}
     build_keys := [String]{}
-    loop module_row in registration.modules {
+    loop (module_index, module_row) in registration.modules {
         // Lexed whole: the ModuleInfo lists every comment, and each
         // FunctionInfo its documentation.
         module_text: sema_comptime_reflection_source(module_row.source, module_row.source_file)
@@ -719,7 +721,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                     }
                     key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
                     markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_identity}` has no marker registry")
-                    value: jet_eval_compiler_services_function_info(function, module_row, module_text, checked, Val(key), markers)
+                    value: jet_eval_compiler_services_function_info(registration, module_index, function, module_text, checked, Val(key), markers)
                     functions.push(value.copy())
                     module_functions.push(value)
                 }

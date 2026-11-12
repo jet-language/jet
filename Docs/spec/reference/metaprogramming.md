@@ -311,7 +311,7 @@ across modules, by its `identity`.
 A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
 a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,
 the receiver included; its `return_type` is the success type the callable
-returns, a `String?` that is `None` when it returns no value; its `effects` is an `EffectInfo`;
+returns, a `TypeId?` that is `None` when it returns no value; its `effects` is an `EffectInfo`;
 its `calling_convention` is a `CallingConvention` (`Jet`, `Kernel` for a
 `#Kernel` function, or `Foreign` for one whose body is inline foreign code); and
 its `generic_bindings` is a `[GenericBindingInfo]`, empty on a declaration,
@@ -332,7 +332,7 @@ its owner's parameters the same way.
 
 Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 (its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,
-`Either` or `LabelOnly`); its `type`; its `access` (`ParamAccess`: `Read`,
+`Either` or `LabelOnly`); its `type`, a TypeId; its `access` (`ParamAccess`: `Read`,
 `Write` for a `&` parameter, or `Move` for a `&&` one); its `default`, a
 `DefaultInfo?` read the same way as a field's and never run; and whether it is
 `variadic`. A catalog reads a callable's parameters without parsing a
@@ -353,7 +353,7 @@ reads its `name`, its `signature` (a `CallableSignature` whose parameters are
 positional and whose `effects` declares no row), the `span` and `location` of
 the name, and its `captures`, a `[CaptureInfo]` in the order the captured
 bindings are declared. Each `CaptureInfo` carries the binding's `name`, its
-`type`, the `span` where it is declared, and its `mode`, the `CaptureMode` the
+`type` (a TypeId), the `span` where it is declared, and its `mode`, the `CaptureMode` the
 checker chose: `Read` in place, `Write` to the owner's binding, `Copy` into an
 escaping closure, `Materialize` for an owned copy of a view, or `Move` when the
 closure takes the value. Reading it is not a use of the closure value, so it
@@ -418,15 +418,16 @@ run: fn() {
 A `TypeInfo` lists what the type implements and binds, and the form of a number:
 
 - `traits` has one `TraitInfo` per trait the type implements, with its `name`,
-  its `associated_types` (`AssociatedTypeInfo` `name` and `type`) and the
+  its `associated_types` (`AssociatedTypeInfo` `name` and `type`, a TypeId) and the
   `methods` the implementation gives. Ask whether a type implements a trait by
   looking for its name in `traits`; there is no string `implements` query.
 - `constants` has one `ConstantInfo` per associated constant of those traits:
-  its `name`, the `trait_name` that declares it, its declared `type`, and its
+  its `name`, the `trait_name` that declares it, its declared `type` (a TypeId), and its
   `value` as `print` shows it (`None` when the value is not known at
   compile time, which is reported where the implementation gives it). A
   constant the implementation leaves out reads the trait's default.
 - `generic_bindings` pairs each type parameter with the type written for it
+  (a `GenericBindingInfo` `name` and `type`, a TypeId)
   when the type is named with its arguments: `Pair<Int, String>.reflect()`
   binds `A` to `Int` and `B` to `String`. Naming the generic type alone, or
   reflecting its declaration in a marker body, gives an empty list. A type

@@ -1,8 +1,9 @@
 // Functions and methods reflect one typed CallableSignature. Its parameter
 // list holds a ParamInfo per parameter: the parameter's name, the label a
-// call writes, its zone, its type, how it takes the argument, where its
-// default is written (read, never run) and whether it is variadic, so nothing
-// here parses a signature string. Effects read the same way: `declared` is the
+// call writes, its zone, its type (a TypeId, printed by its `name`), how it
+// takes the argument, where its default is written (read, never run) and
+// whether it is variadic, so nothing here parses a signature string; its
+// `return_type` is a TypeId too. Effects read the same way: `declared` is the
 // row a signature writes (None when it writes none), and `inferred` is the row
 // the checker solves from the body, read after the check
 // (`b.program.functions()`); a reflected constant is folded inside the check,
@@ -49,10 +50,10 @@ capture_mode: fn(mode: CaptureMode) -> String {
 }
 
 show_closure: fn(info: ClosureInfo) {
-    params: (loop param in info.signature.params -> "{param.name}: {param.type}").join(", ")
+    params: (loop param in info.signature.params -> "{param.name}: {param.type.name}").join(", ")
     line: if info.location == .Val(at) -> at.line else -> 0
-    print("{info.name}({params}) -> {info.signature.return_type ?? "nothing"}, bound on line {line}")
-    loop capture in info.captures -> print("  {info.name} {capture_mode(capture.mode)} {capture.name} ({capture.type})")
+    print("{info.name}({params}) -> {info.signature.return_type?.name ?? "nothing"}, bound on line {line}")
+    loop capture in info.captures -> print("  {info.name} {capture_mode(capture.mode)} {capture.name} ({capture.type.name})")
 }
 
 run: fn() {
@@ -63,7 +64,7 @@ run: fn() {
             .LabelOnly -> "label-only"
         }
         default: if param.default == None -> "required" else -> "has a default"
-        print("connect {param.name}: label {param.label}, {zone}, {param.type}, {default}")
+        print("connect {param.name}: label {param.label}, {zone}, {param.type.name}, {default}")
     }
     loop method in Log.reflect().methods {
         loop param in method.signature.params {
@@ -87,7 +88,7 @@ run: fn() {
         .Kernel -> "kernel"
         .Foreign -> "foreign"
     }
-    print("connect returns {signature.return_type ?? "nothing"} by the {convention} calling convention")
+    print("connect returns {signature.return_type?.name ?? "nothing"} by the {convention} calling convention")
     print(connect("db"))
     limit: 3
     factor: 2
@@ -104,22 +105,22 @@ run: fn() {
     second: keep("grace")
     print("keep ada {first}, grace {second}; {count} calls; budget {kept[0].call()}")
     shelf: Shelf<Int>.reflect()
-    bound: (loop binding in shelf.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
+    bound: (loop binding in shelf.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
     print("{shelf.name} with {bound}")
     loop field in shelf.fields -> print("  field {field.name}: {field.type.name}")
     loop method in shelf.methods {
-        params: (loop param in method.signature.params if param.name != "self" -> "{param.name}: {param.type}").join(", ")
-        binds: (loop binding in method.signature.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
-        print("  {method.name}({params}) -> {method.signature.return_type ?? "nothing"}, binding {binds}")
+        params: (loop param in method.signature.params if param.name != "self" -> "{param.name}: {param.type.name}").join(", ")
+        binds: (loop binding in method.signature.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+        print("  {method.name}({params}) -> {method.signature.return_type?.name ?? "nothing"}, binding {binds}")
     }
     words: Shelf<String>.reflect()
     print("Shelf<Int> and Shelf<String> are distinct instances: {shelf.identity != words.identity}")
     numbers: Shelf<Int>{items: [Int]{1, 2}}
     print("a Shelf<Int> of 2 with 1 more holds {numbers.size_with([Int]{3})}")
     picked: pick.reflect(types: [String])
-    picks: (loop param in picked.signature.params -> "{param.name}: {param.type}").join(", ")
-    chose: (loop binding in picked.signature.generic_bindings -> "{binding.name} = {binding.type}").join(", ")
-    print("pick({picks}) -> {picked.signature.return_type ?? "nothing"}, binding {chose}")
+    picks: (loop param in picked.signature.params -> "{param.name}: {param.type.name}").join(", ")
+    chose: (loop binding in picked.signature.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+    print("pick({picks}) -> {picked.signature.return_type?.name ?? "nothing"}, binding {chose}")
     print("pick for String and for Int are distinct instances: {picked.identity != pick.reflect(types: [Int]).identity}")
     print("pick of a and b is {pick("a", "b")}")
 }
