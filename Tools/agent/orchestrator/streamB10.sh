@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # streamB10.sh A_BATCH B_BATCH SUB... : as soon as A_BATCH's census has a stage-1 compiler with its runtime, run
 # B_BATCH (the SUBs that need a seed carrying A's rows) through integrate10.sh with that compiler as its seed.
-# The original of gauntlet tool entry streamb10; StreamB10.jet beside it is its Jet twin. The batches live in
+# The original of gauntlet tool entry streamb10; StreamB10.jet beside it is its Jet twin and the program in use, and
+# this file stays as the entry's reference. The batches live in
 # $JET_SCRATCH_ROOT/lanes/Main/integ and the seed's IDENTITY and jetpack come from $JET_SEED (Tools/agent/roots.sh);
 # integrate10.sh is the one in $JET_ORCHESTRATOR_DIR, this directory unless set.
 set -u

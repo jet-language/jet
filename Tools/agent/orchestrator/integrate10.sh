@@ -11,7 +11,8 @@
 #   3. if the build produced a compiler, every SUB's tests run with it, each recorded with rc and output tail.
 # Writes integ/BATCH/REPORT.md (one section per SUB: OK, or every failure found) and prints its path.
 # Never edit this file in place while it runs: write a new file and mv it over.
-# The original of gauntlet tool entry integrate10; Integrate10.jet beside it is its Jet twin. The batches are in
+# The original of gauntlet tool entry integrate10; Integrate10.jet beside it is its Jet twin and the program in use,
+# and this file stays as the entry's reference. The batches are in
 # $JET_SCRATCH_ROOT/lanes/Main/integ, the dev worktree is $JET_DEV_WORKTREE and the seed $JET_SEED; integ-apply6.sh
 # and census-snap2.sh are the ones in $JET_ORCHESTRATOR_DIR (this file's directory unless set), and capped.sh and
 # runsub6.sh are Main's, in $JET_STATE_ROOT/scratch/Main (Tools/agent/roots.sh).

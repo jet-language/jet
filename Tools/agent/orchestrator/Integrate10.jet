@@ -5,9 +5,9 @@
 // and `cards`. Steps, all collect-all:
 //   1. export origin/dev to integ/BATCH/tree, apply INTEG_PRE's stacked SUBs
 //      ("BATCH:SUB ...", already tested in a batch still landing), then every
-//      SUB through integ-apply6.sh (a SUB that does not apply is reported and
+//      SUB through IntegApply6.jet (a SUB that does not apply is reported and
 //      skipped); a failed regeneration stops the pass (3);
-//   2. one census of the composed tree through census-snap2.sh under a 32G
+//   2. one census of the composed tree through CensusSnap2.jet under a 32G
 //      cap, then every ratchet check with the seed at once; every keep-going
 //      row is attributed to the SUBs whose touched files it names;
 //   3. if the build produced a compiler, every SUB's tests run with it four
@@ -19,10 +19,11 @@
 //
 // The Jet twin of integrate10.sh (gauntlet tool entry integrate10): the
 // batches are in $JET_SCRATCH_ROOT/lanes/Main/integ, the dev worktree is
-// $JET_DEV_WORKTREE and the seed $JET_SEED; integ-apply6.sh and
-// census-snap2.sh are the ones in $JET_ORCHESTRATOR_DIR (this program's
-// directory unless set), and capped.sh and runsub6.sh are Main's, in
-// $JET_STATE_ROOT/scratch/Main, the roots as Roots.jet finds them.
+// $JET_DEV_WORKTREE and the seed $JET_SEED; IntegApply6.jet and
+// CensusSnap2.jet are the ones in $JET_ORCHESTRATOR_DIR (this program's
+// directory unless set), run by $JET (`jet` on PATH unless set), and
+// capped.sh and runsub6.sh are Main's, in $JET_STATE_ROOT/scratch/Main, the
+// roots as Roots.jet finds them.
 use {
     files: core.files
     process: core.process
@@ -114,6 +115,7 @@ run: fn() {
     w: r["JET_DEV_WORKTREE"]
     g: "{r["JET_STATE_ROOT"]}/scratch/Main"
     o: process.env_nonempty("JET_ORCHESTRATOR_DIR") ?? files.dirname(sys.executable())
+    jet: process.env_nonempty("JET") ?? "jet"
     i: "{r["JET_SCRATCH_ROOT"]}/lanes/Main/integ/{batch}"
     t: "{i}/tree"
     files.remove_all(i) ?? ()
@@ -137,8 +139,8 @@ run: fn() {
         files.write("{i}/PRE", "{stacked.join("\n")}\n")
         print("PRE {files.basename(pd)} from {pb}")
     }
-    // Apply (three-way, generated files excluded and regenerated): integ-apply6.sh prints the applied SUBs last.
-    apply: Sh{"bash {"{o}/integ-apply6.sh"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
+    // Apply (three-way, generated files excluded and regenerated): IntegApply6.jet prints the applied SUBs last.
+    apply: Sh{"{jet} -A {"{o}/IntegApply6.jet"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
     files.write("{i}/apply.out", apply.output)
     if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(line -> line.starts_with("integ-apply:")).last() ?? ""}", 2)
     listing: apply.output.partition("--applied--\n")
@@ -157,7 +159,7 @@ run: fn() {
     loop s in applied -> touched.extend(lines_of("{i}/{files.basename(s)}.files"))
     touched = unique(touched)
     print("census start")
-    census: Sh{"bash {"{g}/capped.sh"} 32G bash {"{o}/census-snap2.sh"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
+    census: Sh{"bash {"{g}/capped.sh"} 32G {jet} -A {"{o}/CensusSnap2.jet"}"}.extend(touched).spec().env("CENSUS_TREE", t).env("CENSUS_OUT", "{i}/census").env("CAP_CPUS", "16-31").stderr(.Stdout).run()
     files.write("{i}/census.out", census.output)
     crc := census.code
     print("census rc={crc}")

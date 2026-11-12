@@ -5,7 +5,8 @@
 // Without --go: dry run printing the changes.
 //
 // The original of gauntlet tool entry tower-spec-apply; TowerSpecApply.jet beside
-// it is its Jet twin. Cards are read with `node Tools/tower/tower.mjs` in
+// it is its Jet twin and the program in use, and this file stays as the entry's
+// reference. Cards are read with `node Tools/tower/tower.mjs` in
 // $TOWER_SPEC_REPO (this checkout unless set) and written through Main's Tower
 // writer, $TOWER_SPEC_WRITER ($JET_STATE_ROOT/scratch/Main/tower-dev.mjs unless
 // set), which takes the card patches from $TOWER_SPEC_PATCHES

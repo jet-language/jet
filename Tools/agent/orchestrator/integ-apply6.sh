@@ -7,7 +7,8 @@
 # is NOAPPLY and leaves the tree as it was. Each applied SUB's effective diff (generated files excluded) is saved as
 # I/SUB.rebased for integ-land; the regeneration diff is I/regen.patch. Prints APPLIED/NOAPPLY lines and, last,
 # the applied SUB paths one per line after a line "--applied--".
-# The original of gauntlet tool entry integ-apply6; IntegApply6.jet beside it is its Jet twin. The base blobs are
+# The original of gauntlet tool entry integ-apply6; IntegApply6.jet beside it is its Jet twin and the program in
+# use, and this file stays as the entry's reference. The base blobs are
 # the objects of the repository $JET_DEV_WORKTREE belongs to, the generators run with the seed $JET_SEED, and
 # linemerge.mjs is Main's, in $JET_STATE_ROOT/scratch/Main (Tools/agent/roots.sh).
 set -u

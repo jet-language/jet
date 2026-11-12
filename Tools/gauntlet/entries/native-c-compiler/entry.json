@@ -1,0 +1,19 @@
+{
+  "name": "native-c-compiler",
+  "mode": "tool",
+  "description": "The native C compiler driver native-c-compiler.mjs and its Jet twin NativeCCompiler.jet in Tools/packaging (#5072 c9): run $CC (default cc) with the caller's arguments followed by the flags of Compiler/JetCli/Source/Cli/native-c-policy.tsv, give the child NIX_HARDENING_ENABLE without the policy's removed features (split on whitespace, single-space joined) and JET_NATIVE_C_WRAPPER_ACTIVE=1, and exit as the child exits, re-raising the signal that stopped it. A run that already has JET_NATIVE_C_WRAPPER_ACTIVE=1 stops with exit 2 before it starts a compiler, and a CC that cannot start fails with exit 1. The fixture's fake-cc prints each argument and the two variables, and exits with FAKE_CC_EXIT or stops itself with FAKE_CC_SIGNAL. Every case sets NIX_HARDENING_ENABLE, so the machine's own value leaks into nothing.",
+  "tool": {
+    "original": "Tools/packaging/native-c-compiler.mjs",
+    "jet": "Tools/packaging/NativeCCompiler.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["-DNAME=a b", "-c", "x y.c"], "env": {"CC": "./fake-cc", "NIX_HARDENING_ENABLE": "bindnow fortify format fortify3 stackprotector", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": ""}, "expected": "expected/flags.out"},
+      {"args": ["-v"], "env": {"CC": "./fake-cc", "NIX_HARDENING_ENABLE": " \tfortify3  pie\tfortify relro ", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": ""}, "expected": "expected/whitespace.out"},
+      {"args": ["-c"], "env": {"CC": "./fake-cc", "NIX_HARDENING_ENABLE": "", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "3", "FAKE_CC_SIGNAL": ""}, "exit": 3, "expected": "expected/exit.out"},
+      {"args": ["-S"], "env": {"CC": "./fake-cc", "NIX_HARDENING_ENABLE": "fortify3x fortify", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": "TERM"}, "exit": 143, "expected": "expected/signal.out"},
+      {"args": ["-c"], "env": {"CC": "./fake-cc", "NIX_HARDENING_ENABLE": "fortify", "JET_NATIVE_C_WRAPPER_ACTIVE": "1", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": ""}, "exit": 2, "expected": "expected/none.out"},
+      {"args": ["-c"], "env": {"CC": "./no-such-cc", "NIX_HARDENING_ENABLE": "fortify", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": ""}, "exit": 1, "expected": "expected/none.out"},
+      {"args": ["-c"], "env": {"CC": "", "NIX_HARDENING_ENABLE": "fortify", "JET_NATIVE_C_WRAPPER_ACTIVE": "", "FAKE_CC_EXIT": "", "FAKE_CC_SIGNAL": ""}, "exit": 1, "expected": "expected/none.out"}
+    ]
+  }
+}

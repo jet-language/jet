@@ -1,22 +1,3 @@
-#!/usr/bin/env jet
-// A stand-in for integrate10.sh: writes to integrate10.facts the batch and
-// SUBs it was given and what the seed it was handed in CENSUS_JET_DIR holds.
-use {
-    files: core.files
-    process: core.process
-}
-
-run: fn() {
-    seed: process.env_get("CENSUS_JET_DIR") ?? ""
-    here: files.cwd() ?? ""
-    facts := ["integrate10: CENSUS_JET_DIR={seed} args={process.args().join(" ")}"]
-    loop name in ["jet", "IDENTITY", "jet-runtime/lib.txt", "jet-runtime/sub/inner.txt"] -> facts.push("{name}: {(files.read("{seed}/{name}") ?? "missing").trim()}")
-    executable: if files.stat("{seed}/jet") == {
-        .Ok(info) -> info.mode % 128 >= 64
-        .Err(_) -> false
-    }
-    facts.push("jet is executable: {executable}")
-    facts.push("jet-runtime is a link: {files.is_symlink("{seed}/jet-runtime")}")
-    facts.push("jetpack -> {(files.read_link("{seed}/jetpack") ?? "none").removeprefix("{here}/")}")
-    files.write("integrate10.facts", "{facts.join("\n")}\n")
-}
+#!/bin/sh
+# A stand-in for integrate10.sh: the one stand-in body is Integrate10.jet beside it.
+exec "${JET:-jet}" -A "$(dirname "$0")/Integrate10.jet" "$@"

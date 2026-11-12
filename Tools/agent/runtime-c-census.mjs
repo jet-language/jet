@@ -7,7 +7,8 @@
 // them, repeated until nothing changes. Weak references pull nothing.
 //
 // The original of gauntlet tool entry runtime-c-census; its Jet twin is
-// RuntimeCCensus.jet beside it.
+// RuntimeCCensus.jet beside it, the program in use. This file stays as the
+// entry's reference.
 //
 //   node Tools/agent/runtime-c-census.mjs [options] <object>... -- <archive>...
 //

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lane-commit.sh <lane> <message file> <patch file>
-# The ONLY way lanes put changes onto dev. Lanes develop in their own export (outside the repo), never
+# Lands lane changes onto dev, as LaneCommit.jet, the program in use, does. Lanes develop in their own export (outside the repo), never
 # in the shared worktree. To commit: make a patch of your changes (repo-relative paths with a/ b/
 # prefixes; adds, deletes and renames are all fine), then run this script.
 #
@@ -14,7 +14,8 @@
 # apply, 5 precommit failed, 6 commit failed, 7 the lander was interrupted.
 # Never edit this file in place while it runs: write a new file and mv it over.
 #
-# The original of gauntlet tool entry lane-commit; LaneCommit.jet beside it is its Jet twin. The
+# The original of gauntlet tool entry lane-commit; LaneCommit.jet beside it is its Jet twin and the program in use,
+# and this file stays as the entry's reference. The
 # worktree is $LANE_COMMIT_WORKTREE, else $JET_DEV_WORKTREE; the queue, lock, hold switch and path
 # freeze are in $JET_RUN_ROOT; the precommit is Main's precommit.sh, in $JET_STATE_ROOT/scratch/Main
 # (Tools/agent/roots.sh). A relative root names a path in the caller's directory.

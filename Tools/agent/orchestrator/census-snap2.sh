@@ -9,7 +9,8 @@
 # CENSUS_BUILD=0 skips everything after the check. CENSUS_JET_DIR names another compiler install
 # (default: the seed). Exit: 0 clean; 1 rows/failure; 2 setup failure.
 # Never edit this file in place while it runs (bash reads scripts incrementally): write a new file and mv.
-# The original of gauntlet tool entry census-snap2; CensusSnap2.jet beside it is its Jet twin. The dev
+# The original of gauntlet tool entry census-snap2; CensusSnap2.jet beside it is its Jet twin and the program in
+# use, and this file stays as the entry's reference. The dev
 # worktree is $JET_DEV_WORKTREE, the seed $JET_SEED, the lock is in $JET_RUN_ROOT, and jetenv.sh,
 # census-errors.mjs, guards-gate.mjs, guards-known.txt, runtime-pack-check.sh and jpwrap.sh are Main's,
 # in $JET_STATE_ROOT/scratch/Main (Tools/agent/roots.sh).

@@ -2,7 +2,8 @@
 # verify-rows.sh ROWS OUTDIR [JET]: runs every "criterion<TAB>profile<TAB>filter" row of ROWS as
 # `jet test Compiler --profile P --filter F` from the dev worktree, six at a time on CPUs 0-11, and prints
 # one line per row: criterion, profile, filter, PASS count, FAIL count, rc. Used to prove "already met" claims.
-# The original of gauntlet tool entry verify-rows; its Jet twin is VerifyRows.jet beside it.
+# The original of gauntlet tool entry verify-rows; its Jet twin is VerifyRows.jet beside it, the program in use, and
+# this file stays as the entry's reference.
 set -u
 ROWS=${1:?rows}; OUT=${2:?outdir}; JETBIN=${3:-jet}
 . "$(dirname "$0")/../roots.sh"

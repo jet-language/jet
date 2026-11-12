@@ -8,7 +8,8 @@
 #        (this attributes failures in concatenated units such as the runtime pack's unit.jet, which have no rows);
 #      with every later SUB of the same lead. integrate3.sh BATCH-r then runs once more with the others.
 # integ-land3.sh lands from whichever pass is all OK.
-# The original of gauntlet tool entry batch10; Batch10.jet beside it is its Jet twin. The batches live in
+# The original of gauntlet tool entry batch10; Batch10.jet beside it is its Jet twin and the program in use, and
+# this file stays as the entry's reference. The batches live in
 # $JET_SCRATCH_ROOT/lanes/Main/integ (Tools/agent/roots.sh); integrate10.sh is the one in $JET_ORCHESTRATOR_DIR,
 # this directory unless set.
 set -u

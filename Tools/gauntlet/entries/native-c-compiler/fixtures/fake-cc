@@ -1,0 +1,9 @@
+#!/bin/sh
+# A stand-in C compiler for the native-c-compiler entry: prints each argument it
+# was given and the two variables the wrapper sets for it. FAKE_CC_EXIT is its
+# exit code, and FAKE_CC_SIGNAL a signal it stops itself with.
+for arg in "$@"; do printf 'arg %s\n' "$arg"; done
+printf 'NIX_HARDENING_ENABLE=%s\n' "${NIX_HARDENING_ENABLE-unset}"
+printf 'JET_NATIVE_C_WRAPPER_ACTIVE=%s\n' "${JET_NATIVE_C_WRAPPER_ACTIVE-unset}"
+[ -n "${FAKE_CC_SIGNAL:-}" ] && kill -s "$FAKE_CC_SIGNAL" $$
+exit "${FAKE_CC_EXIT:-0}"

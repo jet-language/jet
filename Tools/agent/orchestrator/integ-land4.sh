@@ -4,7 +4,8 @@
 # SUB's status is OK, and origin/dev is still the batch's BASE (any other movement means the composed tree was not
 # the one tested: rerun integrate.sh). Commits in the dev worktree stage exactly each patch's files; the author's
 # lane name goes in a Lane: trailer. Pushes once, then appends the shas to batch-queue.txt.
-# The original of gauntlet tool entry integ-land4; IntegLand4.jet beside it is its Jet twin. The batches live in
+# The original of gauntlet tool entry integ-land4; IntegLand4.jet beside it is its Jet twin and the program in use,
+# and this file stays as the entry's reference. The batches live in
 # $JET_SCRATCH_ROOT/lanes/Main/integ, the dev worktree is $JET_DEV_WORKTREE, and treeonly.mjs, batch-queue.txt and
 # landed-subs.txt are Main's, in $JET_STATE_ROOT/scratch/Main (Tools/agent/roots.sh).
 set -u

@@ -7113,7 +7113,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/packaging/NativeCCompiler.jet",
-      "line": 117,
+      "line": 68,
       "column": 9,
       "reason": "re-raise the compiler's terminating signal on this process, as the parent shell expects"
     },
@@ -11188,7 +11188,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
-| Tools | Tools/packaging/NativeCCompiler.jet | 117:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
+| Tools | Tools/packaging/NativeCCompiler.jet | 68:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
