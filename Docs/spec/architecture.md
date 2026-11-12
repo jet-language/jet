@@ -1969,7 +1969,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   stdin, and accepts at most the snapshot's `max_response_bytes` on stdout.
   Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
   kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
-  missing sibling all map to Jet-owned E1402.
+  missing sibling all fail closed as one Jet-owned failure; its registered
+  code is card #6516's work.
 - **E2E harness:** `Jetpack/CLI/Tests/CompilerExtensionHost.jet` drives the
   hidden host verb and pins its fail-closed answer: a snapshot that decodes
   is refused with the host-unavailable message and a nonzero exit, and no
@@ -1978,7 +1979,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   path (expert env registration — no new user syntax until a spelling ballot),
   `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
   exchanges it with the sibling host, then maps validated findings to `L1401`
-  or host/process failures to `E1402`.
+  and fails closed on host/process failures (card #6516).
 
 ## Rules
 

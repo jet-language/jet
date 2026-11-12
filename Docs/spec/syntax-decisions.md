@@ -2687,8 +2687,9 @@ not a user-typeable comptime value; the registered fact spelling is
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
 `const`/`comptime` bindings. `category` is a non-empty plain string literal and
-`tunable` is a bare flag. Unknown fields are E0345 with did-you-mean help,
-duplicate fields are E0346, wrong `category` value type is E0347, empty category
+`tunable` is a bare flag. An unknown field is E0930 (the arguments do not match
+the registered `Meta` signature), duplicate fields are E0346, wrong `category`
+value type is E0347, empty category
 is E0348, and expression-position use is E0349. `#Meta` has no runtime
 semantics and emits no code; it is checked source data for Canvas/tooling only.
 New fields require a future ballot.

@@ -74,7 +74,8 @@ pretending that a failed front end was checked.
 **Consequence.** `jet prove` invokes the existing test producer with the same
 member ordering and does not measure a budget. Compatible budget reports are
 projected as evidence; malformed or rejected reports are unavailable rather
-than invented. The `E2940` contract is:
+than invented. The missing-evidence contract (its registered code is card
+#240's work) is:
 
 - What `required proof evidence is unavailable`;
 - Why `the complete_required policy needs {producer}, but {reason}`;
@@ -128,8 +129,9 @@ means an applicable producer could not start or lacked input, with one of
 `producer_start_failed`. `skipped` means deliberate non-execution, with one of
 `prior_frontend_failure`, `prior_runtime_panic`, `not_executed_by_mode`, or
 `fail_fast_policy`. Existing E0613, E0965, E2901, E3001, and E3005 copy through
-unchanged. E2940 requires its registry entry, UI snapshot, `jet explain`,
-generated reference, and I4 coverage before use. (D-PROVE-SEM1=A)
+unchanged. The missing-evidence code (card #240) requires its registry entry,
+UI snapshot, `jet explain`, generated reference, and I4 coverage before use.
+(D-PROVE-SEM1=A)
 
 ## Report shape and diagnostics
 
@@ -486,7 +488,7 @@ The replay code allocation keeps these What/Why/Fix meanings:
 | E3623 | `replay diverged at record {sequence}` | the request, order, site, shape, or outcome differs | recapture and replay the matching target |
 | E3624 | `replay target cardinality is not one` | target selection produced zero or multiple candidates | select one runnable target |
 | E3625 | `replay capture cannot model {operation}` | an effect, native, task, opaque, or adapter boundary is unsupported | change the source or target to a supported boundary |
-| E3626 | `replay capture lacks {effect} authority` | an existing lexical or invocation grant is missing | add that existing grant or change the target |
+| card #521 | `replay capture lacks {effect} authority` | an existing lexical or invocation grant is missing | add that existing grant or change the target |
 | E3627 | `replay capture refused sensitive data` | raw or tainted data would be stored without the required consent | provide sanitized input or use the approved sensitive path |
 | E3628 | `replay capture exceeded its artifact limit` | actual frames or bytes exceed the bound | reduce the captured input |
 | E3629 | `replay artifact could not be finalized` | the exact destination, race, or filesystem durability check failed | fix the path and retry |
@@ -591,7 +593,8 @@ false claim actionable.
 `structural_limit`, `step_limit`, `coefficient_overflow`, and
 `machine_overflow`. Unavailable is reserved for no selected backend or target,
 with `backend_not_shipped` or `unsupported_target`. Unknown or unavailable is
-incomplete under `allow_incomplete`; `complete_required` uses E2940. A verified
+incomplete under `allow_incomplete`; `complete_required` reports it as missing
+evidence (card #240). A verified
 counterexample adds E2950 and fail/1 unless runtime 70 or ICE 101 takes
 precedence. The owner copy remains verbatim:
 
@@ -680,7 +683,7 @@ item outside the selection under `OUTSIDE SELECTED LENSES`.
 hide incomplete evidence, alter work, or change report identity.
 
 **Consequence.** A lens cannot change pass/fail, pass_incomplete, exit 0/1/2/70/
-101, or hide E0965, E2901, E3001, E3005, E2940, or E2950. `--json` and
+101, or hide E0965, E2901, E3001, E3005, missing evidence, or E2950. `--json` and
 `.jetproof` retain the complete report; selecting a presentation lens leaves
 that report and its report ID unchanged. The focused lens tests compare the
 full JSON bytes, assert canonical duplicate-union output

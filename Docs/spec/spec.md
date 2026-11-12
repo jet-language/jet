@@ -3148,7 +3148,8 @@ arguments. Repeating the same application shares nominal member types and one
 specialization; different arguments or a different template definition produce
 different instances. Semantic checks reject invalid targets, arity, bounds,
 value kinds and types, scope, and cycles with **E0850**–**E0853** and
-**E0855**–**E0857**; a specialization identity collision is **E0859**. The
+**E0855**–**E0857**; a specialization identity collision is an internal
+compiler error (exit 101; card #521). The
 value-argument example is `Examples/Modules/FactValueArguments.jet`.
 
 An instance's member bodies are its template's text, checked once per
@@ -4387,8 +4388,9 @@ expected value, applies the mutation, and returns a `WebMutationState`;
 
 Keys are at most 256 bytes, payloads at most 1 MiB, and subscribers and
 invalidation targets are bounded by the Core limit of 1,000,000. Reusing a key
-with a different dependency footprint is E2473: a key must have one
-invalidation declaration. Offline mode reports `WebQueryError.Offline` rather
+with a different dependency footprint is a runtime contract error (card
+#3709): a key must have one invalidation declaration. Offline mode reports
+`WebQueryError.Offline` rather
 than pretending that a mutation was durable. The offline-first runtime persists
 queued payloads and invalidation targets under
 `$JET_WEB_QUERY_QUEUE_PATH`, `$XDG_STATE_HOME/jet/web-query-queue.v1`, or

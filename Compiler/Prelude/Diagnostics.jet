@@ -2570,21 +2570,6 @@ CompilerExtension: struct {
     }
 }
 
-CompilerExtensionFailed: struct {
-    message: String
-
-    impl Diagnostic {
-        code: "E1402"
-        stage: [.Jet]
-        meaning: "Compiler-extension host failure (load/analyze/validate fail-closed)"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "Compiler-extension failed: {self.message}" }
-        why: fn(self) -> String { "The configured compiler-extension component could not complete `analyze`, or returned an invalid response. Guests are sandboxed; failures stay Jet-owned (I2)." }
-        fix: fn(self) -> String { "Fix the component, or unset `JET_COMPILER_EXTENSION` to skip the extension." }
-    }
-}
-
 NestingTooDeep: struct {
     depth: String
 
@@ -3113,18 +3098,6 @@ DuplicateSwitchOff: struct {
         what: fn(self) -> String { "Only one switch-off attribute can be written on a statement." }
         why: fn(self) -> String { "Two `#Off` markers both control whether the same statement emits code." }
         fix: fn(self) -> String { "Keep one marker: `#Off <statement>` or `#Off(.Release) <statement>`." }
-    }
-}
-
-UnknownMetaField: struct {
-    impl Diagnostic {
-        code: "E0345"
-        edit: .SuggestedSourceEdit
-        no_fix: None
-        fix_safety: .NeedsReview
-        what: fn(self) -> String { "`#Meta` unknown field" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Remove the unknown `#Meta` field or replace it with a supported field." }
     }
 }
 
@@ -6122,23 +6095,6 @@ CompilerValueOutsideRoot: struct {
     }
 }
 
-LiveQueryFootprintConflict: struct {
-    key: String
-    registered: String
-    requested: String
-
-    impl Diagnostic {
-        code: "E2473"
-        stage: [.Runtime]
-        meaning: "A live query key is already registered with a different dependency footprint"
-        no_fix: .Ambiguous
-        fix_next: "Use one dependency footprint per query key, or choose a new key."
-        what: fn(self) -> String { "Query key `{self.key}` already uses footprint `{self.registered}`; requested `{self.requested}`" }
-        why: fn(self) -> String { "An explicit key is the sole cache identity. Registering it with a second footprint would make invalidation ambiguous and split one logical query into multiple cache entries." }
-        fix: fn(self) -> String { "Use the existing footprint for `{self.key}`, or choose a new key for the new dependency declaration." }
-    }
-}
-
 FormActionInputMismatch: struct {
     action: String
     form: String
@@ -7533,19 +7489,6 @@ ModuleValueNotConstant: struct {
         what: fn(self) -> String { "Generic-module value argument is not a closed compile-time value" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Pass a closed compile-time value as the generic-module argument." }
-    }
-}
-
-ModuleFingerprintCollision: struct {
-    impl Diagnostic {
-        code: "E0859"
-        stage: [.Compile]
-        meaning: "distinct generic-module full keys produced one fingerprint (ICE 101)"
-        no_fix: .Behavior
-        fix_next: "Report the generic-module identity collision with the two distinct keys."
-        what: fn(self) -> String { "Distinct generic-module full keys produced one fingerprint (ICE 101)" }
-        why: fn(self) -> String { "The registered compiler rule applies here. During `jet check`, Jet reports this diagnostic." }
-        fix: fn(self) -> String { "Record the two distinct generic-module keys and rerun `jet check`; report the keys if the collision repeats." }
     }
 }
 
@@ -9923,21 +9866,6 @@ UnknownFleetSystem: struct {
     }
 }
 
-FleetPushNotSupported: struct {
-    fleet: String
-
-    impl Diagnostic {
-        code: "E1243"
-        stage: [.Jet]
-        meaning: "`jet push <fleet>` on a valid fleet — deployment gated on single-host jetos realization (U15, Phase D)"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "Fleet `{self.fleet}` is validated, but `jet push` is not available yet." }
-        why: fn(self) -> String { "The fleet's hosts parse and cross-check clean, but rolling a fleet out over ssh needs single-host jetos realization, which is gated (U15; Phase D, owner greenlight required). `jet push` never fakes a deploy." }
-        fix: fn(self) -> String { "Until the jetos realization tier lands, `jet push` captures and validates fleets without deploying them." }
-    }
-}
-
 UnknownFleetField: struct {
     field: String
 
@@ -10974,23 +10902,6 @@ HangarIngestFailed: struct {
     }
 }
 
-AmbiguousPackageVariant: struct {
-    need: String
-    candidates: String
-    axis: String
-
-    impl Diagnostic {
-        code: "E1316"
-        stage: [.Jetpack]
-        meaning: "Ambiguous or unmatched typed package variant selection (E4-JP15)"
-        detail: true
-        no_fix: .Ambiguous
-        what: fn(self) -> String { "Ambiguous package variants for need `{self.need}`: {self.candidates} (first distinguishing axis: {self.axis})" }
-        why: fn(self) -> String { "Matching is exact-then-compatible under one total order; an ambiguous tie is never a silent pick. Provider facts affect selection only through explicit `variant_map` entries." }
-        fix: fn(self) -> String { "Add a `variant_map`, pin one candidate, or make the need more specific on the named axis." }
-    }
-}
-
 RetiredRefSpelling: struct {
     impl Diagnostic {
         code: "E1317"
@@ -11926,17 +11837,6 @@ AmbiguousErrorConversion: struct {
     }
 }
 
-InvalidRename: struct {
-    impl Diagnostic {
-        code: "E2407"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "`#Rename(...)` needs a string literal." }
-        why: fn(self) -> String { "The wire key a `#Codable` field maps to is a constant string; a number or expression has no place on the wire." }
-        fix: fn(self) -> String { "Pass one quoted string — `#Rename(\"wire_name\")`." }
-    }
-}
-
 FlattenNonStruct: struct {
     field: String
 
@@ -12734,20 +12634,6 @@ DoctestMismatch: struct {
     }
 }
 
-MissingProofEvidence: struct {
-    producer: String
-    reason: String
-
-    impl Diagnostic {
-        code: "E2940"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "Required proof evidence is unavailable" }
-        why: fn(self) -> String { "The `complete_required` policy needs `{self.producer}`, but `{self.reason}`." }
-        fix: fn(self) -> String { "Perform the producer-specific action named by `jet prove`, then run the same command again." }
-    }
-}
-
 UnknownProofLens: struct {
     value: String
 
@@ -12907,19 +12793,6 @@ UnmodeledReplayOperation: struct {
         what: fn(self) -> String { "Replay capture cannot model `{self.operation}`" }
         why: fn(self) -> String { "The reachable operation has no bounded replay adapter, including opaque, native, task, or unsupported effect boundaries." }
         fix: fn(self) -> String { "Route the operation through a supported deterministic input, or remove it from the captured target." }
-    }
-}
-
-ReplayAuthorityMissing: struct {
-    effect_name: String
-
-    impl Diagnostic {
-        code: "E3626"
-        stage: [.Compile]
-        detail: true
-        what: fn(self) -> String { "Replay capture lacks `{self.effect_name}` authority" }
-        why: fn(self) -> String { "The operation's existing lexical or invocation authority is missing; capture never grants it implicitly." }
-        fix: fn(self) -> String { "Add the exact existing authority or change the target before capture." }
     }
 }
 

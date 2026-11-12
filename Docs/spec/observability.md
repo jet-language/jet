@@ -112,7 +112,7 @@ invalidation targets. Query and mutation payloads and handler results remain in
 typed runtime state.
 
 Query keys are cache identities. Reusing a key with a different footprint is
-E2473, a runtime contract error, not a second cache row. A mutation without
+a runtime contract error (card #3709), not a second cache row. A mutation without
 explicit targets revalidates the declaring query's footprint; explicit
 `key:<key>` and footprint targets remain in the fact.
 
