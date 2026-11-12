@@ -279,15 +279,23 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
 // `target.marker(T) != None`: whether the value is absent, or None when
 // neither side is `None` or the other side is no known-time Option.
 sema_derive_static_absence: fn(expansion: SemaDeriveExpansion, left: Expr, right: Expr) -> Bool? Never! {
-    if left == .Absent(_, _) {
+    if sema_derive_none_literal(left) {
         value: sema_derive_static_value(expansion, right) ?? return None
         return sema_derive_ct_absent(value)
     }
-    if right == .Absent(_, _) {
+    if sema_derive_none_literal(right) {
         value: sema_derive_static_value(expansion, left) ?? return None
         return sema_derive_ct_absent(value)
     }
     None
+}
+
+// Whether `expression` is the written `None`, which parses as the bare
+// variant `None` with no arguments.
+sema_derive_none_literal: fn(expression: Expr) -> Bool Never! {
+    if expression == .Absent(_, _) -> return true
+    if expression == .EnumLit(type_name, variant, _, args, _, _, _) -> return type_name == "" && variant == "None" && args.len() == 0
+    false
 }
 
 sema_derive_ct_absent: fn(value: CtValue) -> Bool? Never! {

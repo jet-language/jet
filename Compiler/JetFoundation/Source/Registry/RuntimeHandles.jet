@@ -563,6 +563,12 @@ ir_runtime_handle_row: fn(name: String) -> Int? Never! {
 // `info.marker(T)` reads its `T` from. No program can name it.
 IR_MARKER_ARG_VALUE: "MarkerArgValue"
 
+// The type of a Prelude marker's record (Compiler/Prelude/Markers.jet), which
+// `info.marker(T)` returns for a `T` the program does not declare: a host word
+// in compile-time code, whose fields the evaluator answers. No program can
+// name it.
+IR_PRELUDE_MARKER_RECORD: "PreludeMarkerRecord"
+
 // A compiler value with no declaration that build and comptime code hold
 // (the build context and its handles, `Dev`, the ProgramInfo snapshot and
 // its reflection records, the `core.compiler` query results and their
@@ -578,7 +584,7 @@ ir_host_value_name: fn(name: String) -> Bool Never! {
         "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
         "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
         "CompilerLock" | "CompilerLockedPackage" | "CompilerProfileSet" | "CompilerProfile" | "CompilerKeyValue" -> true
-        "MarkerArgValue" -> true
+        "MarkerArgValue" | "PreludeMarkerRecord" -> true
         else -> false
     }
 }

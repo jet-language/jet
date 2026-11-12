@@ -8,6 +8,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     InternalTag,
+    IR_PRELUDE_MARKER_RECORD,
     MarkerDecl,
     ParamZone,
     Span,
@@ -311,8 +312,9 @@ sema_call_reflection_marker_lookup: fn(
     written: sema_call_reflection_marker_name(args[0].expr) ?? ""
     declaration := MarkerDecl?{None}
     if written != "" && program.registration_graph == .Val(graph) -> declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
-    // A Prelude marker is no type in the program: its record is named for it
-    // and keeps only the defaults that check where the lookup is written.
+    // A Prelude marker is no type in the program: its record is a compiler
+    // value the evaluator holds, and keeps only the defaults that check where
+    // the lookup is written.
     prelude := false
     if declaration == None && written != "" && !written.contains(".") {
         declaration = sema_marker_module_prelude_declaration(written)
@@ -340,7 +342,7 @@ sema_call_reflection_marker_lookup: fn(
         host_args.push(sema_call_reflection_text(param.name, span))
         host_args.push(checked)
     }
-    marker_type: if prelude -> Type.Named{name: marker.name.copy()} else -> sema_call_resolved_type(Type.Named{name: written}, environment, program)
+    marker_type: if prelude -> Type.Named{name: IR_PRELUDE_MARKER_RECORD} else -> sema_call_resolved_type(Type.Named{name: written}, environment, program)
     value := sema_tree_node(Type.Option{inner: marker_type}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "marker", args: host_args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
