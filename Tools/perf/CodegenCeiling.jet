@@ -7,7 +7,8 @@
 // runs it against expected.out, and disassembles each function with
 // objdump. A row's symbol names the function exactly or as the prefix of a
 // specialized name (`main_list_sum` matches `main_list_sum__value_<hash>`).
-// It counts:
+// A row also counts the parts the backend moved out of its function (PART),
+// as if they were still in it. It counts:
 // - insns: instructions in the function;
 // - pushes and pops: saves and restores of callee-saved registers;
 // - frame_slots: instructions that address a frame slot below rbp (spills,
@@ -485,19 +486,37 @@ run_command: fn(command: [String], cwd: String, scratch: String) -[Exec, Env, IO
     Ok(receipt.output)
 }
 
-// The one function of `nm` output that a row's symbol names: the symbol
-// itself, or a specialization of it. Err when none or several match.
-resolve: fn(symbols: String, symbol: String) -> String Err! {
-    found := [String]{}
+// A part of a function the backend moved out of it: a continuation the
+// function leaves to (`<symbol>__general_<hash>`, and its tail-call
+// variants `.own<mask>`). A row counts its function's parts with it, so a
+// split lowers a count only by removing instructions.
+PART: "__general_"
+
+// The functions of `nm` output that a row's symbol names: first the
+// function, the symbol itself or a specialization of it, then its parts
+// (PART). Err when no function or several match.
+resolve: fn(symbols: String, symbol: String) -> [String] Err! {
+    names := [String]{}
     loop line in symbols.split("\n") {
         words: line.split(" ").to_list()
-        if words.len() != 3 -> next
-        name: words[2]
-        if name == symbol || name.starts_with("{symbol}__") -> found.push(name.copy())
+        if words.len() == 3 -> names.push(words[2].copy())
+    }
+    found := [String]{}
+    loop name in names {
+        if !name.contains(PART) && (name == symbol || name.starts_with("{symbol}__")) -> found.push(name.copy())
     }
     if found.len() == 0 -> return Err("no function {symbol} in the release build")
     if found.len() > 1 -> return Err("{symbol} names {found.len()} functions: {found.join(", ")}")
-    Ok(found[0].copy())
+    function: found[0].copy()
+    loop name in names {
+        if name.starts_with("{function}{PART}") -> found.push(name.copy())
+    }
+    Ok(found)
+}
+
+// The counts of several functions as one.
+add_counts: fn(a: Counts, b: Counts) -> Counts Never! {
+    Counts{insns: a.insns + b.insns, pushes: a.pushes + b.pushes, pops: a.pops + b.pops, frame_slots: a.frame_slots + b.frame_slots, loops: a.loops + b.loops, loop_insns: a.loop_insns + b.loop_insns}
 }
 
 gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
@@ -516,17 +535,20 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
     failures := 0
     lines := [String]{HEADER}
     loop row in rows {
-        name := ""
+        functions := [String]{}
         if resolve(symbols, row.symbol) == {
-            .Ok(found) -> name = found
+            .Ok(found) -> functions = found
             .Err(error) -> term.eprint("MISSING {error}")
         }
-        if name == "" {
+        if functions.is_empty() {
             failures += 1
             next
         }
-        listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary}, run_dir, scratch) ?? return fail("{err}")
-        current: count_listing(listing)
+        current := Counts{insns: 0, pushes: 0, pops: 0, frame_slots: 0, loops: 0, loop_insns: 0}
+        loop name in functions {
+            listing: run_command([String]{"objdump", "-d", "--no-show-raw-insn", "--disassemble={name}", binary}, run_dir, scratch) ?? return fail("{err}")
+            current = add_counts(current, count_listing(listing))
+        }
         print("{row.symbol}\t{counts_line(current)}\tgolden {counts_line(row.golden)}\tceiling {row.ceiling}\tgap {gap(current.loop_insns, row.ceiling)}")
         worse: regressions(row.golden, current)
         loop item in worse -> term.eprint("REGRESSION {row.symbol}: {item}")
@@ -670,9 +692,20 @@ run: fn() {
 
 #Test("a row's symbol names its function or one specialization of it") {
     symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main_list_sum__value_dac2\n000000000040e720 t main_list_sum_wide__value_ba4a\n"
-    assert_eq(resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}"), "jet_rt_alloc_8")
-    assert_eq(resolve(symbols, "main_list_sum") ?? panic("{err}"), "main_list_sum__value_dac2")
+    assert_eq((resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}")).join(" "), "jet_rt_alloc_8")
+    assert_eq((resolve(symbols, "main_list_sum") ?? panic("{err}")).join(" "), "main_list_sum__value_dac2")
     assert(resolve(symbols, "main_point_sum") == .Err(_))
     twice: "1 t main_k__a\n2 t main_k__b\n"
     assert(resolve(twice, "main_k") == .Err(_))
+}
+
+#Test("a row counts the continuations its function leaves to as part of it") {
+    symbols: "1 t main_list_sum__value_dac2\n2 t main_list_sum__value_dac2__general_77aa\n3 t main_list_sum__value_dac2__general_77aa.own3\n4 t main_list_sum_wide__value_ba4a__general_10ff\n"
+    found: resolve(symbols, "main_list_sum") ?? panic("main_list_sum does not resolve")
+    assert_eq(found.join(" "), "main_list_sum__value_dac2 main_list_sum__value_dac2__general_77aa main_list_sum__value_dac2__general_77aa.own3")
+    // The kernel keeps its fast loop; the continuation holds the general one.
+    kernel: count_listing("  10:\tpush   %rbx\n  11:\tadd    (%rax),%rcx\n  14:\tjne    11 <k+0x1>\n  16:\tpop    %rbx\n  17:\tret\n")
+    general: count_listing("  20:\tpush   %rbx\n  21:\tmov    %rcx,-0x8(%rbp)\n  25:\tcall   30 <jet_int_add>\n  2a:\tjmp    21 <c+0x1>\n")
+    both: add_counts(kernel, general)
+    assert_eq(counts_line(both), "9\t2\t1\t1\t2\t5")
 }
