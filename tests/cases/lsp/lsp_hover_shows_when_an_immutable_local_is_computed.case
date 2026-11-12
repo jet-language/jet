@@ -1,0 +1,21 @@
+# (#4276 c48) Hover on an immutable local says whether it is computed while
+# compiling (with its value) or at run time (with the reason it waits).
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "hoverProvider" # the server answers initialize before any hover
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_local_stage.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"stages: fn(count: Int) -> Int {\\n    base: 40\\n    shown: count + base\\n    shown + base\\n}\\nrun: fn() {\\n    total: stages(2)\\n}\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # the document is checked before the hovers
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_local_stage.jet\"},\"position\":{\"line\":1,\"character\":5}}}"
+recv lsp
+stdout: ~ "Computed while compiling: `40`." # the literal local holds its value from the build
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_local_stage.jet\"},\"position\":{\"line\":2,\"character\":5}}}"
+recv lsp
+stdout: ~ "Computed at run time: it reads `count`, which only the running program knows." # the parameter read keeps it at run time
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+stdout: ~ "result" # shutdown answers
+close lsp
+exit: any # the session ends when the server closes

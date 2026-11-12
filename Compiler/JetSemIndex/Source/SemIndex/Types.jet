@@ -87,8 +87,16 @@ SemKind: enum {
     Param(ty: Type)
 }
 
+// When an immutable `name: value` local is computed (semindex_local_stages):
+// while compiling, with the value it holds (`value` is "" when that value is
+// too long to show), or at run time, with the reason it waits.
+SemLocalStage: enum {
+    Build(value: String)
+    Run(reason: String)
+}
+
 // `qualified_name` is the canonical display path the walk records with the
-// definition.
+// definition; `local_stage` is set on an immutable local whose stage is known.
 SemDef: struct {
     identity: String
     name: String
@@ -96,6 +104,7 @@ SemDef: struct {
     def_span: Span
     module_path: String
     kind: SemKind
+    local_stage: SemLocalStage?{None}
 }
 
 SemAnchor: struct {

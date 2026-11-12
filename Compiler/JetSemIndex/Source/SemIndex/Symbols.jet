@@ -887,6 +887,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         if def.kind == {
             .Local(mutable, _) -> {
                 if docs.summary == "" -> docs.summary = if mutable -> "mutable binding" else -> "immutable binding"
+                if def.local_stage == .Val(stage) -> docs.summary = "{docs.summary}\n\n{semindex_local_stage_text(stage)}"
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
             }
             .Param(_) -> scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)

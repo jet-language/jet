@@ -1,0 +1,173 @@
+// When each immutable `name: value` local of the checked bodies is computed.
+// A local whose checked initializer folds to data (sema's comptime fold: the
+// literals, arithmetic over them, and the aggregates built from them) is
+// computed while compiling and holds that value. A local that reads a value
+// only the running program has, calls a function that reaches the outside
+// world, or holds a value no build can keep waits for run time, and its row
+// names the first such reason. A local that is neither has no row.
+use {
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[
+        BodyTree,
+        FnBody,
+        Span,
+        TLocal,
+        Type,
+        ast_comptime_value_debug,
+        authority_effect_action,
+        authority_is_deny_only,
+        body_each_expr_child,
+        body_node,
+        type_name,
+    ]
+    jet_sema.[
+        SemaComptimeItemValue,
+        sema_comptime_fold,
+        sema_user_template_ct_value,
+    ]
+}
+
+// The longest value a stage row shows; a longer one is reported without it.
+SEMINDEX_LOCAL_STAGE_VALUE_LIMIT: 120
+
+// The stage of every immutable local of `doc_module`'s checked bodies, keyed
+// as semindex_local_types keys its type. `summaries` holds the solved effect
+// rows of the indexed functions (semindex_summaries).
+semindex_local_stages: fn(doc_module: JetDriverDocModule, summaries: [SemSummary]) -> [String: SemLocalStage] Never! {
+    by_raw_key := [String: Int]{}
+    loop (row, summary) in summaries {
+        if by_raw_key.get(summary.raw_key) == None -> _ := by_raw_key.add(summary.raw_key, row)
+    }
+    stages := [String: SemLocalStage]{}
+    loop function in doc_module.functions {
+        if function.synthetic -> next
+        // Source order: a local reads the stage of the locals before it.
+        lets := [Int]{}
+        loop (row, statement) in function.tree.stmts {
+            if statement == .Let(local, _, _, _, _, _) {
+                if !local.mutable && !local.generated -> lets.push(row)
+            }
+        }
+        loop index in 1..<lets.len() {
+            value: lets[index]
+            start: semindex_local_stage_start(function.tree, value)
+            position := index
+            loop position > 0 && semindex_local_stage_start(function.tree, lets[position - 1]) > start {
+                lets[position] = lets[position - 1]
+                position -= 1
+            }
+            lets[position] = value
+        }
+        loop row in lets {
+            if function.tree.stmts[row] == .Let(local, _, init, _, _, _) {
+                key: semindex_local_type_key(local.name, local.span)
+                // A generic body's instances share spans and keep the first.
+                if stages.get(key) != None -> next
+                stage: semindex_local_stage(function, local, init, stages, summaries, by_raw_key, doc_module) ?? next
+                stages[key] = stage
+            }
+        }
+    }
+    stages
+}
+
+// The stage as hover prose.
+semindex_local_stage_text: fn(stage: SemLocalStage) -> String Never! {
+    if stage == {
+        .Build(value) -> if value == "" -> "Computed while compiling." else -> "Computed while compiling: `{value}`."
+        .Run(reason) -> "Computed at run time: {reason}."
+    }
+}
+
+semindex_local_stage_start: fn(tree: BodyTree, row: Int) -> Int Never! {
+    if tree.stmts[row] == .Let(local, _, _, _, _, _) -> return local.span.start
+    0
+}
+
+semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String: SemLocalStage], summaries: [SemSummary], by_raw_key: [String: Int], doc_module: JetDriverDocModule) -> SemLocalStage? Never! {
+    if sema_comptime_fold(function.tree, init, [SemaComptimeItemValue]{}) == .Val(value) {
+        shown := ""
+        // The source-like spelling: a string or character shows quoted.
+        if sema_user_template_ct_value(value) == .Val(checked) -> shown = ast_comptime_value_debug(checked)
+        if shown.len() > SEMINDEX_LOCAL_STAGE_VALUE_LIMIT -> shown = ""
+        return Val(SemLocalStage.Build{value: shown})
+    }
+    span: body_node(function.tree, init).span
+    // The first read, in source order, of a value only the running program
+    // has: a parameter, a mutable local, or a local computed at run time. A
+    // binder inside the initializer (a lambda parameter, a block's own local)
+    // and a compiler temporary are part of the initializer itself.
+    read := String?{None}
+    read_at := 0
+    printed := false
+    pending := [Int]{init}
+    cursor := 0
+    loop cursor < pending.len() {
+        node: body_node(function.tree, pending[cursor])
+        cursor += 1
+        if node.kind == .Local(value) {
+            inner: semindex_local_stage_within(value.span, span)
+            if !value.generated && !inner && (read == None || node.span.start < read_at) {
+                compiled := false
+                if stages.get(semindex_local_type_key(value.name, value.span)) == .Val(known) {
+                    if known == .Build(_) -> compiled = true
+                }
+                if !compiled {
+                    read = Val(value.name.copy())
+                    read_at = node.span.start
+                }
+            }
+        }
+        if node.kind == .Print(_) -> printed = true
+        body_each_expr_child(function.tree, node, (child: Int) -> pending.push(child))
+    }
+    if read == .Val(name) -> return Val(SemLocalStage.Run{reason: "it reads `{name}`, which only the running program knows"})
+    if printed -> return Val(SemLocalStage.Run{reason: "it prints text"})
+    if semindex_local_stage_effect(function, span, summaries, by_raw_key, doc_module) == .Val(reason) -> return Val(SemLocalStage.Run{reason: reason})
+    if semindex_local_stage_unstorable(local.ty) -> return Val(SemLocalStage.Run{reason: "it holds a `{type_name(local.ty)}`, which a build can't keep"})
+    None
+}
+
+// The first call inside `span` whose callee reaches the outside world: a
+// solved effect of an indexed callee, or the written row of a callee outside
+// the indexed modules, that is not deny-only (a stop, memory, or waiting on
+// the program's own work).
+semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSummary], by_raw_key: [String: Int], doc_module: JetDriverDocModule) -> String? Never! {
+    found := String?{None}
+    found_at := 0
+    loop fact in doc_module.call_facts {
+        if fact.caller_key != function.key || !semindex_local_stage_within(fact.span, span) -> next
+        if found != None && fact.span.start >= found_at -> next
+        target: fact.callee ?? next
+        row := [String]{}
+        if by_raw_key.get(target.key) == .Val(index) {
+            row = summaries[index].solved.copy()
+        } else if fact.facts.effect_bound == .Val(bound) {
+            row = loop entry in bound -> entry.name.copy()
+        }
+        loop effect_name in row {
+            if authority_is_deny_only(effect_name) -> next
+            callee: if semindex_function_key(target.key) == .Val(key) -> key.local else -> target.key.copy()
+            found = Val("it calls `{callee}`, which {authority_effect_action(effect_name)}")
+            found_at = fact.span.start
+            break
+        }
+    }
+    found
+}
+
+// A value a build can't hand to the running program: a function, a shared
+// cell, a trait object, or a collection or option of one.
+semindex_local_stage_unstorable: fn(ty: Type) -> Bool Never! {
+    if ty == .Fn(_, _, _, _, _, _) -> return true
+    if ty == .Shared(_) -> return true
+    if ty == .TraitObject(_) -> return true
+    if ty == .List(element) -> return semindex_local_stage_unstorable(element)
+    if ty == .Option(inner) -> return semindex_local_stage_unstorable(inner)
+    if ty == .Map(_, _, value) -> return semindex_local_stage_unstorable(value)
+    false
+}
+
+semindex_local_stage_within: fn(inner: Span, outer: Span) -> Bool Never! {
+    inner.start >= outer.start && inner.end <= outer.end
+}

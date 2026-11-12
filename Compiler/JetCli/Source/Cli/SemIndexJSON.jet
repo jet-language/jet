@@ -24,6 +24,7 @@ use {
         SemIndex,
         SemInstance,
         SemKind,
+        SemLocalStage,
         SemMember,
         SemOutput,
         SemRef,
@@ -161,8 +162,8 @@ jet_cli_sem_json_callable_fields: fn(callable: SemCallable, views: String, produ
     "\"parameters\":[{parameters.join(",")}],\"return_type\":{return_type},\"return_type_status\":\"checked\",\"effects\":{effects},\"effect_status\":{effect_status},\"effect_facts\":{effect_facts},\"errors\":{errors},\"failure_contract\":{failure_contract},\"failure_source\":{failure_source},\"failure_status\":{failure_status},\"returned_views\":{views},\"policies\":{jet_cli_sem_json_strings(policies)},\"generic_parameters\":{generic_parameters},\"generic_parameters_status\":{generic_status},\"metadata_producer_status\":{jet_cli_json_string(producer)}"
 }
 
-// `json_kind` over the `convert_kind` projection.
-jet_cli_sem_json_kind: fn(kind: SemKind) -> String {
+// `json_kind` over the `convert_kind` projection; a local carries its stage.
+jet_cli_sem_json_kind: fn(kind: SemKind, stage: SemLocalStage?) -> String {
     if kind == {
         .Module -> "{{\"kind\":\"module\"}}"
         .Function(callable) -> {
@@ -183,7 +184,17 @@ jet_cli_sem_json_kind: fn(kind: SemKind) -> String {
         .Field(ty, parent) -> "{{\"kind\":\"field\",\"type\":{jet_cli_json_string(type_name(ty))},\"parent\":{jet_cli_json_string(parent)}}}"
         .Local(mutable, ty) -> {
             shown: if ty == .Val(value) -> jet_cli_json_string(type_name(value)) else -> "null"
-            "{{\"kind\":\"local\",\"mutable\":{jet_cli_sem_json_bool(mutable)},\"type\":{shown}}}"
+            staged := ""
+            if stage == .Val(known) {
+                if known == {
+                    .Build(value) -> {
+                        held: if value == "" -> "null" else -> jet_cli_json_string(value)
+                        staged = ",\"stage\":{{\"when\":\"build\",\"value\":{held}}}"
+                    }
+                    .Run(reason) -> staged = ",\"stage\":{{\"when\":\"run\",\"reason\":{jet_cli_json_string(reason)}}}"
+                }
+            }
+            "{{\"kind\":\"local\",\"mutable\":{jet_cli_sem_json_bool(mutable)},\"type\":{shown}{staged}}}"
         }
         .Param(ty) -> "{{\"kind\":\"param\",\"type\":{jet_cli_json_string(type_name(ty))}}}"
     }
@@ -199,7 +210,7 @@ jet_cli_sem_json_def: fn(definition: SemDefinition) -> String {
     callable: if def.kind == .Function(value) -> if value.signature_facts_available -> jet_cli_sem_json_callable_signature(value, definition.view_provenance) else -> "null" else -> "null"
     contracts: loop contract in definition.trait_contracts -> jet_cli_sem_json_trait_contract(contract)
     identity: jet_cli_sem_json_unavailable(SemUnavailable{required_stage: "Resolved", reason: "the semindex producer does not receive a checker-issued DeclarationHandle"})
-    "{{\"identity\":{jet_cli_json_string(def.identity)},\"metadata_declaration_identity\":{identity},\"name\":{jet_cli_json_string(def.qualified_name)},\"leaf_name\":{jet_cli_json_string(def.name)},\"module\":{jet_cli_json_string(def.module_path)},\"span\":{jet_cli_sem_json_span(def.def_span)},\"detail\":{jet_cli_sem_json_kind(def.kind)},\"view_provenance\":{jet_cli_sem_json_view_map(definition.view_provenance)},\"callable_signature\":{callable},\"derives\":{jet_cli_sem_json_strings(definition.derives)},\"nominal_base\":{jet_cli_sem_json_optional(definition.nominal_base)},\"trait_contracts\":[{contracts.join(",")}]}}"
+    "{{\"identity\":{jet_cli_json_string(def.identity)},\"metadata_declaration_identity\":{identity},\"name\":{jet_cli_json_string(def.qualified_name)},\"leaf_name\":{jet_cli_json_string(def.name)},\"module\":{jet_cli_json_string(def.module_path)},\"span\":{jet_cli_sem_json_span(def.def_span)},\"detail\":{jet_cli_sem_json_kind(def.kind, def.local_stage)},\"view_provenance\":{jet_cli_sem_json_view_map(definition.view_provenance)},\"callable_signature\":{callable},\"derives\":{jet_cli_sem_json_strings(definition.derives)},\"nominal_base\":{jet_cli_sem_json_optional(definition.nominal_base)},\"trait_contracts\":[{contracts.join(",")}]}}"
 }
 
 jet_cli_sem_json_ref: fn(reference: SemRef) -> String Never! {

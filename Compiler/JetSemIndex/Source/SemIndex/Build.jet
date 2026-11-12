@@ -103,6 +103,8 @@ SemWalk: struct {
     // A let-bound local's checked type by name and name span
     // (semindex_local_types): an unannotated binding parses with no type.
     local_types: [String: Type]
+    // An immutable local's stage by the same key (semindex_local_stages).
+    local_stages: [String: SemLocalStage]
 }
 
 SemSlotSave: struct {
@@ -1151,8 +1153,12 @@ semindex_binding: fn(binding: Binding, db: &SemDB, ctx: &SemWalk, modules: [JetD
         loop name in semindex_bind_names(pattern) -> semindex_local_def(name.name, name.span, "local", binding.mutable, None, db, ctx)
         return
     }
-    ty: if binding.ty == .Val(written) -> Val(written.copy()) else -> ctx.local_types.get(semindex_local_type_key(binding.name, binding.name_span))
+    key: semindex_local_type_key(binding.name, binding.name_span)
+    ty: if binding.ty == .Val(written) -> Val(written.copy()) else -> ctx.local_types.get(key)
     semindex_local_def(binding.name, binding.name_span, "local", binding.mutable, ty, db, ctx)
+    if !binding.mutable {
+        if ctx.local_stages.get(key) == .Val(stage) -> db.defs[db.defs.len() - 1].local_stage = Val(stage.copy())
+    }
     semindex_scalar("initializer", binding.init, db, ctx, modules)
 }
 
@@ -2409,6 +2415,7 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
             module_paths: module_paths,
             written_returns: semindex_written_returns(doc_module),
             local_types: semindex_local_types(doc_module),
+            local_stages: semindex_local_stages(doc_module, summaries),
         }
         loop item in doc_module.items -> semindex_item(item, db, ctx, modules)
         semindex_apply_inferred_rows(db, doc_module, summaries)
