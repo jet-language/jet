@@ -1,26 +1,32 @@
 # What a site reaches in `jet explain effects` names the deny-only effects
-# (`Panic`, `Mem`) too. No rung grants them, but a `deny` row or `--deny`
-# refuses them, so the explanation lists them with the call that reaches
-# them. Before, they were dropped: a function that only panics reached
+# (`Panic`, `Mem`, `Time.Wait`) too. No rung grants them, but a `deny` row or
+# `--deny` refuses them, so the explanation lists them with the call that
+# reaches them. Before, they were dropped: a function that only panics reached
 # `nothing`.
 fixture: explain_effects_reaches_deny_only/input
 env: NO_COLOR=1
 step: jet check deny_only.jet
 exit: 0
-step stop: jet explain effects deny_only.jet:1
+step stop: jet explain effects deny_only.jet:2
 exit: 0
-stdout: ~ "effects at deny_only.jet:1, in `stop`, nearest first" # the panicking function
+stdout: ~ "effects at deny_only.jet:2, in `stop`, nearest first" # the panicking function
 stdout: ~ "reaches: Panic" # reaches Panic
 stdout: !~ "reaches: nothing" # not nothing
-step run: jet explain effects deny_only.jet:8
+step run: jet explain effects deny_only.jet:9
 exit: 0
-stdout: ~ "effects at deny_only.jet:8, in `run`, nearest first" # the caller
-stdout: ~ "reaches: IO (deny_only.jet:9)" # prints itself
+stdout: ~ "effects at deny_only.jet:9, in `run`, nearest first" # the caller
+stdout: ~ "reaches: IO (deny_only.jet:11)" # prints itself
 stdout: ~ "Mem" # allocates through `make`
-stdout: ~ "Panic via deny_only.stop (deny_only.jet:8)" # and panics through `stop`, where it calls it
-step json: jet explain effects --json deny_only.jet:1
+stdout: ~ "Panic via deny_only.stop (deny_only.jet:10)" # and panics through `stop`, where it calls it
+step json: jet explain effects --json deny_only.jet:2
 exit: 0
 stdout: ~ "\"effect\":\"Panic\"" # the JSON reaches carry it too
-step snapshot: jet explain effects deny_only.jet:8
+step snapshot: jet explain effects deny_only.jet:9
 exit: 0
-stdout: = "effects at deny_only.jet:8, in `run`, nearest first\n  function  (none written)  deny_only.jet:7\n  type      (none written)\n  module    (none written)\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (deny_only.jet:9), Mem via deny_only.make (deny_only.jet:9), Panic via deny_only.stop (deny_only.jet:8)\n" # the whole report: the ladder, then every reached effect, deny-only ones in order with their call sites
+stdout: = "effects at deny_only.jet:9, in `run`, nearest first\n  function  (none written)  deny_only.jet:9\n  type      (none written)\n  module    (none written)\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (deny_only.jet:11), Mem via deny_only.make (deny_only.jet:11), Panic via deny_only.stop (deny_only.jet:10)\n" # the whole report: the ladder, then every reached effect, deny-only ones in order with their call sites
+step wait: jet explain effects deny_only.jet:13
+exit: 0
+stdout: = "effects at deny_only.jet:13, in `doze`, nearest first\n  function  (none written)  deny_only.jet:13\n  type      (none written)\n  module    (none written)\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: Panic via deny_only.nap (deny_only.jet:13), Time.Wait via deny_only.nap (deny_only.jet:13)\n" # a caller of a sleep reaches the deny-only Time.Wait leaf through it
+step waitjson: jet explain effects --json deny_only.jet:13
+exit: 0
+stdout: ~ "\"effect\":\"Time.Wait\"" # the JSON reaches carry Time.Wait too
