@@ -10,7 +10,7 @@ use {
     jet_cli.[
         JetCLICommandSettingLayer,
         jet_cli_command_layers_at, jet_cli_command_settings_words, jet_cli_settings_controls,
-        jet_cli_settings_word, jet_cli_user_settings_file,
+        jet_cli_settings_word, jet_cli_user_config_dir, jet_cli_user_settings_file,
     ]
     jet_foundation.[Diagnostic]
 }
@@ -121,8 +121,15 @@ command_layers_refused: fn(directory: String, config: String?) -> [Diagnostic] N
     assert_eq(reports[1].code, "E1215")
     assert_eq(reports[1].source_path ?? "-", "{root}/package.jet")
     assert(reports[1].why.contains("commands"), "the package report names the commands block: {reports[1].why}")
-    relative: command_layers_refused(root, Val("relative/config"))
-    assert_eq(relative[0].what, "The user configuration directory `relative/config` is a relative path")
+}
+
+#Test("a relative or empty XDG_CONFIG_HOME is ignored for the home's .config, as the XDG specification says") {
+    assert_eq(jet_cli_user_config_dir(Val("/srv/config"), Val("/home/me")) ?? "-", "/srv/config")
+    assert_eq(jet_cli_user_config_dir(Val("relative/config"), Val("/home/me")) ?? "-", "/home/me/.config")
+    assert_eq(jet_cli_user_config_dir(Val(""), Val("/home/me")) ?? "-", "/home/me/.config")
+    assert_eq(jet_cli_user_config_dir(None, Val("/home/me")) ?? "-", "/home/me/.config")
+    assert_eq(jet_cli_user_config_dir(Val("relative/config"), Val("home")) ?? "-", "-")
+    assert_eq(jet_cli_user_config_dir(None, None) ?? "-", "-")
 }
 
 #Test("the settings word is the command a command line dispatches") {

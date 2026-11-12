@@ -23,10 +23,21 @@ JetCLICommandLayers: enum {
 }
 
 // The user settings file under the configuration directory `config`
-// (core.sys `config_dir`: $XDG_CONFIG_HOME, else `.config` in the home
-// directory).
+// (jet_cli_user_config_dir).
 jet_cli_user_settings_file: fn(config: String) -> String Never! {
     layers_files.join_all([String]{config, "jet", "settings.jet"})
+}
+
+// The user configuration directory, from the value of XDG_CONFIG_HOME and the
+// home directory: the variable when it is an absolute path, else `.config` in
+// an absolute home directory, else None (no user file). The XDG base
+// directory specification has a relative or empty value ignored, so jet
+// reads no settings through one and still runs a program that uses its own
+// relative XDG_CONFIG_HOME, as the roots-sh gauntlet cases do.
+jet_cli_user_config_dir: fn(variable: String?, home: String?) -> String? Never! {
+    if variable == .Val(set) && layers_files.is_absolute(set) -> return Val(set.copy())
+    if home == .Val(root) && layers_files.is_absolute(root) -> return Val(layers_files.join(root, ".config"))
+    None
 }
 
 // This process's settings layers for the typed command line `written`: the
@@ -34,7 +45,7 @@ jet_cli_user_settings_file: fn(config: String) -> String Never! {
 jet_cli_command_layers: fn(written: [String]) -[FS, Env]> JetCLICommandLayers Never! {
     cwd: layers_files.cwd() ?? "."
     directory: if jet_cli_option_value(written, "-p") == .Val(name) -> jet_cli_settings_member(cwd, name) ?? cwd else -> cwd
-    jet_cli_command_layers_at(directory, layers_sys.config_dir())
+    jet_cli_command_layers_at(directory, jet_cli_user_config_dir(layers_sys.get("XDG_CONFIG_HOME"), layers_sys.home_dir()))
 }
 
 // The directory of the workspace member `name` that the workspace at
@@ -58,17 +69,13 @@ jet_cli_command_layers_at: fn(directory: String, config: String?) -[FS]> JetCLIC
     layers := [JetCLICommandSettingLayer]{}
     reports := [Diagnostic]{}
     if config == .Val(base) {
-        if !layers_files.is_absolute(base) {
-            reports.push(diagnostic_from_registry("E2104", None, "the user configuration directory `{base}` is a relative path", jet_cli_why("E2104"), "Set XDG_CONFIG_HOME to an absolute path, or unset it to use `~/.config`."))
-        } else {
-            file: jet_cli_user_settings_file(base)
-            if layers_files.is_file(file) {
-                if layers_files.read(file) == {
-                    .Err(error) -> reports.push(jet_cli_command_layer_unread(file, "{error}"))
-                    .Ok(text) -> if pkg_parse_user_settings(text) == {
-                        .Ok(entries) -> layers.push(jet_cli_command_layer(file, layers_files.dirname(file), text, entries))
-                        .Err(error) -> reports.push(jet_cli_user_settings_refused(file, error))
-                    }
+        file: jet_cli_user_settings_file(base)
+        if layers_files.is_file(file) {
+            if layers_files.read(file) == {
+                .Err(error) -> reports.push(jet_cli_command_layer_unread(file, "{error}"))
+                .Ok(text) -> if pkg_parse_user_settings(text) == {
+                    .Ok(entries) -> layers.push(jet_cli_command_layer(file, layers_files.dirname(file), text, entries))
+                    .Err(error) -> reports.push(jet_cli_user_settings_refused(file, error))
                 }
             }
         }

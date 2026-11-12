@@ -615,8 +615,10 @@ commands: {
 ```
 
 - The user settings file, `$XDG_CONFIG_HOME/jet/settings.jet` (else
-  `~/.config/jet/settings.jet`), holds only `commands:`. A relative
-  `XDG_CONFIG_HOME` is refused (E2104).
+  `~/.config/jet/settings.jet`), holds only `commands:`. A relative or empty
+  `XDG_CONFIG_HOME` is ignored, as the XDG base directory specification says,
+  so `~/.config` is used, and a program that sets its own relative
+  `XDG_CONFIG_HOME` still runs under `jet`.
 - The `commands:` block of the selected package's `package.jet`: the
   workspace member a typed `-p NAME` picks, else the nearest one at or above
   the working directory. The packages above it are not merged in.
