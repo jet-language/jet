@@ -1,0 +1,48 @@
+# An instance is a module, so its types are its members (#4276 c8): a
+# generic module's instance names its type as `three_ints.Buffer`, exactly as
+# it names its function `three_ints.echo`, in a literal, a parameter, a
+# result, a method call and a list element, on both tiers. Two instances are
+# two modules: one instance's `Buffer` is not the other's, and a type the
+# module doesn't declare is unknown through the instance. Two names for the
+# same module and arguments are one instance (one canonical key, both names
+# as its applications), so their `Buffer` is one type.
+fixture: d_meta_modname1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_meta_modname1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_meta_modname1_contract.stdout.expected
+stderr: empty
+step fmt: jet fmt --check main.jet mismatch/main.jet missing/main.jet identity/main.jet
+exit: 0 # every fixture file is in `jet fmt` form
+step index: jet inspect semindex main.jet --json
+exit: 0
+json: stdout doc $.semindex.instances #= 2
+json: stdout doc $.semindex.instances[*].full_key #distinct= 2 # each instance has its own canonical key
+json: stdout doc $.semindex.instances[?name="three_ints"][0].argument_values = ["Int|self:Exactness=exactness:exact","Int:3"]
+json: stdout doc $.semindex.instances[?name="two_words"][0].argument_values = ["String","Int:2"]
+step identity: jet run identity/main.jet
+exit: 0
+stdout: ~ "2 2" # one `Buffer` under both names
+stderr: empty
+step identity_index: jet inspect semindex identity/main.jet --json
+exit: 0
+json: stdout doc $.semindex.instances #= 1
+json: stdout doc $.semindex.instances[0].applications[*].name = ["two_points","same_points"]
+json: stdout doc $.semindex.instances[0].argument_values = ["Point","Int:2"]
+step mismatch: jet check mismatch/main.jet
+exit: 1
+stderr: ~ "`last_int` wants `three_ints.Buffer` for argument 1, but this is `other_ints.Buffer`" # each instance has its own type
+stderr: ~ "jet-lang.dev/e/E0112" # the argument type mismatch code
+stderr: ~ "--> main.jet:15:20" # at the argument
+stderr: ~ "1 problem found" # nothing else is reported
+step missing: jet check missing/main.jet
+exit: 1
+stderr: ~ "There's no type called `three_ints.Queue`" # only the module's own members
+stderr: ~ "jet-lang.dev/e/E0119" # the unknown type code
+stderr: ~ "--> main.jet:10:12" # at the literal naming it
+stderr: ~ "1 problem found" # nothing else is reported

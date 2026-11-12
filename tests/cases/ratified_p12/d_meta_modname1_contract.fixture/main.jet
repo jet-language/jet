@@ -1,0 +1,40 @@
+// An instance of a generic module is a module, so its types are members you
+// name through it, exactly as you name its functions: `three_ints.Buffer`
+// beside `three_ints.echo`. The instance's type works everywhere a type does:
+// a literal, a parameter, a result, a method and a list element. Two
+// instances of one module are two modules, each with its own `Buffer`.
+fixed_buffer: module<T>(capacity: Int) {
+    Buffer: struct {
+        items: [T#capacity]
+
+        first: fn(self) -> T { self.items[0] }
+    }
+
+    echo: fn(values: [T#capacity]) -> [T#capacity] { values.copy() }
+
+    make: fn(values: [T#capacity]) -> Buffer { Buffer{items: values} }
+
+    size: fn() -> Int { capacity }
+}
+
+three_ints: fixed_buffer<Int>(3)
+
+two_words: fixed_buffer<String>(2)
+
+last_int: fn(buffer: three_ints.Buffer) -> Int { buffer.items[2] }
+
+wrap: fn(values: [Int#3]) -> three_ints.Buffer { three_ints.Buffer{items: values} }
+
+run: fn() {
+    input: [Int#3]{1, 2, 3}
+    fixed: three_ints.echo(input)
+    buffer: three_ints.Buffer{items: fixed}
+    print("literal: {buffer.items[0]} {buffer.items[1]} {buffer.items[2]}")
+    print("parameter: {last_int(buffer)}")
+    print("result: {wrap([Int#3]{7, 8, 9}).first()}")
+    print("made inside: {last_int(three_ints.make([Int#3]{4, 5, 6}))}")
+    many: [three_ints.Buffer]{buffer, wrap([Int#3]{10, 20, 30})}
+    print("list: {many[1].first()}")
+    words: two_words.Buffer{items: [String#2]{"left", "right"}}
+    print("other instance: {words.first()} of {two_words.size()}, ints of {three_ints.size()}")
+}

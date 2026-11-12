@@ -1,0 +1,16 @@
+fixed_buffer: module<T>(capacity: Int) {
+    Buffer: struct {
+        items: [T#capacity]
+    }
+}
+
+three_ints: fixed_buffer<Int>(3)
+
+other_ints: fixed_buffer<Int>(4)
+
+last_int: fn(buffer: three_ints.Buffer) -> Int { buffer.items[2] }
+
+run: fn() {
+    other: other_ints.Buffer{items: [Int#4]{1, 2, 3, 4}}
+    print(last_int(other))
+}
