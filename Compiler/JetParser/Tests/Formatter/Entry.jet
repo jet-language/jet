@@ -52,6 +52,18 @@ run: fn() {
     assert(formatted.contains("accepts({{\"needle\"}})"))
     assert(formatted.contains("block: fn() {{"))
 }
+// A checked text literal keeps its type head, its quoted body and every
+// `{hole}` as written: formatting never splices a hole into the text.
+#Test("checked_text_literals_keep_head_body_and_holes") {
+    source: `run: fn() {
+    id: 42
+    q: SQL{"select * from t where id = {id}"}
+    page: HTML{"<p>{q.template()}</p>"}
+    line: Sh{"echo {id} done"}
+}
+`
+    assert(fmt_core_stable(source) == source)
+}
 #Test("repeated_struct_list_heads_preserve_explicit_heads") {
     source: `Point: struct {
     x: Int

@@ -1,0 +1,11 @@
+// A SQL hole binds its value through `encode_hole`, whose `Printable` bound
+// refuses a struct with no display text: E0905 at the hole.
+Point: struct {
+    x: Int
+}
+
+run: fn() {
+    point: Point{x: 1}
+    query: SQL{"select * from t where p = {point}"}
+    print(query)
+}

@@ -1316,6 +1316,12 @@ sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEn
             return false
         }
     }
+    // A function named in a hole is code, not a value to show: the lesson is the call.
+    if ty == .Fn(_, _, _, _, _, _) {
+        written: sema_expression_interpolation_text(value.span, environment, program)
+        diagnostics.push(sema_error("E0915", value.span, "the function `{written}` has no `Display` implementation", "a hole shows a value, and a function is code to run, not text", "call it in the hole: `{{{written}()}}`"))
+        return false
+    }
     shown: sema_type_show(ty)
     diagnostics.push(sema_error("E0915", value.span, "`{shown}` has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {shown}.Display {{ display: fn(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
     false

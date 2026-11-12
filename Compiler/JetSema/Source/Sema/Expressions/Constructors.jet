@@ -2201,7 +2201,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 return sema_expr_expected_owned(unit_value, expected, environment, program, diagnostics)
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, scopes, diagnostics) -> return None
-            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? return None
+            diagnostic_start: diagnostics.len()
+            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? {
+                sema_expression_typed_literal_text_mismatch(result_head, value, diagnostic_start, diagnostics)
+                return None
+            }
             return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
         }
         .Elements(elements) -> if elements.len() == 1 {
@@ -2230,7 +2234,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 }
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, scopes, diagnostics) -> return None
-            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? return None
+            diagnostic_start: diagnostics.len()
+            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? {
+                sema_expression_typed_literal_text_mismatch(result_head, value, diagnostic_start, diagnostics)
+                return None
+            }
             return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
         }
         // A scalar head reached through a type parameter (`T{ value }` in a
@@ -2243,6 +2251,20 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         .Entries(_) | .ByteText(_) | .Empty -> {}
     }
     sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
+}
+
+// A quoted body under a type head is a checked text literal (`SQL{"…"}`,
+// `HTML{"…"}`). A named type with no `CheckedText` impl reads no text, so
+// the generic mismatch its body reported becomes that lesson (#4276 c33).
+sema_expression_typed_literal_text_mismatch: fn(head: Type, value: Expr, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
+    if value == .Str(_, _, _) {
+        if head == .Named(_) {
+            value_span: expr_span(value)
+            index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+            shown: type_name(head)
+            diagnostics[index] = sema_error("E0108", value_span, "`{shown}` isn't a checked text type, so it reads no quoted body", "a quoted body under a type head is a checked text literal; only a type with a `CheckedText` impl, such as `SQL`, `HTML`, `Sh`, `Path` or `URL`, reads one", "build `{shown}` from its fields, or write `impl {shown}.CheckedText {{ … }}` to give it a text grammar")
+        }
+    }
 }
 
 // This rule scalar heads use parameter acceptance, never a numeric retag.

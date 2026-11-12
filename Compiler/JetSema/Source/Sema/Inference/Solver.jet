@@ -278,6 +278,10 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                 fix := "write `impl {name}.{bound} {{ … }}` with every required method"
                 if bound == "Comparable" -> fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
                 if bound == "Numeric" -> fix = "write `#Numeric` on a distinct number type, or `impl {name}.Numeric {{ … }}` with `zero` and `one` on a struct that implements {owned_trait_requires_listed(bound)}"
+                if concrete == .Fn(_, _, _, _, _, _) {
+                    why = "`{name}` is a function, which is code to run; its result is the value that can be `{bound}`"
+                    fix = "call the function and use its result, as `f()`"
+                }
                 if graph == .Val(graph_value) {
                     head_module: if parameter.bound_module == "" -> context.caller_module_identity else -> parameter.bound_module
                     if sema_type_conditional_impl_head(graph_value, concrete, bound, head_module) == .Val(head) {

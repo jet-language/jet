@@ -1,0 +1,8 @@
+Error [jet.BindingTypeMismatch]: `Point` isn't a checked text type, so it reads no quoted body
+  --> tests/ui/typed_literal_text_body_needs_checked_text.jet:8:18
+    |
+  8 |     query: Point{"select 1"}
+    |                  ^^^^^^^^^^
+ Why: A quoted body under a type head is a checked text literal; only a type with a `CheckedText` impl, such as `SQL`, `HTML`, `Sh`, `Path` or `URL`, reads one
+ Fix: Build `Point` from its fields, or write `impl Point.CheckedText { … }` to give it a text grammar
+More: jet-lang.dev/e/E0108

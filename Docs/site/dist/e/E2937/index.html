@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add `{capability}` to `authority.needs` in the package manifest, then rebuild.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2937</code>: <code>tests/ui/ui_service_without_capability.stderr</code>.</p>
-<pre class="diag">Error [jet.UiServiceWithoutCapability]: UI host service `core.ui.host.clipboard.read_text` needs `UI.Clipboard`.
-  --&gt; tests/ui/ui_service_without_capability.jet:13:22
+<p>First UI snapshot mentioning <code>E2937</code>: <code>tests/ui/ui_clipboard_clear_without_capability.stderr</code>.</p>
+<pre class="diag">Error [jet.UiServiceWithoutCapability]: UI host service `core.ui.host.clipboard.clear` needs `UI.Clipboard`.
+  --&gt; tests/ui/ui_clipboard_clear_without_capability.jet:14:23
     |
- 13 |     _read: clipboard.read_text()
-    |                      ^^^^^^^^^
+ 14 |     _wiped: clipboard.clear()
+    |                       ^^^^^
  Why: The typed host row crosses an operating-system service boundary, so every tier must receive the same explicit package capability instead of discovering permission at runtime. During `jet check`, Jet reports this diagnostic.
  Fix: Add `UI.Clipboard` to `authority.needs` in the package manifest, then rebuild.
 More: jet-lang.dev/e/E2937
