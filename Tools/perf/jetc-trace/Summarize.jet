@@ -56,7 +56,7 @@ render: fn(file: String) -> String IOError! {
         // A partial last line: the next read sees it whole.
         event: json.decode<Event>(line) ?? next
         ts: event.ts ?? 0
-        if event.ts != None -> last = max(last, ts)
+        last = max(last, ts)
         if event.name == "trace.start" -> start = event.args?.unix_ms
         t: thread_at.get(event.tid) ?? {
             thread_at[event.tid] = threads.len()
@@ -101,10 +101,7 @@ render: fn(file: String) -> String IOError! {
     rows.sort_by(r -> r.first)
     loop r in rows {
         // `+N`: N spans of this kind are still open; their time so far is included.
-        count: if r.open > 0 -> "{r.count}+{r.open}" else -> "{r.count}"
-        items: r.items.map(n -> "{n}") ?? "-"
-        kb: if r.peak > 0 -> mb(Val(r.peak)) else -> "-"
-        lines.push("{r.kind.pad_end(width, " ")} {count:PadLeft(7)} {seconds(Float.from_int(r.total)):PadLeft(9)} {seconds(Float.from_int(r.max)):PadLeft(8)} {items:PadLeft(9)} {kb:PadLeft(8)}")
+        lines.push("{r.kind.pad_end(width, " ")} {(if r.open > 0 -> "{r.count}+{r.open}" else -> "{r.count}"):PadLeft(7)} {seconds(Float.from_int(r.total)):PadLeft(9)} {seconds(Float.from_int(r.max)):PadLeft(8)} {(r.items.map(n -> "{n}") ?? "-"):PadLeft(9)} {(if r.peak > 0 -> mb(Val(r.peak)) else -> "-"):PadLeft(8)}")
     }
     lines.push("")
     stale: start.map(s -> ", last event {(Float.from_int(time.now().to_unix_ms() - s) - Float.from_int(last) / 1000.0) / 1000.0:Fixed(0)} s ago") ?? ""
@@ -117,9 +114,7 @@ render: fn(file: String) -> String IOError! {
         loop depth in 0..<thread.spans.len() {
             span: thread.spans[depth]
             index: span.args?.index ?? -1
-            place: if index >= 0 -> " [{index + 1}/{span.args?.total ?? 0}]" else -> ""
-            label: if span.label == span.kind -> span.kind else -> "{span.kind} {span.label}"
-            line := "{"  ".repeat(depth + 1)}{label}{place} running {seconds(Float.from_int(last - span.ts))} s"
+            line := "{"  ".repeat(depth + 1)}{if span.label == span.kind -> span.kind else -> "{span.kind} {span.label}"}{if index >= 0 -> " [{index + 1}/{span.args?.total ?? 0}]" else -> ""} running {seconds(Float.from_int(last - span.ts))} s"
             if progress.get(span.kind) == .Val(c) && c.ts >= span.ts && c.total > 0 {
                 line = "{line}, {c.done}/{c.total} ({Float{100.0} * Float.from_int(c.done) / Float.from_int(c.total):Fixed(1)}%)"
                 since: c.done - c.first_done
