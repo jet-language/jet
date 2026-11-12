@@ -1,0 +1,31 @@
+// The `effects` fact read is the reflected CallableSignature's own `effects`:
+// on a function and on a method the fact and the signature member read one
+// EffectInfo, whether it folds inside the check or reads at run time, at every
+// optimization level.
+send: fn(text: String) -[Net]> Int { text.len() }
+
+relay: fn(text: String) -> Int { send(text) }
+
+Log: struct {
+    lines: [String]
+
+    post: fn(self, text: String) -[Net]> Int { self.lines.len() + text.len() }
+}
+
+SEND_FOLDS_SAME: #run { send.reflect().effects.values == send.reflect().signature.effects.values && send.reflect().effects.declared == send.reflect().signature.effects.declared }
+
+run: fn() {
+    send_fact: send.reflect().effects
+    send_row: send.reflect().signature.effects
+    send_same: send_fact.values == send_row.values && send_fact.declared == send_row.declared && send_fact.inferred == send_row.inferred
+    print("send same={send_same} values=[{send_row.values.join(", ")}] written={send_row.declared != None} solved={send_row.inferred != None}")
+    relay_fact: relay.reflect().effects
+    relay_row: relay.reflect().signature.effects
+    relay_same: relay_fact.values == relay_row.values && relay_fact.declared == relay_row.declared && relay_fact.inferred == relay_row.inferred
+    print("relay same={relay_same} values=[{relay_row.values.join(", ")}] written={relay_row.declared != None} solved={relay_row.inferred != None}")
+    post_fact: Log.reflect().methods[0].reflect().effects
+    post_row: Log.reflect().methods[0].signature.effects
+    post_same: post_fact.values == post_row.values && post_fact.declared == post_row.declared && post_fact.inferred == post_row.inferred
+    print("Log.post same={post_same} values=[{post_row.values.join(", ")}] written={post_row.declared != None} solved={post_row.inferred != None}")
+    print("folded same={SEND_FOLDS_SAME}")
+}

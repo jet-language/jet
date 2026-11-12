@@ -146,12 +146,12 @@ use {
         SemaScopeMembersMarkerRegistry,
         sema_compiler_semantic_index_from_checked,
         sema_comptime_reflection_arithmetic_facts,
+        sema_comptime_reflection_callable_signature,
         sema_comptime_reflection_declared_effect_names,
         sema_comptime_reflection_declared_function_facts,
         sema_comptime_reflection_effect_info,
         sema_comptime_reflection_location,
         sema_comptime_reflection_module_of,
-        sema_comptime_reflection_param_info,
         sema_comptime_reflection_written_markers,
     ]
 }
@@ -575,7 +575,6 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
             }
         }
     }
-    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
     arithmetic := sema_comptime_reflection_arithmetic_facts(function)
     identity := "{registration_module.module_name}::{function.name}"
     facts := sema_comptime_reflection_declared_function_facts(function, identity)
@@ -584,9 +583,8 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "module", value: jet_eval_compiler_services_string(registration_module.module_name)},
         TComptimeField{name: "identity", value: jet_eval_compiler_services_string(identity)},
         TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
-        TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
+        TComptimeField{name: "signature", value: sema_comptime_reflection_callable_signature(function, solved_effects)},
         TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
-        TComptimeField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), solved_effects)},
         TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
         TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},

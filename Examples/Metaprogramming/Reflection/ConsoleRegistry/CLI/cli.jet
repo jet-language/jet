@@ -13,22 +13,23 @@ Command: struct {
 
         // A command takes at most three arguments, each one `run` parses.
         expand: fn(self, target: Target) {
-            if target.params.len() > 4 {
-                reject(TooManyArguments{command: target.name, count: target.params.len() - 1})
+            params: target.signature.params
+            if params.len() > 4 {
+                reject(TooManyArguments{command: target.name, count: params.len() - 1})
             }
-            if target.params.len() > 1 {
-                if target.params[1].type != "String" && target.params[1].type != "Int" && target.params[1].type != "Float" && target.params[1].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[1].name, type: target.params[1].type})
+            if params.len() > 1 {
+                if params[1].type != "String" && params[1].type != "Int" && params[1].type != "Float" && params[1].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[1].name, type: params[1].type})
                 }
             }
-            if target.params.len() > 2 {
-                if target.params[2].type != "String" && target.params[2].type != "Int" && target.params[2].type != "Float" && target.params[2].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[2].name, type: target.params[2].type})
+            if params.len() > 2 {
+                if params[2].type != "String" && params[2].type != "Int" && params[2].type != "Float" && params[2].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[2].name, type: params[2].type})
                 }
             }
-            if target.params.len() > 3 {
-                if target.params[3].type != "String" && target.params[3].type != "Int" && target.params[3].type != "Float" && target.params[3].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[3].name, type: target.params[3].type})
+            if params.len() > 3 {
+                if params[3].type != "String" && params[3].type != "Int" && params[3].type != "Float" && params[3].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[3].name, type: params[3].type})
                 }
             }
         }
@@ -51,59 +52,59 @@ Console: struct {
                     #loop m in target.methods {
                         #if m.marker(Command) != None {
                             if command == m.name {
-                                if rest.len() != m.params.len() - 1 -> return "{m.name}: expected {m.params.len() - 1} arguments, got {rest.len()}"
-                                #if m.params.len() > 1 {
-                                    #if m.params[1].type == "String" {
+                                if rest.len() != m.signature.params.len() - 1 -> return "{m.name}: expected {m.signature.params.len() - 1} arguments, got {rest.len()}"
+                                #if m.signature.params.len() > 1 {
+                                    #if m.signature.params[1].type == "String" {
                                         a1: rest[0]
                                     }
-                                    #if m.params[1].type == "Int" {
-                                        a1: cli.parse_int(rest[0]) ?? return "{m.name}: {m.params[1].name} must be an Int, not `{rest[0]}`"
+                                    #if m.signature.params[1].type == "Int" {
+                                        a1: cli.parse_int(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be an Int, not `{rest[0]}`"
                                     }
-                                    #if m.params[1].type == "Float" {
-                                        a1: cli.parse_float(rest[0]) ?? return "{m.name}: {m.params[1].name} must be a Float, not `{rest[0]}`"
+                                    #if m.signature.params[1].type == "Float" {
+                                        a1: cli.parse_float(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be a Float, not `{rest[0]}`"
                                     }
-                                    #if m.params[1].type == "Bool" {
-                                        a1: cli.parse_bool(rest[0]) ?? return "{m.name}: {m.params[1].name} must be a Bool, not `{rest[0]}`"
+                                    #if m.signature.params[1].type == "Bool" {
+                                        a1: cli.parse_bool(rest[0]) ?? return "{m.name}: {m.signature.params[1].name} must be a Bool, not `{rest[0]}`"
                                     }
                                 }
-                                #if m.params.len() > 2 {
-                                    #if m.params[2].type == "String" {
+                                #if m.signature.params.len() > 2 {
+                                    #if m.signature.params[2].type == "String" {
                                         a2: rest[1]
                                     }
-                                    #if m.params[2].type == "Int" {
-                                        a2: cli.parse_int(rest[1]) ?? return "{m.name}: {m.params[2].name} must be an Int, not `{rest[1]}`"
+                                    #if m.signature.params[2].type == "Int" {
+                                        a2: cli.parse_int(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be an Int, not `{rest[1]}`"
                                     }
-                                    #if m.params[2].type == "Float" {
-                                        a2: cli.parse_float(rest[1]) ?? return "{m.name}: {m.params[2].name} must be a Float, not `{rest[1]}`"
+                                    #if m.signature.params[2].type == "Float" {
+                                        a2: cli.parse_float(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be a Float, not `{rest[1]}`"
                                     }
-                                    #if m.params[2].type == "Bool" {
-                                        a2: cli.parse_bool(rest[1]) ?? return "{m.name}: {m.params[2].name} must be a Bool, not `{rest[1]}`"
+                                    #if m.signature.params[2].type == "Bool" {
+                                        a2: cli.parse_bool(rest[1]) ?? return "{m.name}: {m.signature.params[2].name} must be a Bool, not `{rest[1]}`"
                                     }
                                 }
-                                #if m.params.len() > 3 {
-                                    #if m.params[3].type == "String" {
+                                #if m.signature.params.len() > 3 {
+                                    #if m.signature.params[3].type == "String" {
                                         a3: rest[2]
                                     }
-                                    #if m.params[3].type == "Int" {
-                                        a3: cli.parse_int(rest[2]) ?? return "{m.name}: {m.params[3].name} must be an Int, not `{rest[2]}`"
+                                    #if m.signature.params[3].type == "Int" {
+                                        a3: cli.parse_int(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be an Int, not `{rest[2]}`"
                                     }
-                                    #if m.params[3].type == "Float" {
-                                        a3: cli.parse_float(rest[2]) ?? return "{m.name}: {m.params[3].name} must be a Float, not `{rest[2]}`"
+                                    #if m.signature.params[3].type == "Float" {
+                                        a3: cli.parse_float(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be a Float, not `{rest[2]}`"
                                     }
-                                    #if m.params[3].type == "Bool" {
-                                        a3: cli.parse_bool(rest[2]) ?? return "{m.name}: {m.params[3].name} must be a Bool, not `{rest[2]}`"
+                                    #if m.signature.params[3].type == "Bool" {
+                                        a3: cli.parse_bool(rest[2]) ?? return "{m.name}: {m.signature.params[3].name} must be a Bool, not `{rest[2]}`"
                                     }
                                 }
-                                #if m.params.len() == 1 {
+                                #if m.signature.params.len() == 1 {
                                     return "{self.#{m}()}"
                                 }
-                                #if m.params.len() == 2 {
+                                #if m.signature.params.len() == 2 {
                                     return "{self.#{m}(a1)}"
                                 }
-                                #if m.params.len() == 3 {
+                                #if m.signature.params.len() == 3 {
                                     return "{self.#{m}(a1, a2)}"
                                 }
-                                #if m.params.len() == 4 {
+                                #if m.signature.params.len() == 4 {
                                     return "{self.#{m}(a1, a2, a3)}"
                                 }
                             }
@@ -120,7 +121,7 @@ Console: struct {
                     #loop m in target.methods {
                         #if m.marker(Command) != None {
                             usage = "  {m.name}"
-                            #loop p in m.params {
+                            #loop p in m.signature.params {
                                 #if p.name != "self" {
                                     usage = "{usage} <{p.name}: {p.type}>"
                                 }

@@ -6,7 +6,7 @@ add: fn(a: Int, b: Int) -> Int { a + b }
 
 build: fn(b: Build) {
     loop f in b.program.functions() {
-        effects: f.effects
+        effects: f.signature.effects
         if f.name == "fetch" {
             if effects.declared == .Val(row) && row.len() == 1 && row[0] == "Net" { b.error(f.span, "DECLARED", "the written row", "EffectInfo.declared", "ok") }
             if effects.inferred != None { b.error(f.span, "SOLVED", "the checked row", "EffectInfo.inferred", "ok") }

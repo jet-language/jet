@@ -1,0 +1,15 @@
+# The `effects` fact read lowers to the reflected signature's own `effects`
+# (one EffectInfo, never computed twice): `f.reflect().effects` equals
+# `f.reflect().signature.effects` on a function and on a method, folded and at
+# run time, at O0, O1 and O2.
+fixture: effects_fact_read_is_the_signature_effects.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = effects_fact_read_is_the_signature_effects.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = effects_fact_read_is_the_signature_effects.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = effects_fact_read_is_the_signature_effects.stdout.expected

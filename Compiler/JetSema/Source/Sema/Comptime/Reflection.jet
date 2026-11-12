@@ -490,6 +490,31 @@ sema_comptime_reflection_declared_effect_names: fn(function: Func) -> [String]? 
     None
 }
 
+// A callable's CallableSignature, the one typed contract FunctionInfo and
+// MethodInfo share and the `effects` fact read projects: its parameters in
+// order, the success type it returns (`None` when it returns no value; the
+// failure route stays the record's `failure_contract`), its EffectInfo
+// (`inferred` is the solved row once the check has solved it), how it is
+// called, and the type bound to each generic parameter (empty on a
+// declaration, which binds none).
+sema_comptime_reflection_callable_signature: fn(function: Func, inferred: [String]?) -> TComptimeValue Never! {
+    returned := "Unit"
+    if function.return_type == .Val(written) -> returned = if written == .Result(success, _) -> type_name(success) else -> type_name(written)
+    return_type: if returned == "Unit" -> sema_comptime_reflection_none(Type.String) else -> sema_comptime_reflection_some(TComptimeValue.String{value: returned})
+    convention: if {
+        function.kernel != None -> "Kernel"
+        function.inline_foreign != None -> "Foreign"
+        else -> "Jet"
+    }
+    sema_comptime_reflection_struct("CallableSignature", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)}},
+        SemaComptimeReflectionField{name: "return_type", value: return_type},
+        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), inferred)},
+        SemaComptimeReflectionField{name: "calling_convention", value: TComptimeValue.Enum{type_name: "CallingConvention", variant: convention, args: [TComptimeEnumArg]{}}},
+        SemaComptimeReflectionField{name: "generic_bindings", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+    })
+}
+
 sema_comptime_reflection_dimension: fn(dimension: Dimension) -> TComptimeValue Never! {
     axes := [TComptimeValue]{}
     loop axis in dimension.axes {
@@ -984,9 +1009,7 @@ sema_comptime_reflection_method_signature_type: fn(method: Func) -> Type Never! 
     }
 }
 sema_comptime_reflection_method_info: fn(method: Func, module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry) -> TComptimeValue {
-    parameter_texts := (loop parameter_index in 0..<method.params.len() -> "{method.params[parameter_index].name}: {type_name(method.params[parameter_index].ty)}")
     result: sema_effective_return_type(method.return_type)
-    return_type: type_name(result)
     dimensions := [TComptimeValue]{}
     loop parameter_index in 0..<method.params.len() {
         loop dimension in sema_comptime_reflection_type_dimensions(method.params[parameter_index].ty) -> dimensions.push(dimension)
@@ -997,12 +1020,9 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
     facts.extend(sema_comptime_reflection_type_fact_rows(method.name, signature_type))
     sema_comptime_reflection_struct("MethodInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: method.name}},
-        SemaComptimeReflectionField{name: "return_type", value: TComptimeValue.String{value: return_type}},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_callable_signature(method, None)},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(method)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(method.return_type)}},
-        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in method.params -> sema_comptime_reflection_param_info(parameter)}},
-        SemaComptimeReflectionField{name: "signature", value: TComptimeValue.String{value: "{method.name}: fn({parameter_texts.join(", ")}) {return_type}"}},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(method), None)},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
         SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method)}},
@@ -1360,22 +1380,21 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
 }
 
 // A function's FunctionInfo (Rust `build_function_type_info`): its stable
-// source shape, its effects as known inside the check (the written row; the
-// solved row is read after the check, jet_eval_compiler_services_function_info),
-// its written `markers` (MarkerInfo rows) and where it is written.
-// `module_name`, `identity` and `package` are the names its reader shows.
+// source shape, its CallableSignature as known inside the check (the written
+// effect row; the solved row is read after the check,
+// jet_eval_compiler_services_function_info), its written `markers`
+// (MarkerInfo rows) and where it is written. `module_name`, `identity` and
+// `package` are the names its reader shows.
 sema_comptime_reflection_function_info: fn(function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue]) -> TComptimeValue {
-    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
     info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: module_name}},
         SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
         SemaComptimeReflectionField{name: "package", value: TComptimeValue.String{value: package}},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_callable_signature(function, None)},
         SemaComptimeReflectionField{name: "failure_contract", value: sema_comptime_reflection_method_failure_type(function)},
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
-        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), None)},
         SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
         SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},

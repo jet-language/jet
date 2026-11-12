@@ -1,11 +1,12 @@
-// Functions and methods reflect one typed parameter list. Each ParamInfo
-// carries the parameter's name, the label a call writes, its zone, its type,
-// how it takes the argument, where its default is written (read, never run)
-// and whether it is variadic, so nothing here parses a signature string.
-// Effects read the same way: `declared` is the row a signature writes (None
-// when it writes none), and `inferred` is the row the checker solves from the
-// body, read after the check (`b.program.functions()`); a reflected constant is
-// folded inside the check, so it reads None.
+// Functions and methods reflect one typed CallableSignature. Its parameter
+// list holds a ParamInfo per parameter: the parameter's name, the label a
+// call writes, its zone, its type, how it takes the argument, where its
+// default is written (read, never run) and whether it is variadic, so nothing
+// here parses a signature string. Effects read the same way: `declared` is the
+// row a signature writes (None when it writes none), and `inferred` is the row
+// the checker solves from the body, read after the check
+// (`b.program.functions()`); a reflected constant is folded inside the check,
+// so it reads None. The `effects` fact read is the signature's own `effects`.
 connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host}:{seconds}:{tls}"
 }
@@ -21,7 +22,7 @@ Log: struct {
 send: fn(text: String) -[Net]> Int { text.len() }
 
 run: fn() {
-    loop param in connect.reflect().params {
+    loop param in connect.reflect().signature.params {
         zone: if param.zone == {
             .PositionalOnly -> "positional"
             .Either -> "either"
@@ -31,7 +32,7 @@ run: fn() {
         print("connect {param.name}: label {param.label}, {zone}, {param.type}, {default}")
     }
     loop method in Log.reflect().methods {
-        loop param in method.params {
+        loop param in method.signature.params {
             if param.name == "self" -> next
             access: if param.access == {
                 .Read -> "reads"
@@ -46,5 +47,12 @@ run: fn() {
     declared: if effects.declared == .Val(row) -> row.join(", ") else -> "nothing"
     solved: if effects.inferred == None -> "not solved yet" else -> "solved"
     print("send declares {declared}; its body row is {solved}")
+    signature: connect.reflect().signature
+    convention: if signature.calling_convention == {
+        .Jet -> "Jet"
+        .Kernel -> "kernel"
+        .Foreign -> "foreign"
+    }
+    print("connect returns {signature.return_type ?? "nothing"} by the {convention} calling convention")
     print(connect("db"))
 }

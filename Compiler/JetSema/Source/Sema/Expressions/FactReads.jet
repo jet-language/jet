@@ -112,6 +112,7 @@ sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
         enum_name == "ExactnessKind" -> Val([String]{"Exact", "Approximate", "Measured"})
         enum_name == "ParamZone" -> Val([String]{"PositionalOnly", "Either", "LabelOnly"})
         enum_name == "ParamAccess" -> Val([String]{"Read", "Write", "Move"})
+        enum_name == "CallingConvention" -> Val([String]{"Jet", "Kernel", "Foreign"})
         enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
         else -> None
     }
@@ -427,10 +428,9 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     if type_name == "FunctionInfo" {
         return if {
             field == "name" || field == "module" || field == "identity" || field == "package" -> Val(string)
-            field == "params" -> Val(sema_fact_list_of("ParamInfo"))
+            field == "signature" -> Val(sema_fact_named("CallableSignature"))
             field == "span" -> Val(sema_fact_named("SourceSpan"))
             field == "location" -> Val(sema_fact_optional("SourceLocation"))
-            field == "effects" -> Val(sema_fact_named("EffectInfo"))
             field == "reaches_panic" -> Val(Type.Bool)
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -463,6 +463,16 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
+    if type_name == "CallableSignature" {
+        return if {
+            field == "params" -> Val(sema_fact_list_of("ParamInfo"))
+            field == "return_type" -> Val(Type.Option{inner: string})
+            field == "effects" -> Val(sema_fact_named("EffectInfo"))
+            field == "calling_convention" -> Val(sema_fact_named("CallingConvention"))
+            field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
+            else -> None
+        }
+    }
     if type_name == "EffectInfo" {
         return if {
             field == "values" -> Val(Type.List{element: string})
@@ -472,9 +482,8 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "MethodInfo" {
         return if {
-            field == "name" || field == "module" || field == "identity" || field == "return_type" || field == "signature" -> Val(string)
-            field == "params" -> Val(sema_fact_list_of("ParamInfo"))
-            field == "effects" -> Val(sema_fact_named("EffectInfo"))
+            field == "name" || field == "module" || field == "identity" -> Val(string)
+            field == "signature" -> Val(sema_fact_named("CallableSignature"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
             field == "dimensions" -> Val(sema_fact_list_of("DimensionInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -636,7 +645,8 @@ sema_fact_reflected_read: fn(value: TComptimeValue, read: FactRead) -> TComptime
         return listed
     }
     if owner == "FunctionInfo" || owner == "MethodInfo" {
-        if read == FactRead.Effects -> return sema_fact_struct_field(value, "effects")
+        // The `effects` fact is the record's own `signature.effects`.
+        if read == FactRead.Effects -> return sema_fact_struct_field(sema_fact_struct_field(value, "signature") ?? return None, "effects")
         return sema_fact_list_detail(facts, read)
     }
     if owner == "FieldInfo" {
@@ -1107,7 +1117,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
         return None
     }
     if read == FactRead.Effects {
-        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("EffectInfo"), value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), None)})
+        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("EffectInfo"), value: sema_fact_struct_field(sema_comptime_reflection_callable_signature(function, None), "effects") ?? return None})
         return None
     }
     if !declared && (read == FactRead.Sendability || read == FactRead.Movedness || read == FactRead.Origin) -> return None

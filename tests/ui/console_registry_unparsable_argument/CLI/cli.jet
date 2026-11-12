@@ -7,22 +7,23 @@ Command: struct {
         sites: [.Method]
 
         expand: fn(self, target: Target) {
-            if target.params.len() > 4 {
-                reject(TooManyArguments{command: target.name, count: target.params.len() - 1})
+            params: target.signature.params
+            if params.len() > 4 {
+                reject(TooManyArguments{command: target.name, count: params.len() - 1})
             }
-            if target.params.len() > 1 {
-                if target.params[1].type != "String" && target.params[1].type != "Int" && target.params[1].type != "Float" && target.params[1].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[1].name, type: target.params[1].type})
+            if params.len() > 1 {
+                if params[1].type != "String" && params[1].type != "Int" && params[1].type != "Float" && params[1].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[1].name, type: params[1].type})
                 }
             }
-            if target.params.len() > 2 {
-                if target.params[2].type != "String" && target.params[2].type != "Int" && target.params[2].type != "Float" && target.params[2].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[2].name, type: target.params[2].type})
+            if params.len() > 2 {
+                if params[2].type != "String" && params[2].type != "Int" && params[2].type != "Float" && params[2].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[2].name, type: params[2].type})
                 }
             }
-            if target.params.len() > 3 {
-                if target.params[3].type != "String" && target.params[3].type != "Int" && target.params[3].type != "Float" && target.params[3].type != "Bool" {
-                    reject(UnparsableArgument{command: target.name, param: target.params[3].name, type: target.params[3].type})
+            if params.len() > 3 {
+                if params[3].type != "String" && params[3].type != "Int" && params[3].type != "Float" && params[3].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: params[3].name, type: params[3].type})
                 }
             }
         }

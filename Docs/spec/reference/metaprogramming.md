@@ -304,23 +304,32 @@ field without a written default, else a `DefaultInfo` whose `source` is the
 `SourceSpan` of the default expression. Reading `default` never runs the
 expression.
 
-A `FunctionInfo` and a `MethodInfo` share one parameter list: `params` is a
-`[ParamInfo]` in declaration order, the receiver included. Each `ParamInfo`
-carries the parameter's `name`; the `label` a call writes (its public label,
-else its name); its `zone` (`ParamZone`: `PositionalOnly`, `Either` or
-`LabelOnly`); its `type`; its `access` (`ParamAccess`: `Read`, `Write` for a
-`&` parameter, or `Move` for a `&&` one); its `default`, a `DefaultInfo?`
-read the same way as a field's and never run; and whether it is `variadic`.
-A catalog reads a callable's parameters without parsing a signature string
-(`Examples/Metaprogramming/Reflection/CallableCatalog.jet`).
+A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
+a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,
+the receiver included; its `return_type` is the success type the callable
+returns, a `String?` that is `None` when it returns no value; its `effects` is an `EffectInfo`;
+its `calling_convention` is a `CallingConvention` (`Jet`, `Kernel` for a
+`#Kernel` function, or `Foreign` for one whose body is inline foreign code); and
+its `generic_bindings` is a `[GenericBindingInfo]`, empty on a declaration,
+which binds no generic parameter. No record carries the signature as text.
 
-Their `effects` is an `EffectInfo`. `declared` is the row the signature
-writes, a `[String]?` that is `None` when it writes none and the row is
-inferred. `inferred` is the row the checker solved from the body: it is known
-after the check, so `b.program.functions()` reads it, while a read folded
-inside the check (`send.reflect().effects`, a marker body, a template) reads
-`None`. `values` is the row known where it is read: the solved row once there
-is one, else the written row.
+Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
+(its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,
+`Either` or `LabelOnly`); its `type`; its `access` (`ParamAccess`: `Read`,
+`Write` for a `&` parameter, or `Move` for a `&&` one); its `default`, a
+`DefaultInfo?` read the same way as a field's and never run; and whether it is
+`variadic`. A catalog reads a callable's parameters without parsing a
+signature string (`Examples/Metaprogramming/Reflection/CallableCatalog.jet`).
+
+The signature's `effects` is an `EffectInfo`, and the `effects` fact read
+(`send.reflect().effects`) is that same record: it reads
+`signature.effects`. `declared` is the row the signature writes, a
+`[String]?` that is `None` when it writes none and the row is inferred.
+`inferred` is the row the checker solved from the body: it is known after the
+check, so `b.program.functions()` reads it, while a read folded inside the
+check (`send.reflect().effects`, a marker body, a template) reads `None`.
+`values` is the row known where it is read: the solved row once there is one,
+else the written row.
 
 Every declaration record names where its declaration is written: the
 `location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
@@ -424,7 +433,7 @@ each argument into the parameter's declared type before the call, and
 text. The Command marker's own body rejects a parameter type no command line
 parses. Only the marked type's own methods become commands, so importing a
 package that declares commands adds none. A string hole in a template reads
-a reflected fact, such as `{m.params[1].name}` or
+a reflected fact, such as `{m.signature.params[1].name}` or
 `{m.marker(Command)?.help ?? ""}`, as that fact's literal.
 [`ReflectedInspector`](../../../Examples/Metaprogramming/Reflection/ReflectedInspector/run.jet)
 is the editor demo the same way: `#Engine.Entity(version: N)` writes a
