@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6766,
-    "rev": 99912,
+    "rev": 99916,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28533,11 +28533,11 @@
         {
           "n": 15,
           "text": "(was #6304) Core/Web/Store.jet transaction/update/batch/optimistic/patch take apply: fn() Never!, so they cannot change the store (Rust took FnOnce(&mut T)). They take a mutating callback in the canonical Jet spelling, and store.transaction in tanstack_start and state_surface changes the stored value (a case proves it). Note: fn(&T) is E0003 today; if no ratified mutating-callback type exists, this row needs an owner ballot first.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:17:25.203Z"
+          "evidence": "Core/Web/Store.jet's transaction, update, batch, optimistic and patch take a mutating callback and change the stored value. The state_surface spin (live_cell_load() folded to a build-time value) is fixed by G12Docs-50 fd03c6617f, under which local values never fold a call that the runtime answers. The tanstack_start example no longer exists in Examples/ on dev. meet g6d on dev 831b178482 with seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), Lander5 meetrun 2026-11-12: jet test Compiler --profile cases tests/cases/corelib/web_store_writes_change_the_stored_value.case PASS 1 (2.out). b12 slice on dev 2844b04984 with the same seed: jet test Compiler --profile golden Examples/Apps/Web/StateSurface.jet PASS o0, o1, o2 (deferred-b12/23.out). 0 FAIL/KF/ERROR.",
+          "at": "2026-11-12T09:26:50.052Z"
         },
         {
           "n": 16,
@@ -28754,7 +28754,7 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:30.358Z",
-      "updated": "2026-11-12T09:15:22.603Z",
+      "updated": "2026-11-12T09:26:50.053Z",
       "updatedBy": "Main",
       "workOrder": 277,
       "goals": [
@@ -34966,11 +34966,11 @@
         {
           "n": 21,
           "text": "The syntax registry (Compiler/JetFoundation/Data/Syntax) has rows for `b.compiler(output)`, `Compiler`, `meta.events`, `meta.add`, `meta.rewrite_body` and `#code { … }` with the `#{code}` paste, landing with the first API that makes each spelling real (no decision citations in the registry, per I7).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T02:44:15.105Z"
+          "evidence": "meet g6c on dev 831b178482 with seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), Lander5 meetrun 2026-11-12, all lines rc 0. grep over Compiler/JetFoundation/Data/Syntax/Spellings.jet finds one row each for spelling \"b.compiler(output)\", \"Compiler\", \"meta.events(watch: …\", \"meta.add(code, scope: name)\", \"meta.rewrite_body(f, code)\", and CODE_VALUE with #code {{ items }} plus the #{{f.body}} paste (lines 3-8); the negated grep finds no decision id or card id in those rows (line 9); jet test tests/guards/syntax_reconciliation.jet passes, including lexical_ledger_is_rendered_from_syntax (line 10). Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6c/.",
+          "at": "2026-11-12T09:26:44.808Z"
         },
         {
           "n": 22,
@@ -35002,7 +35002,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-12T07:04:37.914Z",
+      "updated": "2026-11-12T09:26:44.808Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -55628,7 +55628,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -55637,6 +55637,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 met (50a61e8454); c2, c3 and c5 were already met. All criteria met."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -55652,11 +55657,11 @@
         {
           "n": 1,
           "text": "D-JAI-SMALL1=A part 1: a Set of a small enum is stored as bits and has bits() and from_bits(); a golden shows the round trip and the size on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:01:25.972Z"
+          "evidence": "G6Decl-7r landed as 50a61e8454. meet g6d on dev 831b178482 with seed-b12 jet@a0.0.45#b5c287db (built from 2844b04984), Lander5 meetrun 2026-11-12: jet test Compiler --profile cases tests/cases/collections_and_methods/set_bits_round_trip_on_every_tier.case PASS 1, 0 FAIL/KF/ERROR. The case's expected output pins the bits() and from_bits() round trip of a Set of a small enum and its 8-byte size on O0, O1 and O2. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6d/1.out.",
+          "at": "2026-11-12T09:26:46.344Z"
         },
         {
           "n": 2,
@@ -55701,12 +55706,13 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:46.152Z",
-      "updated": "2026-11-12T01:30:17.951Z",
+      "updated": "2026-11-12T09:26:48.884Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-12T09:26:48.884Z"
     },
     {
       "id": "c06y0cef",
@@ -199942,6 +199948,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T09:26:50.053Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ytw4eo",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-12T09:26:48.885Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qrom2s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-12T09:26:46.344Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qrom2s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-12T09:26:44.808Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02m1p02",
+      "note": "#21"
+    },
     {
       "at": "2026-11-12T09:21:55.615Z",
       "by": "Main",
