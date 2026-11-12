@@ -446,9 +446,19 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "PackageInfo" {
         return if {
+            field == "name" || field == "identity" || field == "version" -> Val(string)
+            field == "modules" -> Val(sema_fact_list_of("ModuleInfo"))
+            field == "types" -> Val(sema_fact_list_of("TypeInfo"))
+            field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
+            else -> None
+        }
+    }
+    if type_name == "ModuleInfo" {
+        return if {
             field == "name" || field == "identity" -> Val(string)
             field == "types" -> Val(sema_fact_list_of("TypeInfo"))
             field == "functions" -> Val(sema_fact_list_of("FunctionInfo"))
+            field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
             else -> None
         }
     }

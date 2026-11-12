@@ -668,6 +668,7 @@ JetCompilerServicesProgramInfo: enum {
 // checked call written in the root package's own source outside its `build`
 // functions, an ambient call's callee being its name (`print`), in the order
 // the checker met them; `meta.events(watch: .Calls{to: f}, …)` reads it.
+// `packages` holds one PackageInfo per package, its modules in load order.
 jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
@@ -676,14 +677,14 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
-    packages := [TComptimeValue]{}
+    packages := [JetCompilerServicesPackageRows]{}
     build_keys := [String]{}
     loop module_row in registration.modules {
         checked := SemaGraphModuleResult?{None}
         loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
         if checked == None -> return .Missing(fact: "module `{module_row.module_identity}` has no checked result")
-        package_types := [TComptimeValue]{}
-        package_functions := [TComptimeValue]{}
+        module_types := [TComptimeValue]{}
+        module_functions := [TComptimeValue]{}
         registry := SemaScopeMembersMarkerRegistry?{None}
         loop item in module_row.program.items {
             name := String?{None}
@@ -700,21 +701,45 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                     markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_identity}` has no marker registry")
                     value: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key), markers)
                     functions.push(value.copy())
-                    package_functions.push(value)
+                    module_functions.push(value)
                 }
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
                 value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
                 types.push(value.copy())
-                package_types.push(value)
+                module_types.push(value)
             }
         }
-        packages.push(TComptimeValue.Struct{type_name: "PackageInfo", fields: [TComptimeField]{
+        at := -1
+        loop (row, package) in packages {
+            if package.identity == module_row.package_identity -> at = row
+        }
+        if at < 0 {
+            at = packages.len()
+            packages.push(jet_eval_compiler_services_package_rows(registration, module_row))
+        }
+        packages[at].types.extend(module_types.copy())
+        packages[at].functions.extend(module_functions.copy())
+        // A file module carries no written markers; a code module's
+        // ModuleInfo (in a marker body) lists its own.
+        packages[at].modules.push(TComptimeValue.Struct{type_name: "ModuleInfo", fields: [TComptimeField]{
             {name: "name", value: jet_eval_compiler_services_string(module_row.module_name)},
             {name: "identity", value: jet_eval_compiler_services_string(module_row.module_name)},
-            {name: "types", value: TComptimeValue.List{values: package_types}},
-            {name: "functions", value: TComptimeValue.List{values: package_functions}},
+            {name: "types", value: TComptimeValue.List{values: module_types}},
+            {name: "functions", value: TComptimeValue.List{values: module_functions}},
+            {name: "markers", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+        }})
+    }
+    package_values := [TComptimeValue]{}
+    loop package in packages {
+        package_values.push(TComptimeValue.Struct{type_name: "PackageInfo", fields: [TComptimeField]{
+            {name: "name", value: jet_eval_compiler_services_string(package.name)},
+            {name: "identity", value: jet_eval_compiler_services_string(package.identity)},
+            {name: "version", value: jet_eval_compiler_services_string(package.version)},
+            {name: "modules", value: TComptimeValue.List{values: package.modules}},
+            {name: "types", value: TComptimeValue.List{values: package.types}},
+            {name: "functions", value: TComptimeValue.List{values: package.functions}},
         }})
     }
     // The revision is the content hash of the checked sources: each module's
@@ -727,7 +752,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     fields := [TComptimeField]{
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
-        {name: "packages", value: TComptimeValue.List{values: packages}},
+        {name: "packages", value: TComptimeValue.List{values: package_values}},
         {name: "revision", value: jet_eval_compiler_services_string(record_key_digest(revision_fields))},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
     }
@@ -773,6 +798,31 @@ jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}
+}
+
+// One package of ProgramInfo while its modules are gathered.
+JetCompilerServicesPackageRows: struct {
+    identity: String
+    name: String
+    version: String
+    modules: [TComptimeValue]
+    types: [TComptimeValue]
+    functions: [TComptimeValue]
+}
+
+// The package `module_row` belongs to, with no modules yet. The entry
+// package is named by the build facts (a source without a manifest takes
+// its file's name there); another package by the manifest the loader read,
+// and a package without one (a Core source) by its module.
+jet_eval_compiler_services_package_rows: fn(registration: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> JetCompilerServicesPackageRows Never! {
+    entry: module_row.package_identity == registration.package_identity
+    name: if {
+        entry -> registration.build_facts.package_name.copy()
+        module_row.package.name != "" -> module_row.package.name.copy()
+        else -> module_row.module_name.copy()
+    }
+    version: if entry -> registration.build_facts.package_version.copy() else -> module_row.package.version.copy()
+    JetCompilerServicesPackageRows{identity: module_row.package_identity.copy(), name: name, version: version, modules: [TComptimeValue]{}, types: [TComptimeValue]{}, functions: [TComptimeValue]{}}
 }
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.

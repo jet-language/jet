@@ -3,7 +3,8 @@
 // read the type's name, kind, identity, module, field and marker counts, and
 // the typed `marker(Label)` argument, and each prints the same line. A type
 // without `Label` reads `marker(Label)` as None at every rung. fn build also
-// reads `marker(Label)` on a function's FunctionInfo.
+// reads `marker(Label)` on a function's FunctionInfo, and the package's one
+// PackageInfo: its name, version, modules and types.
 Label: struct {
     text: String
 
@@ -79,7 +80,9 @@ build: fn(b: Build) {
         }
     }
     loop package in b.program.packages() {
-        b.contribute("package", "{package.name} {package.identity} types={package.types.len()}")
+        if package.name == "reflection_rungs" {
+            b.contribute("package", "{package.name} {package.version} modules={package.modules.len()} types={package.types.len()}")
+        }
     }
 }
 

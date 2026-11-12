@@ -1,0 +1,37 @@
+// The package `pair` has two modules, this file and helper.jet: fn build
+// sees one PackageInfo for it, holding both modules and all their types and
+// functions.
+Score: struct {
+    value: Int
+}
+
+build: fn(b: Build) {
+    anchor: b.program.functions()[0].span
+    records := 0
+    loop package in b.program.packages() {
+        if package.name != "pair" -> next
+        records += 1
+        if package.version == "1.2.0" {
+            b.error(anchor, "VERSION", "the manifest version", "PackageInfo.version", "ok")
+        }
+        if package.modules.len() == 2 {
+            b.error(anchor, "MODULES", "both modules", "PackageInfo.modules", "ok")
+        }
+        if package.types.len() == 2 && package.functions.len() == 2 {
+            b.error(anchor, "MEMBERS", "every module's types and functions", "PackageInfo.types and functions", "ok")
+        }
+        loop part in package.modules {
+            if part.name.ends_with("helper") && part.types.len() == 1 && part.functions.len() == 1 {
+                b.error(anchor, "HELPER", "the helper module", "ModuleInfo", "ok")
+            }
+        }
+    }
+    if records == 1 {
+        b.error(anchor, "ONE", "one package record", "a package is one PackageInfo", "ok")
+    }
+    if records > 1 {
+        b.error(anchor, "SPLIT", "one record per module", "a package is one PackageInfo", "group the modules by package")
+    }
+}
+
+run: fn() { print(total(Pair{left: 1, right: 2}) + Score{value: 3}.value) }

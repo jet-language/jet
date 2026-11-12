@@ -620,6 +620,10 @@ SemaRegistrationModule: struct {
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
     declared_module: String{""}
+    // The package the loader read for this module (its manifest name and
+    // version; the defaults for a source without one): ProgramInfo groups
+    // its modules into one PackageInfo by `package_identity`.
+    package: SemaModulePackage{SemaModulePackage{}}
     source_file: String
     source_segments: [SemaSourceSegment]
     source_origin: SemaSourceOrigin
@@ -2812,6 +2816,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
         core_source_alias: owned.core_source_alias,
         module_path: owned.module_path,
         declared_module: owned.declared_module,
+        package: owned.meta.package.copy(),
         source_file: owned.source_file,
         source_segments: owned.source_segments,
         source_origin: owned.source_origin,
