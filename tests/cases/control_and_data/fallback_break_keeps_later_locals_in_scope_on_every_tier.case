@@ -1,0 +1,15 @@
+# `a ?? b ?? break`, and `?? break` inside an if arm in a loop, leave the loop
+# on a missing value, and the locals bound after them stay in scope, on every
+# tier.
+fixture: fallback_break_keeps_later_locals_in_scope_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "2\n4\n4\n104\n100\n6\n106\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "2\n4\n4\n104\n100\n6\n106\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "2\n4\n4\n104\n100\n6\n106\n"

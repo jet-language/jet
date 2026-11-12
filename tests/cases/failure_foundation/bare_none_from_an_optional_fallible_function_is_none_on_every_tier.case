@@ -1,0 +1,14 @@
+# A bare `None` returned from a `T? E!` function is the missing success
+# value, not an error and not a mistyped value, on every tier.
+fixture: bare_none_from_an_optional_fallible_function_is_none_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "-1\n0\n7\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "-1\n0\n7\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "-1\n0\n7\n"

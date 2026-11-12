@@ -1,0 +1,19 @@
+pick: fn(k: Int) -> Int? { if k > 0 -> Val(k) else -> None }
+
+run: fn() {
+    // A chain ending in `break` leaves the loop; the locals after it stay named.
+    loop k in [1, 2, 0, 5] {
+        v: pick(k) ?? pick(k - 1) ?? break
+        doubled: v * 2
+        print(doubled)
+    }
+    // `?? break` inside an if arm.
+    loop k in [4, 0, 6] {
+        if k > 2 {
+            w: pick(k) ?? break
+            print(w)
+        }
+        after: k + 100
+        print(after)
+    }
+}

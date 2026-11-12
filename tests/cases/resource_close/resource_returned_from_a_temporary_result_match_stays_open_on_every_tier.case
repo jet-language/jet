@@ -1,0 +1,15 @@
+# Returning a resource out of a match on a temporary Result moves it to the
+# caller: it is not closed when the temporary ends, and it closes once, after
+# its new owner is done with it, on every tier.
+fixture: resource_returned_from_a_temporary_result_match_stays_open_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "got held\nclose held\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "got held\nclose held\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "got held\nclose held\n"

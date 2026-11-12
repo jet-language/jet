@@ -1,0 +1,14 @@
+use files: core.files
+
+// A fallible function that borrows the writer writes through it.
+write_into: fn(out: &FileWriter, text: String) IOError! -[FS.Write]> { out.write_all(text.bytes()) }
+
+run: fn() IOError! -[FS, IO]> {
+    out := files.create("written.txt")
+    write_into(out, "hello\n")
+    write_into(out, "again\n")
+    close(out.move())
+    reader := files.open("written.txt")
+    print(reader.read_line() ?? "missing")
+    print(reader.read_line() ?? "missing")
+}

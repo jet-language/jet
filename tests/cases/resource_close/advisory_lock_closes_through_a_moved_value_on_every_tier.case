@@ -1,0 +1,14 @@
+# `close(lock.move())` on an AdvisoryLock releases it through the Close impl: a
+# second lock on the same directory then succeeds, on every tier.
+fixture: advisory_lock_closes_through_a_moved_value_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "locked\nunlocked\nlocked again\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "locked\nunlocked\nlocked again\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "locked\nunlocked\nlocked again\n"

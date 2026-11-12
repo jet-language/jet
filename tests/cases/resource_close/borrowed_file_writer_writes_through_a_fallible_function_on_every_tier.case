@@ -1,0 +1,14 @@
+# A fallible function taking a borrowed FileWriter calls write_all on it,
+# and the bytes reach the file, on every tier.
+fixture: borrowed_file_writer_writes_through_a_fallible_function_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "hello\nagain\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "hello\nagain\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "hello\nagain\n"

@@ -1,0 +1,21 @@
+# Unbounded recursion stops with the registered E3012 report, which names the
+# recursing function and its source line, with exit 70 at every optimization
+# level.
+fixture: unbounded_recursion_stops_naming_the_function_and_line_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none recurse.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3012]: Stack overflow in `recurse`" # the registered stop names the function
+stderr: ~ "--> recurse.jet:2 in recurse" # and its source line
+step: jet run --optimize=basic recurse.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3012]: Stack overflow in `recurse`" # the registered stop names the function
+stderr: ~ "--> recurse.jet:2 in recurse" # and its source line
+step: jet run --optimize=full recurse.jet
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3012]: Stack overflow in `recurse`" # the registered stop names the function
+stderr: ~ "--> recurse.jet:2 in recurse" # and its source line

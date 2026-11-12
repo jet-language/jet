@@ -1,0 +1,19 @@
+# `x == Val(CONST)` compares with the constant on every tier. `x == Val(local)`
+# would bind a new name, so it is refused with a clear error that shows the
+# comparing spelling `Val((local))`, never silently bound.
+fixture: equality_with_a_constant_payload_compares_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "true\nfalse\ntrue\nfalse\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "true\nfalse\ntrue\nfalse\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "true\nfalse\ntrue\nfalse\n"
+step: jet check bind.jet
+exit: 1
+stderr: ~ "Error [jet.NameAlreadyTaken]: `Val(z)` would make a new `z`, but `z` already holds a value" # a local name after `==` is refused, never silently bound
+stderr: ~ "Write `Val((z))` to compare with the existing value" # the fix shows the comparing spelling
