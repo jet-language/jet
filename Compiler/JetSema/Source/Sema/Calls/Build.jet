@@ -311,7 +311,7 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
             else -> false
         }
         if argument.spread || argument.flags.template_items != None || !takes {
-            diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add` doesn't take this argument", "`meta.add` takes one `Code` value and the `scope:` module it joins", "write `{shape}`"))
+            diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add` doesn't take this argument", "`meta.add` takes one `Code` value or source text and the `scope:` module it joins", "write `{shape}`"))
             return failed
         }
         unlabelled := argument.copy()
@@ -319,36 +319,57 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
         if label == "scope" -> scope = Val(unlabelled) else -> code = Val(unlabelled)
     }
     code_arg: code ?? {
-        diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects a `Code` value", "`meta.add` adds the items of one `Code` value", "write `{shape}`"))
+        diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects a `Code` value or source text", "`meta.add` adds the items of one `Code` value or of source text", "write `{shape}`"))
         return failed
     }
     scope_arg: scope ?? {
         diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects `scope:`", "the added items join the generated module `scope:` names", "write `{shape}`"))
         return failed
     }
-    // The session reads the `Code` value, then the scope's String.
-    ordinary := [CallArg]{code_arg, scope_arg}
-    required_types: [Type]{Type.Named{name: "Code"}, Type.String}
-    values := [TExpr]{}
-    params := [SemaCallParam]{}
-    loop (index, argument) in ordinary {
-        required: required_types[index]
-        value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
-        compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return failed
-        if !compatible {
-            diagnostics.push(sema_type_mismatch(required, value.ty, argument.span))
+    // The code is a `Code` value or a String of source text, which the
+    // build parses when it runs.
+    code_value: sema_check_expression(code_arg.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    text: sema_call_type_assignable(Type.String, code_value.ty, environment, program) ?? return failed
+    if !text {
+        is_code: sema_call_type_assignable(Type.Named{name: "Code"}, code_value.ty, environment, program) ?? return failed
+        if !is_code {
+            diagnostics.push(sema_type_mismatch(Type.Named{name: "Code"}, code_value.ty, code_arg.span))
             return failed
         }
-        values.push(value.copy())
+    }
+    scope_value: sema_check_expression(scope_arg.expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    scope_is_text: sema_call_type_assignable(Type.String, scope_value.ty, environment, program) ?? return failed
+    if !scope_is_text {
+        diagnostics.push(sema_type_mismatch(Type.String, scope_value.ty, scope_arg.span))
+        return failed
+    }
+    // The session reads the code, then the scope's String.
+    ordinary := [CallArg]{code_arg, scope_arg}
+    values := [TExpr]{code_value, scope_value}
+    params := [SemaCallParam]{}
+    loop value in values {
         params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
     }
     ownership: sema_ownership_check_method_call(state, "Compiler.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     // `meta.add` writes declarations, so it uses `Meta.Generate`: allowed
-    // unless the calling function's row denies it.
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.{method}", span, [EffectRowEntry]{EffectRowEntry{name: META_GENERATE, span: span}}, diagnostics) -> return failed
-    // The session reads the `Code` value, the scope, then the caller.
+    // unless the calling function's row denies it. Source text is a type
+    // factory: the build parses it after every row is fixed, and it may
+    // declare a type made from any value, so a text add also uses
+    // `Meta.Types` and `Meta.Raw`. A `Code` value's items are fixed where it
+    // is written, like a marker's, so they need `Meta.Generate` alone.
+    performed := [String]{META_GENERATE}
+    if text {
+        performed.push(META_TYPES)
+        performed.push(META_RAW)
+    }
+    entries := [EffectRowEntry]{}
+    loop name in performed -> entries.push(EffectRowEntry{name: name, span: span})
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.{method}", span, entries, diagnostics) -> return failed
+    // The session reads the code, the scope, the caller, then the Meta
+    // effects the add performs, which the build's provenance records.
     values.push(sema_call_compiler_producer(environment, program, scopes, span))
+    values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: performed.join(", ")}}}, span))
     value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

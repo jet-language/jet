@@ -1,0 +1,11 @@
+// Source text is unparsed code, so a row that denies `Meta.Raw` refuses it.
+build: fn(b: Build) -[!Meta.Raw]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.add("Shape: struct {{\n    id: I64\n}}\n", scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    print(Shape{id: I64{40}}.id)
+}

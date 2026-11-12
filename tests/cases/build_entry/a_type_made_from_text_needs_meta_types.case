@@ -1,0 +1,55 @@
+# #3526 c13: a type made from values or text is a type factory. `meta.add`
+# takes source text as well as a `Code` value; the `made` build joins a list
+# of fields into the text of `Shape`, so the add uses `Meta.Generate`,
+# `Meta.Types` and `Meta.Raw`. The type's identity and layout depend only on
+# its text: none, basic and full optimization give the same identity, size,
+# alignment and offsets, and a second build gives them again. A row that
+# denies `Meta.Types` or `Meta.Raw` refuses the text, and nothing is built.
+# A `#code` value's type is written where the value is, like a marker's, so
+# denying `Meta.Types` leaves it alone. Ordinary types and generic instances
+# need no `Compiler` value and no Meta effect.
+fixture: a_type_made_from_text_needs_meta_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --optimize=none made/main.jet --write-generated=on
+exit: 0
+file: made/.jet/generated/main/shape.jet ~ "Shape: struct {" # the text is the generated module
+step: {work}/made/.jet/build/app
+exit: 0
+stdout: = a_type_made_from_text_needs_meta_types.out
+step: jet build --optimize=basic made/main.jet
+exit: 0
+step: {work}/made/.jet/build/app
+exit: 0
+stdout: = a_type_made_from_text_needs_meta_types.out
+step: jet build --optimize=full made/main.jet
+exit: 0
+step: {work}/made/.jet/build/app
+exit: 0
+stdout: = a_type_made_from_text_needs_meta_types.out
+step: jet build --optimize=full made/main.jet
+exit: 0
+step: {work}/made/.jet/build/app
+exit: 0
+stdout: = a_type_made_from_text_needs_meta_types.out
+step: jet inspect graph made/main.jet --json
+exit: 0
+json: stdout doc $.build.generated[0].authority = "Meta.Generate, Meta.Types, Meta.Raw"
+step: jet build denied/main.jet
+exit: 1
+stderr: ~ "reaches the `Meta.Types` effect, which it prohibits with `-[!Meta.Types]>`" # the row's denial wins over the factory
+file: denied/.jet/build/app absent
+step: jet build raw_denied/main.jet
+exit: 1
+stderr: ~ "reaches the `Meta.Raw` effect, which it prohibits with `-[!Meta.Raw]>`" # source text is unparsed code
+file: raw_denied/.jet/build/app absent
+step: jet build written/main.jet
+exit: 0
+step: {work}/written/.jet/build/app
+exit: 0
+stdout: = "40\n"
+step: jet build ordinary/main.jet
+exit: 0
+step: {work}/ordinary/.jet/build/app
+exit: 0
+stdout: = "3\n"

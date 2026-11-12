@@ -1,0 +1,17 @@
+// A `#code` value's type is written where the value is, like a marker's
+// generated type, so it needs `Meta.Generate` alone: denying `Meta.Types`
+// leaves it alone.
+build: fn(b: Build) -[!Meta.Types]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.add(#code {
+        Shape: struct {
+            id: I64
+        }
+    }, scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    print(Shape{id: I64{40}}.id)
+}

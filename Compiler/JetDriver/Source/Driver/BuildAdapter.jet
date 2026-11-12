@@ -177,8 +177,9 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 }
 
 // A call on the root's `Compiler` value, the value first. `meta.add` sends
-// its `Code` value's formatted items as the generated source and the scope
-// it joins (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
+// its `Code` value's formatted items, or its source text, as the generated
+// source, the scope it joins and the Meta effects sema recorded for it
+// (JetBuildSession `compiler.add`). `meta.rewrite_body` sends the
 // function's name and its `Code` value's formatted statements as the new
 // body, then the identity of the function's package and the name a paste
 // line `#{f.body}` writes it with (JetBuildSession `compiler.rewrite_body`);
@@ -210,15 +211,19 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         return jet_driver_compiler_reply(session, reply, span)
     }
     rewrite: member == "Compiler.rewrite_body" || member == "Compiler.rewrite_body.heard"
-    if !(rewrite && args.len() == 5) && !(member == "Compiler.add" && args.len() == 4) -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
+    if !(rewrite && args.len() == 5) && !(member == "Compiler.add" && args.len() == 5) -> return jet_driver_build_host_failure(session, span, "`{member}` is not a `Compiler` method")
     held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     code_index: if rewrite -> 2 else -> 1
-    source: jet_driver_code_source(args[code_index]) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
+    // `meta.add` also takes source text, which the build parses as it adds.
+    found := jet_driver_code_source(args[code_index])
+    if !rewrite && args[code_index] == .String(written) -> found = Val(written.copy())
+    source: found ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
     if jet_driver_code_writes_unsafe(source) -> return jet_driver_code_unsafe_refusal(span, if rewrite -> "meta.rewrite_body" else -> "meta.add")
     if !rewrite {
         scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
         producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
-        reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer}, Val(source), false, span.start, span.end)
+        authority: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
+        reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer, authority}, Val(source), false, span.start, span.end)
         return jet_driver_compiler_reply(session, reply, span)
     }
     // A named function sends its name and its package's identity; a heard
