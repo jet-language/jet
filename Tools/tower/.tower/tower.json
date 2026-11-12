@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6766,
-    "rev": 99909,
+    "rev": 99910,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98952,6 +98952,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "Main 2026-11-12: G4Ports-c1one (2844b04984, in b12) splices the comptime.bodies child's owners after finalize. jetc 0.060 s with 1 bodies program, NCC clean. But JET_RECHECK_VERIFY on RCC shows differences from the full recheck: the pass's comptime closures seed new Core demand (core.regex compile, is_match and match; core.net error_detail, net_err and valid_text; RunColdContext extract_source), and the full recheck re-solves those bodies' failure facts. About 30 comptime cases ERROR under verify (comptime_diff module_calls_match_runtime_source03-24, cbor_canonical, zstd_*, typed_datetime_head, comptime_core_pure_parity rustc_backed_*). Fix order: (1) G4Ports-c1guard, first in b13: refuse the splice whenever the pass has comptime functions with Core call facts; proof is verify clean on RCC, NCC and jetc, plus zero verify ERRORs over the comptime cases. (2) The A/B split of sema_finalize_graph: A is the body pass plus the codec and derive waves; the local-only comptime splice runs between A and B; B is Core demand, the failure solve and recheck, and the side and effect passes, run once seeded with every function. That is exactly the full recheck's input, and it drops the first B (about 0.5 s on RCC). Probes g4p-fin1 and g4p-fin2. c1 stays open until RCC meets the target with verify clean."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Progress, measure only, no criterion met (Lander5 2026-11-12, b11 tip 19333b2bb3, 3 rounds per compiler, all rc 0, comparing seed-b10 and seed-b11). tracecmp medians, b10 then b11: ncc wall 1.12 to 0.98 s (0.87x), peak 308.1 to 257.0 MB (0.83x); rcc wall 3.75 to 3.00 s (0.80x), peak 950.2 to 794.4 MB (0.84x); abs wall 1.00 to 0.99 s, peak 316.9 to 256.5 MB (0.81x). ctrecheck line 6 (jetc-trace): programs_built 0+1 on both; comptime.bodies items 292 to 59, time 0.30-0.37 s to 0.23-0.27 s; peak 347 to 287 MB. Line 7 (run-cold-context): programs_built 2+2 on both; comptime.bodies items 1684 to 1406, time 1.24-1.62 s to 1.21-1.50 s; peak 980 to 822 MB. The c1 4x target is still unmet. G4Ports-1's probe shows the remaining owner is the comptime.bodies full sema recheck (+227 MB on RCC); c1one removes it. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/{ctre67,tracecmp-19333b2bb3}/."
         },
         {
@@ -99021,7 +99026,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-12T08:30:36.883Z",
+      "updated": "2026-11-12T09:18:19.620Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -199930,6 +199935,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T09:18:19.620Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-12T09:15:50.595Z",
       "by": "Main",
