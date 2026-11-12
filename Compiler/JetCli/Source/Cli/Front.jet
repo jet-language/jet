@@ -921,8 +921,13 @@ jet_cli_stdin_source_at: fn(argv: [String]) -> Int? Never! {
 // The argv indexes of `jet eval CODE`'s `eval` and CODE: CODE is the first
 // word after `eval` that is not a flag, unless it names a source file or a
 // project (the file form, jet_cli_eval) or is a `:meta` word. `--json` and
-// `--pure` keep the expression form (JetCLIPlan.EvalExpression).
+// `--pure`, before or after CODE (`jet eval "1 + 2" --json`), keep the
+// expression form (JetCLIPlan.EvalExpression).
 jet_cli_eval_code_at: fn(argv: [String]) -[FS]> (verb: Int, code: Int)? Never! {
+    loop argument in argv {
+        if argument == "--" -> break
+        if argument == "--json" || argument == "--pure" -> return None
+    }
     skip_next := false
     verb := Int?{None}
     loop (index, argument) in argv {
@@ -930,7 +935,7 @@ jet_cli_eval_code_at: fn(argv: [String]) -[FS]> (verb: Int, code: Int)? Never! {
             skip_next = false
             next
         }
-        if argument == "--" || argument == "--json" || argument == "--pure" -> return None
+        if argument == "--" -> return None
         if argument.starts_with("-") && argument != "-" {
             if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> skip_next = true
             next
