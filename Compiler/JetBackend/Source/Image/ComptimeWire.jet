@@ -114,6 +114,7 @@ X64_COMPTIME_FILE_CALLS: [Int]{0, 1, 2, 3, 4, 5, 6, 8, 17, 18, 21, 74, 75, 77, 8
 // the command and reply descriptors), so one the block opened.
 X64_COMPTIME_FILE_FD_CALLS: [Int]{0, 1, 3, 5, 8, 17, 18, 74, 75, 77, 91, 217}
 X64_COMPTIME_FIRST_OPENED_FD: 5
+X64_COMPTIME_SIGRETURN: 15
 
 // One classic BPF instruction and its symbolic jump targets (-1: next).
 X64ComptimeBpf: struct {
@@ -157,16 +158,20 @@ x64_comptime_filter: fn(stdout: Bool, cookie: Int) -> [U8] Never! {
 // inside an admitted `#Impure` block. A file call is allowed unless it names
 // a descriptor the child started with; any other reissue returns -4095, and
 // the handler refuses it as it refused the call. A call without the cookie
-// goes on to the refusal block. Classic BPF jumps only forward, so the
-// descriptor check ends in its own -4095 return.
+// goes on to the refusal block. rt_sigreturn goes there first: the handler
+// returns through its restorer with the reissue's cookie still in r9, and the
+// restorer's rt_sigreturn is no reissue. Classic BPF jumps only forward, so
+// the descriptor check ends in its own -4095 return.
 x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
     start: program.len()
     calls: X64_COMPTIME_FILE_CALLS
-    unadmitted: start + 5 + calls.len()
+    unadmitted: start + 7 + calls.len()
     fd_check: unadmitted + 1
     fd_refused: fd_check + 2
     allow: fd_refused + 1
     rest: allow + 1
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_SIGRETURN, jt: rest, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 56, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: cookie.bit_and(4294967295), jt: -1, jf: rest})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 60, jt: -1, jf: -1})
@@ -238,9 +243,53 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
 #Test("the comptime seccomp program encodes, every jump forward and in range, with and without standard output") {
     modes: [Bool]{false, true}
     loop (index, stdout) in modes {
-        // The header (3), the cookie check (10 + its file calls) and the
+        // The header (3), the cookie check (12 + its file calls) and the
         // refusal block (11 + its free calls + the write descriptors).
-        expected: 24 + X64_COMPTIME_FILE_CALLS.len() + X64_COMPTIME_ALLOWED.len() + 2 + index
+        expected: 26 + X64_COMPTIME_FILE_CALLS.len() + X64_COMPTIME_ALLOWED.len() + 2 + index
         assert_eq(x64_comptime_filter(stdout, 81985529216486895).len(), 8 * expected)
     }
+}
+
+// The action `program` (a filter's bytes) takes on system call `number` with
+// first argument `first` and sixth argument `sixth`.
+x64_comptime_bpf_run: fn(program: [U8], number: Int, first: Int, sixth: Int) -> Int Never! {
+    data := [U8]{}
+    // seccomp_data: the call's number and architecture (32 bits each), its
+    // instruction pointer, then its six arguments.
+    header: [Int]{number, X64_AUDIT_ARCH_X86_64}
+    loop word in header {
+        loop shift in 0..<4 -> data.push(U8{(word >> (8 * shift)).bit_and(255)})
+    }
+    x64_comptime_put_word(data, 0)
+    x64_comptime_put_word(data, first)
+    loop _ in 0..<4 -> x64_comptime_put_word(data, 0)
+    x64_comptime_put_word(data, sixth)
+    accumulator := 0
+    at := 0
+    loop at * 8 < program.len() {
+        code: x64_comptime_unsigned(program, at * 8, 2)
+        k: x64_comptime_unsigned(program, at * 8 + 4, 4)
+        if code == X64_BPF_RET_K -> return k
+        if code == X64_BPF_LD_W_ABS {
+            accumulator = x64_comptime_unsigned(data, k, 4)
+            at += 1
+            next
+        }
+        taken: if code == X64_BPF_JEQ_K -> accumulator == k else -> accumulator >= k
+        step: if taken -> Int.from_u8(program[at * 8 + 2]) else -> Int.from_u8(program[at * 8 + 3])
+        at += 1 + step
+    }
+    panic("the comptime seccomp program runs off its end")
+}
+
+#Test("the comptime seccomp program admits a reissued file call and the handler's rt_sigreturn, which carries the reissue's cookie") {
+    cookie: 81985529216486895
+    program: x64_comptime_filter(false, cookie)
+    assert_eq(x64_comptime_bpf_run(program, X64_COMPTIME_SIGRETURN, 0, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, X64_COMPTIME_SIGRETURN, 0, 0), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 2, 0, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 2, 0, 0), X64_SECCOMP_RET_TRAP)
+    assert_eq(x64_comptime_bpf_run(program, 0, 6, cookie), X64_SECCOMP_RET_ALLOW)
+    assert_eq(x64_comptime_bpf_run(program, 0, 3, cookie), X64_SECCOMP_RET_UNADMITTED)
+    assert_eq(x64_comptime_bpf_run(program, 41, 0, cookie), X64_SECCOMP_RET_UNADMITTED)
 }
