@@ -95199,6 +95199,70 @@
       "completedAt": "2026-11-09T19:27:40.244Z",
       "questions": [],
       "retiredAt": "2026-11-12T19:30:06.058Z"
+    },
+    {
+      "id": "c0aqrdp0",
+      "num": 6442,
+      "title": "Finish and land the held Jetpack lane patches (BugSweep BS15n, BS18-23; ToolsJet SHORTROOTS, Engine rerun, Foundation 3 fails)",
+      "body": "The BugSweep and ToolsJet lanes wound down on 2026-10-31 under the 8-agent cap. Their unfinished work is listed row by row, with files and the next step, in $JET_SCRATCH_ROOT/lanes/BugSweep/HELD.md and $JET_SCRATCH_ROOT/lanes/ToolsJet/HELD.md.\nBugSweep: BS15n (2 test files, after ToolsJet-34), BS18 (exclusive: flock header for fixed-port examples), BS19 (inline package stock carrier), BS20 (command home vs sibling E0105), BS21 (project configuration files are never package source), BS22 (#6434, must be redone), BS23 (catalog services ask for @nixpkgs and stop at E1317), plus the @nixpkgs hint texts in the CLI.\nToolsJet: SHORTROOTS (blocked on #6441), the Engine area rerun, 3 Foundation runtime fails, and the JetDriver loopback-rejection test port.\nEach patch applies on df84747616 unless noted, but none has lane-check or targeted evidence yet.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "bd847b4830 (Builder3, Batch7): BugSweep 15n, 19, 20, 21 and 23 landed (FIXED_POINT 898cff6a654ffaa2; lane-check CHECK OK; cases lost 0 with 4 FAIL to PASS; ui and golden unchanged). held/5971 retired to the scratch held area. c1 still needs BS18, BS22 and the ToolsJet rows (SHORTROOTS, Engine rerun, Foundation 3 fails) landed or closed with reasons."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). BugSweep/ToolsJet HELD.md, recovered/6442.md and recovered/patches/ now live at Tools/tower/held/6442/: BS15n, BS19 and BS20 (rebased by hand onto dev 1b79163228), BS21 and BS23, with a README. All five apply and compose on dev. BS18, BS22, SHORTROOTS and the ReportJSON half of 15n are superseded (commits cited in held/README.md)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Recovered 2026-11-04 from session transcripts (table $JET_STATE_ROOT/recovered/6442.md; patches restored to $JET_SCRATCH_ROOT/lanes/BugSweep/ and $JET_STATE_ROOT/recovered/patches/). BugSweep 15n, 18, 19, 20, 21 and 23 are rebuilt and byte-size-verified against the lane's own listing; all apply on df84747616. Against dev 45280941cf: 21 and 23 apply clean, not landed. 15n: only the WhyCommand.jet part is left (patches/BugSweep/head/BugSweep-15n.patch); its ReportJSON.jet part is superseded by CardClose-32. 18 (5/7 files), 19 (Loader use list) and 20 (Items.jet) need a hand rebase. BS22 is superseded by GoldC-56 c81961f6fd (#6434). ToolsJet SHORTROOTS is rebuilt but likely superseded by 7c67280960; confirm. The Foundation fails are superseded by CardClose-32 (92/92). The Engine rerun is unblocked (#6441's case is in UiGreen-35). Never written, so nothing to recover: the @nixpkgs hints, the Engine rerun and the BuildHTTPTransport loopback port (still missing at HEAD, tests.tsv:2146). Next: commit the patches into the repo under #6563 c2, then land 21, 23 and 15n and rebase 18, 19 and 20."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Main 2026-11-04: the $JET_SCRATCH_ROOT cleanup deleted lanes/BugSweep and lanes/ToolsJet, including HELD.md and their unverified patches, before I checked open cards for scratch references. That was my error. ext4 has no snapshots, so the patches are not recoverable. The rows listed in this card's body (BS15n, BS18-BS23, the @nixpkgs hint texts; SHORTROOTS, the Engine rerun, 3 Foundation runtime fails, the JetDriver loopback test port) are redone from those descriptions, or closed with a reason on their own card. The criterion stands."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every HELD.md row in the BugSweep and ToolsJet lanes is landed on dev with its named check passing, or closed with a reason on its own card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "QuickLead: every HELD row on dev — @nixpkgs hints 4c4b04dd4a, loopback port a5b9339ad9, Engine rerun 5cf8cfa2a0 (#3590 c52 leftover carried on #6577), Foundation 6e912387a9; Main verified all four are ancestors of origin/dev; held/README marks the rest superseded",
+          "at": "2026-11-08T19:46:21.160Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T12:35:05.769Z",
+      "updated": "2026-11-09T19:31:14.577Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-09T19:31:14.577Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T19:32:44.639Z"
     }
   ]
 }
