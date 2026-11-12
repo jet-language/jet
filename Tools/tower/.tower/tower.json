@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6764,
-    "rev": 99856,
+    "nextNum": 6765,
+    "rev": 99859,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61064,12 +61064,12 @@
         },
         {
           "n": 13,
-          "text": "(was #5981) (was #3104) ScriptBench (Tools/perf/scriptbench) reports each workload's jet-run tier as three separate cells in cells.tsv: the first run with nothing kept, the warm run, and the run after a one-line edit; no card cites a jet-run number without naming its phase (receipt: a full run's cells.tsv).",
+          "text": "(was #5981) (was #3104) ScriptBench (Tools/perf/scriptbench) reports each workload's jet-run tier as separate cells in cells.tsv: the first run (nothing kept, compile included) and the run after a one-line edit; with no compile cache there is no separate warm phase. No card cites a jet-run number without naming its phase (receipt: a full run's cells.tsv).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T18:18:28.988Z"
+          "at": "2026-11-12T07:36:46.409Z"
         },
         {
           "n": 14,
@@ -61187,7 +61187,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-11T12:44:55.874Z",
+      "updated": "2026-11-12T07:36:46.409Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -99134,6 +99134,47 @@
       "needsAcceptance": false,
       "created": "2026-11-12T07:18:38.825Z",
       "updated": "2026-11-12T07:18:45.327Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0nul956",
+      "num": 6764,
+      "title": "RuntimeEffectRows --check is red on dev: 12 dead core.encoding/core.term dispatcher rows",
+      "body": "Found 2026-11-12 by G5DevX-1. jet Tools/agent/RuntimeEffectRows.jet --check reports 5 differences on dev. Root: when 892727fd3a was restaged it lost its Core.jet hunk, leaving 12 dead dispatcher rows (core.encoding __read_byte through __bytes_view, and core.term __stdin_line) that CoreCallRows regenerated with no effect. Fix SUB: G5DevX-runtime-effect-rows, which deletes the rows and regenerates the views with CoreSourceRows.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/RuntimeEffectRows.jet --check on dev reports 0 differences. CoreSourceRows, RuntimeGenerators, UnsafeRatchet and CoreSurfaceLedger --check stay current.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T07:36:47.294Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T07:36:31.179Z",
+      "updated": "2026-11-12T07:36:47.294Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -199749,6 +199790,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T07:36:47.294Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nul956",
+      "note": "#1 jet Tools/agent/RuntimeEffectRows.jet --check on dev reports"
+    },
+    {
+      "at": "2026-11-12T07:36:46.409Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0wi8ere",
+      "note": "#13: AGENTS.md Performance gate: no compile cache serves a measured run, and every compile cache is off by default. A warm jet run therefore compiles again, so it is the first-run cell repeated. 5b49f1c59a removed the warm phase for that reason (#6639 c6/c7).; was: (was #5981) (was #3104) ScriptBench (Tools/perf/scriptbench) reports each workload's jet-run tier as three separate cells in cells.tsv: the first run with nothing kept, the warm run, and the run after"
+    },
+    {
+      "at": "2026-11-12T07:36:31.179Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0nul956",
+      "note": "RuntimeEffectRows --check is red on dev: 12 dead core.encoding/core.term dispatcher rows"
+    },
     {
       "at": "2026-11-12T07:32:13.655Z",
       "by": "Main",
