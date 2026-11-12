@@ -2,7 +2,7 @@
 // Publication uses the canonical held codemod transaction.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, DIAGNOSTIC_ERROR]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
 }
@@ -45,13 +45,16 @@ jet_cli_fix_compile: fn(file: String, source: String) -> JetCLICompiled {
     }
 }
 
+// The fixes of `file` with `source` as its text: the compiler's own, and
+// the `syntax.rewrite` edits of the findings the entry package's build
+// raises in it (jet_cli_fix_build_findings).
 jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQuery {
     diagnostics := [Diagnostic]{}
+    canonical: jet_cli_overlay_path(file)
     if jet_cli_fix_compile(file, source) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
         .Compiled(result, snapshot) -> {
             if result.internal_problem == .Val(problem) -> return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
-            canonical: jet_cli_overlay_path(file)
             loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
                 if diagnostic.origin == .Val(origin) {
                     if origin.path != canonical || origin.source != source -> next
@@ -59,6 +62,13 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
                 diagnostics.push(diagnostic)
             }
         }
+    }
+    loop finding in jet_cli_fix_build_findings(file, source) {
+        if finding.origin == None -> next
+        if finding.origin == .Val(origin) {
+            if origin.path != canonical || origin.source != source -> next
+        }
+        diagnostics.push(finding)
     }
     fixes: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
     errors := [String]{}
@@ -71,6 +81,25 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
     }
     repairs: jet_cli_collect_fixes_from_diagnostics(failed, source)
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)}
+}
+
+// The `.Tidy` findings a package lint raises (`meta.report`) when the entry
+// package's `build: fn` runs with `file` reading `source`, presented in
+// their files; none when the package has no build or it fails. A finding's
+// `syntax.rewrite` fix is its edit.
+jet_cli_fix_build_findings: fn(file: String, source: String) -> [Diagnostic] {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{JetCLIOverlay{path: file, source: source}}, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(_) -> return [Diagnostic]{}
+        .Prepared(request, _) -> {
+            owned := request.move()
+            if !jet_driver_entry_package_has_build(owned) -> return [Diagnostic]{}
+            scope := JetDriverBuildQueryScope{next_session_id: 1}
+            response := jet_driver_query_build_plan(owned, scope)
+            query := response.query.move()
+            if !query.complete || query.internal_problem != None -> return [Diagnostic]{}
+            return jet_driver_present_diagnostics(query.tidy, response.request.authorized_sources, query.generated_source_files)
+        }
+    }
 }
 
 // The errors of `file` with `source` as its text (jet_cli_fix_collect); a

@@ -695,6 +695,15 @@ build; a `.Tidy` one fails `jet build` but not `jet run`, `jet dev` or
 `jet test`; a `.Report` one is advice for lint alone and fails nothing. A
 value whose type has no `impl Diagnostic` is refused (E0905). Reporting
 needs no Meta effect, and the build refuses a value whose build has returned.
+A finding can carry a machine fix: `structured_fix: syntax.rewrite(callee:
+print, replacement: note)` in its `impl Diagnostic` names two functions,
+resolved where the finding is reported. At each reported call of the
+callee, `jet fix --all` rewrites the call's callee to the replacement and
+keeps its arguments and the use of its result. The replacement must take
+what the callee takes (the same leading parameter types; any further
+parameter has a default) and return what it returns; otherwise the build
+refuses the report (E1135). `jet fix` rolls back a rewritten call that no
+longer checks.
 A package's lint group is an ordinary function over the root build's
 `Compiler` value, such as `install: fn(meta: Compiler)`, whose body registers
 call watches and reports findings. A root enables the group once, from its

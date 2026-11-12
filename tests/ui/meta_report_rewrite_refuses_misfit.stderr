@@ -1,0 +1,8 @@
+Error [jet.RewriteIncompatible]: `syntax.rewrite` can't call `count` where `print` was called: its argument 1 is `Int` and the call passes `String`
+  --> tests/ui/meta_report_rewrite_refuses_misfit.jet:19:55
+    |
+ 19 |         if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    |                                                       ^^^^^^^^^^^^^^
+ Why: A rewrite keeps each call's arguments and its use of the result, so the replacement takes what the callee takes and returns what it returns
+ Fix: Name a replacement whose parameters and return type match `print`, or drop the `structured_fix`
+More: jet-lang.dev/e/E1135

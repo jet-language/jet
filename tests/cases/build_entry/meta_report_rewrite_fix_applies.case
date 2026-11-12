@@ -1,0 +1,12 @@
+# #6516 c3: a finding's `structured_fix: syntax.rewrite(callee: print,
+# replacement: note)` is an edit `jet fix --all` applies at each `print`
+# call the build's watch reported: the call keeps its argument and calls
+# `note`, and the fixed file builds without the finding.
+fixture: fixtures/meta_report_rewrite
+step: jet fix --all fix.jet
+exit: 0
+file: fix.jet ~ "shout: fn(text: String) { note(text) }" # the call calls the replacement with its own argument
+file: fix.jet !~ "{ print(text) }" # no print call is left
+step: jet build fix.jet
+exit: 0
+stderr: !~ "mypkg.NoPrintInLib" # the fixed file raises no finding

@@ -95,6 +95,9 @@ BuildSessionFinding: struct {
     module: String
     at_start: Int
     at_end: Int
+    // The function the call calls instead under the finding's
+    // `syntax.rewrite` fix, as the fix writes it; "" for none.
+    rewrite: String
 }
 
 BuildSessionContribution: struct {
@@ -598,9 +601,10 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         return added
     }
     // `meta.report(finding, at: c)`: the finding is kept with the build and
-    // reported once it returns.
+    // reported once it returns, with the replacement its `syntax.rewrite`
+    // fix calls at `c` ("" for none).
     if method == "compiler.report" {
-        if args.len() != 8 -> return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, and the call it names")
+        if args.len() != 9 -> return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, the call it names and its rewrite")
         _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
         texts := [String]{}
         loop index in 1..<7 {
@@ -614,8 +618,9 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
             at_end = to
         }
         if at_start < 0 || at_end < at_start -> return build_session_fail(state, "`meta.report` lost the place of its call")
+        rewrite: build_session_text(args, 8) ?? return build_session_fail(state, "`meta.report` lost its rewrite")
         if texts[1] != "Error" && texts[1] != "Tidy" && texts[1] != "Report" -> return build_session_fail(state, "`meta.report` takes a finding of tier `Error`, `Tidy` or `Report`")
-        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], module: texts[5], at_start: at_start, at_end: at_end})
+        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], module: texts[5], at_start: at_start, at_end: at_end, rewrite: rewrite})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     if method == "args" {

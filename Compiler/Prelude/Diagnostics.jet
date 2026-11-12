@@ -9153,6 +9153,21 @@ MarkerUsesOutsidePackage: struct {
     }
 }
 
+RewriteIncompatible: struct {
+    callee: String
+    replacement: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E1135"
+        meaning: "`syntax.rewrite` names functions a call can't swap"
+        detail: true
+        what: fn(self) -> String { "`syntax.rewrite` can't call `{self.replacement}` where `{self.callee}` was called: {self.reason}." }
+        why: fn(self) -> String { "A rewrite keeps each call's arguments and its use of the result, so the replacement takes what the callee takes and returns what it returns." }
+        fix: fn(self) -> String { "Name a replacement whose parameters and return type match `{self.callee}`, or drop the `structured_fix`." }
+    }
+}
+
 UndischargedTask: struct {
     impl Diagnostic {
         code: "L1101"

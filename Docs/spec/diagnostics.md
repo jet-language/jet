@@ -17,10 +17,12 @@ hold the stable code, stage, severity (`.Error` by default), timing, status, and
 fix metadata; and `what`, `why`, and `fix` each return one string literal
 whose `{self.field}` holes the report fills. `structured_fix` is the one
 machine edit `jet fix` applies (`.Replace{from: "=", to: ":"}`,
-`.Remove{text: ","}`, or a named edit such as `.SourceEdit`), while the `fix`
-text stays the help a reader follows by hand. `tier` says which commands a
-finding fails: `.Error` (the default) fails every command, `.Tidy` fails
-`jet check` and `jet build` but never `jet run`, `jet dev` or `jet test`, and
+`.Remove{text: ","}`, a named edit such as `.SourceEdit`, or, for a package
+finding a build reports at a call, `syntax.rewrite(callee: f, replacement:
+g)`), while the `fix` text stays the help a reader follows by hand. `tier`
+says which commands a finding fails: `.Error` (the default) fails every
+command, `.Tidy` fails `jet check` and `jet build` but never `jet run`,
+`jet dev` or `jet test`, and
 `.Report` is listed by `jet lint` and fails nothing. Preserve the code and its
 meaning when changing an impl. `Tools/agent/DiagnosticRows.jet` reads the impls
 as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`

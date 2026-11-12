@@ -250,21 +250,34 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         return jet_driver_compiler_reply(session, reply, span)
     }
     // `meta.report(finding, at: c)` sends the finding's code, tier and texts
-    // (sema sema_call_try_compiler_report) and the file and span of the call
-    // `c` names (JetBuildSession `compiler.report`).
-    if member == "Compiler.report.finding" && args.len() == 7 {
+    // (sema sema_call_try_compiler_report), the file and span of the call
+    // `c` names (JetBuildSession `compiler.report`), and the replacement its
+    // `syntax.rewrite` fix calls there: only when `c` calls the rewrite's
+    // callee, else none.
+    if member == "Compiler.report.finding" && args.len() == 9 {
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
         values := [BuildSessionValue]{held}
-        loop index in 1..<6 {
+        texts := [String]{}
+        loop index in 1..<8 {
             text: if args[index] == .String(value) -> value.copy() else -> { return jet_driver_build_host_failure(session, span, "`meta.report` lost a finding's text") }
-            values.push(BuildSessionValue.Text{value: text})
+            texts.push(text)
         }
-        module_name: if jet_eval_build_field(args[6], "module") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard") }
-        place: jet_eval_build_field(args[6], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` lost the place of its call")
+        // copy: the five finding texts go to the session; the rewrite texts stay here.
+        loop index in 0..<5 -> values.push(BuildSessionValue.Text{value: texts[index].copy()})
+        module_name: if jet_eval_build_field(args[8], "module") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard") }
+        place: jet_eval_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` lost the place of its call")
         first: if jet_eval_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
         last: if jet_eval_build_field(place, "end") == .Val(.Int(value)) -> value else -> -1
+        rewrite := ""
+        if texts[5] != "" {
+            if jet_eval_build_field(args[8], "callee") == .Val(.String(called)) {
+                // copy: the replacement is read again for no other call.
+                if called == texts[5] -> rewrite = texts[6].copy()
+            }
+        }
         values.push(BuildSessionValue.Text{value: module_name})
         values.push(BuildSessionValue.Span{start: first, end: last})
+        values.push(BuildSessionValue.Text{value: rewrite})
         reply: build_session_call(session, "compiler.report", values, None, false, span.start, span.end)
         return jet_driver_compiler_reply(session, reply, span)
     }

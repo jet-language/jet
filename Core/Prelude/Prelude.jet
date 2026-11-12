@@ -200,12 +200,17 @@ DiagnosticStatus: enum {
 
 // The machine edit `jet fix` applies for a diagnostic. `.Replace` writes `to`
 // over the reported `from` text, and `.Remove` deletes the reported `text`.
+// `.Rewrite` is what `syntax.rewrite(callee: f, replacement: g)` writes in a
+// package lint's `structured_fix`: at a reported call of the resolved
+// function `callee`, the call calls `replacement` instead and keeps its
+// arguments.
 DiagnosticEdit: enum {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
     Replace(from: String, to: String)
     Remove(text: String)
+    Rewrite(callee: String, replacement: String)
     GeneratedMarkerGroup
     GeneratedMissingArms
     GeneratedScriptRun

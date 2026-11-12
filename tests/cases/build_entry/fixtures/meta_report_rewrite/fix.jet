@@ -1,0 +1,29 @@
+
+// A Tidy lint whose structured fix calls `note` instead of `print`, keeping
+// each call's arguments.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "mypkg.NoPrintInLib"
+        tier: .Tidy
+        structured_fix: syntax.rewrite(callee: print, replacement: note)
+        what: fn(self) -> String { "library code prints to the terminal" }
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+        fix: fn(self) -> String { "write the message to stderr with `note`" }
+    }
+}
+
+// Library output: a line on stderr, which the caller can redirect.
+note: fn(text: String) { eprint(text) }
+
+shout: fn(text: String) { print(text) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["fix.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout("hi") }

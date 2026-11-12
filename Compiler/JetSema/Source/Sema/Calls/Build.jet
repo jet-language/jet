@@ -678,14 +678,18 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
 // Diagnostic value `finding` at the checked call `c` (a CompilerCall). The
 // finding's type's `impl Diagnostic` gives its `code` (the type path when it
 // writes none) and `tier` (`.Error` when it writes none) as constants, and
-// its texts from `what`, `why` and `fix`. The call is checked as the code
+// its texts from `what`, `why` and `fix`. A `structured_fix` written as
+// `syntax.rewrite(callee: f, replacement: g)` resolves `f` to its function
+// identity and `g` to a function here, and a `g` whose parameters or return
+// type don't fit `f`'s is refused (E1135). The call is checked as the code
 //     finding: <finding>
 //     at: CompilerCall = <c>
-//     <meta>.report.finding(<code>, <tier>, finding.what(), finding.why(), finding.fix(), at)
-// in a frame of its own; `report.finding` is a hidden `Compiler` method no
-// source can spell (sema_call_compiler_report_finding). The build host keeps
-// the finding with the build: an `.Error` finding fails the build, a `.Tidy`
-// one fails `jet build` but not a run, and a `.Report` one is for lint alone.
+//     <meta>.report.finding(<code>, <tier>, finding.what(), finding.why(), finding.fix(), <f identity>, <g>, at)
+// in a frame of its own (the two rewrite texts are empty without one);
+// `report.finding` is a hidden `Compiler` method no source can spell
+// (sema_call_compiler_report_finding). The build host keeps the finding with
+// the build: an `.Error` finding fails the build, a `.Tidy` one fails
+// `jet build` but not a run, and a `.Report` one is for lint alone.
 sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     shaped := args.len() == 2
@@ -719,6 +723,15 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
         sema_scope_leave(scopes, state)
         return failed
     }
+    // A `syntax.rewrite` fix names its functions where the finding is
+    // reported; the build host offers it only at a call of the callee.
+    rewrite := SemaCompilerReportRewriteCheck{callee: "", replacement: "", refusal: ""}
+    if facts.rewrite == .Val(written) -> rewrite = sema_compiler_report_rewrite_check(written, environment, program, scopes, state, tail_store, context)
+    if rewrite.refusal != "" {
+        diagnostics.push(sema_error("E1135", expr_span(args[0].expr), "`syntax.rewrite` can't call `{rewrite.replacement}` where `{rewrite.callee}` was called: {rewrite.refusal}", "a rewrite keeps each call's arguments and its use of the result, so the replacement takes what the callee takes and returns what it returns", "name a replacement whose parameters and return type match `{rewrite.callee}`, or drop the `structured_fix`"))
+        sema_scope_leave(scopes, state)
+        return failed
+    }
     finding: Expr.Ident{name: finding_name.copy(), span: span, id: AST_NODE_GENERATED}
     texts := [CallArg]{
         sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: facts.code}}, span: span, id: AST_NODE_GENERATED}, span),
@@ -727,6 +740,8 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
     loop text in ([String]{"what", "why", "fix"}) {
         texts.push(sema_compiler_events_arg(Expr.MethodCall{receiver: finding.copy(), method: text, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}, span))
     }
+    texts.push(sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: rewrite.callee}}, span: span, id: AST_NODE_GENERATED}, span))
+    texts.push(sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: rewrite.replacement}}, span: span, id: AST_NODE_GENERATED}, span))
     texts.push(sema_compiler_events_arg(Expr.Ident{name: place_name.copy(), span: span, id: AST_NODE_GENERATED}, span))
     raise: Expr.MethodCall{receiver: receiver.copy(), method: "report.finding", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: texts, id: AST_NODE_GENERATED}
     statements: [Stmt]{
@@ -746,18 +761,19 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// The hidden `report.finding(code, tier, what, why, fix, at)` that
-// `meta.report` checks as: five Strings and the CompilerCall, sent to the
-// build host (JetDriver jet_driver_compiler_call), which keeps the finding
-// once the build session accepts the value as one of its own while it runs.
-// Reporting only records a finding, so it uses no Meta effect.
+// The hidden `report.finding(code, tier, what, why, fix, rewrite_callee,
+// rewrite_to, at)` that `meta.report` checks as: seven Strings and the
+// CompilerCall, sent to the build host (JetDriver jet_driver_compiler_call),
+// which keeps the finding once the build session accepts the value as one of
+// its own while it runs. Reporting only records a finding, so it uses no
+// Meta effect.
 sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
-    if args.len() != 6 -> return failed
+    if args.len() != 8 -> return failed
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return failed
     values := [TExpr]{}
     loop (index, argument) in args {
-        required: if index == 5 -> Type.Named{name: "CompilerCall"} else -> Type.String
+        required: if index == 7 -> Type.Named{name: "CompilerCall"} else -> Type.String
         value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
         values.push(value)
     }
@@ -766,10 +782,18 @@ sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, arg
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
 }
 
-// The code and tier a reported finding's `impl Diagnostic` declares.
+// The code and tier a reported finding's `impl Diagnostic` declares, and the
+// `syntax.rewrite(callee: f, replacement: g)` its `structured_fix` writes.
 SemaCompilerReportFacts: struct {
     code: String
     tier: String
+    rewrite: SemaCompilerReportRewrite?
+}
+
+// A finding's `syntax.rewrite`: the callee and replacement as written.
+SemaCompilerReportRewrite: struct {
+    callee: Expr
+    replacement: Expr
 }
 
 // The `impl Diagnostic` of a finding's type `ty`, written as a top-level
@@ -805,7 +829,9 @@ sema_compiler_report_facts: fn(ty: Type?, environment: SemaScopeEnvironment, pro
     report: found ?? return None
     code := "{report.module_name}.{report.definition.type_name}"
     tier := "Error"
+    rewrite := SemaCompilerReportRewrite?{None}
     loop constant in report.definition.constants {
+        if constant.name == "structured_fix" -> rewrite = sema_compiler_report_rewrite(constant.value)
         known: sema_derive_static_value(SemaDeriveExpansion{scope: [NamedCtValue]{}, failure: None}, constant.value)
         if constant.name == "code" {
             if known == .Val(.Str(text)) -> code = text
@@ -815,7 +841,110 @@ sema_compiler_report_facts: fn(ty: Type?, environment: SemaScopeEnvironment, pro
             if known == .Val(.Enum(_, variant, _)) -> tier = variant
         }
     }
-    Val(SemaCompilerReportFacts{code: code, tier: tier})
+    Val(SemaCompilerReportFacts{code: code, tier: tier, rewrite: rewrite})
+}
+
+// The callee and replacement of a `structured_fix: syntax.rewrite(callee: f,
+// replacement: g)` constant (TraitConstants.jet checked its shape).
+sema_compiler_report_rewrite: fn(value: Expr) -> SemaCompilerReportRewrite? Never! {
+    if value == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method != "rewrite" || !sema_trait_constant_is_syntax(receiver) -> return None
+        callee := Expr?{None}
+        replacement := Expr?{None}
+        // copy: the names are views of the impl's constant, which stays registered.
+        loop arg in args {
+            label: arg.label ?? return None
+            if label.name == "callee" -> callee = Val(arg.expr.copy())
+            if label.name == "replacement" -> replacement = Val(arg.expr.copy())
+        }
+        from: callee ?? return None
+        to: replacement ?? return None
+        return Val(SemaCompilerReportRewrite{callee: from, replacement: to})
+    }
+    None
+}
+
+// What a finding's `syntax.rewrite` names where the finding is reported:
+// the callee's resolved identity (the one a checked call of it records) and
+// the replacement as written, with `refusal` empty; or, when the
+// replacement can't take the callee's place, the callee as written and why.
+SemaCompilerReportRewriteCheck: struct {
+    callee: String
+    replacement: String
+    refusal: String
+}
+
+sema_compiler_report_rewrite_check: fn(rewrite: SemaCompilerReportRewrite, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCompilerReportRewriteCheck {
+    callee_text: sema_trait_constant_callable_path(rewrite.callee) ?? ""
+    replacement_text: sema_trait_constant_callable_path(rewrite.replacement) ?? ""
+    identity: sema_compiler_events_call_target(rewrite.callee, scopes) ?? ""
+    from: sema_compiler_report_callable_type(rewrite.callee, environment, program, scopes, state, tail_store, context)
+    to: sema_compiler_report_callable_type(rewrite.replacement, environment, program, scopes, state, tail_store, context)
+    refusal: if {
+        identity == "" || from == None -> "`{callee_text}` names no function here"
+        to == None -> "`{replacement_text}` names no function here"
+        else -> sema_compiler_report_rewrite_misfit(from, to) ?? ""
+    }
+    if refusal != "" -> return SemaCompilerReportRewriteCheck{callee: callee_text, replacement: replacement_text, refusal: refusal}
+    SemaCompilerReportRewriteCheck{callee: identity, replacement: replacement_text, refusal: ""}
+}
+
+// The function type `written` names here: a function's declared type; an
+// ambient `print` takes the one text a rewritten call passes; a path such
+// as `module.name` is checked as an expression whose type is a function.
+// None when it names no function.
+sema_compiler_report_callable_type: fn(written: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
+    if written == .Ident(name, _, _) {
+        if sema_scope_resolve(scopes, name) == .Val(symbol) {
+            if symbol.kind != SymbolKind.Function -> return None
+            // copy: the symbol is a view of the scope table, which stays whole.
+            if symbol.ty == .Val(.Fn(_, _, _, _, _, _)) -> return symbol.ty.copy()
+            return None
+        }
+        if SEMA_COMPILER_EVENTS_AMBIENT_CALLS.contains(name) -> return Val(Type.Fn{params: [Type]{Type.String}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+        return None
+    }
+    // The check only reads the name's type; what it reports is dropped.
+    unreported := [Diagnostic]{}
+    checked: sema_check_expression(written, None, environment, program, scopes, state, tail_store, context, unreported) ?? return None
+    if unreported.len() > 0 -> return None
+    // copy: the checked expression's type outlives the dropped expression.
+    if checked.ty == .Fn(_, _, _, _, _, _) -> return Val(checked.ty.copy())
+    None
+}
+
+// Why a call of function type `from` can't call `to` instead with the same
+// arguments and the same use of its result: `to` takes fewer arguments, an
+// argument of another type, a further argument without a default, or
+// returns another type. None when it fits.
+sema_compiler_report_rewrite_misfit: fn(from: Type?, to: Type?) -> String? Never! {
+    callee_type: from ?? return Val("it is not a function")
+    replacement_type: to ?? return Val("it is not a function")
+    if callee_type == .Fn(from_params, from_ret, _, _, _, _) {
+        if replacement_type == .Fn(to_params, to_ret, _, _, to_metadata, _) {
+            if to_params.len() < from_params.len() -> return Val("it takes {to_params.len()} argument(s) and the call passes {from_params.len()}")
+            loop index in 0..<from_params.len() {
+                if type_name(to_params[index]) != type_name(from_params[index]) -> return Val("its argument {index + 1} is `{type_name(to_params[index])}` and the call passes `{type_name(from_params[index])}`")
+            }
+            loop index in from_params.len()..<to_params.len() {
+                defaulted := false
+                if to_metadata == .Val(metadata) {
+                    if index < metadata.defaults.len() && metadata.defaults[index] != None -> defaulted = true
+                }
+                if !defaulted -> return Val("its argument {index + 1} has no default and the call doesn't pass it")
+            }
+            returned: sema_compiler_report_returned(to_ret)
+            expected: sema_compiler_report_returned(from_ret)
+            if returned != expected -> return Val("it returns `{returned}` and the call's result is `{expected}`")
+            return None
+        }
+    }
+    Val("it is not a function")
+}
+
+sema_compiler_report_returned: fn(ret: Type?) -> String Never! {
+    if ret == .Val(ty) -> return type_name(ty)
+    "Unit"
 }
 
 // What a `meta.events` watch names: the marker value `m` of

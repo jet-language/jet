@@ -1,0 +1,24 @@
+// A finding's `syntax.rewrite` names a replacement that can't take the callee's place.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "mypkg.NoPrintInLib"
+        tier: .Tidy
+        structured_fix: syntax.rewrite(callee: print, replacement: count)
+        what: fn(self) -> String { "library code prints to the terminal" }
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+        fix: fn(self) -> String { "count the message instead" }
+    }
+}
+
+count: fn(n: Int) -> Int { n + 1 }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_report_rewrite_refuses_misfit.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { print("hi") }

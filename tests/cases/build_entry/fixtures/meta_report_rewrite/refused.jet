@@ -1,0 +1,28 @@
+
+// A Tidy lint whose structured fix names a replacement that can't take a
+// `print` call's place: `count` takes an Int and returns one.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "mypkg.NoPrintInLib"
+        tier: .Tidy
+        structured_fix: syntax.rewrite(callee: print, replacement: count)
+        what: fn(self) -> String { "library code prints to the terminal" }
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+        fix: fn(self) -> String { "count the message instead" }
+    }
+}
+
+count: fn(n: Int) -> Int { n + 1 }
+
+shout: fn(text: String) { print(text) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["refused.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout("hi") }

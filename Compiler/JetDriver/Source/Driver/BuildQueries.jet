@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Item, PolicyKey, SourceFile, Span, TComptimeValue, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, policy_gate_allows, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -310,7 +310,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         generated.push(row)
     }
     tidy := [Diagnostic]{}
-    jet_driver_build_findings(build_plan_findings(plan), ran, tidy)
+    jet_driver_build_findings(request.authorized_sources, build_plan_findings(plan), ran, tidy)
     if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
@@ -369,16 +369,47 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
 // file: an `.Error` finding joins `errors`, a `.Tidy` one `tidy`, and a
 // `.Report` one is for lint alone. A finding whose code is the compiler's
 // own takes its registry row; a package's code (`mypkg.NoPrintInLib`) is
-// reported as written.
-jet_driver_build_findings: fn(findings: [BuildSessionFinding], errors: &[Diagnostic], tidy: &[Diagnostic]) Never! {
+// reported as written. A finding with a `syntax.rewrite` fix carries the
+// edit `jet fix` applies (jet_driver_build_finding_rewrite).
+jet_driver_build_findings: fn(snapshot: JetDriverAuthorizedSourceSnapshot, findings: [BuildSessionFinding], errors: &[Diagnostic], tidy: &[Diagnostic]) Never! {
     loop finding in findings {
         if finding.tier == "Report" -> next
         place: Span{start: finding.at_start, end: finding.at_end}
-        report: if diagnostic_registry_row(finding.code) != None -> diagnostic_from_registry(finding.code, Val(place), finding.what, finding.why, finding.fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: finding.code.copy(), span: Val(place), what: diagnostic_sentence_case_line(finding.what), why: diagnostic_sentence_case_line(finding.why), fix: diagnostic_sentence_case_line(finding.fix)}
+        report := if diagnostic_registry_row(finding.code) != None -> diagnostic_from_registry(finding.code, Val(place), finding.what, finding.why, finding.fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: finding.code.copy(), span: Val(place), what: diagnostic_sentence_case_line(finding.what), why: diagnostic_sentence_case_line(finding.why), fix: diagnostic_sentence_case_line(finding.fix)}
+        if jet_driver_build_finding_rewrite(snapshot, finding) == .Val(edit) {
+            report.edit = Val(edit)
+            report.applicability = Val(DiagnosticFixApplicability.Suggested)
+            report.safety = Val(DiagnosticFixSafety.NeedsReview)
+        }
         located: diagnostic_with_source_path(report, finding.module, 0)
         if finding.tier == "Error" -> errors.push(located) else -> tidy.push(located)
     }
 }
+// The edit of a finding's `syntax.rewrite` fix: the callee as the call
+// writes it (the name or `module.name` path its span starts with) becomes
+// the replacement, and the call's arguments stay. None without a rewrite,
+// or when the call's file is not one of the build's sources.
+jet_driver_build_finding_rewrite: fn(snapshot: JetDriverAuthorizedSourceSnapshot, finding: BuildSessionFinding) -> TextEdit? Never! {
+    if finding.rewrite == "" -> return None
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if file.path != finding.module -> next
+            bytes: file.source.bytes()
+            end := finding.at_start
+            loop end < finding.at_end && end < bytes.len() {
+                byte: bytes[end]
+                named: (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte == 46
+                if !named -> break
+                end += 1
+            }
+            if end == finding.at_start -> return None
+            // copy: the edit outlives the finding it was read from.
+            return Val(TextEdit{span: Span{start: finding.at_start, end: end}, new_text: finding.rewrite.copy()})
+        }
+    }
+    None
+}
+
 // A report in a module `b.generate` made names the build file call that
 // made it, as its note (`detail`); the report itself names the module's
 // virtual source. A report in a module a `Compiler` value made names the
