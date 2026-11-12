@@ -134,14 +134,26 @@ sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, p
     panic("an owning registered-module pass lost its registration graph")
 }
 
+// What the demand waves of one finalization have read and checked: per
+// module, how many of its functions and call-site facts were read, and how
+// many bodies and waves were checked.
+SemaCoreDemandTally: struct {
+    read_functions: [Int]
+    read_facts: [Int]
+    checked: Int
+    waves: Int
+}
+
 // Demand: after the body pass and the codec and derive waves, every deferred
 // Core body a checked body names is checked into its module's result. A
 // wave's bodies may name more, and may reach generated codecs and derived
-// methods, whose waves follow it; waves repeat until no body names a new
-// deferred one. A program that names no Core body runs none. A compile that
-// lowers also lowers what the driver joins to the checked modules after
-// finalization, the comptime closures (jet_driver_merge_checked_text_functions),
-// so the first wave demands what those name too.
+// methods; waves repeat until no body names a new deferred one, and the
+// codec and derive waves follow each pass of demand waves
+// (sema_core_demand_pass). A program that names no Core body runs none. A
+// compile that lowers also lowers what the driver joins to the checked
+// modules after finalization, the comptime closures
+// (jet_driver_merge_checked_text_functions), so the first wave demands what
+// those name too.
 sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
     if graph.core_demand_rows.len() == 0 -> return graph.move()
@@ -154,34 +166,61 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
             }
         }
     }
-    // Per module: how many of its functions and call-site facts were read.
-    read_functions := [Int]{}
-    read_facts := [Int]{}
-    checked := 0
-    waves := 0
+    tally := SemaCoreDemandTally{read_functions: [Int]{}, read_facts: [Int]{}, checked: 0, waves: 0}
     loop {
         wave := [String:Bool]{}
         affected := [Int]{}
         loop key in seeds -> sema_core_demand_key(graph, key, wave, affected)
         seeds = [String]{}
-        sema_core_demand_named(graph, modules, read_functions, read_facts, wave, affected)
+        sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, wave, affected)
         if wave.len() == 0 -> break
-        affected.sort()
-        checked += wave.len()
-        waves += 1
         graph.core_wave_rows = wave.move()
-        result := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.core_demand", trace_sink, carried, modules)
-        graph = result.move()
-        graph.core_wave_rows = [String:Bool]{}
-        after_codec_graph := sema_codec_waves(graph, trail, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, carried, modules)
+        checked_graph := sema_core_demand_pass(graph, affected, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, tally, carried, modules)
+        after_codec_graph := sema_codec_waves(checked_graph, trail, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, carried, modules)
         graph = sema_derive_waves(after_codec_graph, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, carried, modules)
     }
     if trace_sink == .Val(sink) {
         sink.progress("counters.sema.core_deferred", graph.core_demand_rows.len(), -1)
-        sink.progress("counters.sema.core_checked", checked, -1)
-        sink.progress("counters.sema.core_waves", waves, -1)
+        sink.progress("counters.sema.core_checked", tally.checked, -1)
+        sink.progress("counters.sema.core_waves", tally.waves, -1)
     }
     graph.move()
+}
+
+// Consecutive demand waves in one body pass (sema_finalize_pass_open): the
+// pass facts, body values, program tables and pass environment are built
+// once for all of them, so a wave costs only the bodies it checks. The first
+// wave is the graph's core_wave_rows, in the modules `first_affected`; each
+// later one is what the bodies before it name (sema_core_demand_named). The
+// pass ends when a wave names nothing new, with core_wave_rows empty.
+sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int], values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, tally: &SemaCoreDemandTally, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    graph := owned.move()
+    size := graph.core_wave_rows.len()
+    shared_state: sema_finalize_pass_open(graph, values, checked_types, threads, trace_sink, carried)
+    comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
+    affected := first_affected.move()
+    loop size > 0 {
+        affected.sort()
+        tally.checked += size
+        tally.waves += 1
+        if trace_sink == .Val(sink) -> sink.begin("sema.core_demand", "", -1, -1)
+        checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, affected, true, true, true, host_hooks, threads, None, "sema.core_demand", trace_sink, modules)
+        if trace_sink == .Val(sink) -> sink.end("sema.core_demand", checked_functions)
+        // The next wave, named on the pass's own graph.
+        wave := [String:Bool]{}
+        affected = [Int]{}
+        program := sema_check_shared_take_program(shared_state)
+        memory_plan := sema_check_shared_take_memory_plan(shared_state)
+        held := program.registration_graph.move()
+        program.registration_graph = None
+        pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
+        sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, wave, affected)
+        size = wave.len()
+        pass_graph.core_wave_rows = wave.move()
+        program.registration_graph = Val(pass_graph.move())
+        sema_check_shared_put_tables(shared_state, program, memory_plan)
+    }
+    sema_finalize_pass_close(shared_state, "sema.core_demand", trace_sink, carried)
 }
 
 // One demand wave's part of module `module_index` on this thread, nothing

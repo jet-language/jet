@@ -3821,7 +3821,7 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
     lines: lexed.line_starts.len() - 1
     // A lexer error ends the frontend before the parse.
     if jet_driver_has_errors(lexed.lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.lexed.diagnostics}, demand: jet_driver_empty_core_identifier_demand(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move()}
-    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens)
+    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, retain_demand, true, threads)
     demand := scanned.demand.move()
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
@@ -3953,7 +3953,7 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     lexed := lex_generated_threads(source, threads)
     tokens: lexed.lexed.tokens.len()
     lines: lexed.line_starts.len() - 1
-    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens)
+    spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, entry, threads)
     demand := scanned.demand.move()
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)

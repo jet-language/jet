@@ -8701,10 +8701,23 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
     if trace_sink == .Val(sink) -> sink.begin(phase, "", -1, -1)
     // A codec wave (sema_codec_waves) checks only the generated codecs it
     // filled, a derive wave (sema_derive_waves) only the derived methods
-    // demanded, and a Core demand wave (sema_core_demand_waves) only the
+    // demanded, and a Core demand wave (sema_core_demand_pass) only the
     // deferred bodies named, into the modules' existing results.
     core_wave: graph.core_wave_rows.len() > 0
     codec_wave: graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || core_wave
+    pass_graph := graph.move()
+    shared_state: sema_finalize_pass_open(pass_graph, values, checked_types, threads, trace_sink, carried)
+    comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
+    checked_functions: sema_finalize_pass_modules(shared_state, values, comptime_functions, comptime_rows, selected, codec_wave, core_wave, pending_obligations, host_hooks, threads, session, phase, trace_sink, modules)
+    if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
+    sema_finalize_pass_close(shared_state, phase, trace_sink, carried)
+}
+
+// The shared state of one body pass over `graph`, which moves into the
+// pass's program tables: the pass environment, the program tables and the
+// memory plan, built from `carried` (its one row) when it holds the graph's
+// pass facts, else computed here.
+sema_finalize_pass_open: fn(graph: &&SemaRegistrationGraph, values: [SemaComptimeItemValue], checked_types: [TTypeDef], threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts]) -> Shared<SemaCheckShared> {
     fresh: carried.len() == 0
     facts := carried.pop() ?? sema_pass_facts_new()
     owned := if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> SemaRegistrationGraph?{Val(graph.move())}
@@ -8732,7 +8745,12 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
     environment.copy_facts = sema_copy_facts_table_empty()
     shared_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
-    comptime_rows := sema_comptime_checked_function_rows(comptime_functions)
+    shared_state
+}
+
+// Checks the registered modules `selected` in an open pass
+// (sema_finalize_pass_open); returns how many functions they checked.
+sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], selected: [Int], codec_wave: Bool, core_wave: Bool, pending_obligations: Bool, host_hooks: SemaHostHookAccess?, threads: CompilerThreads, session: SemaIncrementalCache?, phase: String, trace_sink: CompilerTraceSink?, modules: &[SemaGraphModuleResult]) -> Int {
     // A per-function trace times each check where it runs, in item order.
     trace_functions := false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
@@ -8777,7 +8795,12 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
         modules.push(checked)
         start += 1
     }
-    if trace_sink == .Val(sink) -> sink.end(phase, checked_functions)
+    checked_functions
+}
+
+// Ends an open pass: its facts go to `carried` for the next pass, and the
+// pass graph moves back out of its program tables.
+sema_finalize_pass_close: fn(shared_state: Shared<SemaCheckShared>, phase: String, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts]) -> SemaRegistrationGraph {
     environment_out := sema_check_shared_take_environment(shared_state)
     program_out := sema_check_shared_take_program(shared_state)
     memory_plan_out := sema_check_shared_take_memory_plan(shared_state)

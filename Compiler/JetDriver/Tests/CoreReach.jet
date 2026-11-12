@@ -81,6 +81,15 @@ reach_test_functions: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     assert_eq(reach_test_functions(load, "__core_devtools_table"), [String]{"value"})
 }
 
+#Test("a string's text reaches nothing, and its interpolation reaches what it calls") {
+    text: reach_test_load("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\nusage: fn() -> String {{ \"tools.lookup reads table.value\" }}\n")
+    assert(!reach_test_has_module(text, "__core_devtools_table"))
+    assert_eq(reach_test_functions(text, "core.devtools"), [String]{"plain"})
+    interpolated: reach_test_load("use tools: core.devtools\nrun: fn() {{ print(\"value: {{tools.lookup()}}\") }}\n")
+    assert(reach_test_has_module(interpolated, "__core_devtools_table"))
+    assert_eq(reach_test_functions(interpolated, "core.devtools"), [String]{"plain", "lookup"})
+}
+
 #Test("a Core module's import of a part the catalog doesn't hold stops the load with E1001") {
     owner: "use {{\n    table: __core_devtools_table\n    probe: __core_devtools_probe\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
     load: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n", owner)
@@ -224,8 +233,8 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     assert(checked >= 7, "the scan found {checked} routes")
 }
 
-#Test("a unit's spellings come from its tokens: strings spell what they hold, comments and digit-led words spell nothing") {
-    source: "plain: fn() -> Int Never! {{ other.value() }}\n\n// hidden\nLABEL: \"{{named}} 9lives\"\n"
+#Test("a unit's spellings come from its code tokens: a string spells only its interpolations, and comments spell nothing") {
+    source: "plain: fn() -> Int Never! {{ other.value() }}\n\n// hidden\nLABEL: \"{{named}} quiet.text 9lives\"\n"
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     words: parsed.words ?? panic("a Core unit has words")
     // One row per name that reaches a lazy declaration, then the rest, which

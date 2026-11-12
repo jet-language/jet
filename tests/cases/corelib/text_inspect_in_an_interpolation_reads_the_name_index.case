@@ -1,0 +1,19 @@
+# Use-driven Core loading reads a string's interpolations, not its text: the
+# interpolations call text.inspect, which reads the Unicode name index, and the
+# names come out the same at O0, O1 and O2.
+fixture: fixtures/text_inspect_in_an_interpolation_reads_the_name_index
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = text_inspect_in_an_interpolation_reads_the_name_index.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = text_inspect_in_an_interpolation_reads_the_name_index.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = text_inspect_in_an_interpolation_reads_the_name_index.out
+stderr: empty

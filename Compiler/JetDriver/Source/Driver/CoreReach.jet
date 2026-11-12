@@ -14,18 +14,18 @@
 // functions the compiler calls by a name no program spells, and the whole of
 // a module the compiler demands) is reached with its module.
 //
-// Spellings are read from the unit's tokens outside comments, strings
-// included, so reach is a superset of what the code names. When the load is
-// done, the imports never followed, the unreached constants and every
-// unreached declaration of a routed module leave their modules, and so does
-// every unreached declaration that spells one of those aliases as a path head
-// or spells a declaration that left; what stays names only what stays, so
-// every tier checks the same closed program, and comptime evaluates only
-// constants the program can name.
+// Spellings are read from the unit's code tokens, a string's interpolations
+// included (its text is data), so reach is a superset of what the code
+// names. When the load is done, the imports never followed, the unreached
+// constants and every unreached declaration of a routed module leave their
+// modules, and so does every unreached declaration that spells one of those
+// aliases as a path head or spells a declaration that left; what stays names
+// only what stays, so every tier checks the same closed program, and
+// comptime evaluates only constants the program can name.
 use {
     jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, Func, ImportDecl, Item, NameTable, Span, core_call_source_member, name_intern, name_intern_bytes, name_table]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
-    jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_CHAR, TOKEN_FLOAT, TOKEN_INT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_UNIT_NUMBER, Token]
+    jet_lexer.[STRING_PART_INTERPOLATION, TOKEN_BLOCK_COMMENT, TOKEN_CHAR, TOKEN_FLOAT, TOKEN_INT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_UNIT_NUMBER, Token, TokenTables]
     jet_sema.[sema_call_core_f32_source, sema_source_word_byte]
 }
 
@@ -290,20 +290,27 @@ JetDriverSpellings: struct {
     keys: [Int]
 }
 
-// What `tokens`, the lex of `source`, spell outside comments. A token whose
-// bytes are all word bytes (sema_source_word_byte: an identifier or a
-// keyword) is one word, interned once per lexer name. A whole number spells
-// nothing, and a punctuation token (at most three bytes, none a word byte)
-// is skipped. Any other token's bytes (a string with its interpolations, a
-// unit number) are read as maximal runs of word bytes, so strings spell what
-// they hold. A word that starts with a digit spells nothing.
-jet_driver_unit_spellings: fn(source: [U8], tokens: [Token]) -> JetDriverSpellings Never! {
+// What `tokens`, the lex of `source` into `tables`, spell outside comments.
+// A token whose bytes are all word bytes (sema_source_word_byte: an
+// identifier or a keyword) is one word, interned once per lexer name. A whole
+// number spells nothing, and a punctuation token (at most three bytes, none a
+// word byte) is skipped. A string spells what its interpolations hold: its
+// text, escapes and `\$` template payloads are data, not code. Any other
+// token's bytes (a character, a unit number) are read as maximal runs of
+// word bytes. A word that starts with a digit spells nothing.
+jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables) -> JetDriverSpellings Never! {
     spellings := JetDriverSpellings{table: name_table(), starts: [Int]{}, keys: [Int]{}}
     // Per lexer name id, its word in `spellings.table`, or -1 before.
     local := [Int]{}
     loop token in tokens {
         kind: token.kind
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT || kind == TOKEN_INT || kind == TOKEN_FLOAT -> next
+        if (kind == TOKEN_STRING || kind == TOKEN_RAW_STRING) && token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> jet_driver_spell_span(source, part.span.start, if part.span.end < source.len() -> part.span.end else -> source.len(), spellings)
+            }
+            next
+        }
         start: token.span.start
         end: if token.span.end < source.len() -> token.span.end else -> source.len()
         if start >= end -> next
