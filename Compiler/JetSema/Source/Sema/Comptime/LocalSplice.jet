@@ -17,15 +17,20 @@
 // stays): the call facts, hardware use, name references,
 // comptime requests, compute facts, `exact_int_reachable`, copy events,
 // diagnostics, `complete`, failure facts, incomplete reasons, injected
-// functions and their keys, and tests. The comptime function results must
-// bring the same diagnostics too, but for lints on Core source, which the
-// finalization drops, and they must name no Core body that waits for demand,
-// which the recheck's Core demand seeds from them in a compile that lowers
-// (and whose failure facts it solves again). Then every whole-program pass after the
-// body pass (failure solve and recheck, effects, taint, Core usage, names)
-// reads what it read in the finalization, so its rows stand, and the stamps
-// it put on the owners carry over. When any of this fails, or a site is not
-// a local value, the caller finalizes again.
+// functions and their keys, and tests. No landed site whose value is not a
+// failure may hold a call fact strictly inside its span: the effect solve
+// walks the bodies, and a value node, which takes its initializer's span,
+// finds only the call fact of that span (sema_effect_find_exact_fact), so the
+// edges of any call inside it (an argument's call, a `?? panic`) leave with
+// the value, and the finalized stamps would keep them. The comptime function
+// results must bring the same diagnostics too, but for lints on Core source,
+// which the finalization drops, and they must name no Core body that waits
+// for demand, which the recheck's Core demand seeds from them in a compile
+// that lowers (and whose failure facts it solves again). Then every
+// whole-program pass after the body pass (failure solve and recheck,
+// effects, taint, Core usage, names) reads what it read in the finalization,
+// so its rows stand, and the stamps it put on the owners carry over. When any
+// of this fails, or a site is not a local value, the caller finalizes again.
 use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
@@ -203,8 +208,9 @@ sema_local_splice_valued: fn(landed: [String:Bool], after: [SemaModuleBodyRows])
 // Whether the two checks of the owner modules (`earlier` against the
 // finalized values, which it takes, and `after` against the pass's) let the
 // splice stand, as the file comment says. `owners` holds the owner function
-// keys, `landed` the `module\nkey` of each landed site that got a value.
-sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows]) -> Bool Never! {
+// keys, `landed` the `module\nkey` of each landed site that got a value, and
+// `computed` those of them whose value is not a failure.
+sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], computed: [String:Bool], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows]) -> Bool Never! {
     before := earlier.move()
     settled_owners := 0
     position := owner_modules.len()
@@ -214,6 +220,9 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         new: after[position]
         module_index: owner_modules[position]
         if sema_module_body_rows_text(old) != sema_module_body_rows_text(new) -> return false
+        // A value keeps only the effects of the call at its own span. A
+        // failure keeps the initializer as run-time code, calls and all.
+        if sema_local_splice_inner_call(old, computed) -> return false
         kept: sema_local_splice_unlanded(old.comptime_body_sources, landed)
         if "{kept:Debug}" != "{new.comptime_body_sources:Debug}" -> return false
         if old.functions.len() != new.functions.len() -> return false
@@ -234,6 +243,32 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         }
     }
     settled_owners == owners.len()
+}
+
+// The sites of `landed` (`module\nkey`) whose value in `values` is not a
+// failure (sema_comptime_local_value_reason): the ones whose value replaces
+// the initializer.
+sema_local_splice_computed: fn(landed: [String:Bool], values: [SemaComptimeItemValue]) -> [String:Bool] Never! {
+    computed := [String:Bool]{}
+    loop value in values {
+        site: "{value.module_identity}\n{value.key}"
+        if landed.get(site) != None && sema_comptime_local_value_reason(value.value) == None -> computed[site] = true
+    }
+    computed
+}
+
+// Whether a site of `rows` in `sites` (`module\nkey`) holds a call fact of
+// its owner whose span is strictly inside the site's.
+sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: [String:Bool]) -> Bool Never! {
+    loop source in rows.comptime_body_sources {
+        if sites.get("{source.module_identity}\n{source.key}") == None -> next
+        loop fact in rows.call_facts {
+            if fact.caller_key != source.function_key -> next
+            if fact.span.start < source.span.start || fact.span.end > source.span.end -> next
+            if fact.span.start != source.span.start || fact.span.end != source.span.end -> return true
+        }
+    }
+    false
 }
 
 // Whether the pass's comptime functions name a Core body that waits for
@@ -341,7 +376,8 @@ sema_local_value_splice: fn(
     // so it is still a site of the pass's check, as of the full recheck's;
     // only the sites that got values leave the source rows.
     valued := sema_local_splice_valued(landed_keys, after)
-    holds: sema_local_splice_holds(finalized.modules, owner_modules, owners, valued, before, after)
+    computed: sema_local_splice_computed(valued, values)
+    holds: sema_local_splice_holds(finalized.modules, owner_modules, owners, valued, computed, before, after)
     counter: if holds -> "counters.sema.local_values_spliced" else -> "counters.sema.local_values_refused"
     if trace_sink == .Val(sink) -> sink.progress(counter, owners.len(), -1)
     if !holds -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
