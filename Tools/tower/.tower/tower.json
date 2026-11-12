@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6762,
-    "rev": 99814,
+    "rev": 99815,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57018,11 +57018,11 @@
         {
           "n": 18,
           "text": "The Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built with no ballot, per the owner's instruction of 2026-11-10 that Core API gaps are built and only syntax goes to a ballot. Their names follow existing Core conventions. They are: (1) a tally (Counter) over an iterator; (3) regex full-match with typed captures; (4) width and zero-pad format specs in interpolation; (5) several aggregates per group in one pass and a grouped .to_map(); (6) whole-unit Duration accessors with no error path; (7) find-and-update of the first matching element; (8) whole-tensor reductions in core.compute; (9) infallible forms where the type proves success. For (6) and (9), `Duration.in` and the other whole-unit forms whose runtime never fails have a type with no error path, cut over at every caller in one change. The two rewrites that need no new API (counts.top_n in wordfreq, text.count in regex-find-all-4mb) are applied. Each of the nine entries then uses no more source tokens than its Python twin (c14 bar 3).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T23:11:22.439Z"
+          "evidence": "meet-G4b on dev afca453b51 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 00:27. The conveniences are on dev: (1) counts() d0eba66902; (3) match_full with typed group reads e38f6aab22; (4) width and zero-pad specs, used in bulkrename; (5) group_by into a map of lists b8420fa37c; (6) and (9) Duration.in is a plain Int, cut over at every caller in aa75c9d6b7, cdda5a7803 and 8ec883c0c0; (7) position with a field write b8420fa37c; (8) compute.sum e38f6aab22. The top_n rewrite in wordfreq and the text.count rewrite in regex-find-all-4mb are applied. jet Tools/gauntlet/PortBars.jet --measure --entry E for all nine entries (rc 0), Jet tokens against the Python original: wordfreq 64/111, tensor-map-4k 83/95, csvtransform 133/144, bulkrename 132/133, regex-find-all-4mb 42/50, tzreport 134/185, taskfile-cli 288/299, fft-4096 140/178, logreport 235/237. Each Jet twin is at or below its original.",
+          "at": "2026-11-12T05:27:41.362Z"
         },
         {
           "n": 19,
@@ -57413,7 +57413,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-12T05:25:21.454Z",
+      "updated": "2026-11-12T05:27:41.362Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -199534,6 +199534,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T05:27:41.362Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#18"
+    },
     {
       "at": "2026-11-12T05:25:21.454Z",
       "by": "Main",
