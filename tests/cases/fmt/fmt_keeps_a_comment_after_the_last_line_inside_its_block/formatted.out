@@ -1,0 +1,64 @@
+one: fn() {
+    print(1)  // last
+}
+
+run: fn() {
+    print(1)
+    // last line of the body
+}
+
+two: fn() {
+    print(2)  // trailing comment
+    // and its second line
+}
+
+nested: fn() {
+    if true {
+        print(1)
+        // end of the if body
+    }
+    loop x in [1, 2] -> print(x)
+    // after an arrow loop
+
+    /* after a blank line */
+}
+
+lambda: fn() {
+    step: () -> {
+        print("x")
+        // end of the lambda
+    }
+    step()
+}
+
+sse: fn(name: String) -> Int? {
+    if name == {
+        "movaps" -> Val(1)
+        // AES rounds.
+        "aesenc" -> Val(2)  // the first one
+
+        // The last.
+        "aesdec" -> Val(3)
+        // Anything else.
+        else -> None
+    }
+}
+
+kind: fn(n: Int) -> String {
+    if {
+        n < 0 -> "negative"
+        // zero is its own case
+        n == 0 -> "zero"
+        else -> "positive"
+        // nothing follows
+    }
+}
+
+pick: fn(flag: Bool?) -> Int {
+    if flag == {
+        .Val(true) -> 1
+        .Val(false) -> 2
+        // absent
+        .None -> 3
+    }
+}

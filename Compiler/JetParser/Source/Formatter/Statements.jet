@@ -47,6 +47,7 @@ use {
         TOKEN_RBRACKET,
         TOKEN_RBRACE,
         TOKEN_RPAREN,
+        TOKEN_SEMI,
         TOKEN_STRING,
     ]
 }
@@ -386,6 +387,18 @@ jfmt_fmt_block_stmts: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_block_lines(f, body, [Marker]{})
 }
 
+// Where `stmt` starts for the gap before it: an expression statement or an
+// assigned field or element starts at its leftmost operand (jfmt_expr_start),
+// as a method call's or a field's own span starts after its receiver.
+jfmt_stmt_gap_next: fn(stmt: Stmt) -> Int Never! {
+    if stmt == .Expr(expr) -> return jfmt_expr_start(expr)
+    if stmt == .Assign(target, _, _, _) {
+        if target == .Field(base, _, _) -> return jfmt_expr_start(base)
+        if target == .Index(base, _, _, _) -> return jfmt_expr_start(base)
+    }
+    jfmt_stmt_start(stmt)
+}
+
 // A block's statements and, for a function body, its `#X: value` marker
 // lines, each printed where it was written.
 jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
@@ -397,7 +410,8 @@ jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
             marker: markers[marker_index]
             if previous_end == .Val(end) {
                 jfmt_newline(f)
-                jfmt_emit_leading_statement_gap(f, end, marker.span.start)
+                gap_start: jfmt_statement_gap_start(f, end, marker.span.start)
+                jfmt_emit_leading_statement_gap(f, gap_start, marker.span.start)
             } else {
                 jfmt_emit_leading(f, marker.span.start)
             }
@@ -412,7 +426,9 @@ jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
         source_start: if fence == .Val(fact) -> fact.span.start else -> jfmt_stmt_start(stmt)
         if previous_end == .Val(end) {
             jfmt_newline(f)
-            jfmt_emit_leading_statement_gap(f, end, source_start)
+            gap_next: if fence == None -> jfmt_stmt_gap_next(stmt) else -> source_start
+            gap_start: jfmt_statement_gap_start(f, end, gap_next)
+            jfmt_emit_leading_statement_gap(f, gap_start, source_start)
         } else {
             jfmt_emit_leading(f, source_start)
         }
@@ -429,6 +445,43 @@ jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
             index += 1
         }
     }
+    if previous_end == .Val(end) {
+        first_start: if markers.len() > 0 && (body.len() == 0 || markers[0].span.start < jfmt_stmt_start(body[0])) -> markers[0].span.start else -> jfmt_stmt_start(body[0])
+        jfmt_emit_block_close_comments(f, first_start, end)
+    }
+}
+
+// The comments after a braced block's last line and before its `}` stay
+// inside the block, one per line at the block's indent, with a blank line the
+// author wrote before one kept. Only a block that opens with `{` before its
+// first line and closes with `}` after its last owns them; an arrow body
+// leaves them to the enclosing block.
+jfmt_emit_block_close_comments: fn(f: &JetFmt, first_start: Int, last_end: Int) {
+    if !jfmt_src_range_valid(f, first_start, last_end) -> return
+    before := jfmt_first_token_at(f, first_start) - 1
+    loop before >= 0 && jfmt_close_comment_trivia(f.source_toks[before].kind) -> before -= 1
+    if before < 0 || f.source_toks[before].kind != TOKEN_LBRACE -> return
+    // The `}` that matches the block's `{`: the last line's own span can end
+    // early (an arrow body), so the brace pairing decides.
+    if before >= f.brace_closes.len() || f.brace_closes[before] < 0 -> return
+    close: f.source_toks[f.brace_closes[before]].span.start
+    loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < close {
+        span: f.comments[f.comment_i].span.copy()
+        text: f.comments[f.comment_i].text.copy()
+        previous := jfmt_first_token_at(f, span.start) - 1
+        loop previous >= 0 && (f.source_toks[previous].span.start >= span.start || f.source_toks[previous].kind == TOKEN_SEMI) -> previous -= 1
+        gap_start: if previous >= 0 -> f.source_toks[previous].span.end else -> last_end
+        jfmt_newline(f)
+        if span.start > gap_start && jfmt_source_has_blank_line(f.src_bytes, gap_start, span.start) -> jfmt_newline(f)
+        jfmt_write(f, text)
+        f.comment_i += 1
+    }
+}
+
+// A comment or the `;` the lexer ends a line with: neither opens nor closes
+// a block.
+jfmt_close_comment_trivia: fn(kind: Int) -> Bool Never! {
+    jfmt_is_comment_kind(kind) || kind == TOKEN_SEMI
 }
 
 jfmt_fenced_statement_for: fn(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! {
@@ -1239,6 +1292,7 @@ jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_b
         jfmt_write(f, " ")
         jfmt_write(f, "->")
         jfmt_fmt_arm_body(f, else_b, force_arm_blocks, statement_table)
+        jfmt_fmt_dispatch_else_trail(f, arms, compact)
     }
     jfmt_table_close(f, compact)
 }
@@ -1256,6 +1310,16 @@ jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
     } else if jfmt_dispatch_else_start(f, 0) == .Val(else_start) {
         jfmt_emit_leading(f, else_start)
     }
+}
+
+// The comment written on the last line of an `else ->` arm, which the
+// table's `}` would otherwise carry out of it.
+jfmt_fmt_dispatch_else_trail: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
+    if compact || arms.len() == 0 -> return
+    else_start: jfmt_dispatch_else_start(f, arms[arms.len() - 1].span.end) ?? return
+    else_arm := jfmt_table_else_arm(f, else_start)
+    span: jfmt_table_arm_source(f, else_arm) ?? return
+    jfmt_emit_trailing(f, span.end)
 }
 
 jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
@@ -1298,6 +1362,7 @@ jfmt_fmt_guard_dispatch_table: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stm
         jfmt_write(f, " ")
         jfmt_write(f, "->")
         jfmt_fmt_arm_body(f, body, false, statement_table)
+        jfmt_fmt_dispatch_else_trail(f, arms, compact)
     }
     jfmt_table_close(f, compact)
 }

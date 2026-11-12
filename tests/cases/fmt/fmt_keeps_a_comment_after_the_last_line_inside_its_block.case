@@ -1,0 +1,11 @@
+# Claim: a comment after a block's last line stays inside the block, before its `}` (#6566 c1)
+# Claim: in a function body, an `if` body, a lambda body and after a last line with an arrow body
+# Claim: a blank line written before such a comment stays
+# Claim: a value table's arm comments stay with their arms, a blank line before one included, and a comment after the last arm stays before the table's `}`
+fixture: fmt_keeps_a_comment_after_the_last_line_inside_its_block/input
+step: jet fmt run.jet
+exit: 0
+file: run.jet = fmt_keeps_a_comment_after_the_last_line_inside_its_block/formatted.out
+step: jet fmt --check run.jet
+exit: 0
+file: run.jet = fmt_keeps_a_comment_after_the_last_line_inside_its_block/formatted.out

@@ -1101,6 +1101,114 @@ jfmt_statement_source_end: fn(f: JetFmt, stmt: Stmt) -> Int Never! {
     last_end
 }
 
+// Where the gap after a statement starts. A block statement's source end is
+// its last inner statement's (jfmt_stmt_end), or its head's when the block
+// is empty, so when the last token before `next_start` (past comments and
+// line breaks) is a `}` after `end`, the gap starts past it: a blank line
+// inside the block stays inside it.
+jfmt_statement_gap_start: fn(f: JetFmt, end: Int, next_start: Int) -> Int Never! {
+    index := jfmt_first_token_at(f, next_start) - 1
+    loop index >= 0 {
+        token: f.source_toks[index]
+        if !jfmt_is_comment_kind(token.kind) && token.kind != TOKEN_SEMI {
+            if token.kind == TOKEN_RBRACE && token.span.end > end -> return token.span.end
+            return end
+        }
+        index -= 1
+    }
+    end
+}
+
+// The source arms of a table written one arm per line, read in order so
+// their comments stay with them: `at` is the token the next arm starts at or
+// after, `close` the table's closing `}` (-1: no arms are read), and
+// `previous_end` where the arm before ends (-1: none yet).
+JetFmtTableArms: struct {
+    at: Int
+    close: Int
+    previous_end: Int{-1}
+}
+
+// The arms of the table written at `start`: its `{` is the first one outside
+// parentheses and brackets, as jfmt_cmp_op_before_brace reads it.
+jfmt_table_arms: fn(f: JetFmt, start: Int, compact: Bool) -> JetFmtTableArms Never! {
+    none: JetFmtTableArms{at: 0, close: -1}
+    if compact -> return none
+    depth := 0
+    loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
+        kind: f.source_toks[index].kind
+        if {
+            kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+            kind == TOKEN_LBRACE && depth == 0 -> {
+                if index >= f.brace_closes.len() || f.brace_closes[index] < 0 -> return none
+                return JetFmtTableArms{at: index + 1, close: f.brace_closes[index]}
+            }
+            kind == TOKEN_EOF -> return none
+            else -> {}
+        }
+    }
+    none
+}
+
+// The arm read from the table's `else ->` written at `start`.
+jfmt_table_else_arm: fn(f: JetFmt, start: Int) -> JetFmtTableArms Never! {
+    JetFmtTableArms{at: jfmt_first_token_at(f, start), close: f.source_toks.len()}
+}
+
+// The next source arm: its tokens up to the line break, `,` or closing
+// token that ends it. Moves `arms` past it.
+jfmt_table_arm_source: fn(f: JetFmt, arms: &JetFmtTableArms) -> Span? Never! {
+    if arms.close < 0 -> return None
+    start := -1
+    end := -1
+    depth := 0
+    loop arms.at < arms.close && arms.at < f.source_toks.len() {
+        token: f.source_toks[arms.at]
+        kind: token.kind
+        closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
+        if kind == TOKEN_EOF || (closer && depth == 0) -> break
+        if !jfmt_is_comment_kind(kind) {
+            if depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_COMMA) {
+                if start >= 0 -> break
+            } else {
+                if {
+                    kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+                    closer -> depth -= 1
+                    else -> {}
+                }
+                if start < 0 -> start = token.span.start
+                end = token.span.end
+            }
+        }
+        arms.at += 1
+    }
+    if start < 0 -> return None
+    Val(Span{start: start, end: end})
+}
+
+// Before an arm of a table written one arm per line: the comments that lead
+// it, with a blank line written between an earlier arm and a comment kept.
+// Returns where the arm ends in the source, for its trailing comment
+// (jfmt_table_arm_end), or -1 when the source has no arm left.
+jfmt_table_arm_lead: fn(f: &JetFmt, arms: &JetFmtTableArms) -> Int {
+    span: jfmt_table_arm_source(f, arms) ?? return -1
+    if arms.previous_end >= 0 -> jfmt_emit_leading_statement_gap(f, arms.previous_end, span.start) else -> jfmt_emit_leading(f, span.start)
+    arms.previous_end = span.end
+    span.end
+}
+
+// After an arm: the comment written on its last line.
+jfmt_table_arm_end: fn(f: &JetFmt, end: Int) {
+    if end >= 0 -> jfmt_emit_trailing(f, end)
+}
+
+// Before a table's closing `}`: the comments on their own lines after its
+// last arm.
+jfmt_table_arms_close: fn(f: &JetFmt, arms: JetFmtTableArms) {
+    if arms.close >= 0 && arms.close < f.source_toks.len() -> jfmt_emit_leading(f, f.source_toks[arms.close].span.start)
+}
+
 // S69 did the author break the line before this chain step's `.`?
 jfmt_chain_break_between: fn(f: JetFmt, from: Int, to: Int) -> Bool Never! {
     from <= to && jfmt_src_valid(f, from, to) && jfmt_bytes_have_newline(f.src_bytes, from, to)

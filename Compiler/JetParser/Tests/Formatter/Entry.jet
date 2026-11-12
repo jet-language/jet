@@ -166,6 +166,42 @@ run: fn() {
     assert_eq(fmt_core_stable(member), member)
 }
 
+// A comment after a block's last line stays inside the block, before its `}`,
+// with any blank line before it kept: in a function body, an `if` body, a
+// lambda body and after a last line whose own body is an arrow.
+#Test("comment_after_a_block_last_line_stays_inside_the_block") {
+    source: `run: fn() {
+    print(1)
+    // last line of the body
+}
+
+two: fn() {
+    print(2)  // trailing comment
+    // and its second line
+}
+
+nested: fn() {
+    if true {
+        print(1)
+        // end of the if body
+    }
+    loop x in [1, 2] -> print(x)
+    // after an arrow loop
+
+    /* after a blank line */
+}
+
+lambda: fn() {
+    step: () -> {
+        print("x")
+        // end of the lambda
+    }
+    step()
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}
+
 // A multiline argument or parameter list puts each entry one level in and its
 // closer back at the list's own indent, a text-block argument included.
 #Test("multiline_lists_indent_their_entries_one_level") {

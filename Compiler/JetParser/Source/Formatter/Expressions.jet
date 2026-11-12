@@ -470,16 +470,21 @@ jfmt_table_arm_break: fn(f: &JetFmt, compact: Bool) {
     if compact -> jfmt_write(f, ", ") else -> jfmt_newline(f)
 }
 
+// A comment line before the `}` already ends its line.
 jfmt_table_close: fn(f: &JetFmt, compact: Bool) {
     if compact {
         jfmt_write(f, " }}")
     } else {
         f.indent -= 1
-        jfmt_end_block(f)
+        if !f.at_line_start -> jfmt_newline(f)
+        jfmt_write(f, "}}")
     }
 }
 
+// A table written one arm per line keeps each arm's comments with it
+// (JetFmtTableArms).
 jfmt_fmt_guard_table: fn(f: &JetFmt, expr: Expr, table_span: Span, compact: Bool) {
+    arms := jfmt_table_arms(f, table_span.start, compact)
     if jfmt_dispatch_value_head(f, expr) == .Val(head) {
         jfmt_write(f, "if ")
         jfmt_fmt_expr(f, head.subject, JFMT_PREC_OR_FALLBACK)
@@ -490,9 +495,11 @@ jfmt_fmt_guard_table: fn(f: &JetFmt, expr: Expr, table_span: Span, compact: Bool
         arm := expr
         loop {
             parts: jfmt_if_parts(arm) ?? break
+            arm_end: jfmt_table_arm_lead(f, arms)
             jfmt_fmt_dispatch_value_cond(f, head.subject, head.op, parts.cond)
             jfmt_write(f, " -> ")
             jfmt_fmt_guard_arm_value(f, parts.then_body, parts.then_value)
+            jfmt_table_arm_end(f, arm_end)
             // Card #1440: an exhaustive all-pattern table ends in NoElse.
             if parts.else_body.len() == 0 && jfmt_is_no_else(parts.else_value) -> break
             jfmt_table_arm_break(f, compact)
@@ -500,10 +507,13 @@ jfmt_fmt_guard_table: fn(f: &JetFmt, expr: Expr, table_span: Span, compact: Bool
                 arm = parts.else_value
                 next
             }
+            else_end: jfmt_table_arm_lead(f, arms)
             jfmt_write(f, "else -> ")
             jfmt_fmt_guard_arm_value(f, parts.else_body, parts.else_value)
+            jfmt_table_arm_end(f, else_end)
             break
         }
+        jfmt_table_arms_close(f, arms)
         jfmt_table_close(f, compact)
         return
     }
@@ -512,18 +522,23 @@ jfmt_fmt_guard_table: fn(f: &JetFmt, expr: Expr, table_span: Span, compact: Bool
     arm := expr
     loop {
         parts: jfmt_if_parts(arm) ?? break
+        arm_end: jfmt_table_arm_lead(f, arms)
         if !jfmt_fmt_readiness_head(f, parts.cond) -> jfmt_fmt_expr(f, parts.cond, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, " -> ")
         jfmt_fmt_guard_arm_value(f, parts.then_body, parts.then_value)
+        jfmt_table_arm_end(f, arm_end)
         jfmt_table_arm_break(f, compact)
         if jfmt_table_continues(parts.else_body, parts.else_value, parts.span, table_span) {
             arm = parts.else_value
             next
         }
+        else_end: jfmt_table_arm_lead(f, arms)
         jfmt_write(f, "else -> ")
         jfmt_fmt_guard_arm_value(f, parts.else_body, parts.else_value)
+        jfmt_table_arm_end(f, else_end)
         break
     }
+    jfmt_table_arms_close(f, arms)
     jfmt_table_close(f, compact)
 }
 
