@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100063,
+    "rev": 100065,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -66507,112 +66507,6 @@
       "criteriaLastN": 8
     },
     {
-      "id": "c0jfu2us",
-      "num": 6015,
-      "title": "One `#Test`: a test with inputs is also a property test with shrinking and a fuzz target",
-      "body": "Rust needs proptest, cargo-fuzz and insta as separate add-ons. Jet should need none. A `#Test` that takes inputs runs on generated inputs, shrinks a failure to the smallest case, and can be fuzzed by coverage, all inside `jet test`. D-CLAIM1=C already folds fuzzing into `jet test --grade=generated --iterations=N`, and the snapshot assertion already has one spelling (`expect(...).snapshot()`, syntax-decisions.md). This card builds them on the self-hosted toolchain, mining the Rust-era harness (#4117, #3957, #1916).\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T21. No new syntax.\n\nRelated: #4510 (expected stop message), #5899, #5902.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Moved from G1 to G15 (testing toolkit) by owner order 2026-11-06: G1 keeps only hand-off and durability."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 in flight (rejected cases and #Pre), then c2 and c6. 980b5d3680 and be89473c60 (c1, c4) are in batch vb5."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 2 criteria from archived #2341: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`jet test --grade=generated --iterations=1000` runs a `#Test` with parameters on generated inputs; a planted bug that breaks `reverse(reverse(xs)) == xs` for lists of length 3 is reported with a shrunk input of length 3 or less.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "980b5d3680 (jet test --grade=generated --iterations --seed). Proof vb5 (dev 7f0b3d03ed, s1 jet f3b0ef65fd735e3c): tests/cases/testing_tiers/generated_grade_shrinks_a_planted_reverse_bug.case PASS (planted reverse bug at length 3 reported with a shrunk input).",
-          "at": "2026-11-06T18:42:19.648Z"
-        },
-        {
-          "n": 3,
-          "text": "`expect(value).snapshot()` writes its snapshot on the first run and fails on a later mismatch with a diff; the update step is documented in Docs/spec (test).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev a39c0b0cd9 (TestProfiles): expect(value).snapshot() built (sema lowers to assert(core.testing.snap(...)), loader loads core.testing on bare expect(, spec.md + core-library.md document it and jet test -u). s1 82605eb651+patch: cases expect_snapshot_records_first_then_fails_with_a_diff PASS (first run writes the snapshot, rerun passes, changed value exits nonzero with a diff and leaves the file unchanged, -u rewrites); feature_acceptance/project_format_and_test PASS (KF #6419 row removed); testing_tiers 10 PASS/1 KF; test_profile 2/2",
-          "at": "2026-11-05T23:25:14.299Z"
-        },
-        {
-          "n": 4,
-          "text": "The fault-injection-over-effect-roots tests of #1916 are ported and pass on the self-hosted toolchain.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "be89473c60 (fail-nth effect-loop fault injection ported as a cases row). Proof vb5 (dev 7f0b3d03ed, s1 jet f3b0ef65fd735e3c): tests/cases/effects/sqlite_style_fail_nth_effect_loop_is_deterministic.case PASS.",
-          "at": "2026-11-06T18:42:20.502Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #2341 c4) Each law records its precondition, generated partitions, observable sink, shrink rule, surface set, seed, and relation; rejected inputs do not inflate valid-case counts [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "a73b97035e (+43ab1dae55, 8db9c87aff). Main focused proof at 529e9d9ddd, s1 bd1b1baa: cases testing_tiers/property_pre_rejects_cases_and_records_its_law, generated_grade_shrinks_a_planted_reverse_bug, property_tests_generate_shrink_and_replay: 3/3 PASS.",
-          "at": "2026-11-06T19:32:42.204Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #2341 c6) The layer adds no new runner, membership ledger, uncontrolled randomness, hidden skip, or separate result format [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Code at 8fe1586eaa, checked by Main. One runner: JetIR BuildTests.jet:459 chooses jet_rt_test_property or jet_rt_test_unit within the single #Test lowering and test.unit slot; TestHarness.jet:115-117 routes faults for both. One ledger and format: TestProperty.jet:422 builds the outcome with the shared test_outcome_new (Test.jet:36-51); the property fills only the fifth wire field; NativeTests.jet:522-524 reads the same wire; the same EvidenceRecord with law attachments (TestOutcome.jet:151-173). Seeded randomness: property_seed (TestProperty.jet:278-291) records the seed on every record, and replay uses JET_PROP_SEED. No hidden skip: TestProperty.jet:371-396 uses the body's own skip flag, rejection exhaustion is a reported error, and rejected cases are not counted. Behaviour rows are the 3 testing_tiers property cases that passed for c5.",
-          "at": "2026-11-06T19:35:29.905Z"
-        }
-      ],
-      "refs": [
-        "#4510",
-        "#4117",
-        "#3957",
-        "#1916",
-        "D-CLAIM1",
-        "D-PROP1"
-      ],
-      "tags": [
-        "needs-triage",
-        "testing",
-        "audit-2026-10-28",
-        "future-2026-10-28"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T11:57:26.439Z",
-      "updated": "2026-11-09T19:27:40.244Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G5"
-      ],
-      "criteriaLastN": 6,
-      "completedAt": "2026-11-09T19:27:40.244Z"
-    },
-    {
       "id": "c0efae83",
       "num": 6021,
       "title": "Forwarding derive: a distinct type takes its base type's traits in one line",
@@ -76738,6 +76632,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Main 2026-11-12 after an owner course-correction (target Pareto wins; size work lives in G11): G12Docs-4 now works as the G11 size lane. Order: the per-binary floor (#6501, c2), the bignum closure in every checked-Int program (#6498 c2), the scheduler/time and allocator when unused, general per-function codegen bloat (c29), then niche tables (hash families via size1, Unicode, regex). c22 (precompiled Core and Prelude) goes to G11Speed-4 as the top compile-speed lever after the comptime re-finalize fix, starting with a design note and a non-author review."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c3 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c4 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c5 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c6 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c15 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c16 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c17 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c18 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c19 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c20 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c21 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c25 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c26 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c); c27 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
@@ -77194,7 +77093,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-12T18:44:38.806Z",
+      "updated": "2026-11-12T19:30:05.865Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -98082,6 +97981,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "Main 2026-11-12: re-ranked for Pareto. (1) the comptime re-finalize fix (c1, about 35 percent of every Core-reaching run); (2) #6328 c22, precompiled Core and Prelude, which removes most of the about 2.7 s of the 3.6 s twin compile spent on Core load, finalize and comptime, and most of the 900 MB; (3) item-level reach only where c22 does not cover it."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Owner 2026-11-12: compile speed and memory belong to G11 (speed and size), not G4. Removed from G4; the card stays in G11."
         },
         {
@@ -98178,7 +98082,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-12T17:56:24.996Z",
+      "updated": "2026-11-12T19:30:07.418Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -200092,6 +199996,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T19:30:07.418Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T19:30:05.865Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-12T19:08:19.565Z",
       "by": "Main",
