@@ -1,0 +1,15 @@
+# #3526 c14: a `#{name}` paste in a build's `#code` value writes the name or
+# type its String build local spells, through the same template paste a
+# `b.generate` template uses. The added function is named by `name` and typed
+# by `kind`, and the program calls it. A paste of a build local that is not a
+# String is refused where the code is written
+# (tests/ui/code_value_paste_takes_a_string.jet).
+fixture: code_value_pastes_a_name_and_a_type.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/greeting.jet ~ "greeting: fn(who: String) -> String" # the pasted name and types
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "pasted for meta.add\n"

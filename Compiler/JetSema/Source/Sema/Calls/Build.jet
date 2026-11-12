@@ -177,7 +177,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     if method == "generate" {
         loop argument in args {
             body: argument.flags.template_items ?? next
-            splices: sema_build_generate_splices(body, argument.span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+            splices: sema_build_generate_splices(body, argument.span, false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
             generated.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: splices.source}}}, argument.span))
             loop index in 0..<splices.markers.len() {
                 generated.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: splices.markers[index], width: None}, argument.span))
@@ -226,31 +226,51 @@ sema_build_root_package: fn(graph: SemaRegistrationGraph) -> String Never! {
 
 // `#code { items }`: a `Code` value holding its items formatted as source,
 // expanded by the same path as a `b.generate` template. The items are
-// checked where the value lands, with the program (`meta.add`). A block of
-// statements alone is a body (`meta.rewrite_body`): its statements are
-// formatted as written, never run as template statements.
-sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+// checked where the value lands, with the program (`meta.add`). A `#{name}`
+// naming a String build local pastes the name or type it spells: the value
+// holds the splice's marker, which the build host replaces with the local's
+// text when the build runs (`Code.pasted`). A block of statements alone is a
+// body (`meta.rewrite_body`): its statements are formatted as written, never
+// run as template statements.
+sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     body := [DeriveBodyItem]?{None}
     if call.args.len() == 1 -> body = call.args[0].flags.template_items
     items_written: body ?? {
         diagnostics.push(sema_error("E3502", call.name_span, "`#code` needs one item block", "a `Code` value is the items written in its block", "write `#code {{ ... }}`"))
         return None
     }
+    span: Span{start: call.name_span.start, end: call.args[0].span.end}
     statements := [Stmt]{}
     loop written in items_written {
         if written == .Stmt(statement) -> statements.push(statement.copy()) else -> break
     }
-    text := ""
+    splices := SemaBuildGenerateSplices{source: "", markers: [Int]{}, args: [CallArg]{}, values: [TExpr]{}}
     if items_written.len() > 0 && statements.len() == items_written.len() {
-        text = sema_build_code_statements(statements)
+        splices.source = sema_build_code_statements(statements)
     } else {
-        items: sema_derive_expand_template_body(items_written, [NamedCtValue]{}, diagnostics) ?? return None
-        text = sema_build_generate_format(items)
+        splices = sema_build_generate_splices(items_written, span, true, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     }
-    source: TComptimeField{name: "source", value: TComptimeValue.String{value: text}}
+    source: TComptimeField{name: "source", value: TComptimeValue.String{value: splices.source.copy()}}
     value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{source}}
-    node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, Span{start: call.name_span.start, end: call.args[0].span.end})
-    sema_expr_expected(node, expected, environment, program, diagnostics)
+    node: sema_tree_node(Type.Named{name: "Code"}, TExprKind.CtLit{value: value}, span)
+    if splices.markers.len() == 0 -> return sema_expr_expected(node, expected, environment, program, diagnostics)
+    // The pasted locals are read like a call's arguments; the host takes each
+    // splice's marker, the name it pastes, then the local's value.
+    params := [SemaCallParam]{}
+    loop pasted in splices.values {
+        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(pasted.ty), variadic: false})
+    }
+    ownership: sema_ownership_check_call_arguments(state, "#code", params, splices.args, scopes, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return None
+    args := [TExpr]{}
+    loop index in 0..<splices.markers.len() {
+        name: if splices.args[index].expr == .Ident(written, _, _) -> written.copy() else -> ""
+        args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: splices.markers[index], width: None}, span))
+        args.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, span))
+        args.push(splices.values[index].copy())
+    }
+    pasted: sema_tree_node(Type.Named{name: "Code"}, TExprKind.HostCall{call: THostCall.Method{receiver: node, method: "pasted", args: args}}, span)
+    sema_expr_expected(pasted, expected, environment, program, diagnostics)
 }
 
 // Statements formatted as a function body's lines, unindented: the formatter
@@ -771,10 +791,13 @@ sema_call_compiler_producer: fn(environment: SemaScopeEnvironment, program: Sema
     sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "`{location.function}` at {location.file}:{location.line}"}}}, span)
 }
 
-// A `b.generate` template's formatted items and the build locals it splices.
-// Each `#{name}` naming a build local is formatted as that splice's marker, a
-// whole Int literal, which the build host replaces with the local's value
-// written as a Jet literal (JetDriver jet_driver_build_host_call).
+// A `b.generate` template's or a `#code` value's formatted items and the
+// build locals it splices. Each `#{name}` naming a build local is formatted as
+// that splice's marker, which the build host replaces when the build runs
+// (JetDriver jet_driver_build_host_call). In a `b.generate` template the
+// marker is a whole Int literal, replaced by the local's value written as a
+// Jet literal. In a `#code` value the local is a String, bound as text: the
+// marker stands as the name or type it pastes, replaced by the local's text.
 SemaBuildGenerateSplices: struct {
     source: String
     markers: [Int]
@@ -796,29 +819,36 @@ sema_build_generate_format: fn(items: [Item]) -> String {
 
 // Rust lower_build_generate expands and formats the typed body under an empty
 // compile-time scope. A `#{name}` still unbound there that names a build local
-// of a literal type is spliced: the body is expanded again with each such
-// name bound to its marker, so the marker stands exactly where the value goes.
-sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaBuildGenerateSplices? {
+// is spliced: the body is expanded again with each such name bound to its
+// marker, so the marker stands exactly where the value goes. `named` is a
+// `#code` value's paste of a name or type, and is otherwise a value literal.
+sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, named: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaBuildGenerateSplices? {
     items: sema_derive_expand_template_body(body, [NamedCtValue]{}, diagnostics) ?? return None
     splices := SemaBuildGenerateSplices{source: sema_build_generate_format(items), markers: [Int]{}, args: [CallArg]{}, values: [TExpr]{}}
+    owner: if named -> "`#code`" else -> "`b.generate`"
     scope := [NamedCtValue]{}
     loop name in sema_build_generate_splice_names(splices.source) {
         if sema_scope_resolve_index(scopes, name) == None -> next
         local: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
         value: sema_check_expression(local.copy(), None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-        if !sema_build_generate_splice_type(value.ty) {
+        if named && value.ty != Type.String {
+            diagnostics.push(sema_error("E3502", span, "`#code` can't paste `#{{{name}}}`, a `{type_name(value.ty)}`", "a paste in a `Code` value writes a name or a type, and a build spells one as a String", "paste a String that spells the name or type, built from `{name}`"))
+            return None
+        }
+        if !named && !sema_build_generate_splice_type(value.ty) {
             diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice `#{{{name}}}`, a `{type_name(value.ty)}`", "a build local enters the generated items as a literal, and only String, Int and Bool values and lists of them have one", "splice a String, Int or Bool built from `{name}`"))
             return None
         }
         marker: SEMA_BUILD_GENERATE_SPLICE_BASE + splices.markers.len()
-        scope.push(NamedCtValue{name: name, value: CtValue.Int{value: marker}})
+        bound: if named -> CtValue.Str{value: "{marker}"} else -> CtValue.Int{value: marker}
+        scope.push(NamedCtValue{name: name, value: bound})
         splices.markers.push(marker)
         splices.args.push(CallArg{convention: AccessConvention.Read, expr: local, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
         splices.values.push(value)
     }
     if splices.markers.len() == 0 -> return Val(splices)
     if splices.markers.len() > SEMA_BUILD_GENERATE_SPLICE_LIMIT || splices.source.contains(SEMA_BUILD_GENERATE_SPLICE_PREFIX) {
-        diagnostics.push(sema_error("E3502", span, "`b.generate` can't splice build locals into these items", "the items splice more than {SEMA_BUILD_GENERATE_SPLICE_LIMIT} build locals, or already spell the splice marker prefix `{SEMA_BUILD_GENERATE_SPLICE_PREFIX}`", "splice fewer build locals, or write that number another way"))
+        diagnostics.push(sema_error("E3502", span, "{owner} can't splice build locals into these items", "the items splice more than {SEMA_BUILD_GENERATE_SPLICE_LIMIT} build locals, or already spell the splice marker prefix `{SEMA_BUILD_GENERATE_SPLICE_PREFIX}`", "splice fewer build locals, or write that number another way"))
         return None
     }
     spliced: sema_derive_expand_template_body(body, scope, diagnostics) ?? return None

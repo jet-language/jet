@@ -488,6 +488,9 @@ that holds a `Compiler` value, an option that skips or weakens a check
 it) is refused (E3503). `#code { items }` is a `Code` value holding its items,
 and `meta.add(code, scope: "name")` adds them to the value's target as the
 generated module `name`, checked with the program like hand-written code.
+A `#{name}` in the items that names a String build local pastes the name or
+type it spells, as a template paste does, and the build host refuses text
+that is not one name or type's spelling (E0357).
 `meta.add` uses `Meta.Generate`, so a function whose row denies that effect
 (`-[!Meta.Generate]>`) can't call it. A root package's
 `authority: { deny: [Meta.Generate] }` refuses it wherever the root's build

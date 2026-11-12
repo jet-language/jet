@@ -1,0 +1,13 @@
+// @programmable_build
+// @cli_build
+// A paste in a build's `#code` value writes a name or a type, which a build
+// spells as a String; an Int build local is refused where the code is written.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["code_value_paste_takes_a_string.jet"], [])
+    meta: b.compiler(app)
+    count: 3
+    meta.add(#code { total: fn() -> Int { #{count} } }, scope: "total")
+    b.default(app)
+}
+
+run: fn() { print(1) }

@@ -5849,6 +5849,11 @@ function the root hands its `Build` to. The value expires with the build that
 made it. `#code { items }` is a `Code` value holding the items written in its
 block, and `meta.add(code, scope: "name")` adds them to the value's target as
 the generated module `name`, which the program checks like hand-written code.
+A `#{name}` in the items that names a String build local pastes the name or
+type it spells, through the same template paste a `b.generate` template uses
+(`#{name}: fn(who: #{kind}) -> #{kind}`). A paste of any other build local
+is refused where the code is written, and the build host refuses text that is
+not one name or type's spelling (E0357).
 `meta.add` writes declarations, so it uses the `Meta.Generate` effect: allowed
 unless the calling function's row denies it (`-[!Meta.Generate]>`).
 `meta.rewrite_body(f, code)` replaces the body of the top-level function `f`

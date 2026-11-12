@@ -1,0 +1,14 @@
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    name: "greeting"
+    kind: "String"
+    meta.add(#code {
+        #{name}: fn(who: #{kind}) -> #{kind} { "pasted for {who}" }
+    }, scope: "greeting")
+    b.default(app)
+}
+
+run: fn() {
+    print(greeting("meta.add"))
+}
