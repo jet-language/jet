@@ -19,9 +19,9 @@
 // diagnostics, `complete`, failure facts, incomplete reasons, injected
 // functions and their keys, and tests. The comptime function results must
 // bring the same diagnostics too, but for lints on Core source, which the
-// finalization drops, and in a compile that lowers they must name no Core
-// body the finalization left deferred, which the recheck's Core demand would
-// check. Then every whole-program pass after the
+// finalization drops, and they must name no Core body that waits for demand,
+// which the recheck's Core demand seeds from them in a compile that lowers
+// (and whose failure facts it solves again). Then every whole-program pass after the
 // body pass (failure solve and recheck, effects, taint, Core usage, names)
 // reads what it read in the finalization, so its rows stand, and the stamps
 // it put on the owners carry over. When any of this fails, or a site is not
@@ -236,12 +236,14 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
     settled_owners == owners.len()
 }
 
-// Whether the pass's comptime functions name a deferred Core body the
-// finalization left unchecked. A compile that lowers demands what they name
-// (sema_core_demand_waves), so the full recheck checks it, and its failure
-// contract may restamp the bodies that call it.
+// Whether the pass's comptime functions name a Core body that waits for
+// demand (graph.core_demand_rows), checked or not. A compile that lowers
+// seeds its Core demand with what they name (sema_core_demand_waves), so the
+// full recheck checks it as their demand and solves its failure facts
+// again, which may restamp it and the bodies that call it; any compile
+// refuses the splice then.
 sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
-    if graph.core_lowering_roots == None || graph.core_demand_rows.len() == 0 -> return false
+    if graph.core_demand_rows.len() == 0 -> return false
     keys := [String]{}
     loop result in functions {
         if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, keys)
@@ -250,7 +252,7 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
         }
     }
     loop key in keys {
-        if sema_core_demand_deferred(graph, key) || sema_core_demand_deferred(graph, sema_core_demand_template_key(key)) -> return true
+        if graph.core_demand_rows.get(key) != None || graph.core_demand_rows.get(sema_core_demand_template_key(key)) != None -> return true
     }
     false
 }
