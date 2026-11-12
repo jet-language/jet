@@ -476,7 +476,7 @@ wants_help: fn(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "
 // help text of every level as text; the entry hands both to `__cli_spec`
 // and parses the process argument vector with `__cli_parse` (`__cli_parse_float` when an
 // input is a Float). Help, usage and error texts are the args builder's
-// (`JetArgsSpec::help`, `jet_args_parse_mode`).
+// (`__args_help`, `args_parse_level`).
 
 // Value kinds of a non-flag input.
 CLI_TEXT: 0
@@ -619,7 +619,7 @@ __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, 
     spec
 }
 
-// Rust `jet_args_source_program_name`: argv[0]'s file name without `.jet`.
+// argv[0]'s file name without `.jet`.
 cli_program_name: fn(argv0: String) -> String Never! {
     raw: argv0.bytes()
     start := 0
@@ -642,7 +642,7 @@ cli_root_level: fn(spec: CLISpec, program: String) -> CLILevel Never! {
     CLILevel{program: program.copy(), help: spec.help.copy(), accepts_version: spec.version != None, inherited: [CLIInput]{}, local: spec.inputs.copy(), commands: spec.commands.copy()}
 }
 
-// Rust `jet_args_subcommand`: a command inherits every root input; its own
+// A command inherits every root input; its own
 // input of the same name gives way to the inherited one.
 cli_command_level: fn(spec: CLISpec, program: String, command: CLICommand) -> CLILevel Never! {
     local := [CLIInput]{}
@@ -768,7 +768,7 @@ __cli_is_bool: fn(text: String) -> Bool Never! {
     lower == "true" || lower == "false"
 }
 
-// Rust `jet_args_store_option`: "" when `value` fits the input, else the
+// "" when `value` fits the input, else the
 // refusal. `float_ok` checks a Float value.
 cli_store_error: fn(input: CLIInput, value: String, float_ok: fn(String) -> Bool Never!) -> String Never! {
     if input.kind == CLI_INT && !__cli_is_int(value) -> return __cli_int_refusal(input.name, value)
@@ -798,7 +798,7 @@ cli_edit_distance: fn(a: String, b: String) -> Int Never! {
     previous[right.len()]
 }
 
-// Rust `jet_args_unknown`.
+// The unknown-input refusal, with the help text after it.
 cli_unknown: fn(name: String, inputs: [CLIInput], help: String) -> String Never! {
     names: loop input in inputs -> input.name.copy()
     "{__cli_unknown(name, names)}\n\n{help}"
@@ -813,7 +813,7 @@ __cli_unknown: fn(name: String, names: [String]) -> String Never! {
     "unknown option `--{name}`"
 }
 
-// Rust `jet_args_parse_mode` over argv[start..]: options, flags, shorts, one
+// One level's parse over argv[start..]: options, flags, shorts, one
 // command word and the positional fill, with the explicit > env > default
 // precedence.
 cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, float_ok: fn(String) -> Bool Never!) -> CLIParsed Never! {
@@ -1248,7 +1248,7 @@ args_same_input: fn(left: ArgEntry, right: ArgEntry) -> Bool Never! {
     left.kind == right.kind && left.kind != ARG_COMMAND && left.name == right.name
 }
 
-// Rust `jet_args_subcommand`: the command inherits every parent input; its
+// The command inherits every parent input; its
 // own input of the same name gives way to the inherited one. Its levels move
 // after the parent's, so each nested level index shifts by the parent count.
 __args_subcommand: fn(&&spec: ArgsSpec, name: String, help: String, &&command: ArgsSpec) -> ArgsSpec Never! {
@@ -1346,7 +1346,7 @@ __args_help: fn(spec: ArgsSpec) -[Exec.Args]> String Never! {
     args_help(spec, 0)
 }
 
-// Rust `jet_args_completion`: the words a shell completes, in declaration
+// The words a shell completes, in declaration
 // order.
 __args_completion: fn(spec: ArgsSpec, shell: String) -> String Never! {
     words := [String]{"--help"}
@@ -1362,7 +1362,7 @@ __args_completion: fn(spec: ArgsSpec, shell: String) -> String Never! {
     "{shell} completion: {words.join(" ")}"
 }
 
-// Rust `jet_args_all_entries`: the inherited inputs, then the level's own.
+// The inherited inputs, then the level's own.
 args_all: fn(level: ArgsLevel) -> [ArgEntry] Never! {
     all := level.inherited.copy()
     loop entry in level.entries {
@@ -1388,7 +1388,7 @@ args_find_short: fn(all: [ArgEntry], short: String) -> Int Never! {
     -1
 }
 
-// Rust `jet_args_store_option`: "" after storing `value`, else the refusal.
+// "" after storing `value`, else the refusal.
 // A repeatable option keeps every value; another keeps the last.
 args_store: fn(options: &[String:[String]], entry: ArgEntry, value: String) -> String Never! {
     if entry.value == CLI_INT && !__cli_is_int(value) -> return __cli_int_refusal(entry.name, value)
@@ -1400,7 +1400,7 @@ args_store: fn(options: &[String:[String]], entry: ArgEntry, value: String) -> S
     ""
 }
 
-// Rust `jet_args_unknown`.
+// The unknown-input refusal, with the help text after it.
 args_unknown: fn(name: String, all: [ArgEntry], help: String) -> String Never! {
     suggestion := ""
     loop entry in all {
@@ -1416,7 +1416,7 @@ args_parsed: fn() -> ParsedArgs Never! {
     ParsedArgs{flags: [String:Bool]{}, options: [String:[String]]{}, positionals: [String]{}, subcommand: None, explicit_flags: [String:Bool]{}, explicit_options: [String:Bool]{}}
 }
 
-// Rust `jet_args_parse_mode` for level `at` over argv[start..] into `out`:
+// Level `at`'s parse over argv[start..] into `out`:
 // "" after a parse, else the refusal. Options, flags, short clusters, one
 // command word and the positional fill, with explicit > env > default.
 args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &ParsedArgs) -[Env, Exec.Args]> String Never! {
@@ -1604,7 +1604,7 @@ __args_parse: fn(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs E
     Ok(out)
 }
 
-// Rust `jet_args_parse_or_exit`: `--help` prints the help and exits 0; a
+// `--help` prints the help and exits 0; a
 // refusal goes to stderr and exits 2.
 __args_parse_or_exit: fn(spec: ArgsSpec, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
     out := args_parsed()
