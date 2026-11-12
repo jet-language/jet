@@ -29,7 +29,7 @@
 // without that mode prints PRELUDE UNCHECKED and never CHECK OK. A `.rows`
 // or `.tsv` table is never Jet: its generator check is its whole check.
 // A Core source is checked as Core, the library that may define `__` names:
-// a public module or a private part (its row in `jet inspect structure core
+// a public module or a private part (its row in `jet inspect structure --core
 // --json`, the compiler's CORE_SOURCE_OWNED_ROWS) as the
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
 // then as `jet check Core` (every Core body, called or not), with this
@@ -579,7 +579,7 @@ json_text: fn(value: Dyn, key: String) -> String Never! {
 }
 
 // The row of the Core source at `relative` in `structure` (the output of
-// `jet inspect structure core --json`), or None.
+// `jet inspect structure --core --json`), or None.
 core_row: fn(structure: String, relative: String) -> CoreRow? Never! {
     answer: json.parse(structure) ?? return None
     core: answer.get("core") ?? return None
@@ -605,9 +605,9 @@ core_probe_source: fn(name: String) -> String Never! {
 // checks the bodies a program importing it alone reaches, then as `jet check
 // Core`, which checks every Core body, called or not.
 core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).cwd(repo).env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure core --json` could not start: {err}\n"}
-    if asked.code != 0 || asked.signal != None -> return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure core --json` failed\n"}
-    row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure core --json`; declare it in Compiler/Prelude/Core.rows or CoreSourceParts.tsv and rebuild the compiler\n"}
+    asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd(repo).env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure --core --json` could not start: {err}\n"}
+    if asked.code != 0 || asked.signal != None -> return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure --core --json` failed\n"}
+    row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure --core --json`; declare it in Compiler/Prelude/Core.rows or CoreSourceParts.tsv and rebuild the compiler\n"}
     if row.runtime -> return run_check(repo, jet, [String]{"check", target}, scratch)
     dir: "{scratch}/core-probe.{sys.pid()}"
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}

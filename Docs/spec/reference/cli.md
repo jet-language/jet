@@ -665,7 +665,7 @@ the built-in Core sources. A declaration that disagrees with the sources stops
 the build and names each problem. The canonical effect source and the effect
 vocabulary are read the same way
 ([`EffectVocabulary.jet`](../../../Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet)).
-`jet inspect structure core --json` prints the built tables: the bootstrap
+`jet inspect structure --core --json` prints the built tables: the bootstrap
 steps, root types, modules, Core sources and each Core call record's effect
 fields and Prelude symbol (`calls`). `jet Tools/agent/CoreSurfaceLedger.jet
 --write` writes the Core surface ledger from them and `--check` holds it
@@ -1239,8 +1239,8 @@ structure slice of its gate ledger; it does not infer missing facts by scanning
 source text. Frontend failures can publish a structure report before the
 diagnostic report, so the machine stream can contain a successful envelope
 followed by a failed one. `--core` presents the canonical bootstrap order,
-root types, and module/type export declarations without compiling the entry.
-Its ordinary inspect target/project resolution still applies.
+root types, and module/type export declarations of the toolchain's Core
+without compiling anything, so it needs no target or project.
 The Jet semantic pass publishes unused-import, private-function, and
 package-export liveness verdicts in source/span/code/name order, with the same
 `unreachable` status and collector detail as the diagnostic. Resolved user and

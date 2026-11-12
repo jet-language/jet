@@ -3,7 +3,7 @@
 // alone. A whole-program build only checks the Core items its callers reach, so
 // a module whose own source no longer checks stays hidden until some program
 // imports it. This sweep checks each public Core module the compiler declares
-// (`$JET inspect structure core --json`) in its own one-import probe, then every Core body,
+// (`$JET inspect structure --core --json`) in its own one-import probe, then every Core body,
 // called or not, as `jet check Core` (the row EVERY_BODY), and reports every
 // failing row, not the first one.
 //
@@ -80,12 +80,12 @@ option: fn(args: [String], name: String) -> String? Never! {
 }
 
 // The importable Core modules, once each, from `structure` (the output of
-// `jet inspect structure core --json`).
+// `jet inspect structure --core --json`).
 core_modules: fn(structure: String) -> [String] CheckError! {
-    answer: json.parse(structure) ?? return Err(problem("`jet inspect structure core --json` printed no JSON: {err}"))
-    core: answer.get("core") ?? return Err(problem("`jet inspect structure core --json` printed no `core` object"))
-    listed: core.get("modules") ?? return Err(problem("`jet inspect structure core --json` printed no Core modules"))
-    rows: if listed == .Array(entries) -> entries.copy() else -> return Err(problem("`jet inspect structure core --json` printed no Core module list"))
+    answer: json.parse(structure) ?? return Err(problem("`jet inspect structure --core --json` printed no JSON: {err}"))
+    core: answer.get("core") ?? return Err(problem("`jet inspect structure --core --json` printed no `core` object"))
+    listed: core.get("modules") ?? return Err(problem("`jet inspect structure --core --json` printed no Core modules"))
+    rows: if listed == .Array(entries) -> entries.copy() else -> return Err(problem("`jet inspect structure --core --json` printed no Core module list"))
     modules := [String]{}
     loop entry in rows {
         named: entry.get("module") ?? next
@@ -252,8 +252,8 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     jobs: Int.parse(jobs_text) ?? 0
     if jobs < 1 || jobs > MAX_JOBS || "{jobs}" != jobs_text -> return Err(problem("--jobs takes 1..{MAX_JOBS}"))
     root: repo_root() ?? return Err(err)
-    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).cwd(root).env("NO_COLOR", "1").output_limit(4194304).run() ?? return Err(problem("`{jet} inspect structure core --json` could not start: {err}"))
-    if asked.code != 0 || asked.signal != None -> return Err(problem("`{jet} inspect structure core --json` failed: {asked.errors.trim()}"))
+    asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd(root).env("NO_COLOR", "1").output_limit(4194304).run() ?? return Err(problem("`{jet} inspect structure --core --json` could not start: {err}"))
+    if asked.code != 0 || asked.signal != None -> return Err(problem("`{jet} inspect structure --core --json` failed: {asked.errors.trim()}"))
     known: core_modules(asked.output) ?? return Err(err)
     modules: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(name -> name != "") else -> known.copy()
     unknown: modules.filter(name -> !known.contains(name))

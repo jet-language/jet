@@ -186,8 +186,9 @@ jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?
 }
 
 // `run_inspect`: one parsed plane request. Accel routes before the scopes, then
-// the live and replay scopes, the build coverage table before the entry, and
-// every other plane reads the entry `inspect_entry_path` resolves.
+// the live and replay scopes, the build coverage table and the Core catalog
+// before the entry, and every other plane reads the entry
+// `inspect_entry_path` resolves.
 jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     plane: request.plane
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
@@ -203,6 +204,8 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             if option == "--coverage" || option.starts_with("--coverage=") -> return jet_cli_inspect_coverage(json, color)
         }
     }
+    // The Core catalog is the toolchain's, so it needs no target or project.
+    if plane == "structure" && request.options.contains("--core") -> return JetCLIPlan.Done{output: jet_cli_structure_core(json)}
     file := ""
     notice := ""
     if jet_cli_inspect_entry(request.scope, plane, color) == {
@@ -218,12 +221,7 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
     if request.scope == .Target(target) -> project = cli_files.is_dir(target)
     if plane == {
         "types" | "shapes" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
-        // `--core` reports the canonical Core catalog after the target
-        // resolves, without compiling the entry.
-        "structure" -> {
-            if request.options.contains("--core") -> return jet_cli_with_notices([String]{notice}, JetCLIPlan.Done{output: jet_cli_structure_core(json)})
-            return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
-        }
+        "structure" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> {
             if request.options.contains("--times") -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_build_times(file, json, color))

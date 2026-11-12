@@ -7,7 +7,7 @@
 // holds only the comparison policy and the reader of those tables; Core.rows's
 // declarations are read and gated by the compiler build
 // (Compiler/JetFoundation/Source/CoreDeclarations), and this tool reads the
-// built tables through `jet inspect structure core --json`. The runtime JSON
+// built tables through `jet inspect structure --core --json`. The runtime JSON
 // report is generated from those inputs; --check rebuilds it and never reads
 // the report.
 //
@@ -1091,7 +1091,7 @@ Inventory: struct {
     collections: [Collection]
 }
 
-// One Core module fact from `jet inspect structure core --json`.
+// One Core module fact from `jet inspect structure --core --json`.
 ModuleFact: struct {
     name: String
     members: [String]
@@ -3259,12 +3259,12 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 
 // ---- Ledger -------------------------------------------------------------------
 
-// The compiler's Core structure (`jet inspect structure core --json`, run by
+// The compiler's Core structure (`jet inspect structure --core --json`, run by
 // $JET, else `jet` on PATH, from `root`): Core.rows's modules and the Core
 // sources the compiler loads, as the build computed them.
 core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
-    argv: [String]{jet, "inspect", "structure", "core", "--json"}
+    argv: [String]{jet, "inspect", "structure", "--core", "--json"}
     spec: process.cmd(argv).cwd(root).stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     receipt: ran[0] ?? return Err(fail("{argv.join(" ")} could not start: {err}"))

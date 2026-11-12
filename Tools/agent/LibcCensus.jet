@@ -7,7 +7,7 @@
 //
 // A row's `jet` names are checked, never trusted: `core.<module>.<member>` (or
 // a bare module) must be exported by Compiler/Prelude/Core.rows, as the
-// compiler declares it (`$JET inspect structure core --json`),
+// compiler declares it (`$JET inspect structure --core --json`),
 // `core.<module>.<Type>.<method>` must name a type that module exports and a
 // method its source declares, and `<Type>.<method>` must be a built-in method,
 // static or collection operation row. Every unresolved name is reported. With
@@ -410,14 +410,14 @@ family_names: fn(family: Family) -> [String] Never! {
 
 is_pattern: fn(name: String) -> Bool Never! { name.contains("*") }
 
-// The compiler's Core structure: `jet inspect structure core --json`, run by
+// The compiler's Core structure: `jet inspect structure --core --json`, run by
 // $JET, else `jet` on PATH.
 core_structure: fn() -[Env, Exec, Time.Wait]> Dyn CensusError! {
     jet: process.env_get_or("JET", "jet")
-    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).env("NO_COLOR", "1").output_limit(16777216).run() ?? return Err(census_fail("`{jet} inspect structure core --json` could not start: {err}"))
-    if asked.code != 0 || asked.signal != None -> return Err(census_fail("`{jet} inspect structure core --json` failed: {asked.errors.trim()}"))
-    answer: json.parse(asked.output) ?? return Err(census_fail("`{jet} inspect structure core --json` printed no JSON: {err}"))
-    core: answer.get("core") ?? return Err(census_fail("`{jet} inspect structure core --json` printed no `core` object"))
+    asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).env("NO_COLOR", "1").output_limit(16777216).run() ?? return Err(census_fail("`{jet} inspect structure --core --json` could not start: {err}"))
+    if asked.code != 0 || asked.signal != None -> return Err(census_fail("`{jet} inspect structure --core --json` failed: {asked.errors.trim()}"))
+    answer: json.parse(asked.output) ?? return Err(census_fail("`{jet} inspect structure --core --json` printed no JSON: {err}"))
+    core: answer.get("core") ?? return Err(census_fail("`{jet} inspect structure --core --json` printed no `core` object"))
     Ok(core)
 }
 

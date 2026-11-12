@@ -7,7 +7,7 @@
 // `dispatcher_row` in Compiler/Prelude/Core.rows and its CoreCallRecord in
 // Foundation's CORE_CALLS, which the compiler computes from Core.rows while it
 // builds (Compiler/JetFoundation/Source/CoreDeclarations); this tool reads the
-// built records through `jet inspect structure core --json` (its `calls`),
+// built records through `jet inspect structure --core --json` (its `calls`),
 // run by $JET, else `jet` on PATH, so the jet must be built from this tree.
 // While both tables carry that leaf, the member's declared row must be the
 // effect sema gives a call of the record: its `effect_kind` unless its
@@ -159,7 +159,7 @@ interface_members: fn(text: String) -> [InterfaceMember] Never! {
     members
 }
 
-// The `calls` of `jet inspect structure core --json`'s `core` object: each
+// The `calls` of `jet inspect structure --core --json`'s `core` object: each
 // CORE_CALLS record's module, member, effect fields and Prelude symbol.
 core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
     leaves := [CoreLeaf]{}
@@ -289,11 +289,11 @@ read_text: fn(path: String) -[FS]> String RowsError! {
     Ok(text)
 }
 
-// The compiler's Core structure (`jet inspect structure core --json`, run by
+// The compiler's Core structure (`jet inspect structure --core --json`, run by
 // $JET, else `jet` on PATH): its `core` object, as the build computed it.
 core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn RowsError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
-    argv: [String]{jet, "inspect", "structure", "core", "--json"}
+    argv: [String]{jet, "inspect", "structure", "--core", "--json"}
     spec: process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
@@ -310,7 +310,7 @@ runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wai
     }
     members: interface_members(read_text(INTERFACE) ?? return Err(err))
     leaves: core_leaves(core_structure() ?? return Err(err))
-    if leaves.len() == 0 -> return Err(RowsError{message: "`jet inspect structure core --json` printed no Core call records"})
+    if leaves.len() == 0 -> return Err(RowsError{message: "`jet inspect structure --core --json` printed no Core call records"})
     dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
     report: differences(members, leaves, dispatched, leaf_aliases())
