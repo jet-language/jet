@@ -1,10 +1,12 @@
 // When each immutable `name: value` local of the checked bodies is computed.
 // A local whose checked initializer folds to data (sema's comptime fold: the
-// literals, arithmetic over them, and the aggregates built from them) is
-// computed while compiling and holds that value. A local that reads a value
-// only the running program has, calls a function that reaches the outside
-// world, or holds a value no build can keep waits for run time, and its row
-// names the first such reason. A local that is neither has no row.
+// literals, arithmetic over them, and the aggregates built from them, which
+// include the value compiling computed for a local that calls code) is
+// computed while compiling and holds that value. A local compiling tried and
+// left to run time carries why. A local that reads a value only the running
+// program has, calls a function that reaches the outside world, or holds a
+// value no build can keep waits for run time, and its row names the first
+// such reason. A local that is neither has no row.
 use {
     jet_driver.[JetDriverDocModule]
     jet_foundation.[
@@ -125,6 +127,9 @@ semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [St
     if printed -> return Val(SemLocalStage.Run{reason: "it prints text"})
     if semindex_local_stage_effect(function, span, summaries, by_raw_key, doc_module) == .Val(reason) -> return Val(SemLocalStage.Run{reason: reason})
     if semindex_local_stage_unstorable(local.ty) -> return Val(SemLocalStage.Run{reason: "it holds a `{type_name(local.ty)}`, which a build can't keep"})
+    // Compiling tried it and left it to run time (a stop, running out of
+    // steps, or code the compile-time evaluator can't run).
+    if local.run_time_reason == .Val(reason) -> return Val(SemLocalStage.Run{reason: reason})
     None
 }
 

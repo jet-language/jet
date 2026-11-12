@@ -161,6 +161,10 @@ TLocal: struct {
     // variable the place reads is written, moved or captured while it lives
     // (JetSema Ownership/PlaceBorrows.jet).
     place_borrow: Bool{false}
+    // Why an immutable `name: value` binder that calls code is computed at
+    // run time: compiling could not compute it (it stops, runs out of steps,
+    // reaches the outside world, or can't run while compiling).
+    run_time_reason: String?{None}
 }
 
 checked_user_local: fn(name: String, span: Span, ty: Type) -> TLocal Never! {

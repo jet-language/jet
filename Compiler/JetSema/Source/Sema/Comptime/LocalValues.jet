@@ -1,0 +1,91 @@
+// An immutable local `name: value` whose initializer calls code is computed
+// while compiling whenever it can be. Its first check stages the initializer
+// as a body site (sema_comptime_body_capture_local); the driver evaluates it
+// beside the other body sites, and the owner body is checked again. A value
+// that landed replaces the call, so the program holds the value and runs no
+// code for it. A site the driver could not compute (its compile-time check
+// fails, it reaches the outside world, the evaluator can't run its code, or
+// computing it stops or runs out of steps) lands a failure holding why
+// (sema_comptime_local_value_failure): the binding stays run-time code with
+// that reason and reports nothing. A local that reads a run-time value, or
+// whose calls reach the outside world by their written rows, is never staged.
+use jet_foundation.[
+    Expr,
+    Span,
+    Type,
+    expr_span,
+]
+
+// What a local's computed initializer became: the value's expression, or
+// why it stays run-time code. Neither when it was not staged or has not
+// landed yet.
+SemaComptimeLocalValue: struct {
+    value: TExpr?
+    reason: String?
+}
+
+sema_comptime_local_value: fn(
+    name: String,
+    name_span: Span,
+    expression: Expr,
+    init: TExpr,
+    fact_start: Int,
+    reference_start: Int,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: SemaScopeTable,
+    context: &SemaCheckContext,
+) -> SemaComptimeLocalValue {
+    none: SemaComptimeLocalValue{value: None, reason: None}
+    if !sema_comptime_local_value_candidate(init.ty, fact_start, reference_start, program, scopes, context) -> return none
+    source_span: expr_span(expression)
+    staged: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), source_span, name_span) ?? {
+        sema_comptime_body_capture_local(context, environment, scopes, name, expression, init.ty, source_span, name_span)
+        return none
+    }
+    why: sema_comptime_local_value_reason(staged.value)
+    if why != None -> return SemaComptimeLocalValue{value: None, reason: why}
+    SemaComptimeLocalValue{value: sema_fact_prepared_expr(staged.value, init.ty, init.span, environment, program, context), reason: None}
+}
+
+// Whether a checked initializer of type `ty`, whose calls are the call
+// facts from `fact_start` on and whose name reads the references from
+// `reference_start` on, may be computed while compiling: it calls code, is
+// not compile-time code already, sits outside `#Impure`, `#Unsafe` and
+// generic bodies, reads no run-time local or parameter, holds a value a
+// build can keep, and no call's written row reaches the outside world.
+sema_comptime_local_value_candidate: fn(
+    ty: Type,
+    fact_start: Int,
+    reference_start: Int,
+    program: SemaProgramTables,
+    scopes: SemaScopeTable,
+    context: SemaCheckContext,
+) -> Bool {
+    if context.call_facts.len() <= fact_start -> return false
+    if scopes.comptime_execution_depth > 0 || context.unsafe_depth > 0 || context.generic_params.len() > 0 -> return false
+    if sema_scope_inside_impure(scopes) || sema_comptime_local_value_unstorable(ty) -> return false
+    loop index in reference_start..<context.name_references.len() {
+        reference: context.name_references[index]
+        if reference.kind != "local" && reference.kind != "param" -> next
+        position: sema_scope_resolve_index(scopes, reference.symbol.name) ?? return false
+        if scopes.bindings[position].prepared == None -> return false
+    }
+    graph: program.registration_graph ?? return false
+    calls := [SemaCallSiteFact]{}
+    loop index in fact_start..<context.call_facts.len() -> calls.push(context.call_facts[index].copy())
+    sema_comptime_call_facts_impurity(graph, calls) == None
+}
+
+// A value a build can't hand to the running program: nothing, a function, a
+// shared cell, a trait object, or a collection or option of one.
+sema_comptime_local_value_unstorable: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Fn(_, _, _, _, _, _) | .Shared(_) | .TraitObject(_) -> true
+        .List(element) -> sema_comptime_local_value_unstorable(element)
+        .Option(inner) -> sema_comptime_local_value_unstorable(inner)
+        .Map(_, _, value) -> sema_comptime_local_value_unstorable(value)
+        .Named(name) -> name == "Unit"
+        .Int | .Float | .Bool | .String | .Char | .Result(_, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}

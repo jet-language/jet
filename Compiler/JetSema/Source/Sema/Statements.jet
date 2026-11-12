@@ -5476,6 +5476,8 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // bare range place is a read window into its source, typed `View<T>`.
     if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, state) -> binding_expr = Expr.Place{value: binding_expr, access: PlaceAccess.Read, span: expr_span(binding.init), id: AST_NODE_GENERATED}
     range_head: sema_stmt_range_conversion_head(binding.init, environment, program, scopes)
+    fact_start: context.call_facts.len()
+    reference_start: context.name_references.len()
     previous_binding_initializer: context.binding_initializer
     context.binding_initializer = true
     // `mem.Fixed.new`/`.over` is allowed only as the whole initializer.
@@ -5622,7 +5624,14 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tree_promotion(promotion)) else -> None
     stored := view_init ?? init
-    if folded == .Val(number) -> stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
+    if folded == .Val(number) {
+        stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
+    } else if !binding.mutable && !string_view && binding.name != "_" {
+        // Computed while compiling when it can be (Comptime/LocalValues.jet).
+        computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, environment, program, scopes, context)
+        if computed.value == .Val(value) -> stored = value
+        local.run_time_reason = computed.reason
+    }
     Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
 }
 

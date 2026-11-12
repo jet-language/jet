@@ -62,6 +62,7 @@ use {
         sema_comptime_environment,
         sema_comptime_environment_publish_body_values,
         sema_comptime_fold,
+        sema_comptime_local_value_failure,
         sema_comptime_shared_payload,
         sema_comptime_graph_apply_sites,
         sema_comptime_graph_apply_values,
@@ -1404,6 +1405,33 @@ jet_driver_module_value_eval_reason: fn(result: JetEvalIRResult) -> String {
     "computing it returns an error"
 }
 
+// Lands local value `source` (SemaComptimeItemSource.local_value) as run-time
+// code for `reason`: its owner body keeps the initializer and reports nothing.
+jet_driver_comptime_local_value_runs: fn(values: &[SemaComptimeItemValue], source: SemaComptimeItemSource, reason: String) Never! {
+    values.push(SemaComptimeItemValue{
+        module_identity: source.module_identity,
+        key: source.key,
+        destination_key: source.destination_key,
+        kind: source.kind,
+        value: sema_comptime_local_value_failure(reason),
+        ty: source.expected_type ?? Type.Named{name: "Unit"},
+    })
+}
+
+// Why local value evaluation `result` leaves it to run time, or None when it
+// produced a value: it printed, ended the program, stopped, ran out of
+// steps, failed, or could not run.
+jet_driver_comptime_local_value_eval_reason: fn(result: JetEvalIRResult) -> String? {
+    if result.stdout.len() > 0 || result.stderr.len() > 0 -> return Val("it prints text")
+    if result.exit_code != None -> return Val("it ends the program")
+    if result.internal_problem == .Val(problem) -> return Val("the compile-time evaluator can't run it ({problem.message})")
+    if result.error != None -> return Val(jet_driver_module_value_eval_reason(result))
+    value: result.value ?? return Val("computing it gives no value")
+    if value == .Failed(_) -> return Val(jet_driver_module_value_eval_reason(result))
+    if !result.complete -> return Val("computing it gives no value")
+    None
+}
+
 // Refuses module value `source` for `reason` (E0643). It is checked again as
 // ordinary code, outside compile-time execution: that check's errors are the
 // item's real ones and stand in place of E0643, reported once (the
@@ -1664,6 +1692,16 @@ jet_driver_comptime_flush: fn(
             return flushed
         }
         item_name: batch.entries[start].source.name
+        // A local value the IR builder refuses stays run-time code.
+        if batch.entries[start].source.local_value {
+            jet_driver_comptime_local_value_runs(values, batch.entries[start].source, "the compile-time evaluator can't run its code ({built.build_failures[0]})")
+            flushed.progressed = true
+            loop index in start + 1..<batch.entries.len() {
+                plain: batch.entries[index].plain ?? next
+                values.push(jet_driver_comptime_item_value(batch.entries[index].source, plain, batch.entries[index].request.expression))
+            }
+            return flushed
+        }
         // A module value the IR builder refuses can't be computed while
         // building; the batch's later literals still land.
         if batch.entries[start].source.module_value {
@@ -1715,6 +1753,15 @@ jet_driver_comptime_flush: fn(
         item_config.effect_call = comptime_request.effect_call
         eval_result: jet_eval_native_run(native, item, [TComptimeValue]{}, item_config, comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
+        // A local value whose evaluation prints, ends the program, stops or
+        // fails stays run-time code: its output never joins the build's.
+        if source.local_value {
+            if jet_driver_comptime_local_value_eval_reason(eval_result) == .Val(reason) {
+                jet_driver_comptime_local_value_runs(values, source, reason)
+                flushed.progressed = true
+                next
+            }
+        }
         jet_driver_record_eval_result(trace, eval_result)
         if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {
             // Rust CheckerMarkers an unevaluable field default lands
@@ -2116,8 +2163,9 @@ jet_driver_comptime_run: fn(
                 // A module value's compile-time reports are withdrawn: when
                 // its compile-time check fails it is refused, after its check
                 // as ordinary code reports its real errors
-                // (jet_driver_module_value_refused).
-                if !source.module_value {
+                // (jet_driver_module_value_refused). A local value's are
+                // withdrawn too: its owner body's check reports for it.
+                if !source.module_value && !source.local_value {
                     // A comptime item's checker reports against its own module's
                     // source, so each carries that module's location.
                     loop diagnostic in checked_item.diagnostics -> diagnostics.push(jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity))
@@ -2157,6 +2205,15 @@ jet_driver_comptime_run: fn(
                     }
                     // Its compile-time check passed: its warnings are its own.
                     loop diagnostic in checked_item.diagnostics -> diagnostics.push(jet_driver_attach_program_source_location(diagnostic, programs[0], source.module_identity))
+                }
+                // A local value whose compile-time check fails, or that calls
+                // anything impure, stays run-time code untried.
+                if source.local_value {
+                    if jet_driver_module_value_check_refusal(programs[0], checked_item) == .Val(reason) {
+                        jet_driver_comptime_local_value_runs(values, source, reason)
+                        made_progress = true
+                        next
+                    }
                 }
                 if !checked_item.complete && keep_going {
                     diagnostics.push(jet_driver_diagnostic_at_program_site(programs[0], source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "JET_KEEP_GOING drops the item and runs the rest", "see the item's other reports"))
@@ -2232,7 +2289,7 @@ jet_driver_comptime_run: fn(
                 checked_mark := checked_functions.len()
                 closure_diagnostic_start: diagnostics.len()
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
-                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value, diagnostics)
+                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, diagnostics)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
@@ -2252,6 +2309,21 @@ jet_driver_comptime_run: fn(
                     }
                     retry = true
                     next
+                }
+                // A local value's closure reports are withdrawn: the bodies'
+                // own checks report. A failed or impure closure leaves it
+                // run-time code untried.
+                if source.local_value {
+                    closure_failed: jet_driver_has_errors_since(diagnostics, closure_diagnostic_start) || (!closure.complete && closure.waiting_dependencies.len() == 0)
+                    failure: jet_driver_first_error_since(diagnostics, closure_diagnostic_start) ?? "a function it calls does not check completely"
+                    loop diagnostics.len() > closure_diagnostic_start {
+                        _ := diagnostics.pop()
+                    }
+                    if closure.waiting_dependencies.len() == 0 && (closure_failed || closure.impurity != None) {
+                        jet_driver_comptime_local_value_runs(values, source, closure.impurity ?? "a function it calls fails its compile-time check ({failure})")
+                        made_progress = true
+                        next
+                    }
                 }
                 if source.module_value {
                     closure_failed: jet_driver_has_errors_since(diagnostics, closure_diagnostic_start) || (!closure.complete && closure.waiting_dependencies.len() == 0)
@@ -2359,6 +2431,20 @@ jet_driver_comptime_run: fn(
                 refused_any = true
                 stop_mark = diagnostics.len()
             }
+        }
+        // A local value still waiting once nothing else lands waits for
+        // good: it stays run-time code, and the rest go on.
+        if next_pending.len() > 0 && !made_progress {
+            still := [SemaComptimeItemSource]{}
+            loop waiting in next_pending {
+                if waiting.local_value {
+                    jet_driver_comptime_local_value_runs(values, waiting, "it waits on a value compiling never computes")
+                    made_progress = true
+                    next
+                }
+                still.push(waiting.copy())
+            }
+            if made_progress -> next_pending = still
         }
         if next_pending.len() > 0 && !made_progress {
             // What waits on a refused module value waits for good; the

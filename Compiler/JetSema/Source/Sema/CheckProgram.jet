@@ -347,6 +347,11 @@ SemaComptimeItemSource: struct {
     // A refused module value's check as ordinary code, outside compile-time
     // execution, which reports its real errors.
     runtime_check: Bool{false}
+    // An immutable local `name: value` that calls code: computed while
+    // compiling when that succeeds, and otherwise left to run time without a
+    // report; its landed value is then `.Failed` with the reason as text
+    // (sema_comptime_local_value_failure).
+    local_value: Bool{false}
     // A body site's prepared locals, declared before its expression is checked.
     prepared: [SemaComptimePreparedLocal]{[SemaComptimePreparedLocal]{}}
     // A body site lexically inside an `#Impure` block: its Tier-2 effects

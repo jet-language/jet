@@ -5,6 +5,8 @@ use jet_foundation.[
     Expr,
     CompilerTraceSink,
     Span,
+    TComptimeReport,
+    TComptimeValue,
     Type,
 ]
 
@@ -235,6 +237,35 @@ sema_comptime_body_capture: fn(
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodySource Never! {
+    sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, false)
+}
+
+// An immutable local `name: value` that calls code, staged to be computed
+// while compiling; it stays run-time code when that fails, without a report.
+sema_comptime_body_capture_local: fn(
+    context: &SemaCheckContext,
+    environment: SemaScopeEnvironment,
+    scopes: SemaScopeTable,
+    name: String,
+    expression: Expr,
+    expected_type: Type,
+    source_span: Span,
+    site_span: Span,
+) Never! {
+    _ := sema_comptime_body_capture_site(context, environment, scopes, name, expression, expected_type, source_span, site_span, true)
+}
+
+sema_comptime_body_capture_site: fn(
+    context: &SemaCheckContext,
+    environment: SemaScopeEnvironment,
+    scopes: SemaScopeTable,
+    name: String,
+    expression: Expr,
+    expected_type: Type,
+    source_span: Span,
+    site_span: Span,
+    local_value: Bool,
+) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity}::{destination_key}"
@@ -255,6 +286,7 @@ sema_comptime_body_capture: fn(
         prepared: sema_comptime_body_prepared_locals(environment, scopes),
         impure: sema_scope_inside_impure(scopes),
         runtime_locals: sema_comptime_body_runtime_locals(scopes),
+        local_value: local_value,
     }
     sema_comptime_body_source_append(context, source)
     source
@@ -330,6 +362,24 @@ sema_comptime_body_item_source: fn(source: SemaComptimeBodySource) -> SemaCompti
         prepared: source.prepared,
         impure: source.impure,
         runtime_locals: source.runtime_locals,
+        local_value: source.local_value,
     }
+}
+
+// The landed value of a local left to run time: a failure holding why.
+sema_comptime_local_value_failure: fn(reason: String) -> TComptimeValue Never! {
+    TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.String{value: reason}}}
+}
+
+// Why a local whose landed value is `value` stays run-time code, or None
+// when it holds that value.
+sema_comptime_local_value_reason: fn(value: TComptimeValue) -> String? Never! {
+    if value == .Failed(report) {
+        if report == .Told(told) {
+            if told == .String(text) -> return Val(text.copy())
+        }
+        return Val("computing it returns an error")
+    }
+    None
 }
 

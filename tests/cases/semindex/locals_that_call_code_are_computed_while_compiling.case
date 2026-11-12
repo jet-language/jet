@@ -1,0 +1,10 @@
+# (#4276 c48) An immutable `name: value` local that calls pure code is computed
+# while compiling and holds the value; one whose computation stops is quietly
+# left to run time with the reason, and the build reports nothing for it.
+fixture: locals_that_call_code_are_computed_while_compiling.fixture
+step: jet inspect semindex computed.jet --json
+exit: 0
+json: stdout doc $.semindex.definitions[?leaf_name="area"][0].detail.stage = {"when":"build","value":"49"}
+json: stdout doc $.semindex.definitions[?leaf_name="hello"][0].detail.stage = {"when":"build","value":"\"hello jet\""}
+json: stdout doc $.semindex.definitions[?leaf_name="risky"][0].detail.stage.when = "run"
+json: stdout doc $.semindex.definitions[?leaf_name="risky"][0].detail.stage.reason ~ "computing it stops"
