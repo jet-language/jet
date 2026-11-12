@@ -1,0 +1,28 @@
+{
+  "name": "optimization",
+  "mode": "tool",
+  "description": "The bounded optimization experiments of #2951, Tools/gauntlet/optimization/optimization.mjs, and its Jet twin, Tools/gauntlet/optimization/optimization/run.jet, #5072 c8: the plan of the five experiment families of a manifest (the repository's, its fixture directories named from the repository root) with each variant's fixture hashes, printed (also with --runs and --timeout-ms, whole and read in part as parseInt reads them) and written to --output; the report of a crafted raw record whose variants are improvements, invalid fast variants that change or keep the output, slow, equal, timed-out and failed runs, blocked, nested and missing inspect records, peers and tiers that are not ready, runtimes that are not numbers and families with no evidence; the usage; and the refusals: an unknown argument, an option without its value, --runs and --timeout-ms that are not positive, report without --raw, the default manifest (its fixture directories are not repository paths), a manifest that is not there, a malformed owner card, and raw records of another schema or manifest. Every harness_sha256 is masked by check.jet.",
+  "tool": {
+    "original": "Tools/gauntlet/optimization/optimization.mjs",
+    "jet": "Tools/gauntlet/optimization/optimization/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["plan", "--manifest", "manifest.json"], "check": "check.jet", "expected": "expected/plan.out"},
+      {"args": ["plan", "--manifest", "manifest.json", "--runs", "3", "--timeout-ms", "5000"], "check": "check.jet", "expected": "expected/plan.out"},
+      {"args": ["plan", "--manifest", "manifest.json", "--runs", "3x", "--timeout-ms", "5000.9"], "check": "check.jet", "expected": "expected/plan.out"},
+      {"args": ["--manifest", "manifest.json", "--output", "plan.json"], "check": "check.jet", "expected": "expected/output.out"},
+      {"args": ["report", "--manifest", "manifest.json", "--raw", "raw.json"], "check": "check.jet", "expected": "expected/report.out"},
+      {"args": ["report", "--help"], "expected": "expected/help.out"},
+      {"args": ["plan", "--bogus"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan", "--manifest"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan", "--runs", "0"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan", "--timeout-ms", "soon"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["report", "--manifest", "manifest.json"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan", "--manifest", "missing.json"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["plan", "--manifest", "owner-manifest.json"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["report", "--manifest", "manifest.json", "--raw", "stale-raw.json"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["report", "--manifest", "manifest.json", "--raw", "schema-raw.json"], "exit": 1, "expected": "expected/empty.out"}
+    ]
+  }
+}
