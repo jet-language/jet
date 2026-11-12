@@ -214,7 +214,9 @@ sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegi
 
 sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
-    if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
+    // A skipped body (sema_checked_unusable_bodies) leaves its references
+    // uncounted, so no verdict holds.
+    if modules.len() != graph.modules.len() || graph.unusable_bodies.len() > 0 -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     candidates := SemaLivenessCandidates{keys: name_rows(), rows: [SemaLivenessCandidate]{}, reached: [Bool]{}}
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next

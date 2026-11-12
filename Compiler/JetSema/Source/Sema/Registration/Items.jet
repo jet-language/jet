@@ -825,6 +825,12 @@ SemaRegistrationGraph: struct {
     // their caller, one fixed point once every declaration is registered
     // (sema_divergence_solve).
     diverging_functions: [String:Bool]{[String:Bool]{}}
+    // The symbol keys of the bodies that reach a nominal whose declared
+    // member type names nothing (sema_checked_unusable_bodies): the check
+    // skips them and records each as skipped, so it reports no follow-on
+    // error of theirs while every other body is checked. Set after the
+    // declaration pass of a compile with errors; empty otherwise.
+    unusable_bodies: [String:Bool]{[String:Bool]{}}
     // #3708: the bundle failure solve has settled every unannotated
     // callable's contract, so a body checked again (the recheck pass) reads
     // a still-defaulted callee as one the solve left fallible.

@@ -3340,9 +3340,9 @@ sema_check_registered_method_stub: fn(job: SemaBodyJob, module_index: Int, memor
 // rule it breaks, such as E0217 guard storage) or drops its fact row (a
 // constant without a checked value: a skipped item) keeps the module
 // complete, so its bodies are checked and their errors are reported with
-// the declaration's (collect-all). A member type that names nothing leaves
-// its declaration unusable: the module's bodies are not checked, and its
-// misspelled signature types report beside the member's (#6294).
+// the declaration's (collect-all). So does a member type that names
+// nothing: only the bodies that reach its declaration are skipped
+// (sema_checked_unusable_bodies).
 sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], scopes: &SemaScopeTable) -> SemaGraphModuleResult {
     if program.registration_graph == .Val(graph) {
         diagnostics := [Diagnostic]{}
@@ -3353,13 +3353,7 @@ sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, prog
             complete = false
             incomplete_reasons.push("module scope could not be applied")
         }
-        declarations_diagnostic_count := diagnostics.len()
         declarations := sema_registration_check_declarations_with_values(graph, module_index, diagnostics, values, program.boxed_edges)
-        if sema_has_error_since(diagnostics, declarations_diagnostic_count) && sema_checked_member_types_name_nothing(graph, module_index) {
-            complete = false
-            incomplete_reasons.push("a declared member type names nothing")
-            sema_type_signature_unknown_names(graph, module_index, diagnostics)
-        }
         // The module's unknown applied rules (E0927) do not stop its check;
         // they follow its declaration errors, as Rust reports a derive of a
         // tag (E0731) before the unknown rule on the same marker.
@@ -3397,6 +3391,157 @@ sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, prog
         }
     }
     panic("an owning registered-module pass lost its registration graph")
+}
+
+// The body key of module `module_identity`'s top-level function `name`: the
+// key its body job and its Core demand row use.
+sema_check_top_level_key: fn(module_identity: String, name: String) -> String Never! {
+    symbol_id(SymbolKind.Function, module_identity, "", name).key
+}
+
+// The body key of the test declared at `span` of module `module_identity`,
+// which has no symbol of its own.
+sema_check_test_key: fn(module_identity: String, span: Span) -> String Never! {
+    "{module_identity}\ntest@{span.start}"
+}
+
+// Whether the body under `key` reaches an unusable declaration
+// (sema_checked_unusable_bodies).
+sema_check_unusable_body: fn(graph: SemaRegistrationGraph, key: String) -> Bool Never! {
+    graph.unusable_bodies.len() > 0 && graph.unusable_bodies.get(key) != None
+}
+
+// Whether the text of `raw` at `span` names one of `names` as a whole
+// identifier (sema_stmt_names_word).
+sema_check_span_names_any: fn(raw: [U8], span: Span, names: [String]) -> Bool {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return false
+    text: String.from_bytes(raw.slice(span.start, span.end)) ?? return false
+    loop name in names {
+        if sema_stmt_names_word(text, name) -> return true
+    }
+    false
+}
+
+// The bodies that reach a nominal whose struct field or enum payload type
+// names nothing (sema_checked_member_types_name_nothing; E0119 reports at
+// the member): the nominal's methods and impl methods, each function, method
+// or test whose text names the nominal, and in turn each one whose text
+// names such a function. Each would report follow-on errors of the unusable
+// member, so these are skipped and recorded
+// (sema_check_record_unusable_bodies); every other body is checked
+// (collect-all). Core names no user type, so only user modules are read.
+sema_checked_unusable_bodies: fn(graph: SemaRegistrationGraph) -> [String:Bool] {
+    bodies := [String:Bool]{}
+    names := [String]{}
+    loop (module_index, module_row) in graph.modules {
+        if module_row.module_identity.starts_with("<corelib>") -> next
+        loop nominal in module_row.nominals {
+            if sema_checked_member_types_name_nothing(graph, module_index, nominal) -> names.push(nominal.symbol.name)
+        }
+    }
+    if names.len() == 0 -> return bodies
+    loop module_row in graph.modules {
+        if module_row.module_identity.starts_with("<corelib>") -> next
+        loop nominal in module_row.nominals {
+            if !names.contains(nominal.symbol.name) -> next
+            loop method in nominal.methods -> bodies[method.symbol.id.key] = true
+        }
+        loop implementation in module_row.impls {
+            if !names.contains(implementation.target_type_name) -> next
+            loop method in implementation.methods -> bodies[method.symbol.id.key] = true
+        }
+    }
+    // A function that reaches them joins `names`, so its callers do too; a
+    // method's callers reach it through a value whose type or maker they name.
+    grown := true
+    loop grown {
+        grown = false
+        loop module_row in graph.modules {
+            if module_row.module_identity.starts_with("<corelib>") -> next
+            raw: module_row.source.bytes()
+            loop item in module_row.program.items {
+                if item == .Func(func) {
+                    key: sema_check_top_level_key(module_row.module_identity, func.name)
+                    if bodies.get(key) == None && sema_check_span_names_any(raw, func.span, names) {
+                        bodies[key] = true
+                        names.push(func.name)
+                        grown = true
+                    }
+                }
+                if item == .Test(test) {
+                    key: sema_check_test_key(module_row.module_identity, test.span)
+                    if bodies.get(key) == None && sema_check_span_names_any(raw, test.span, names) -> bodies[key] = true
+                }
+            }
+            loop nominal in module_row.nominals {
+                loop method in nominal.methods {
+                    if bodies.get(method.symbol.id.key) == None && sema_check_span_names_any(raw, method.declaration.span, names) -> bodies[method.symbol.id.key] = true
+                }
+            }
+            loop implementation in module_row.impls {
+                loop method in implementation.methods {
+                    if bodies.get(method.symbol.id.key) == None && sema_check_span_names_any(raw, method.declaration.span, names) -> bodies[method.symbol.id.key] = true
+                }
+            }
+        }
+    }
+    bodies
+}
+
+// Records each body of module `module_index` that the check skipped
+// (sema_checked_unusable_bodies), which leaves the module incomplete, and
+// reports the misspelled signature types (E0119) its function check would
+// have reported. A demand wave checks only the bodies it names, so it
+// records none.
+sema_check_record_unusable_bodies: fn(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
+    if program.registration_graph == .Val(graph) {
+        if graph.unusable_bodies.len() == 0 || graph.core_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || graph.codec_wave_rows.len() > 0 -> return
+        module_row: graph.modules[module_index]
+        recorded := [String:Bool]{}
+        loop item in module_row.program.items {
+            if item == .Func(func) {
+                key: sema_check_top_level_key(module_row.module_identity, func.name)
+                if !sema_check_unusable_body(graph, key) || recorded.get(key) != None -> next
+                recorded[key] = true
+                sema_type_func_unknown_names(graph, module_index, func, [String]{}, module_result.diagnostics)
+                sema_check_record_skipped_body("function `{func.name}`", module_result)
+            }
+            if item == .Test(test) {
+                if !(graph.test_mode || graph.check_tests) || test.name == None || !sema_check_unusable_body(graph, sema_check_test_key(module_row.module_identity, test.span)) -> next
+                sema_check_record_skipped_body("test `{test.name ?? ""}`", module_result)
+            }
+        }
+        loop nominal in module_row.nominals {
+            owner_names: loop param in nominal.generic_params -> param.name
+            loop method in nominal.methods {
+                if !sema_check_unusable_body(graph, method.symbol.id.key) || recorded.get(method.symbol.id.key) != None -> next
+                recorded[method.symbol.id.key] = true
+                if !method.declaration.compiler_generated -> sema_type_func_unknown_names(graph, module_index, method.declaration, owner_names, module_result.diagnostics)
+                sema_check_record_skipped_body("method `{nominal.symbol.name}.{method.declaration.name}`", module_result)
+            }
+        }
+        loop implementation in module_row.impls {
+            owner_names := [String]{}
+            loop nominal in module_row.nominals {
+                if nominal.symbol.name == implementation.target_type_name {
+                    loop param in nominal.generic_params -> owner_names.push(param.name)
+                }
+            }
+            loop method in implementation.methods {
+                if !sema_check_unusable_body(graph, method.symbol.id.key) || recorded.get(method.symbol.id.key) != None -> next
+                recorded[method.symbol.id.key] = true
+                if !implementation.compiler_generated -> sema_type_func_unknown_names(graph, module_index, method.declaration, owner_names, module_result.diagnostics)
+                sema_check_record_skipped_body("method `{implementation.target_type_name}.{method.declaration.name}`", module_result)
+            }
+        }
+        return
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+sema_check_record_skipped_body: fn(body: String, module_result: &SemaGraphModuleResult) {
+    module_result.complete = false
+    module_result.incomplete_reasons.push("{body} is skipped: it reaches a declared member type that names nothing")
 }
 
 // Module `module_index`'s result after its declaration and program checks:
@@ -3604,10 +3749,12 @@ sema_check_registration_module_foreign: fn(environment: SemaScopeEnvironment, pr
 
 // Tests stay synthetic owned AST inputs to the existing checker, never a fake
 // registration index. Their property diagnostics precede their body reports.
+// A test that reaches an unusable declaration (sema_checked_unusable_bodies)
+// is not checked.
 sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?, module_result: &SemaGraphModuleResult) {
     if program.registration_graph == .Val(graph) {
         if graph.modules[module_index].program.items[item_index] == .Test(test) {
-            if (graph.test_mode || graph.check_tests) && test.name != None {
+            if (graph.test_mode || graph.check_tests) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(graph.modules[module_index].module_identity, test.span)) {
                 loop diagnostic in sema_property_param_diagnostics(test) -> module_result.diagnostics.push(diagnostic)
                 checked_test: sema_check_test_function(test, environment, program, scopes, host_hooks)
                 loop diagnostic in checked_test.diagnostics -> module_result.diagnostics.push(diagnostic)
@@ -3650,8 +3797,9 @@ sema_check_registered_item_is_jet_function: fn(environment: SemaScopeEnvironment
         // `check_fn`: an `#FFI` tier body is foreign source and a per-callable
         // `#Import(c)` has no Jet body (its C signature is checked by
         // sema_guest_check_surfaces); neither is checked as an empty value body.
-        // Both stay registered.
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.inline_foreign == None && !sema_function_is_guest_import(func)
+        // Both stay registered. A body that reaches an unusable declaration
+        // (sema_checked_unusable_bodies) is not checked either.
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.inline_foreign == None && !sema_function_is_guest_import(func) && !sema_check_unusable_body(graph, sema_check_top_level_key(graph.modules[module_index].module_identity, func.name))
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -4544,8 +4692,9 @@ SemaBodyClaim: struct {
 // The item indexes of module `module_index`'s top-level functions a compiler
 // thread can check, in item order: not foreign (the foreign stage checks
 // those), not already checked by comptime (the body loop takes that result),
-// without generic parameters (sema_function_check_shared), and not waiting
-// for demand (sema_core_demand_deferred); during a Core demand wave
+// without generic parameters (sema_function_check_shared), not waiting
+// for demand (sema_core_demand_deferred), and not reaching an unusable
+// declaration (sema_checked_unusable_bodies); during a Core demand wave
 // (graph.core_wave_rows) only that wave's. `weights` gets each one's source
 // bytes.
 sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] Never! {
@@ -4555,9 +4704,9 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
     item_index := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
-            key: symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
+            key: sema_check_top_level_key(source_module.module_identity, func.name)
             waiting: if core_wave -> graph.core_wave_rows.get(key) == None else -> sema_core_demand_deferred(graph, key)
-            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None && !waiting {
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None && !waiting && !sema_check_unusable_body(graph, key) {
                 jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 weights.push(func.span.end - func.span.start)
             }
@@ -4575,7 +4724,9 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
 // once a derive wave checked it (graph.derive_checked, so a recheck keeps
 // it); during a derive wave (graph.derive_wave_rows) only that wave's are.
 // A deferred Core body (sema_core_demand_deferred) is not a job; during a
-// Core demand wave (graph.core_wave_rows) only that wave's bodies are.
+// Core demand wave (graph.core_wave_rows) only that wave's bodies are. A
+// body that reaches an unusable declaration (sema_checked_unusable_bodies)
+// is never a job.
 sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: &Int, count_work: Bool) -> [SemaBodyJob] Never! {
     jobs := [SemaBodyJob]{}
     codec_wave: graph.codec_wave_rows.len() > 0
@@ -4595,7 +4746,7 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
                 }
             }
             loop (method_index, method) in nominal.methods {
-                if impl_method_keys.get("{method.symbol.id.key}@{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
+                if impl_method_keys.get("{method.symbol.id.key}@{method.declaration.span.start}:{method.declaration.span.end}") != None || sema_check_unusable_body(graph, method.symbol.id.key) -> next
                 if core_wave {
                     if graph.core_wave_rows.get(method.symbol.id.key) == None -> next
                 } else if method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.key) != None {
@@ -4628,6 +4779,7 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
             }
         }
         loop (method_index, method) in implementation.methods {
+            if sema_check_unusable_body(graph, method.symbol.id.key) -> next
             if core_wave {
                 if graph.core_wave_rows.get(method.symbol.id.key) == None -> next
             } else if sema_core_demand_deferred(graph, method.symbol.id.key) {
@@ -5424,6 +5576,7 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
         generated_references.push(Span{start: references_from, end: module_result.name_references.len()})
         generated_calls.push(Span{start: calls_from, end: module_result.call_facts.len()})
         loop index in injected_from..<module_result.functions.len() -> module_result.injected_function_keys.push(module_result.functions[index].key)
+        sema_check_record_unusable_bodies(program, module_index, module_result)
     }
     sema_check_registration_module_foreign(environment, program, module_index, module_result)
     sema_check_soft_public_uses(program, module_index, generated_references, generated_calls, module_result)
@@ -7742,6 +7895,9 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     structure_facts: sema_name_structure_facts(pass_graph)
     names := sema_name_facts_empty()
     returned := sema_name_build_facts_threads(pass_graph, modules, structure_facts, threads, names)
+    // The bodies that reach a declaration a misspelled member type left
+    // unusable are skipped; every other body is checked.
+    if sema_has_error_since(diagnostics, 0) -> returned.unusable_bodies = sema_checked_unusable_bodies(returned)
     SemaComptimeDeclarationStage{
         modules: modules.move(),
         imports: imports.move(),

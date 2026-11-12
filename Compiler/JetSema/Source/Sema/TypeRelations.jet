@@ -990,29 +990,12 @@ sema_type_measure_unknown_name: fn(graph: SemaRegistrationGraph, caller: Int, me
     }
 }
 
-// E0119 for the written parameter and return type names of module row
-// `caller`'s functions and methods. A module whose declared member type names
-// nothing has no function check, where a signature is judged otherwise
+// E0119 for the written parameter and return type names of `func`, a
+// function or method of module row `caller`. A body that reaches an unusable
+// declaration has no function check, where a signature is judged otherwise
 // (sema_check_failure_contract_type); its misspelled signature types still
-// report alongside the misspelled member (#6294, collect-all).
-sema_type_signature_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, diagnostics: &[Diagnostic]) {
-    loop function in graph.modules[caller].functions -> sema_type_func_unknown_names(graph, caller, function.declaration, [String]{}, diagnostics)
-    loop nominal in graph.modules[caller].nominals {
-        owner_names: loop param in nominal.generic_params -> param.name
-        loop method in nominal.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, diagnostics)
-    }
-    loop implementation in graph.modules[caller].impls {
-        if implementation.compiler_generated -> next
-        owner_names := [String]{}
-        loop nominal in graph.modules[caller].nominals {
-            if nominal.symbol.name == implementation.target_type_name {
-                loop param in nominal.generic_params -> owner_names.push(param.name)
-            }
-        }
-        loop method in implementation.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, diagnostics)
-    }
-}
-
+// report alongside the misspelled member (sema_check_record_unusable_bodies,
+// collect-all).
 sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func: Func, owner_names: [String], diagnostics: &[Diagnostic]) {
     generic_names := owner_names.copy()
     loop param in func.type_params -> generic_names.push(param.name)
