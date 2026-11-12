@@ -5,14 +5,13 @@ env: JET_STORE_DIR={work}/cache
 step all: jet test {root}/Core/Regex/Regex.jet
 timeout: 900s
 exit: 0
-stdout: ~ "doctest at Core/Regex/Regex.jet:695: pass" # a method's doctest, named by its row path and fence line
-stdout: ~ "doctest at Core/Regex/Regex.jet:2130: pass" # the last one
+stdout: count "doctest at Core/Regex/Regex.jet:" = 8 # each doctest, named by its row path and fence line
 stdout: ~ "a lookaround pass is linear: doubling an adversarial text at most doubles its steps: pass" # the #Tests run beside them
 stdout: ~ "12 passed, 0 failed" # 4 #Tests and 8 doctests share the summary
 
 step docs: jet test --docs {root}/Core/Regex/Regex.jet
 timeout: 900s
 exit: 0
-stdout: ~ "doctest at Core/Regex/Regex.jet:1911: pass" # --docs runs the doctest claims
+stdout: count "doctest at Core/Regex/Regex.jet:" = 8 # --docs runs the doctest claims
 stdout: !~ "has_line matches each line on its own" # and no #Test
 stdout: ~ "8 passed, 0 failed" # the summary counts the doctests alone
