@@ -196,8 +196,9 @@ palette is the same static text with or without a terminal and never opens
 input against the session so far, then builds and runs it after the earlier
 statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
 `:rerun`, `:history` and `?name` docs for names the session did not define
-report E2104 until they are built (#6195). `jet eval <expression>` runs one REPL
-turn and prints its value. `?` is not a command: `jet ?` gets the
+report E2104 until they are built (#6195). `jet eval CODE` runs CODE as the
+body of `run: fn`, as `jet -e CODE` does (below), and `jet eval --json <expression>`
+runs one REPL turn and prints its value in the status envelope. `?` is not a command: `jet ?` gets the
 unknown-command E2101.
 
 The root index below mirrors `jet help` from this checkout's compiler. It lists
@@ -758,7 +759,9 @@ misspelled name is refused before anything runs. The file that holds it is
 written under the scripts directory (`eval/`, named by the content hash),
 and the rest runs as `jet <that file> [args...]`, so the same code reruns the
 same file. Flags that come before `-e` are the run's. `jet run -e CODE`
-runs the same way. A `-e` after the program (`jet run hello.jet -e …`) is
+runs the same way, and so does `jet eval CODE [args...]`, whose flags between
+`eval` and CODE are the run's (`jet eval -A 'input.to_list().len()' log.txt`).
+A `-e` after the program (`jet run hello.jet -e …`) is
 refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
 may declare: a line of it (between `;`s) that is a declaration alone, such as
 a type, a function, an `impl` or a `use`, goes above `run: fn`, so

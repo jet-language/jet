@@ -918,6 +918,33 @@ jet_cli_stdin_source_at: fn(argv: [String]) -> Int? Never! {
     None
 }
 
+// The argv indexes of `jet eval CODE`'s `eval` and CODE: CODE is the first
+// word after `eval` that is not a flag, unless it names a source file or a
+// project (the file form, jet_cli_eval) or is a `:meta` word. `--json` and
+// `--pure` keep the expression form (JetCLIPlan.EvalExpression).
+jet_cli_eval_code_at: fn(argv: [String]) -[FS]> (verb: Int, code: Int)? Never! {
+    skip_next := false
+    verb := Int?{None}
+    loop (index, argument) in argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if argument == "--" || argument == "--json" || argument == "--pure" -> return None
+        if argument.starts_with("-") && argument != "-" {
+            if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) -> skip_next = true
+            next
+        }
+        if verb == .Val(at) {
+            if argument.starts_with(":") || jet_cli_looks_like_source(argument) -> return None
+            return Val((verb: at, code: index))
+        }
+        if argument != "eval" -> return None
+        verb = Val(index)
+    }
+    None
+}
+
 // The commands that compile, and so take `--threads N`.
 JET_CLI_THREADS_COMMANDS: [String]{"build", "run", "check", "test", "dev", "inspect"}
 
@@ -2253,8 +2280,10 @@ jet_cli_emit: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
 
 // `jet eval <file.jet | expression>` (`"eval"`): a file, a project directory,
 // or a bare stem (`looks_like_jet_source`) is the file form and resolves as
-// `resolve_source_path` does; a `:meta` word is REPL vocabulary; any other
-// argument is the expression form (REPL `eval_once`).
+// `resolve_source_path` does; a `:meta` word is REPL vocabulary. Code typed
+// after `eval` runs as a `run` of its entry file (jet_cli_plan,
+// jet_cli_eval_code_at), so only `--json` and `--pure` reach the expression
+// form here (REPL `eval_once`).
 jet_cli_eval: fn(raw: [String], args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() < 2 {
         return jet_cli_fail("E2104", "`jet eval` needs a file or an expression: jet eval <file.jet | expression>", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
@@ -2463,6 +2492,17 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
     // no move out of it, E0201) and the binding `argv` owns its own.
     argv := raw.copy()
+    // `jet eval CODE [args...]` is `jet run <file> [args...]` of the file that
+    // holds CODE as the body of `run: fn`, as `jet -e CODE` is; the flags
+    // between `eval` and CODE are the run's.
+    if jet_cli_eval_code_at(argv) == .Val(found) {
+        file: jet_cli_eval_file(argv[found.code]) ?? return jet_cli_fail("E2105", "couldn't write the file `jet eval` runs", jet_cli_why("E2105"), "set `XDG_CACHE_HOME` or `HOME` to a writable directory", color, JET_DRIVER_EXIT_USER_ERROR)
+        rewritten := jet_cli_prefix(argv, found.code)
+        rewritten[found.verb] = "run"
+        rewritten.push(file)
+        loop word in jet_cli_tail(argv, found.code + 1) -> rewritten.push(word)
+        argv = rewritten
+    }
     // `jet -e CODE [args...]` is `jet <file> [args...]` of the file that
     // holds CODE as the body of `run: fn` (ScriptCache.jet jet_cli_eval_file).
     if jet_cli_eval_flag_at(argv) == .Val(at) {

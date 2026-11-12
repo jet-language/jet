@@ -1,0 +1,30 @@
+# `jet eval CODE [args...]` runs CODE as the body of `run: fn`, as `jet -e`
+# does (D-CLI-EVAL1, #6281 c160): a `;` separates statements, the files named
+# after CODE are its `input`, else standard input is, and the value of a last
+# statement that is an expression is shown, one line per item of a List and
+# nothing for a unit value. Flags between `eval` and CODE are the run's.
+# `--json` keeps the one value envelope (eval_accepts_an_expression_argument).
+fixture: eval_runs_code_as_the_body_of_run.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_CACHE_HOME={work}/xdg
+step statements: jet eval "x := 2; x += 1; x * 10"
+exit: 0
+stdout: = "30\n"
+step files: jet eval "input.to_list().len()" log.txt
+exit: 0
+stdout: = "2\n"
+step stdin: jet eval "input.map((l) -> l.words()[1])"
+stdin: log.txt
+exit: 0
+stdout: = "b\nd\n"
+step unit: jet eval "print(1 + 1)"
+exit: 0
+stdout: = "2\n"
+step flags: jet eval -A "1 + 2"
+exit: 0
+stdout: = "3\n"
+step undefined: jet eval "name := 1; print(nmae)"
+exit: 1
+stdout: = ""
+stderr: ~ "E0107"
