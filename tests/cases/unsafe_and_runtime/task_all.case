@@ -1,10 +1,29 @@
 # Port of tests/tir_unsafe_and_runtime.rs::task_all; sources copied verbatim.
 # ORACLE-LITERAL: original assert_task_tier_parity/assert_named_task_tier_parity expected_stdout.
+# The positional form prints the same results on O0, O1, O2, the built binary and web.
 fixture: fixtures/task_all
 step: jet check fixture.jet
 step default: jet run fixture.jet
 stdout: = task_all.out
 stderr: empty
+step O0: jet run --optimize=none fixture.jet
+exit: 0
+stdout: = task_all.out
+step O1: jet run --optimize=basic fixture.jet
+exit: 0
+stdout: = task_all.out
+step O2: jet run --optimize=full fixture.jet
+exit: 0
+stdout: = task_all.out
 step: jet build fixture.jet
 step: built
 stdout: = task_all.out
+when tool node
+step: jet build --target web fixture.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = task_all.out
+end when

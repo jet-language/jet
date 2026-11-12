@@ -1,0 +1,28 @@
+# The TaskAllNamed lesson runs one pair of branches in the positional and in
+# the named `task.all` form, and each form prints the same line, on O0, O1, O2,
+# the built binary and web.
+copy: {root}/Examples/Concurrency/TaskAllNamed.jet main.jet
+env: NO_COLOR=1
+step O0: jet run --optimize=none main.jet
+exit: 0
+stdout: = ../../../Examples/Concurrency/TaskAllNamed.out
+step O1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = ../../../Examples/Concurrency/TaskAllNamed.out
+step O2: jet run --optimize=full main.jet
+exit: 0
+stdout: = ../../../Examples/Concurrency/TaskAllNamed.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = ../../../Examples/Concurrency/TaskAllNamed.out
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = ../../../Examples/Concurrency/TaskAllNamed.out
+end when

@@ -1,10 +1,29 @@
 # Port of tests/tir_unsafe_and_runtime.rs::named_task_all_maps_reverse_completion_by_field_name; sources copied verbatim.
 # ORACLE-LITERAL: original assert_task_tier_parity/assert_named_task_tier_parity expected_stdout.
+# The named form maps each result to its field on O0, O1, O2, the built binary and web.
 fixture: fixtures/named_task_all_maps_reverse_completion_by_field_name
 step: jet check fixture.jet
 step default: jet run fixture.jet
 stdout: = named_task_all_maps_reverse_completion_by_field_name.out
 stderr: empty
+step O0: jet run --optimize=none fixture.jet
+exit: 0
+stdout: = named_task_all_maps_reverse_completion_by_field_name.out
+step O1: jet run --optimize=basic fixture.jet
+exit: 0
+stdout: = named_task_all_maps_reverse_completion_by_field_name.out
+step O2: jet run --optimize=full fixture.jet
+exit: 0
+stdout: = named_task_all_maps_reverse_completion_by_field_name.out
 step: jet build fixture.jet
 step: built
 stdout: = named_task_all_maps_reverse_completion_by_field_name.out
+when tool node
+step: jet build --target web fixture.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = named_task_all_maps_reverse_completion_by_field_name.out
+end when

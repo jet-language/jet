@@ -1,0 +1,31 @@
+// `task.all` runs every branch as a task and waits for all of them. Written
+// with positional branches it returns the results in branch order; written
+// with named branches (`name: expr`) it returns a record whose fields are the
+// branch names. The two forms run the same branches the same way: the slow
+// first branch finishes last in both, and each prints the same line.
+slow: fn(value: Int) -> Int {
+    total := value
+    loop _ in 0..<50000 {
+        total += 1
+        total -= 1
+    }
+    return total
+}
+
+fast: fn(value: Int) -> Int {
+    return value
+}
+
+run: fn() {
+    positional: (task.all {
+        slow(10),
+        fast(20)
+    }) ?? panic("task.all failed")
+    print("{positional[0]} {positional[1]}")
+
+    named: (task.all {
+        first: slow(10),
+        second: fast(20)
+    }) ?? panic("named task.all failed")
+    print("{named.first} {named.second}")
+}

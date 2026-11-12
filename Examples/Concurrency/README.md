@@ -23,6 +23,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 - [SharedStaleRevision](SharedStaleRevision.jet) — A publication must match the committed Shared revision it observed; the older result is rejected without overwriting new.
 - [ShieldCommit](ShieldCommit.jet) — Cancellation is deferred inside `#Shield`.
 - [SyncCRDT](SyncCRDT.jet) — Shipped CRDT values and the database row policy check.
+- [TaskAllNamed](TaskAllNamed.jet) — Positional and named `task.all` run the same branches the same way; the named form returns a record of branch names.
 - [TaskBlocked](TaskBlocked.jet) — A detached child parked on a full channel is named at the shared process-exit boundary.
 - [TaskCPUClock](TaskCPUClock.jet) — Each task has its own CPU clock, which advances only while the task runs.
 - [TaskControls](TaskControls.jet) — Coroutine-grade control via task handles (internal substrate).
