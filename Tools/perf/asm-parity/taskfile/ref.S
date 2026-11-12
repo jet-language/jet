@@ -26,7 +26,11 @@
 # maximal invalid sequence -> U+FFFD), as process.args gives it.
 # One lazy anonymous mapping holds the file, the 64-byte rows {id, id
 # length, text, text length, done}, the decoded texts and ids, the keys of
-# the open objects (for the repeat check) and the output.
+# the open objects (for the repeat check) and the output. It is advised
+# MADV_NOHUGEPAGE: the areas lie far apart, and under transparent huge
+# pages (`always`) each first touch of one zero-filled a whole 2 MiB page,
+# 6 of them per step (12,320 KiB peak RSS); with 4 KiB pages a step touches
+# only the pages its small store and output use.
 # Errors (unreadable or invalid store, failed save) -> exit 1 with no stdout.
 # Scope: a store whose ids expand past the text area (~900 MB) is refused.
     .intel_syntax noprefix
@@ -58,6 +62,11 @@ _start:
     cmp rax, -4096
     ja fail
     mov r15, rax
+    mov rdi, rax
+    mov rsi, 1 << 32
+    mov edx, 15                  # MADV_NOHUGEPAGE
+    mov eax, 28                  # madvise
+    syscall
     lea rbx, [r15 + REC]         # rows
     xor r14d, r14d               # their count
     lea r13, [r15 + TEXT]        # the text area's end
