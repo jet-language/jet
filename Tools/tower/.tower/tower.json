@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6752,
-    "rev": 99649,
+    "rev": 99650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -198783,6 +198783,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-12T00:17:19.073Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0o7180b",
+      "note": "Gaps against hand-written code and cold-script cost: update (2026-11-11 night)"
+    },
+    {
       "at": "2026-11-12T00:11:59.266Z",
       "by": "Main",
       "action": "card.update",
@@ -203567,6 +203574,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0o7180b",
+      "title": "Gaps against hand-written code and cold-script cost: update (2026-11-11 night)",
+      "body": "# Gaps against hand-written code and cold-script cost: update (2026-11-11 night)\n\nThis revision replaces briefing0i2ghnn. Every number below is measured, except where a line says it is an estimate.\n\n## Proof incident: deferred credits on b4–b7 (fixed)\n\nSince b4, the Lander credited every merged deferred proof (case, ui and golden lines merged into one run per profile) as a pass without reading it. The script read the results with a JSON tool that was not on its PATH, so the results table came out empty and every member was credited.\n\n- Scope: 90 credits across 58 submissions (b4 17, b5 33, b6 12, b7 28). On b7 the merged runs actually held 52 case FAILs, 4 ICE ERRORs (exit 101) and 4 REFUSED, plus 3 ui FAILs.\n- Tower impact: none of Main's meets cited a merged b4–b7 credit; they rest on pre-landing proved lines or b2/b3 deferred passes. Four adjacent meets were rechecked on seed-b7. Three hold. #6129 c64 (a pure fn cannot write held state) had regressed and was reopened; G8Scope-44 fixes it, and c64 is met again only from b9's proved line.\n- The four ICEs (I2) came from G6Meta-55: the build-entry comptime input route refused while a host was installed. G6Meta-67 fixes it: the host serves the read, and with no host the error is E0956, never 101.\n- Every flipped credit was reset, every owner got one fail list, and every false-passed line reruns in full on b8.\n- A guard against recurrence: an always-failing canary case now rides every merged run. If it reads as a pass, the deferred step fails red.\n\nA second measurement defect of the same kind: PortBars never checked a timed run's exit code, so roots-sh \"passed\" speed at 14.3 ms when every timed run was an instant refusal. A real cold run is about 1.8 s and 250 MB against the shell script's 30 ms, so speed still fails. ScriptAPI-63 makes a wrong exit fail the bar as not measured and re-judges every tool entry.\n\n## Hello world: per-feature cost, hand vs Jet\n\nThe ceiling reference now carries the smallest hand-written version of every feature Jet's hello pays for (Tools/perf/asm-parity hello ref.S, 1,453 B):\n\n|Feature|Hand (B)|Jet (B)|\n|---|---:|---:|\n|Startup|78|824|\n|Refusal / defect stop|0|2,501|\n|Checked allocation|259|1,662|\n|Fault report|858|3,584+|\n|Print|82|1,827|\n|Crash receipt|0|12,080|\n\nJet hello is 31,439 B on b4. These submissions cut it, each landing only on a measured win:\n\n- G23: runtime bookkeeping uses wrapping arithmetic, so no overflow stop is reachable from it.\n- G26: the fault report enters through the linker.\n- G27: a lazy stdout buffer, set up on the first buffered write, with no startup mmap or terminal probe.\n- G30: the startup refusal writes its bytes straight to stderr, and the arguments check is installed only for programs that read arguments.\n\nWith G23, G26 and G27, release hello code should fall from about 21.5 KB to about 7.4 KB. That is a call-graph estimate, not a measurement; the third measurement window measures it.\n\n## Codegen ceiling kernels (b4)\n\nJet against hand-written, in loop instructions: list_sum 254/5, gather 273/8, stride 71/6, collatz 180/11, point 213/9, byte_count 119/7.\n\nThe second measurement window measured two submissions:\n\n- G9 cuts loop instructions 12–50% on all seven kernels, and isum is 1,600 B smaller. Its sieve time read +14.5% against a control of −4.9%. Instruction counts are identical, so it is being re-measured as 20 repeated runs against a control-vs-control spread. It lands only if sieve falls inside that spread.\n- G11 (the clone path) is 416–1,152 B smaller on every cell, with time within the control (+2.0% against +3.1%). It lands on size only if every cell's time is within its control's noise.\n\nG10r failed its runtime lowering; G10r2 fixes the cause (a non-slot value read as a slot) and is measured first in the third window. Also queued there: G12–G22 (store-forward stalls, compare-and-branch for `||` and `&&`, one-byte find, jcc fusion for the regexlogscan regression, and the cold-arm inline cost).\n\n## Cold scripts and compile speed\n\nJet compiles from cold on every run, with no cache. Measured on Roots.jet: 0.67 s wall, 1.13 CPU-s and 287 MB. Parsing runs at 136k lines/s, about 220× short of the 30M lines/s target.\n\nLanded or staged load-by-use steps:\n\n- G8Scope-38: the first root loads 60 modules instead of 101.\n- G8Scope-39: runtime units load by use.\n- G8Scope-40: unreached constants are skipped.\n- G8Scope-41: the route set is built from compiler tables.\n- G8Scope-42: reached words come from the tokens, which removes a second byte pass.\n- G8Scope-45 (step 3): core.math's types, methods, F32 forms and precise families load by use. A program calling only `math.sqrt` goes from 1,785 to 1,364 functions and from 39 to 31 modules, and checks in 734 ms instead of 915 ms. It lands only on a cold-compile win across sqrt1, Roots.jet and MathAudit, with no cell worse.\n\nThe target remains a few dozen functions for a bare `math.sqrt`, and then lexing (45% of parsing, with float bignum at 22% of lexing).\n\nEvery switch of a tool script to its Jet version stays blocked on speed until this closes: a small tool still pays about 1.8 s of compile per run.\n\n## Memory\n\n`jet check` OOM: on seed-b6, 8 compiler and test roots were killed at a 6 GB cap (JetBackend/Tests, JetCli, JetCli/Commands and its Tests, two JetCli fixtures, and JetDriver/Tests). #6527 c11 now requires a per-root peak of 3 GB or less. It is G8Scope-3's next item.\n\n## Releases\n\nThe newest admitted release is a0.0.44, from the train before b1. b8 (776b3d1191) is published, and its admission as the next a0.0.N is queued after its deferred pass. a0.0.44 cannot build current Core, so the admission uses a boot seed from b8.\n",
+      "by": "Main",
+      "created": "2026-11-12T00:17:19.073Z",
+      "sections": []
+    },
     {
       "id": "briefing0i2ghnn",
       "title": "Gaps against hand-written code and cold-script cost: update (2026-11-11 evening)",
