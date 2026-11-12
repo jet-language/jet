@@ -400,9 +400,26 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
 
 #Export(c) jet_rt_string_byte_len: fn(value: I64) -> I64 { rt_text_len(value) }
 
+// One load of the cap word tells the three kinds apart: a heap text (cap at
+// least RT_TEXT_INLINE) is retained, a static one (cap 0) is its own clone,
+// and a frame view (RT_TEXT_FRAME), which lives no longer than its frame,
+// is copied into a fresh owner. A heap text pays what it paid before frame
+// views. Nothing but `value` is live across the allocation and nothing but
+// the new owner across the byte copy, so the copy path costs the fast path
+// one more saved register, not one per value of an inlined rt_text_copy.
 #Export(c) jet_rt_string_clone: fn(value: I64) -> I64 {
-    if !rt_text_immortal(value) -> jet_rt_rc_retain(wrapping(value - I64{8}))
-    value
+    cap: rt_text_word(wrapping(value + I64{16}))
+    if (cap > I64{0}) {
+        jet_rt_rc_retain(wrapping(value - I64{8}))
+        return value
+    }
+    if (cap != RT_TEXT_FRAME) -> return value
+    owner: rt_text_builder_with_capacity(rt_text_len(value))
+    if (owner != I64{0}) {
+        rt_text_store(wrapping(owner + I64{8}), rt_text_len(value))
+        rt_text_bytes_copy(rt_text_data(owner), rt_text_data(value), rt_text_len(value))
+    }
+    owner
 }
 
 // Borrow both carriers; publish one fresh owner (inline when it fits).
@@ -919,41 +936,125 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 
 #Export(c) jet_rt_string_builder_finish: fn(target: I64) -> I64 { target }
 
-rt_text_after: fn(value: I64, needle: I64) -> I64 {
+// Where `value.after(needle)` starts: just past the first `needle`, or 0.
+rt_text_after_start: fn(value: I64, needle: I64) -> I64 {
     found: rt_text_find(value, needle, I64{0}, false)
-    start: if (found < I64{0}) -> I64{0} else -> found + rt_text_len(needle)
-    rt_text_slice(value, start, rt_text_len(value))
+    if (found < I64{0}) -> return I64{0}
+    found + rt_text_len(needle)
+}
+
+// Where `value.before(needle)` ends: at the first `needle`, or the length.
+rt_text_before_end: fn(value: I64, needle: I64) -> I64 {
+    found: rt_text_find(value, needle, I64{0}, false)
+    if (found < I64{0}) -> return rt_text_len(value)
+    found
+}
+
+rt_text_after: fn(value: I64, needle: I64) -> I64 {
+    rt_text_slice(value, rt_text_after_start(value, needle), rt_text_len(value))
 }
 
 rt_text_before: fn(value: I64, needle: I64) -> I64 {
-    found: rt_text_find(value, needle, I64{0}, false)
-    end: if (found < I64{0}) -> rt_text_len(value) else -> found
-    rt_text_slice(value, I64{0}, end)
+    rt_text_slice(value, I64{0}, rt_text_before_end(value, needle))
 }
 
-rt_text_trim: fn(value: I64) -> I64 {
+// Where `value.trim()` starts: past the leading white space.
+rt_text_trim_start: fn(value: I64) -> I64 {
     data: rt_text_data(value)
     len: rt_text_len(value)
     start := I64{0}
-    end := len
-    loop start < end {
+    loop start < len {
         if !unicode_is_white_space(rt_text_decode(wrapping(data + start))) -> break
         start += rt_text_width(wrapping(data + start))
     }
+    start
+}
+
+// Where `value.trim()` ends: before the trailing white space after `start`.
+rt_text_trim_end: fn(value: I64, start: I64) -> I64 {
+    data: rt_text_data(value)
+    end := rt_text_len(value)
     loop end > start {
         at := end - I64{1}
         loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
+    end
+}
+
+rt_text_trim: fn(value: I64) -> I64 {
+    start: rt_text_trim_start(value)
+    end: rt_text_trim_end(value, start)
     // Nothing to trim: the text is its own result, shared, not copied.
-    if (start == I64{0} && end == len) -> return jet_rt_string_clone(value)
+    if (start == I64{0} && end == rt_text_len(value)) -> return jet_rt_string_clone(value)
     rt_text_slice(value, start, end)
 }
 
 #Export(c) jet_string_after: fn(value: I64, needle: I64) -> I64 { rt_text_after(value, needle) }
 
 #Export(c) jet_string_before: fn(value: I64, needle: I64) -> I64 { rt_text_before(value, needle) }
+
+// Frame views (#6414). A text piece whose root sema proved unchanged, never
+// moved and never dropped while the piece lives (TLocal.place_borrow over a
+// string view or a diverging split pair; JetIR ir_text_piece) is a 40-byte
+// cell in its function's frame: [count -1][data, len, cap RT_TEXT_FRAME,
+// cache], its data a window into the root's bytes. No allocation, no copy.
+// The negative count makes every retain and release a no-op, as for any
+// immortal block, so a drop frees nothing and the X64 inline clone and drop
+// fall back to these routines. A clone copies the bytes into a fresh owner
+// (jet_rt_string_clone), so no holder outlives the frame. A writer finds it
+// shared: append and clear build a new owner, and rt_text_writable refuses.
+RT_TEXT_FRAME: I64{-2}
+
+// Writes frame cell `cell` as a view of bytes start..<end of `value` and
+// returns the view.
+rt_text_frame_view: fn(cell: I64, value: I64, start: I64, end: I64) -> I64 {
+    rt_text_store(cell, I64{-1})
+    header: wrapping(cell + I64{8})
+    rt_text_store(header, wrapping(rt_text_data(value) + start))
+    rt_text_store(wrapping(header + I64{8}), end - start)
+    rt_text_store(wrapping(header + I64{16}), RT_TEXT_FRAME)
+    rt_text_store(wrapping(header + I64{24}), I64{0})
+    header
+}
+
+// `value.after(needle)` as a frame view in `cell`.
+#Export(c) jet_rt_text_after_frame: fn(value: I64, needle: I64, cell: I64) -> I64 {
+    rt_text_frame_view(cell, value, rt_text_after_start(value, needle), rt_text_len(value))
+}
+
+// `value.before(needle)` as a frame view in `cell`.
+#Export(c) jet_rt_text_before_frame: fn(value: I64, needle: I64, cell: I64) -> I64 {
+    rt_text_frame_view(cell, value, I64{0}, rt_text_before_end(value, needle))
+}
+
+// `value.trim()` as a frame view in `cell`.
+#Export(c) jet_rt_text_trim_frame: fn(value: I64, cell: I64) -> I64 {
+    start: rt_text_trim_start(value)
+    rt_text_frame_view(cell, value, start, rt_text_trim_end(value, start))
+}
+
+// The cut of `value` at the separator found at byte `found` (-1: none):
+// the text before it as a frame view in the cell at `cells`, the text after
+// it in the cell at cells + 40. 1 when there is one; 0, cells untouched,
+// when not.
+rt_text_cut_frame: fn(value: I64, separator: I64, cells: I64, found: I64) -> I64 {
+    if (found < I64{0}) -> return I64{0}
+    _: rt_text_frame_view(cells, value, I64{0}, found)
+    _: rt_text_frame_view(wrapping(cells + I64{40}), value, found + rt_text_len(separator), rt_text_len(value))
+    I64{1}
+}
+
+// `value.split_once(separator)` as frame views (rt_text_cut_frame).
+#Export(c) jet_rt_text_split_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
+    rt_text_cut_frame(value, separator, cells, rt_text_find(value, separator, I64{0}, false))
+}
+
+// `value.cut_last(separator)` as frame views (rt_text_cut_frame).
+#Export(c) jet_rt_text_cut_last_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
+    rt_text_cut_frame(value, separator, cells, rt_text_find(value, separator, I64{0}, true))
+}
 
 rt_text_push_word: fn(target: I64, word: I64, len: I64) {
     rest := word

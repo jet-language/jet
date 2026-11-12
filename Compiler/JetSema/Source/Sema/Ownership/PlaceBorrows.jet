@@ -17,8 +17,8 @@
 // split pair that diverges on a miss (`x: s.split_once(sep) ?? panic(…)`,
 // and `cut_last`) whose text is a root or a place in one. Its bytes are a
 // window into the root's, which nothing changes, moves or drops while the
-// binding lives; lowering builds the pieces without a copy (JetIR ir_stmt
-// `.Let`) and every use that hands one on copies it.
+// binding lives; lowering builds the pieces as frame views without a copy
+// (JetIR ir_text_piece) and every use that hands one on copies it.
 //
 // A loop variable is a root for the Lets of its body: it holds one item
 // for a whole pass, and every Let of the body ends with the pass.

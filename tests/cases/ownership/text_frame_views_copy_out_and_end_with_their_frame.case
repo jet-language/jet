@@ -1,0 +1,29 @@
+# Text pieces built as frame views (#6414) copy out on every use that hands
+# them on: returned, stored in a struct, whole pairs pushed into a List,
+# pieces of pieces kept as map keys, cloned into a map that outlives the
+# function and its lines, a var copy appended to. A piece's end drops
+# nothing at a scope end, `next`, `break` or `return`, and many small pieces
+# of big lines are kept as small copies. A var root appended to after the
+# split and roots dropped early (reassigned, moved away) keep owned pieces.
+# Every tier and a built binary print the same bytes.
+fixture: text_frame_views_copy_out_and_end_with_their_frame.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = text_frame_views_copy_out_and_end_with_their_frame.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = text_frame_views_copy_out_and_end_with_their_frame.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = text_frame_views_copy_out_and_end_with_their_frame.out
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = text_frame_views_copy_out_and_end_with_their_frame.out

@@ -1,0 +1,145 @@
+// Text pieces built as frame views (#6414): every use that hands a piece on
+// copies its bytes out, so the copy outlives the frame (returned, stored in
+// a struct, a List of pairs, a map kept by the caller, appended to as a var),
+// and a piece's end drops nothing (scope end, `next`, `break`, `return` and a
+// panic-free early exit). Many small pieces of big lines are kept as small
+// copies, not as windows that pin the lines.
+
+Entry: struct {
+    level: String
+    rest: String
+}
+
+// A piece returned copies out of the frame.
+level_of: fn(line: String) -> String {
+    pair: line.split_once(" ") ?? return "none"
+    pair.before
+}
+
+// Pieces stored in a struct the caller keeps.
+entry_of: fn(line: String) -> Entry {
+    pair: line.split_once(" ") ?? return Entry{level: "", rest: line}
+    tail: pair.after.trim()
+    Entry{level: pair.before, rest: tail}
+}
+
+// Whole pairs pushed into a List the caller keeps.
+pairs_of: fn(text: String) -> [(before: String, after: String)] {
+    kept := [(before: String, after: String)]{}
+    loop line in text.lines() {
+        pair: line.cut_last(".") ?? next
+        kept.push(pair)
+    }
+    kept
+}
+
+// Pieces of pieces as map keys the caller keeps; lookups borrow them.
+tally: fn(text: String) -> [String:Int] {
+    counts := [String:Int]{}
+    loop line in text.lines() {
+        pair: line.split_once("=") ?? next
+        key: pair.before.trim()
+        if key == "stop" -> break
+        value: pair.after.trim()
+        counts[key] = (counts.get(key) ?? 0) + value.len()
+    }
+    counts
+}
+
+// A var copy of a piece is its own text: appending to it leaves the root
+// and the piece as they were.
+grown: fn(line: String) {
+    pair: line.split_once(":") ?? return
+    word := pair.before
+    word += "!"
+    word += pair.after
+    print("grown [{word}] [{pair.before}] [{pair.after}] [{line}]")
+}
+
+// Views in nested blocks and early exits: each ends with its frame.
+first_long: fn(lines: [String], width: Int) -> String {
+    loop line in lines {
+        head: line.before(";")
+        if head.len() < width -> next
+        tail: line.after(";")
+        if tail == "" -> return "empty tail after {head}"
+        return "{head}|{tail}"
+    }
+    "none"
+}
+
+// Many small pieces of big lines: each kept piece is a copy of its bytes.
+keep_heads: fn(rows: Int) -> [String] {
+    pad: "x".repeat(4000)
+    heads := [String]{}
+    loop index in 0..<rows {
+        line: "k{index} {pad}"
+        pair: line.split_once(" ") ?? next
+        heads.push(pair.before)
+    }
+    heads
+}
+
+// Negative case: a var parent appended to after the split is not marked, so
+// its pieces are owned copies that keep the old bytes.
+appended_after_split: fn() {
+    buf := "alpha beta".copy()
+    pair: buf.split_once(" ") ?? panic("no space")
+    buf += " gamma"
+    buf += "x".repeat(200)
+    print("appended [{pair.before}] [{pair.after}] [{buf.len()}]")
+}
+
+// Negative case: a parent dropped early (reassigned, or moved away) while its
+// pieces live is not marked either.
+dropped_early: fn() {
+    text := "left|right".copy()
+    pair: text.split_once("|") ?? panic("no bar")
+    text = "replaced"
+    owned: "up|down".copy()
+    cut: owned.split_once("|") ?? panic("no bar")
+    sink := [String]{}
+    sink.push(owned)
+    print("dropped [{pair.before}] [{pair.after}] [{text}] [{cut.before}] [{cut.after}] [{sink[0]}]")
+}
+
+// A frame view cloned into a map that outlives the function: the map holds
+// copies, so it reads the same after every line is gone.
+map_of_views: fn(lines: [String]) -> [String:String] {
+    kept := [String:String]{}
+    loop line in lines {
+        pair: line.split_once("=") ?? next
+        name: pair.before.trim()
+        kept[name] = pair.after.trim()
+    }
+    kept
+}
+
+run: fn() {
+    print("level [{level_of("WARN disk full")}] [{level_of("plain")}]")
+    entry: entry_of("INFO   started  ")
+    print("entry [{entry.level}] [{entry.rest}]")
+    pairs: pairs_of("a.txt\nnoext\nb.tar.gz\n.hidden")
+    loop pair in pairs -> print("pair [{pair.before}] [{pair.after}]")
+    counts: tally("a = 1\nb=22\n a=333\nnone\nstop = 0\nc = 4\n")
+    print("tally a {counts.get("a") ?? 0} b {counts.get("b") ?? 0} c {counts.get("c") ?? 0} keys {counts.len()}")
+    grown("left:right")
+    grown("nocolon")
+    print("first {first_long(["ab;c", "abcd;", "abcdef;tail"], 3)}")
+    print("first {first_long(["ab;c", "abcdef;tail"], 3)}")
+    print("first {first_long(["x;y"], 3)}")
+    heads: keep_heads(20000)
+    total := 0
+    loop head in heads -> total += head.len()
+    print("heads {heads.len()} bytes {total} [{heads[0]}] [{heads[19999]}]")
+    appended_after_split()
+    dropped_early()
+    lines := [String]{}
+    loop index in 0..<4 -> lines.push("key{index % 3} = value {index} {"y".repeat(100)}")
+    lines.push("no equals here")
+    views: map_of_views(lines)
+    lines = [String]{}
+    key0: views.get("key0") ?? "-"
+    key2: views.get("key2") ?? "-"
+    print("map keys {views.len()} lines {lines.len()} key0 [{key0.before(" y")}] key2 [{key2.len()}]")
+}

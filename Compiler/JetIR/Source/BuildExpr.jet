@@ -423,6 +423,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 binder_ty: ir_fact(p, b, local.ty, span)
                 return ir_bind_uninit(m, p, b, local, binder_ty, span)
             }
+            if local.place_borrow && ir_text_piece(m, p, b, local, init, span) -> return
             value: ir_expr(m, p, b, init)
             if ir_failed(b) -> return
             if ir_unit_type(ir_ty(p, b, init)) || value < 0 {
@@ -432,8 +433,8 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // (TLocal.place_borrow) is read in place: the binding aliases its
             // value like a read pin and never owns it, so every use that hands
             // the value on copies it (ir_own). Only for a value that copies as
-            // a share or a clone and never closes. A text piece's mark (a
-            // string view or a diverging split pair) is not a place: its
+            // a share or a clone and never closes. A text piece's mark that
+            // ir_text_piece does not build (a slice) is not a place: its
             // value is built as an owned copy.
             piece: let_ty == .StrView || ir_body_node(p, b, init).kind == .OrFallback(_, _, _)
             if local.place_borrow && !piece && !b.fresh[value] && ir_place_borrow_type(m, p, b, value, span) {
@@ -817,6 +818,135 @@ ir_refutable_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pattern: BodyPa
     ir_end(b.f, b.line)
     b.pending = pending
     ir_bind_pending(m, p, b)
+}
+
+// A text piece sema marked (TLocal.place_borrow over a string view or a
+// split pair whose fallback leaves; JetSema PlaceBorrows.jet), whose root
+// nothing changes, moves or drops while the binding lives, is built as frame
+// views of the root's bytes (JetRuntime Text.jet rt_text_frame) in storage
+// of this frame: no allocation and no copy. The binding owns nothing, so its
+// end drops nothing; every use that hands a piece on copies it (ir_own), and
+// the clone of a frame view copies its bytes. False, having built nothing,
+// for another piece (a slice), which binds an owned copy.
+ir_text_piece: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) -> Bool Never! {
+    if ir_masking(b) -> return false
+    node: ir_body_node(p, b, init).kind
+    if node == .OrFallback(value, fallback, ambient) -> return ir_text_pair(m, p, b, local, init, value, fallback, ambient, span)
+    if node == .BuiltinMethod(receiver, operation, args) {
+        maker := ""
+        if operation == .TrimView && args.len() == 0 -> maker = "jet_rt_text_trim_frame"
+        if operation == .AfterView && args.len() == 1 -> maker = "jet_rt_text_after_frame"
+        if operation == .BeforeView && args.len() == 1 -> maker = "jet_rt_text_before_frame"
+        if maker == "" || !ir_text_piece_types(m, p, b, receiver, args) -> return false
+        inputs := ir_text_piece_inputs(m, p, b, receiver, args)
+        if ir_failed(b) -> return true
+        inputs.push(ir_frame_cells(m, b, 1))
+        string_row: ir_string_row(m)
+        view: ir_runtime(m, b, maker, inputs, string_row)
+        b.fresh[view] = false
+        if args.len() == 1 -> ir_release(m, b, inputs[1])
+        ir_text_piece_bind(b, local, view)
+        return true
+    }
+    false
+}
+
+// ir_text_piece of `value ?? fallback`: a `split_once`/`cut_last` pair whose
+// fallback leaves.
+ir_text_pair: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, value: Int, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Bool Never! {
+    if fallback == .Value(_) || ambient == .Val(_) -> return false
+    receiver := -1
+    args := [Int]{}
+    cutter := ""
+    if ir_body_node(p, b, value).kind == .BuiltinMethod(text, operation, operands) {
+        receiver = text
+        args = operands
+        if operation == .StringSplitOnce -> cutter = "jet_rt_text_split_frame"
+        if operation == .StringCutLast -> cutter = "jet_rt_text_cut_last_frame"
+    }
+    if cutter == "" || args.len() != 1 || !ir_text_piece_types(m, p, b, receiver, args) -> return false
+    pair_ty: ir_ty(p, b, init)
+    fields: if ir_untag(pair_ty) == .Tuple(parts) -> parts else -> { return false }
+    members: ir_tuple_members(m, p, fields) ?? return false
+    if members.len() != 2 || members[0].boxed || members[1].boxed || m.types[members[0].ty].kind != .String || m.types[members[1].ty].kind != .String -> return false
+    pair_row: ir_value_type(m, p, pair_ty) ?? return false
+    inputs := ir_text_piece_inputs(m, p, b, receiver, args)
+    if ir_failed(b) -> return true
+    // The text before the separator in the first cell, after it in the
+    // second; the pair's members are label-sorted (S73: `after` precedes
+    // `before`), so each view goes to the member of its own name.
+    cells: ir_frame_cells(m, b, 2)
+    inputs.push(cells)
+    word_row: ir_word_row(m)
+    found: ir_runtime(m, b, cutter, inputs, word_row)
+    ir_release(m, b, inputs[1])
+    pair: ir_temp(m, b, pair_row)
+    ir_emit(b.f, IROp.StackAddress, pair, m.types[pair_row].size, m.types[pair_row].align, -1, b.line)
+    swapped: members[0].name == "after"
+    before: ir_address_at(m, b, cells, 8)
+    ir_emit(b.f, IROp.Store, -1, pair, if swapped -> members[1].offset else -> members[0].offset, before, b.line)
+    after: ir_address_at(m, b, cells, 48)
+    ir_emit(b.f, IROp.Store, -1, pair, if swapped -> members[0].offset else -> members[1].offset, after, b.line)
+    // On a miss the fallback runs and leaves; past the `??` each variable
+    // owns what it owned before it.
+    zero: ir_word_const(m, b, 0)
+    miss: ir_bool_op(m, b, IROp.Eq, found, zero)
+    states: ir_own_states(b, b.bindings.len())
+    ir_open_if(b.f, miss, b.line)
+    mark: b.bindings.len()
+    ir_fallback_route(m, p, b, fallback, -1, span)
+    if ir_failed(b) -> return true
+    ir_truncate_bindings(b, mark)
+    ir_end(b.f, b.line)
+    ir_set_own_states(b, states)
+    ir_text_piece_bind(b, local, pair)
+    true
+}
+
+// Whether a piece's text `receiver` and its separator `args` are Strings.
+ir_text_piece_types: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, args: [Int]) -> Bool Never! {
+    nodes := [Int]{receiver}
+    loop arg in args -> nodes.push(arg)
+    loop node in nodes {
+        row: ir_value_type(m, p, ir_ty(p, b, node)) ?? return false
+        if m.types[row].kind != .String -> return false
+    }
+    true
+}
+
+// The text and separator slots of a piece. A fresh text (a copy a place
+// read made) becomes a hidden variable of the open scope, so the views
+// into it end before it does.
+ir_text_piece_inputs: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, args: [Int]) -> [Int] Never! {
+    inputs := [Int]{}
+    text: ir_expr(m, p, b, receiver)
+    if ir_failed(b) -> return inputs
+    if b.fresh[text] {
+        b.fresh[text] = false
+        b.bindings.push(IRBinding{name: "", slot: text, owned: true})
+    }
+    inputs.push(text)
+    loop arg in args {
+        slot: ir_expr(m, p, b, arg)
+        if ir_failed(b) -> return inputs
+        inputs.push(slot)
+    }
+    inputs
+}
+
+// Frame storage for `count` text frame views of 40 bytes each
+// (JetRuntime Text.jet rt_text_frame_view).
+ir_frame_cells: fn(m: &IRModule, b: &IRBuilder, count: Int) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    cells: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, cells, 40 * count, 8, -1, b.line)
+    cells
+}
+
+// Binds `local` to piece `slot`, which it does not own.
+ir_text_piece_bind: fn(b: &IRBuilder, local: TLocal, slot: Int) Never! {
+    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    b.bindings.push(IRBinding{name: local.name, slot: slot, symbol: symbol})
 }
 
 // A new variable `local` holding `value` (a Let's binding), typed by its
