@@ -19,9 +19,9 @@ use core.[files, process, sys]
 
 // The eight roots and their values, roots.sh's table: each line's default
 // takes an unset or empty root's place, a later line seeing an earlier one.
+// The checkout is single-quoted, its own quotes escaped, so any path reads
+// back as itself.
 roots: fn() -> [String:String] {
-    vars := sys.env_file("{sys.config_dir() ?? ""}/jet/env")
-    vars["checkout"] = files.normalize("{sys.executable()}/../../../..")
     sys.env_text("""
         JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
         JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
@@ -30,8 +30,8 @@ roots: fn() -> [String:String] {
         JET_TARGET_ROOT=${{JET_TARGET_ROOT:-$JET_SCRATCH_ROOT/targets}}
         JET_SEEDS=${{JET_SEEDS:-${{XDG_DATA_HOME:-$HOME/.local/share}}/jet-seeds}}
         JET_SEED=${{JET_SEED:-$JET_SEEDS/current}}
-        JET_DEV_WORKTREE=${{JET_DEV_WORKTREE:-$checkout}}
-        """, vars)
+        JET_DEV_WORKTREE=${{JET_DEV_WORKTREE:-'{files.normalize("{sys.executable()}/../../../..").replace("'", "'\\''")}'}}
+        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
 }
 
 run: fn() {
