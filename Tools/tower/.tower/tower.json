@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100111,
+    "rev": 100115,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62216,6 +62216,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "c25/c27: ballot D-COMPONENT-TUPLE1 posted (author G12Docs-4; non-author adversarial review ReviewComponentTuple, Claude Opus, which respelled A from _0/_1 to part0/part1 after probes showed _0 fails E0357 and breaks D-NAME-SIGIL1, and rebuilt D on the #Import overlay model). Recommendation A (part0, part1). c25b needs four edits if A is ratified."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "c8 reproduces on seed-b13 (D-SCRIPT-HELPERS1 authoring, 2026-11-12, probes in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1): a closure that writes a captured := local loses the write when passed as a callback, so each(...) leaves the value at 0 (p13, q09). A task that calls such a closure compiles and loses the write (q12), while writing the name directly in the task is refused with E1101 (q11), so the same write is refused in one spelling and silently dropped in the other. Closures also copy values they only read (q16, q18), against spec.md 'shared read access' (Docs/spec/spec.md:1167-1181). Rerun: sh run.sh p13.jet q09.jet q11.jet q12.jet q16.jet q18.jet in that directory."
         },
         {
@@ -62676,6 +62681,24 @@
           "verifiedBy": null,
           "evidence": "d6e24a4836: false_if_without_else_falls_through_on_every_tier passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
           "at": "2026-11-10T03:58:25.139Z"
+        },
+        {
+          "n": 42,
+          "text": "E0313 fix text names a valid rename for every tuple destructure: it fills in the member names the user wrote, in order, and never offers a pattern that repeats one binding name (today it offers `{ _0: name, _1: name }`, which is E0118). A ui snapshot shows the fixed text for a two-member tuple.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:42:59.853Z"
+        },
+        {
+          "n": 43,
+          "text": "E0357 fix text for a name like `_0` states the real rule broken (a leading underscore followed by a digit is not a valid binding name), not \"a name cannot end with `_`\". A ui snapshot covers `_0`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:43:00.786Z"
         }
       ],
       "refs": [],
@@ -62686,12 +62709,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-12T21:51:26.878Z",
+      "updated": "2026-11-12T22:43:01.695Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 41
+      "criteriaLastN": 43
     },
     {
       "id": "c0iuv3zr",
@@ -197126,6 +197149,272 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-12T22:04:24.095Z"
+    },
+    {
+      "id": "D-COMPONENT-TUPLE1",
+      "cardId": "c08s0ppt",
+      "group": "design",
+      "title": "Names for the parts of a plugin's tuple result",
+      "situation": "A Jet program can load a WebAssembly plugin and call the functions it exports. A plugin built in another language may return a tuple, such as a pair of numbers, whose parts have no names. Jet tuples always name their parts. The ratified tuple rule allows named members only, with no positional tuples and no `.0`, and a destructure binds each member by name, never by position. So a host can't read a plugin's tuple result today. This vote decides how that result appears in Jet. The choices are made-up member names `part0` and `part1`, or a positional tuple allowed only for plugin results. The others are a refusal until the plugin returns a record, or names the host declares in a struct. We recommend `part0` and `part1`.",
+      "gist": "How should a Jet program read a plugin result that is a tuple whose parts have no names?",
+      "lesson": "WebAssembly components describe their functions in WIT. WIT has records, whose fields have names, and tuples, whose parts are known only by position. Jet tuples always name their parts, so a WIT tuple needs names before Jet can read it. Rust, JavaScript and Python read such tuples by position, because their own tuples are positional. Go, C and C# give the parts made-up names, such as F0, f0 and Item1. The Component Model itself labels tuple parts 0, 1, and so on.",
+      "explainer": "A plugin is a WebAssembly component that a Jet program loads and calls like an object. WIT is the language that lists a component's functions and types. A WIT tuple, written `tuple<s64, s64>`, is a fixed group of values known by position; `s64` is a 64-bit integer, Jet's `Int`. A WIT record is a group whose fields have names. A Jet named tuple, written `(left: Int, right: Int)`, is a group whose members have names. A destructure, written `(left, right): value`, binds each member by its name.",
+      "story": "Ana's Jet program loads a geometry plugin written in Rust. Its function `pair` returns `tuple<s64, s64>`, two corner values, 7 and -9. Ana wants to print them. Every option below uses her program and the same plugin. Options A, B and D print `7 -9`. Option C refuses the call until the plugin's author changes `pair` to return a record.",
+      "inWild": "Rust (wasmtime `bindgen!` on the host, wit-bindgen in the guest): `tuple<s64, s64>` becomes `(i64, i64)`, read as `.0` and `.1` or by a positional pattern. Checked in the wasmtime-wit-bindgen 25.0.3 source; wasmtime 48 ran the test guest and printed `(7, -9)`.\nJavaScript (jco): a tuple becomes an array such as `[7n, -9n]`, read by index. Checked in jco's generator source, not run.\nPython (componentize-py): a tuple becomes a Python tuple, read by index or unpacking. From documentation only, not checked.\nGo (wit-bindgen-go, package cm): a tuple becomes `cm.Tuple[int64, int64]`, a struct whose fields are named `F0` and `F1`. Checked in the cm package source, which stops at 16 parts.\nC# (wit-bindgen): a tuple becomes a value tuple `(long, long)`, whose members are `Item1` and `Item2`. Checked in the generator source; a one-part tuple becomes its bare value.\nC (wit-bindgen): a tuple becomes a struct whose fields are named `f0` and `f1`. Checked in the generator source, not run.",
+      "detail": "Scope. This vote decides one rule: the Jet type a host sees for a Component tuple, wherever a tuple appears in a plugin export's signature. It does not change tuples written in Jet source. It does not change what a Jet sandbox exports either. Jet sandboxes cannot export tuples (D-PLUGIN-EXPORT1), so tuples reach a host only from components built in other languages.\n\nThe rule today. S73 says tuples have named members only, with no positional tuples and no `.0` (Docs/spec/syntax-decisions.md:1254-1255). A tuple destructure selects each member by name (Compiler/JetSema/Source/Sema/Statements.jet:5182-5198). Its E0313 text says \"a tuple destructure binds each member by its name, never by position\" (:5270). The ratified naming ladder, D-NAME-SIGIL1, gives a leading `_` one meaning, internal or discarded. It says compiler-made visible names use `__jet_` (syntax-decisions.md:7862-7869).\n\nWhat the probe showed. Before card #5971 c25, the plugin interface reader refused a tuple result as E1260 (unsupported Component value `tuple`). The first c25 draft gave the tuple's members empty names. Probe g3-fold3 then failed `(left, right): guest.pair()` with E0313 \"`left` isn't a member of (: Int, : Int)\". Its fix text offered `(, ): …`, which nobody can write. The output is in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g3-fold3/7.out.\n\nCode. The interface reader maps each export's Component types to Jet types (Compiler/JetPlugin/Source/Plugin/Interface.jet, staged in G3Core-golden1b-r2 and not yet on dev). The checker turns that Jet type into a descriptor that tells code generation where each value lands (Compiler/JetSema/Source/Sema/Calls/Plugin.jet).\n\nThe runtime writes one word per tuple part in Component order. Code generation stores each word into the member its label names (Compiler/JetIR/Source/BuildRoutes.jet, ir_route_tuple_order). A named tuple sorts its members by name (S73), so every option with names needs that label map, and it already exists.\n\nReview probes. These ran on the seed-b13 compiler in $JET_SCRATCH_ROOT/lanes/Main/probe/ReviewComponentTuple. The first draft spelled the parts `_0` and `_1`. Member access `pair._0` and the rename `{ _0: left, _1: right }: …` work and print `7 -9`. A local named `_0` fails E0357, so `(_0, _1): …` and `loop (_0, _1) in list` don't compile. A signature that writes `(_0: Int, _1: Int)` draws two L0601 warnings, because `_0` reads as soft-public.\n\nThe E0313 fix text for that tuple offers `(_0, _1): …`, which fails E0357. It also offers `{ _0: name, _1: name }: …`, which fails E0118 because `name` repeats, a fault for every tuple. The same probes spelled `part0` and `part1` pass `jet check` with no warnings. `(part0, part1): …`, the rename, a loop over a list of pairs and nested access all print the expected values.\n\nOther evidence. The renaming destructure `{ x: a, y: b }: p` ships in Examples/Basics/Tuples.jet:13. A loop header can't rename members, so a list of tuples destructures there only under the given names. The only positional destructure is the built-in VJPRun pair, and the checker names its parts `value` and `pull` (Statements.jet:5155-5165 and 5239-5250). That precedent uses ordinary words, not `_` names. The draft cited EditActions.jet:364 for `_0`; that devserver file is untranslated and proves nothing, so the probes replace it.\n\nEdge cases. Each row is one plugin signature. Every option is proposed and UNCHECKED except where a row cites a probe or today. Card #5971 c25 builds only a top-level result tuple of scalars. Nested tuples, lists of tuples and tuple parameters stay E1260 until built, and each option fixes the type they will get then.\n\n```\ncase                                 A (part0, part1)                          B (positional)            C (records only)            D (host struct)\n1 tuple<s64, s64> result             (part0: Int, part1: Int)                  (Int, Int)                E1260: return a record      Corners { left, right }\n2 tuple<s64>, one part               (part0: Int), readable, not buildable     (Int), clashes with ( )   E1260                       a one-field struct\n3 tuple<>, no parts                  refused by the Component Model, which requires at least one part (every option)\n4 tuple<tuple<s64, s64>, s64>        (part0: (part0: Int, part1: Int), part1: Int)  nested positional  E1260                       nested structs\n5 list<tuple<string, string>>        [(part0: String, part1: String)]          [(String, String)]        E1260                       [Entry]\n6 tuple parameter                    host passes (part0: 1, part1: 2)          host passes (1, 2)        E1260                       host passes a struct\n7 destructure with the wrong count   E0315 count mismatch                      E0315                     not reached                 struct fields, no count\n8 declared shape differs from guest  does not arise                            does not arise            does not arise              new compile error, like E3205\n9 tuple of 11 or more parts          shown as part0, part1, part10, part2...   works                     E1260                       works\n10 record { left: s64, right: s64 }  E1260, separate work                      E1260, separate work      (left: Int, right: Int)     E1260, separate work\n11 record with a field named part0   mapped by Component position, not name   same                      same                        same\n12 Jet sandbox exports a tuple       E1260 (D-PLUGIN-EXPORT1)                  same                      same                        same\n```\n\nRow notes. Row 2: Jet source can name `(part0: Int)` as a type and read `.part0`, but can't build one, because a tuple literal needs two members (E0003, probed). C# returns a one-part tuple as its bare value, which A could adopt when one-part tuples are built. Row 9: names sort as text, so `part10` comes before `part2` when a tuple is printed, compared or sorted. Each value still lands in its own member, because code generation stores by label.\n\nBeginners and experts. Under A a beginner sees `(part0: Int, part1: Int)` in hover and errors; hover was not run. The repaired E0313 fix text offers `{ part0: left, part1: right }: …`, filled with the names the user wrote. An expert reads `pair.part0` directly.\n\nUnder B a beginner writes `(left, right)` as in Rust or Python. An expert must remember that positional tuples exist only at this boundary and convert before passing one on. The VJPRun exemption keys on a type the compiler owns by name. A plugin tuple is structural, so it can't reuse that exemption without a new wrapper type.\n\nUnder C a beginner who can't change the plugin is stuck. An expert can wrap the plugin in a second component that returns a record. Under D everyone declares a struct and an overlay before the first call, and gets meaningful names and a checked contract.\n\nPeers. Rust, JavaScript and Python read WIT tuples by position because their own tuples are positional. Go, C and C# have no positional form in their structs, so their bindings invent names. The Component Model defines a tuple as a record labeled \"0\", \"1\" (CanonicalABI.md, despecialize), which `part0` mirrors as a legal Jet name. None of the peers asks the host to restate names. Jet's C boundary does, through an `#Import c.<lib>` overlay (D-FFI-UNIFY1), which D reuses.\n\nWhere tuples appear. WASI 0.2.12 uses tuples in 9 function signatures and 2 type aliases. Examples are environment variables and HTTP header lists as `list<tuple<string, string>>`, and `insecure-seed` returning `tuple<u64, u64>`. All are host imports, not plugin exports, so none is in this vote's scope today. How often hand-written plugin exports return tuples was not measured. Jet's C boundary already refuses tuples outright (E3203), a precedent for C.\n\nShared work. Every option needs c25's lift through the return area, staged as G3Core-c25b and held for this vote. Its case covers member access only. It has not run, and no case tests a destructure. The staged patch spells the parts `_0`. Moving to `part0` changes Interface.jet's name text, the checker's position decoding, one spec sentence and the case's `pair._0`.\n\nA as repaired carries each part's Component position in the interface fact instead of decoding it from the name. Records need that fact anyway, since a WIT record may legally name a field `part0`. The staged runtime already lifts records of scalars. A also repairs E0313's fix text to fill in the user's own names in order.\n\nB needs a positional tuple kind in types, destructure by position, hover text and UI snapshots. C needs new E1260 fix text and the reader's record mapping; the runtime record lift is already staged. D needs an `#Import plugin.<artifact>` root, a check of the overlay against the component, the tuple-to-struct mapping, a mismatch error and UI snapshots.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Parts are named part0, part1, and so on",
+          "gist": "A Component tuple becomes a Jet named tuple whose members are `part0`, `part1`, in Component order.",
+          "detail": "The part at position N is the member `partN`, counting from 0 as the Component Model's own labels do. Ana writes `(part0, part1): guest.pair()` or `{ part0: left, part1: right }: guest.pair()`, or reads `pair.part0`. The program prints `7 -9`. Nested tuples and lists of tuples follow the same rule, as Go's and C's bindings do. The names are ordinary snake_case words, so they pass every naming rule and lint.\n\nBeginners meet `part0` in hover and in the E0313 fix text, which shows the rename with their own names. Experts read members directly. Gain: one rule for every tuple, with no new syntax. Loss: the names say nothing about meaning, so a host renames them to read well.",
+          "technical": "Staged as G3Core-c25b with the spelling `_0`, held. That spelling broke D-NAME-SIGIL1, where a leading `_` means internal. It also drew L0601 in signatures and failed E0357 as a local, so `(_0, _1): …` could not compile.\n\nRepair: Interface.jet names each part `part{index}` and records its Component position in the interface fact. The checker orders the descriptor's fields by that position, not by decoding names, so a WIT record field named `part0` can't be misread. ir_plugin_invoke_words passes the member names as labels, and ir_route_store_tuple stores each word in the member its label names. E0313's fix text fills in the user's own names in order.",
+          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    { part0: left, part1: right }: guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed output: 7 -9\n// (part0, part1): guest.pair() ?? panic(\"pair failed\") also works\n// pair: guest.pair() ?? panic(\"pair failed\")\n// print(\"{pair.part0}\")   // also 7"
+        },
+        {
+          "key": "B",
+          "name": "Positional tuples for plugin results only",
+          "gist": "A Component tuple becomes a positional Jet tuple `(Int, Int)` that destructures by position.",
+          "detail": "Plugin results get a tuple kind with unnamed parts. Ana writes `(left, right): guest.pair()` and the program prints `7 -9`, as in Rust. The kind exists only for values that come from a plugin, so S73 gains an exception.\n\nBeginners write what Rust and Python users expect. Experts learn that a destructure means two things: by name for Jet tuples, by position for plugin tuples. A plugin tuple can't be passed where a named tuple is expected without rebuilding it. Gain: no invented names. Loss: two tuple kinds, and the rule that destructures never bind by position breaks.",
+          "technical": "Proposed, UNCHECKED. The type system gains a positional tuple kind, or a flag on Type.Tuple, that only the interface reader creates. The destructure in Statements.jet binds such a tuple by position instead of by name. Hover, error text and the type printer need a spelling for it, such as `(Int, Int)`; a one-part `(Int)` reads as plain grouping. Member access stays refused, since S73 bans `.0`. Code generation can reuse the same word layout.\n\nStatements.jet already exempts one pair from the by-name rule: VJPRun, a type the compiler owns by name (:5155-5165). A plugin tuple is structural and looks like any Jet tuple of the same shape, so B can't reuse that exemption. It needs a new type kind.",
+          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    (left, right): guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed output: 7 -9\n// pair is (Int, Int); pair.0 stays refused"
+        },
+        {
+          "key": "C",
+          "name": "Refuse tuples; plugins return records",
+          "gist": "A Component tuple stays E1260; a guest returns a WIT record, whose field names Jet uses.",
+          "detail": "A tuple anywhere in an export's signature stays E1260, and the fix text asks for a record. A WIT record such as `record corners { left: s64, right: s64 }` becomes the Jet named tuple `(left: Int, right: Int)`. Ana's program fails until the plugin's author changes `pair`. Then `(left, right): guest.pair()` prints `7 -9`.\n\nBeginners who own the plugin get the best names. Beginners using someone else's plugin can't fix it. Experts can wrap the plugin in a component that returns a record. Gain: every name comes from the plugin's author. Loss: a host that can't change the plugin has no fix, and card #5971 c25 as written can't be met.",
+          "technical": "Proposed, UNCHECKED. The interface reader keeps tuple as an unsupported kind, so the E1260 text names `tuple` and its fix suggests a record. Jet's C boundary already refuses tuples the same way (E3203). The staged c25b runtime already lifts a record of scalars. The remaining work is the reader's mapping from a WIT record's fields to a named tuple, folding `-` to `_` as export names already do. Card #5971 c25's criterion would be amended to the refusal.\n\nWASI's own tuples, such as HTTP header lists, are host imports and outside this vote. How many real plugin exports return tuples was not measured.",
+          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    (left, right): guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed: E1260 Plugin export `pair` uses unsupported Component value `tuple`\n// Fix: return a record, such as record corners { left: s64, right: s64 }\n// With that guest the same program prints 7 -9"
+        },
+        {
+          "key": "D",
+          "name": "The host declares a struct for the result",
+          "gist": "The host declares a struct and an overlay; the plugin's tuple fills the struct's fields in declaration order.",
+          "detail": "Jet hosts have no declaration of a plugin's signatures today; the checker reads them from the component. D adds an optional overlay, like the `#Import c.<lib>` overlay that already lets a host override a generated C binding. Ana declares a struct `Corners` with fields `left` and `right`, then writes `#Import plugin.guest: module { pair: fn() -> Corners }`. The tuple fills the fields in declaration order, and the program prints `7 -9`.\n\nBeginners must write the struct and overlay before the first call. Experts get meaningful names and a contract checked against the component. Gain: no invented names. Loss: two sources for one interface and new syntax. Without an overlay a tuple still needs A, B or C.",
+          "technical": "Proposed, UNCHECKED. The draft mapped a trait method's tuple result by written order. S73 makes `(left: Int, right: Int)` and `(right: Int, left: Int)` one type, so written order can't carry meaning there. A struct's declaration order already does: the checker maps struct fields to Component record fields by declaration index (Calls/Plugin.jet:134-143).\n\nReused: the overlay model of D-FFI-UNIFY1, where an overlay wins over the generated binding and an incompatible one is E3205. New: an `#Import plugin.<artifact>` root naming guest.wasm, the check against the component, and the tuple-to-struct mapping. D could also be added later on top of A, as an optional overlay.",
+          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nCorners: struct {\n    left: Int\n    right: Int\n}\n#Import plugin.guest: module { pair: fn() -> Corners }\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    corners: guest.pair() ?? panic(\"pair failed\")\n    print(\"{corners.left} {corners.right}\")\n}\n// Proposed output: 7 -9"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps Jet's tuple rule whole: every member has a name, and the names come from one fixed rule with no new syntax. Spelled `part0`, the names are ordinary words that pass every naming rule, so `(part0, part1): …` compiles. They follow the Component Model's own labels and Go's and C's bindings.",
+        "gains": [
+          "No new syntax, no exception to the tuple rule, and no naming-rule exception",
+          "One naming rule for every tuple; card #5971 c25 builds the top-level result first",
+          "Staged as G3Core-c25b; moving it from `_0` to `part0` is four small edits, and its case has not run yet"
+        ],
+        "losses": [
+          {
+            "loss": "The names `part0` and `part1` say nothing about what the values mean.",
+            "mitigation": "One line renames them, `{ part0: left, part1: right }: guest.pair()`, and the repaired E0313 fix text offers that form with the user's own names. The plugin's WIT carries no names to use instead."
+          },
+          {
+            "loss": "Names sort as text, so `part10` comes before `part2` when a tuple of eleven or more parts is printed, compared or sorted.",
+            "mitigation": "Each value still lands in its own member, because code generation stores by label. Go's bindings stop at 16 parts and WASI's largest tuple has 8. This cost can't be removed without a positional kind."
+          },
+          {
+            "loss": "Jet source can't build a one-part tuple, so a `tuple<s64>` result can be read but not rebuilt.",
+            "mitigation": "Read it with `.part0`. When one-part tuples are built, A can return the bare value instead, as C# does."
+          },
+          {
+            "loss": "Users learn one more naming rule.",
+            "mitigation": "The rule is one sentence in the spec's plugin section, hover shows the type, and Go and C bindings follow the same pattern."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a second tuple kind and makes a destructure bind by position in one place, breaking the ratified rule that tuples are named. The existing VJPRun exemption relies on a type the compiler owns by name, which a plugin tuple lacks."
+          },
+          {
+            "key": "C",
+            "reason": "A host that can't change the plugin has no fix, and card #5971 c25 as written can't be met. WASI's own tuples are host imports, so the cost to real plugin exports is unmeasured."
+          },
+          {
+            "key": "D",
+            "reason": "It adds a second source for the plugin's interface and new syntax, and without an overlay a tuple still needs another rule. It can be added later on top of A as an optional overlay."
+          }
+        ],
+        "tradeoff": "Jet gives up meaningful names at the plugin boundary, in exchange for one rule that reads every tuple with no new syntax. A host that wants better names renames the parts when it destructures them, or declares them later if D is added."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewComponentTuple. Seed probes showed `_0` breaks D-NAME-SIGIL1, draws L0601 and fails E0357 as a local, so A became `part0` with a repaired fix text. D became a struct overlay because S73 erases written order, and C's wasi-http claim and several citations were corrected."
+      },
+      "checkInstructions": "The current-behavior evidence is the g3-fold3 probe output in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g3-fold3/7.out (E0313 on the empty member names) and the cited source lines on dev. Option A is staged as $JET_SCRATCH_ROOT/lanes/Main/inbox/G3Core-c25b with the spelling `_0`. Its case tests/cases/authority/plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers has not run; it should print `pair:7 -9 sum=-2` once built.\n\nThe review probes ran on the seed-b13 compiler. They are in $JET_SCRATCH_ROOT/lanes/Main/probe/ReviewComponentTuple: names.jet, fixtext.jet, dupfix.jet, underscore_loop.jet, snake.jet, rows.jet and one.jet. wasm-tools 1.256 printed the test guest's WIT, and wasmtime 48 ran it, printing `(7, -9)` for `pair`.\n\nThe Rust, Go, C, C# and jco rows were checked in generator source, not run. The Python row is documentation only. Hover was not run. Options B, C and D are proposed and UNCHECKED. After implementation, prove every edge-case row on every tier with cases and UI snapshots. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "How should Jet name the parts of a plugin's tuple result, which has no names of its own?",
+        "lesson": "A plugin can return a tuple, a group of values known only by position. Jet tuples always name their parts, so these parts need names. Go and C plugin tools invent names like F0. Rust and JavaScript read the parts by position, which Jet does not allow.",
+        "trio": {
+          "current": {
+            "note": "Refused today: Jet can't read a tuple with unnamed parts.",
+            "code": "// plugin WIT: pair: func() -> tuple<s64, s64>\nguest: plugin.load(\"guest.wasm\", policy)\n(left, right): guest.pair() ?? panic(\"pair failed\")\n// error: `left` isn't a member of the result"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust tuples are positional, so the parts are read by position.",
+            "code": "// wasmtime bindgen: pair returns (i64, i64)\nlet (left, right) = guest.call_pair(&mut store)?;\nprintln!(\"{left} {right}\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Parts are named part0, part1",
+            "gist": "The part at position N is the member `partN`, counting from 0.",
+            "gains": [
+              "No new syntax",
+              "Ordinary names that pass every naming rule"
+            ],
+            "losses": [
+              "Names say nothing about meaning",
+              "`part10` sorts before `part2`"
+            ],
+            "proposed": {
+              "code": "{ part0: left, part1: right }: guest.pair() ?? panic(\"pair failed\")\nprint(\"{left} {right}\")   // 7 -9"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Positional tuples for plugins only",
+            "gist": "Plugin tuples bind by position, as in Rust.",
+            "gains": [
+              "Reads like Rust and Python"
+            ],
+            "losses": [
+              "Two kinds of tuple",
+              "Breaks the rule that tuples are named"
+            ],
+            "proposed": {
+              "code": "(left, right): guest.pair() ?? panic(\"pair failed\")\nprint(\"{left} {right}\")   // 7 -9"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Plugins must return records",
+            "gist": "Tuples stay refused; a record's field names are used.",
+            "gains": [
+              "Every name comes from the plugin's author"
+            ],
+            "losses": [
+              "No fix without changing the plugin",
+              "The planned tuple support is dropped"
+            ],
+            "proposed": {
+              "code": "(left, right): guest.pair() ?? panic(\"pair failed\")\n// error: tuple is unsupported; return a record\n// guest WIT: record corners { left: s64, right: s64 }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "The host declares a struct",
+            "gist": "A declared struct names the parts, filled in field order.",
+            "gains": [
+              "Meaningful names",
+              "A contract checked against the plugin"
+            ],
+            "losses": [
+              "New syntax and a struct to write first",
+              "Two sources for one interface"
+            ],
+            "proposed": {
+              "code": "Corners: struct {\n    left: Int\n    right: Int\n}\n#Import plugin.guest: module { pair: fn() -> Corners }\ncorners: guest.pair() ?? panic(\"pair failed\")\nprint(\"{corners.left} {corners.right}\")   // 7 -9"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It keeps every tuple named with one fixed rule and no new syntax. The names are ordinary words, so they pass Jet's naming rules. It reads any tuple a plugin returns, as Go and C tools do.",
+          "gains": [
+            "No new syntax",
+            "Every plugin tuple gets the same names"
+          ],
+          "losses": [
+            {
+              "loss": "The names say nothing about meaning.",
+              "mitigation": "One line renames them: `{ part0: left, part1: right }: guest.pair()`."
+            },
+            {
+              "loss": "`part10` sorts before `part2` when printed.",
+              "mitigation": "Each value still lands in the right member; such long tuples are rare."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two kinds of tuple, and one breaks Jet's naming rule."
+            },
+            {
+              "key": "C",
+              "reason": "No fix for users who can't change the plugin."
+            },
+            {
+              "key": "D",
+              "reason": "Every host restates the plugin's interface; it can come later on top of A."
+            }
+          ],
+          "tradeoff": "Plain names at the plugin edge, in exchange for one rule with no new syntax."
+        }
+      },
+      "reports": [
+        {
+          "title": "Component Model: WIT reference, tuples and records",
+          "url": "https://component-model.bytecodealliance.org/design/wit.html",
+          "note": "A tuple is an ordered group of unnamed values; a record names its fields."
+        },
+        {
+          "title": "Component Model explainer",
+          "url": "https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md",
+          "note": "Defines tuple and record value types; a tuple is a record with integer labels."
+        },
+        {
+          "title": "Component Model Canonical ABI",
+          "url": "https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md",
+          "note": "despecialize turns a tuple into a record whose field labels are \"0\", \"1\", and so on."
+        },
+        {
+          "title": "wasmtime component bindgen! macro",
+          "url": "https://docs.rs/wasmtime/latest/wasmtime/component/macro.bindgen.html",
+          "note": "Generates Rust host bindings; WIT tuples become Rust tuples."
+        },
+        {
+          "title": "jco: JavaScript toolchain for components",
+          "url": "https://github.com/bytecodealliance/jco",
+          "note": "Transpiled bindings represent a WIT tuple as a JavaScript array."
+        },
+        {
+          "title": "Go package go.bytecodealliance.org/cm, type Tuple",
+          "url": "https://pkg.go.dev/go.bytecodealliance.org/cm#Tuple",
+          "note": "A WIT tuple is a struct with fields F0, F1; the package defines tuples up to 16 parts."
+        },
+        {
+          "title": "wit-bindgen: guest bindings for Rust, C, C# and more",
+          "url": "https://github.com/bytecodealliance/wit-bindgen",
+          "note": "The C generator names tuple fields f0, f1; the C# generator uses value tuples and unwraps a one-part tuple."
+        },
+        {
+          "title": ".NET ValueTuple<T1,T2>",
+          "url": "https://learn.microsoft.com/dotnet/api/system.valuetuple-2",
+          "note": "Members are Item1 and Item2 unless the source names them."
+        },
+        {
+          "title": "wasi-http types.wit",
+          "url": "https://github.com/WebAssembly/wasi-http/blob/main/wit/types.wit",
+          "note": "Header entries are a list of tuples of name and value; these are host imports, outside this vote's export scope."
+        },
+        {
+          "title": "WASI random: insecure-seed.wit",
+          "url": "https://github.com/WebAssembly/wasi-random/blob/main/wit/insecure-seed.wit",
+          "note": "insecure-seed returns tuple<u64, u64>, WASI 0.2's only top-level tuple of scalars; a host import."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T22:42:58.919Z"
     }
   ],
   "questions": [
@@ -200354,6 +200643,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T22:43:01.695Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T22:43:00.787Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08s0ppt",
+      "note": "#43 E0357 fix text for a name like `_0` states the real rule bro"
+    },
+    {
+      "at": "2026-11-12T22:42:59.854Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08s0ppt",
+      "note": "#42 E0313 fix text names a valid rename for every tuple destruct"
+    },
+    {
+      "at": "2026-11-12T22:42:58.919Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMPONENT-TUPLE1",
+      "note": "Names for the parts of a plugin's tuple result"
+    },
     {
       "at": "2026-11-12T22:32:59.622Z",
       "by": "Main",
