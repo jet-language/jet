@@ -96,6 +96,12 @@
 // A copy is made only when it gains something: a body whose arithmetic the
 // SSA round trip proves inline without the guards keeps its loops as they
 // are (ir_opt_version_function).
+//
+// Both copies of a versioned loop carry IR_LOOP_VERSIONED in the Loop's
+// `b`, and versioning never copies a loop so marked, or one inside it. A
+// caller that inlines a callee whose loop was versioned gets both copies;
+// copying them again behind the same guards only grows the code (the copy
+// of the loop as it was runs only after those guards failed).
 
 use jet_foundation.[compiler_threads_single, name_rows_set]
 
@@ -103,6 +109,9 @@ IR_VERSION_BODY: 160
 IR_VERSION_BODY_SMALL: 64
 IR_VERSION_COPIES: 3
 IR_VERSION_GUARDS: 4
+
+// The Loop's `b` once versioning copied it (IR.jet; -1 otherwise).
+IR_LOOP_VERSIONED: 1
 
 // The guard's bounds: OptRange reads a compare with an inline constant, so
 // `n < IR_VERSION_HIGH` and `n > IR_VERSION_LOW` leave n inline.
@@ -168,11 +177,21 @@ ir_opt_version_loops: fn(m: IRModule, f: &IRFunction, body: Int, report: &IROptR
     guard_range := [Bool]{}
     guard_bits := [Int]{}
     budget := IR_VERSION_COPIES * body
+    // The End of the last loop met that an earlier versioning copied.
+    versioned := -1
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
         // A loop inside one already copied goes with it.
         if lasts.len() > 0 && at <= lasts[lasts.len() - 1] -> next
+        if at < versioned -> next
         end: f.a[at]
+        // A copy an earlier versioning made, the inlined body of a callee
+        // versioned on its own: its guards already split it, and copying it
+        // again behind the same guards only grows the code.
+        if f.b[at] == IR_LOOP_VERSIONED {
+            versioned = end
+            next
+        }
         // The Block a loop leaves by is copied with it.
         wrapped: at > 0 && f.op[at - 1] == .Block && f.a[at - 1] == end + 1
         start: if wrapped -> at - 1 else -> at
@@ -346,6 +365,8 @@ ir_version_counted: fn(f: &IRFunction, code: &IROptCode, first: [Int], latest: [
     head: if f.op[start] == .Block -> start + 2 else -> start + 1
     bool_row: f.slot_type[f.dst[head]]
     index: if f.a[head] == bound -> f.b[head] else -> f.a[head]
+    // Both copies carry the mark (ir_opt_version_loops).
+    f.b[head - 1] = IR_LOOP_VERSIONED
     high: ir_slot(f, int_row, .Temp, -1, line)
     low: ir_slot(f, int_row, .Temp, -1, line)
     inline_bound: ir_slot(f, int_row, .Temp, -1, line)
@@ -408,6 +429,8 @@ IRVersionSteps: struct {
 ir_version_guarded_copy: fn(f: &IRFunction, code: &IROptCode, facts: OptFacts, first: [Int], latest: [Int], start: Int, last: Int, pre: [Int], pre_bits: [Int], head: [Int], steps: IRVersionSteps, bool_row: Int) Never! {
     line: f.code_line[start]
     loop_at: if f.op[start] == .Block -> start + 1 else -> start
+    // Both copies carry the mark (ir_opt_version_loops).
+    f.b[loop_at] = IR_LOOP_VERSIONED
     // The constructs of the region open at the loop's head: a head guard
     // leaves them and goes to the inner block's End.
     inner: loop_at - start + 1
@@ -967,6 +990,70 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
     }
     assert(guards > 0)
     assert(wrapped > 0)
+}
+
+// Versioning marks both copies of each loop it copies, so a second round,
+// as in a caller that inlined the versioned body, copies neither again: not
+// the guarded loop of steps(x), nor the counted loop of count(n).
+#Test("A versioned loop is not versioned again") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("steps", "test:steps.jet::steps", "", "steps.jet", 1)
+    x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    g.result = exact
+    t: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "t"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    three: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    tripled: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, t, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, three, 3, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Eq, done, x, one, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(g, 5)
+    ir_end(g, 5)
+    _ := ir_emit(g, IROp.Return, -1, t, -1, -1, 6)
+    h := ir_function_new("count", "test:count.jet::count", "", "count.jet", 1)
+    n: ir_slot(h, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    h.result = exact
+    i: ir_slot(h, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    step: ir_slot(h, exact, IRSlotKind.Temp, -1, 0)
+    over: ir_slot(h, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(h, IROp.Const, i, 0, -1, -1, 2)
+    _ := ir_emit(h, IROp.Const, step, 1, -1, -1, 2)
+    _ := ir_open(h, IROp.Block, 3)
+    _ := ir_open(h, IROp.Loop, 3)
+    _ := ir_emit(h, IROp.Ge, over, i, n, -1, 3)
+    _ := ir_emit(h, IROp.BrIf, -1, over, 1, -1, 3)
+    _ := ir_emit(h, IROp.Add, i, i, step, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(h, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(h, 4)
+    ir_end(h, 4)
+    _ := ir_emit(h, IROp.Return, -1, i, -1, -1, 5)
+    notes := ir_opt_report(2)
+    bodies: [IRFunction]{g, h}
+    loop body in bodies {
+        versioned := body.copy()
+        assert_eq(ir_opt_version_loops(m, versioned, IR_VERSION_BODY, notes), 1)
+        loops := 0
+        loop (at, op) in versioned.op {
+            if op != .Loop -> next
+            assert_eq(versioned.b[at], IR_LOOP_VERSIONED)
+            loops += 1
+        }
+        assert_eq(loops, 2)
+        size: versioned.op.len()
+        assert_eq(ir_opt_version_loops(m, versioned, IR_VERSION_BODY, notes), 0)
+        assert_eq(versioned.op.len(), size)
+    }
 }
 
 // walk(x, n, p) steps x by p until x >= n: x is a stepped index, guarded
