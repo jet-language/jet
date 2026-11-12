@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6756,
-    "rev": 99718,
+    "rev": 99725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55224,6 +55224,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "D-CONTEXT-EFFECT1 ratified F on 2026-11-12: context is an implicit input to every function, as in Jai. c2 and c13 now state F's build, and the new last criterion is F's cross-family review, which goes first."
+        },
+        {
           "at": "2026-11-11",
           "by": "Main",
           "text": "Conflict found 2026-11-11 (G8Scope-3 sweep): c2's slice 1e1fff240f added `Context` as a 13th effect root (Compiler/Prelude Effect enum, generated EffectRoots.jet). Ratified D-EFFTYPE-KERNEL1 lists 12 roots. An effect root is user-visible language surface, so this goes to an owner ballot: ratify Context as a 13th root, or carry context reads under an existing root or a sub-effect. Until it is ratified, c2 cannot close. The ballot is drafted by G8Scope-3 and reviewed by sol-reviewer."
@@ -55286,12 +55291,12 @@
         },
         {
           "n": 2,
-          "text": "Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) and reads add the Context effect in sema, proven by goldens on O0/O1/O2 through the one shared runtime.",
+          "text": "Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) as an implicit input to every function, under D-CONTEXT-EFFECT1=F: a read adds nothing to an effect row and needs no grant, a pure -[]> function may read context, and goldens on O0/O1/O2 through the one shared runtime prove it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T03:28:39.937Z"
+          "at": "2026-11-12T02:21:35.830Z"
         },
         {
           "n": 3,
@@ -55376,12 +55381,12 @@
         },
         {
           "n": 13,
-          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). Once D-CONTEXT-EFFECT1 is ratified, the chosen option is built with its authority and generated-registry cutover in one change. For option A that means the authority, budget and EffectRoots paths, not only a moved declaration. A composed landing proof shows the app examples for inferred, written-row, deny, spawn, #Context block and comptime reads give identical results at O0/O1/O2.",
+          "text": "From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). The ratified option F is built with its authority and generated-registry cutover in one change. Context leaves EffectRoots, the named grant exemption, the package budget insertion and the deny path, and every -[Context]> row, deny entry, snapshot, example and spec line is migrated. #Memo keys its cache on its arguments plus the context fields the function can reach (the whole context where sema cannot bound the reach), and a C callback that reads context without installing one gets a registered diagnostic with a UI snapshot. A composed landing proof shows the app examples for inferred, written-row, spawn, #Context block, #Memo and comptime reads give identical results at O0/O1/O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-11T22:07:59.150Z"
+          "at": "2026-11-12T02:21:36.703Z"
         },
         {
           "n": 14,
@@ -55391,6 +55396,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T22:08:00.042Z"
+        },
+        {
+          "n": 15,
+          "text": "First criterion for building D-CONTEXT-EFFECT1=F (ratified 2026-11-12): a dated cross-family adversarial review in Docs/audits attacks F's claims (determinism in arguments plus context, #Memo keying on reached context fields, the C-callback rule, and what dropping the package deny gives up) against code and probes, and ends with a holds verdict; every gap it finds is on a card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:21:37.559Z"
         }
       ],
       "refs": [
@@ -55408,12 +55422,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T02:15:44.209Z",
+      "updated": "2026-11-12T02:21:38.396Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 14
+      "criteriaLastN": 15
     },
     {
       "id": "c0th2wgp",
@@ -57024,11 +57038,11 @@
         {
           "n": 22,
           "text": "Found 2026-11-09 by the same port: the Jet twin needed 3693 source tokens against 915. The twin reads the trace through the existing typed `json.decode<T>` (no new Dyn API: 1108 tokens on 2026-11-10), and :Fixed(N) is fixed by c24 (its ties already match JavaScript toFixed, per the owner ruling in the #4588 log). Every remaining Core gap between the twin and the original (the pad fills are known) is built under a ratified API ballot, and the twin then has at most the original tokens with identical output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T10:49:51.064Z"
+          "evidence": "ScriptAPI-65 landed as 9fc9ae6037 (on dev). The Lander intake line 3 (Tools/gauntlet/PortBars.jet --entry jetc-trace) printed parity PASS (2/2 cases do the job) and tokens PASS (Jet 1363 against 1393, Jet/original 0.98) with identical output, and token_gaps is empty. Speed and reasoning remain under c14 and c42.",
+          "at": "2026-11-12T02:21:39.254Z"
         },
         {
           "n": 23,
@@ -57374,7 +57388,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-12T00:28:07.154Z",
+      "updated": "2026-11-12T02:21:39.254Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -195989,8 +196003,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-11T22:07:57.295Z"
+      "status": "ratified",
+      "created": "2026-11-11T22:07:57.295Z",
+      "outcome": "F",
+      "ratifiedAt": "2026-11-12"
     }
   ],
   "questions": [
@@ -199198,6 +199214,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T02:21:40.155Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G4",
+      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
+    },
+    {
+      "at": "2026-11-12T02:21:39.254Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qe89cl",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-12T02:21:38.396Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T02:21:37.559Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dhc7rh",
+      "note": "#15 First criterion for building D-CONTEXT-EFFECT1=F (ratified 2"
+    },
+    {
+      "at": "2026-11-12T02:21:36.703Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#13: D-CONTEXT-EFFECT1 ratified F on 2026-11-12; was: From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). Once D-CONTEXT-EFFECT1 is ratified, the chosen option is built with its authority and generated-registry cutover in one cha"
+    },
+    {
+      "at": "2026-11-12T02:21:35.831Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dhc7rh",
+      "note": "#2: D-CONTEXT-EFFECT1 ratified F on 2026-11-12; was: Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) and reads add the Context effect in sema, proven by goldens on O0/O1/O2 through the"
+    },
+    {
+      "at": "2026-11-12T02:16:45.477Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CONTEXT-EFFECT1",
+      "note": "F"
+    },
     {
       "at": "2026-11-12T02:15:54.696Z",
       "by": "Main",
@@ -204838,6 +204903,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, G5 is at least 30% met, G6 at least 90% and G11 at least 25%. Work continues past 05:30. A goal or card whose criteria are all met closes at once. The owner wants as many card closures, and as many closed goals, as possible. Agents are pushed hard for fast, efficient and correct results: sweeps for criteria already holding on dev come first, and meets follow Lander proof lines only."
+        },
+        {
           "at": "2026-11-10",
           "by": "Main",
           "text": "Owner order 2026-11-10 ~16:18: due 20:00 today. Work continues past the deadline; when G1, G4, G8 and G6 are done, work moves to the next goals in number order."
@@ -204854,7 +204924,7 @@
         }
       ],
       "created": "2026-11-04T18:09:52.919Z",
-      "updated": "2026-11-10T21:18:53.046Z",
+      "updated": "2026-11-12T02:21:40.155Z",
       "updatedBy": "Main"
     },
     {
