@@ -11195,11 +11195,11 @@ DebuggerUnavailable: struct {
     impl Diagnostic {
         code: "E2203"
         stage: [.Tooling]
-        meaning: "The native `jet debug` backend could not debug or record this program: LLDB is missing or the native debug session failed"
+        meaning: "The native `jet debug` backend could not debug this program: LLDB is missing or the native debug session failed"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "`jet debug` could not run the native debugger: {self.detail}." }
-        why: fn(self) -> String { "`jet debug` steps, records, and replays the real compiled program through LLDB; without a working LLDB session there is nothing to step or record." }
+        why: fn(self) -> String { "`jet debug` steps through the real compiled program under LLDB, stopping at breakpoints and showing its frames and locals; without a working LLDB session there is nothing to step through." }
         fix: fn(self) -> String { "Install LLDB (the Jet dev shell provides it) and rerun `jet debug <file>`, or use `jet run <file>` to run the program without the debugger." }
     }
 }
