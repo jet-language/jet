@@ -1,7 +1,8 @@
-# #6611 c2: method, plain, operator-hook and code-argument calls that hand a
-# read parameter to an owning parameter all report E0201 with the same `.copy()`
+# Method, plain, operator-hook and code-argument calls that hand a read
+# parameter to an owning parameter all report E0201 with the same `.copy()`
 # fix; no call form copies on its own. The operator itself (`bag + item`) reads
-# `item` (the hook's `rhs` is a read parameter), so it reports nothing.
+# `item` (the hook's `rhs` is a read parameter), so it reports nothing. Written
+# with `.copy()` at each owning argument, all four forms check clean and run.
 fixture: read_param_owning_argument_is_one_rule_in_every_call_form
 env: NO_COLOR=1
 step: jet check run.jet
@@ -9,9 +10,15 @@ exit: nonzero
 stderr: ~ "4 problems found" # exactly the four call forms
 stderr: ~ "--> run.jet:11:23" # operator hook body: rows.push(rhs)
 stderr: ~ "--> run.jet:27:15" # method call: rows.push(item)
-stderr: ~ "--> run.jet:32:10" # plain call: keep(item)
+stderr: ~ "--> run.jet:32:15" # plain call: take_rows(item)
 stderr: ~ "--> run.jet:41:15" # code-argument call: with_rows(item, () -> { 1 })
 stderr: ~ "Write `item.copy()` when `.push()` should receive a copy" # method form fix
-stderr: ~ "Write `item.copy()` when `keep` should receive a copy" # plain form fix
+stderr: ~ "Write `item.copy()` when `take_rows` should receive a copy" # plain form fix
 stderr: ~ "Write `item.copy()` when `with_rows` should receive a copy" # code-argument form fix
 stderr: ~ "Write `rhs.copy()` when `.push()` should receive a copy" # operator hook form fix
+step: jet check copied.jet
+exit: 0
+stderr: !~ "[jet." # no diagnostic in any form
+step: jet run copied.jet
+exit: 0
+stdout: = "5\n"
